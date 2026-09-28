@@ -168,9 +168,11 @@ Worker recovery now requests backoff for temporary Provider outages and selected
 SQLite environmental failures, retains pending projections and preserves existing
 network errors. Permanent Provider rejections remain blocked; cancellation and
 diagnostic failures release the busy state. Worker orchestration has focused JVM
-checks. Five isolated physical SQLite/Provider recovery fixtures and twelve related
-Provider regression tests passed. This is not yet full reboot, real storage failure,
-permission-revocation or Doze qualification.
+checks. Transient startup selection, catalog persistence and explicit-refresh
+storage failures now schedule durable local and network recovery rather than
+losing the trigger. Eight isolated recovery tests on a physical device and
+twelve related Provider regression tests passed. This is not yet full reboot,
+real storage failure, permission-revocation or Doze qualification.
 
 Calendeer posts no notifications. Reminder data belongs to the Android calendar
 client; progress and errors are shown inside the bridge. The merged manifest

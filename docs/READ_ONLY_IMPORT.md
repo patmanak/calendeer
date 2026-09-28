@@ -207,6 +207,11 @@ I/O or full-storage exceptions escaping the worker request backoff without relyi
 on another successful database write. Rejected Provider batches, identity conflicts
 and corrupt schemas are not silently retried as temporary outages. Cancellation
 propagates, and the UI leaves its busy state even if diagnostic refresh also fails.
+The same transient storage failures during startup selection restoration, catalog
+persistence or an explicit refresh also schedule durable local and network work.
+This preserves previously admitted work even when the selection list cannot be
+read at the time of the trigger. The calendar list may briefly appear empty while
+the store is unavailable; it is refreshed after a successful worker run.
 
 ## Access and privacy
 

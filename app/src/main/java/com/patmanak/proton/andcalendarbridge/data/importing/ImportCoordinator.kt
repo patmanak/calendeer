@@ -45,9 +45,16 @@ class ImportCoordinator(
         if (!value) {
             scheduler.cancel()
         } else {
+            val expected = generation
             scope.launch {
-                refreshState()
-                if (state.value.selections.any { it.enabled }) requestSync()
+                try {
+                    refreshState()
+                    if (state.value.selections.any { it.enabled }) requestSync()
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (failure: Exception) {
+                    if (!recoverTransientStorage(failure, expected)) throw failure
+                }
             }
             enqueueLocal()
         }
@@ -57,10 +64,16 @@ class ImportCoordinator(
         val account = catalog.account ?: return
         if (!authenticated || catalog.status != CalendarCatalogStatus.READY) return
         val expected = generation
-        mutex.withLock {
-            if (!isCurrent(expected, account)) return
-            store.remember(account, catalog.calendars)
-            refreshState()
+        try {
+            mutex.withLock {
+                if (!isCurrent(expected, account)) return
+                store.remember(account, catalog.calendars)
+                refreshState()
+            }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (failure: Exception) {
+            if (!recoverTransientStorage(failure, expected)) throw failure
         }
     }
 
@@ -104,9 +117,10 @@ class ImportCoordinator(
             }
             } catch (cancelled: CancellationException) {
                 throw cancelled
-            } catch (_: Exception) {
-                // A full/unavailable local store cannot arm recovery. Keep the previous data and
-                // show a closed error instead of crashing the application or scheduling false work.
+            } catch (failure: Exception) {
+                // A transient store failure needs a durable trigger even when selections
+                // cannot be read. Other failures keep the previous data and show an error.
+                if (recoverTransientStorage(failure, requestGeneration)) return@launch
                 if (generation == requestGeneration) mutableState.value = state.value.copy(
                     selections = state.value.selections.map { if (it.enabled) it.copy(status = "ERROR") else it })
             }
@@ -115,6 +129,16 @@ class ImportCoordinator(
 
     private fun enqueueLocal() {
         scheduler.requestLocal()
+    }
+
+    /** A failed SQLite read cannot tell us which selections need a refresh. Retry durably. */
+    private fun recoverTransientStorage(failure: Exception, expected: Long): Boolean {
+        if (!retryableImportFailure(failure)) return false
+        if (authenticated && generation == expected) {
+            enqueueLocal()
+            scheduler.requestNetwork()
+        }
+        return true
     }
 
     fun enqueueContinuation(network: Boolean) {
