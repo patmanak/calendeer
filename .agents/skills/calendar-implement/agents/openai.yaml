@@ -1,0 +1,4 @@
+interface:
+  display_name: "Calendar — Développer"
+  short_description: "Implémenter et corriger par étapes vérifiables"
+  default_prompt: "Utilise $calendar-implement pour réaliser la prochaine étape autorisée et la vérifier."

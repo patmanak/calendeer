@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="import_title">Importuj do Androida</string>
+    <string name="import_read_only">Wybrane kalendarze są kopiowane do Androida tylko do odczytu. Nic nie jest wysyłane do Proton.</string>
+    <string name="import_privacy">Treść wydarzeń jest zapisywana w kalendarzu Androida i może być odczytana przez inne aplikacje z dostępem do kalendarzy.</string>
+    <string name="import_permission_help">Android wymaga uprawnień odczytu i zapisu kalendarzy do tworzenia i aktualizowania kopii lokalnych, mimo że dostęp do Proton pozostaje tylko do odczytu.</string>
+    <string name="import_allow">Zezwól na dostęp do kalendarzy</string>
+    <string name="import_settings">Otwórz ustawienia aplikacji</string>
+    <string name="import_no_calendars">Wczytaj listę, aby wybrać kalendarze do importu.</string>
+    <string name="import_last_completed">Ostatni ukończony import: %1$s</string>
+    <string name="import_running">Importowanie…</string>
+    <string name="import_sync">Importuj teraz</string>
+    <string name="import_window">Nowe importy wczytują najpierw ostatnie i następne 30 dni, a potem cały okres: 90 dni wstecz i 365 dni naprzód.</string>
+    <string name="import_pause_help">Wstrzymanie zatrzymuje kolejne importy tego kalendarza. Wydarzenia już zaimportowane do Androida pozostają na urządzeniu, także po wylogowaniu.</string>
+    <string name="import_field_limits">Importowane są tytuły, daty, opisy, miejsca i kolory. Obsługiwane przypomnienia realizuje aplikacja kalendarza; przypomnienia e-mail pozostają w Proton. Uczestnicy są tylko do odczytu. Wydarzenia autorów zewnętrznych mogą wymagać weryfikacji.</string>
+    <string name="import_status_paused">Wstrzymano</string>
+    <string name="import_status_pending">Oczekiwanie na import</string>
+    <string name="import_status_running">Import w toku</string>
+    <string name="import_status_imported">Obsługiwane wydarzenia zaimportowane dla wybranego okresu</string>
+    <string name="import_status_permission">Wymagane uprawnienia do kalendarzy</string>
+    <string name="import_status_auth">Połącz ponownie konto Proton</string>
+    <string name="import_status_network">Proton jest nieosiągalny. Import zostanie ponowiony, gdy będzie to możliwe.</string>
+    <string name="import_status_unsupported">Znaleziono nieobsługiwane dane wydarzeń. Import jest niekompletny.</string>
+    <string name="import_status_error">Import nie powiódł się. Spróbuj ponownie.</string>
+    <string name="import_status_partial">Import zakończony z nieobsługiwanymi wydarzeniami</string>
+    <string name="import_status_capacity">Import wstrzymany: osiągnięto lokalny limit przetwarzania lub pamięci. Istniejące dane zostały zachowane.</string>
+    <string name="import_deferred_count">Wydarzenia zachowane bez importu: %1$d. Dane będą ponownie sprawdzane podczas odświeżania.</string>
+    <string name="import_deferred_categories">Nieobsługiwana zawartość: %1$d · Wymagana weryfikacja: %2$d</string>
+    <string name="import_status_local_keys">Klucze odszyfrowywania są niedostępne na tym urządzeniu. Otrzymane dane są zachowane do czasu udostępnienia kluczy.</string>
+    <string name="import_status_incomplete">Niektóre zdalne zmiany pozostają nierozstrzygnięte. Istniejące wydarzenia są zachowane; odśwież, aby spróbować ponownie.</string>
+    <string name="import_status_unavailable">Ten kalendarz nie jest już dostępny. Wcześniej zaimportowane wydarzenia są zachowane.</string>
+    <string name="import_status_history_gap">Ostatnie zmiany zaimportowane; starsza historia jest niepełna</string>
+    <string name="import_history_gap_help">Proton zresetował historię zmian. Nie można zweryfikować niektórych starszych zmian lub usunięć. Istniejące wydarzenia Androida są zachowane; odświeżenie nie potwierdzi wszystkich starszych kopii.</string>
+    <string name="import_coverage_progress">Okresy w tym przebiegu: %1$d/%2$d odebranych · %3$d/%2$d przetworzonych</string>
+    <string name="import_coverage_help">Po przetworzeniu mogą pozostać nieobsługiwane wydarzenia. Aktualizacje Androida i luki w historii zmian są śledzone osobno.</string>
+    <string name="import_projection_pending">Aktualizacje oczekujące na skopiowanie do Androida: %1$d</string>
+    <string name="import_status_series_pending">Niektóre wystąpienia czekają na oryginalną serię przed importem. Odśwież, aby spróbować ponownie.</string>
+    <string name="import_recurrence_limits">Importowane są typowe reguły cykliczne i zmiany pojedynczych wystąpień. Nieobsługiwane formy pozostają oczekujące.</string>
+</resources>

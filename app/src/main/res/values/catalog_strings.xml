@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="catalog_signed_out">Connect your Proton account to load its calendars.</string>
+    <string name="catalog_loading">Loading calendars…</string>
+    <string name="catalog_refreshing">Refreshing calendars…</string>
+    <string name="catalog_empty">No calendars were returned by Proton.</string>
+    <string name="catalog_stale">Previous results from this session are shown. They may be out of date.</string>
+    <string name="catalog_refresh">Refresh calendars</string>
+    <string name="catalog_retry_wait">Wait before refreshing again.</string>
+    <string name="catalog_untitled">Untitled calendar</string>
+    <string name="catalog_sync_unavailable">Choose calendars for read-only import below. Editing in Android and uploads to Proton are not available yet.</string>
+    <string name="catalog_auth_required">Reconnect your account to load calendars.</string>
+    <string name="catalog_unreachable">Proton cannot be reached. Check your connection and this app’s network access.</string>
+    <string name="catalog_timeout">Loading calendars timed out. Try again.</string>
+    <string name="catalog_rate_limited">Too many requests. Wait before refreshing again.</string>
+    <string name="catalog_forbidden">This account cannot access the calendar list.</string>
+    <string name="catalog_unsupported">The calendar list could not be read completely. No partial result is shown.</string>
+    <string name="catalog_try_again">The calendar list could not be loaded. Try again.</string>
+</resources>

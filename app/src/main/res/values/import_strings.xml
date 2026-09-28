@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="import_title">Import into Android</string>
+    <string name="import_read_only">Selected calendars are copied to Android in read-only mode. Nothing is uploaded to Proton.</string>
+    <string name="import_privacy">Event contents are stored in Android Calendar and can be read by other apps with calendar access.</string>
+    <string name="import_permission_help">Android read and write calendar permissions are needed to create and update these local copies, even though Proton stays read-only.</string>
+    <string name="import_allow">Allow calendar access</string>
+    <string name="import_settings">Open app settings</string>
+    <string name="import_no_calendars">Load the calendar list to choose calendars for import.</string>
+    <string name="import_last_completed">Last completed import: %1$s</string>
+    <string name="import_running">Importing…</string>
+    <string name="import_sync">Import now</string>
+    <string name="import_window">New imports load the past and next 30 days first, then the full period: 90 days back and 365 days ahead.</string>
+    <string name="import_pause_help">Pausing stops future imports for that calendar. Events already imported into Android remain on the device, including after signing out.</string>
+    <string name="import_field_limits">Titles, dates, descriptions, locations and colors are imported. Supported reminders are handled by your calendar app; email reminders remain in Proton. Participants are read-only. Events from external authors may still need verification.</string>
+    <string name="import_status_paused">Paused</string>
+    <string name="import_status_pending">Waiting to import</string>
+    <string name="import_status_running">Import in progress</string>
+    <string name="import_status_imported">Supported events imported for the selected period</string>
+    <string name="import_status_permission">Calendar permissions required</string>
+    <string name="import_status_auth">Reconnect your Proton account</string>
+    <string name="import_status_network">Proton is unreachable. Import will retry when possible.</string>
+    <string name="import_status_unsupported">Unsupported event data was found. Import is incomplete.</string>
+    <string name="import_status_error">Import failed. Try again.</string>
+    <string name="import_status_partial">Import complete with unsupported events</string>
+    <string name="import_status_capacity">Import paused: a local processing or storage limit has been reached. Existing data is retained.</string>
+    <string name="import_deferred_count">Events retained without import: %1$d. Their data is checked again on refresh.</string>
+    <string name="import_deferred_categories">Unsupported content: %1$d · Verification required: %2$d</string>
+    <string name="import_status_local_keys">Decryption keys are unavailable on this device. Received data is retained until the keys are available.</string>
+    <string name="import_status_incomplete">Some remote changes could not be resolved. Existing events are retained; refresh to retry.</string>
+    <string name="import_status_unavailable">This calendar is no longer accessible. Previously imported events are retained.</string>
+    <string name="import_status_history_gap">Recent changes imported; older history is incomplete</string>
+    <string name="import_history_gap_help">Proton reset the change history. Some older changes or deletions could not be verified. Existing Android events are retained; refreshing cannot confirm all older copies.</string>
+    <string name="import_coverage_progress">Periods in this scan: %1$d/%2$d received · %3$d/%2$d processed</string>
+    <string name="import_coverage_help">Processing may leave unsupported events. Android updates and incomplete change history are tracked separately.</string>
+    <string name="import_projection_pending">Updates waiting to be copied to Android: %1$d</string>
+    <string name="import_status_series_pending">Waiting for the original series before importing some occurrences. Refresh to retry.</string>
+    <string name="import_recurrence_limits">Common recurrence rules and single-occurrence changes are imported. Unsupported recurrence forms remain pending.</string>
+</resources>

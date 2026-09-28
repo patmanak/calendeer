@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="catalog_signed_out">Ligue a sua conta Proton para carregar os calendários.</string>
+    <string name="catalog_loading">A carregar calendários…</string>
+    <string name="catalog_refreshing">A atualizar calendários…</string>
+    <string name="catalog_empty">O Proton não devolveu nenhum calendário.</string>
+    <string name="catalog_stale">São apresentados resultados anteriores desta sessão. Podem estar desatualizados.</string>
+    <string name="catalog_refresh">Atualizar calendários</string>
+    <string name="catalog_retry_wait">Aguarde antes de atualizar novamente.</string>
+    <string name="catalog_untitled">Calendário sem título</string>
+    <string name="catalog_sync_unavailable">Escolha abaixo os calendários para importar só de leitura. A edição no Android e o envio para o Proton ainda não estão disponíveis.</string>
+    <string name="catalog_auth_required">Volte a ligar a conta para carregar os calendários.</string>
+    <string name="catalog_unreachable">Não é possível aceder ao Proton. Verifique a ligação e o acesso à rede desta aplicação.</string>
+    <string name="catalog_timeout">O carregamento dos calendários excedeu o tempo limite. Tente novamente.</string>
+    <string name="catalog_rate_limited">Demasiados pedidos. Aguarde antes de atualizar.</string>
+    <string name="catalog_forbidden">Esta conta não pode aceder à lista de calendários.</string>
+    <string name="catalog_unsupported">Não foi possível ler a lista completa de calendários. Não é apresentado um resultado parcial.</string>
+    <string name="catalog_try_again">Não foi possível carregar a lista de calendários. Tente novamente.</string>
+</resources>

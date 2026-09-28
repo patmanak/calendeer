@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="catalog_signed_out">Verbind je Proton-account om de kalenders te laden.</string>
+    <string name="catalog_loading">Kalenders laden…</string>
+    <string name="catalog_refreshing">Kalenders vernieuwen…</string>
+    <string name="catalog_empty">Proton heeft geen kalenders teruggegeven.</string>
+    <string name="catalog_stale">Eerdere resultaten van deze sessie worden getoond. Ze kunnen verouderd zijn.</string>
+    <string name="catalog_refresh">Kalenders vernieuwen</string>
+    <string name="catalog_retry_wait">Wacht voordat je opnieuw vernieuwt.</string>
+    <string name="catalog_untitled">Naamloze kalender</string>
+    <string name="catalog_sync_unavailable">Kies hieronder kalenders voor alleen-lezen import. Bewerken in Android en uploaden naar Proton zijn nog niet beschikbaar.</string>
+    <string name="catalog_auth_required">Verbind je account opnieuw om kalenders te laden.</string>
+    <string name="catalog_unreachable">Proton is niet bereikbaar. Controleer je verbinding en de netwerktoegang voor deze app.</string>
+    <string name="catalog_timeout">Het laden van de kalenders duurde te lang. Probeer het opnieuw.</string>
+    <string name="catalog_rate_limited">Te veel aanvragen. Wacht voordat je opnieuw vernieuwt.</string>
+    <string name="catalog_forbidden">Dit account heeft geen toegang tot de kalenderlijst.</string>
+    <string name="catalog_unsupported">De volledige kalenderlijst kon niet worden gelezen. Er wordt geen gedeeltelijk resultaat getoond.</string>
+    <string name="catalog_try_again">De kalenderlijst kon niet worden geladen. Probeer het opnieuw.</string>
+</resources>

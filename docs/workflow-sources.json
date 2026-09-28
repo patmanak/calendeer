@@ -1,0 +1,68 @@
+{
+  "reviewed_at": "2026-09-26",
+  "mode": "selective-local-adaptation",
+  "sources": [
+    {
+      "repository": "https://github.com/obra/superpowers",
+      "commit": "8ca22dba9a94f28898bbce59f2537ff4d87c747d",
+      "reviewed_paths": [
+        "README.md",
+        "skills/brainstorming/SKILL.md",
+        "skills/writing-plans/SKILL.md",
+        "skills/systematic-debugging/SKILL.md",
+        "skills/verification-before-completion/SKILL.md",
+        "skills/subagent-driven-development/SKILL.md"
+      ],
+      "local_license": "docs/licenses/superpowers-MIT.txt",
+      "license": "MIT",
+      "upstream_license": "https://github.com/obra/superpowers/blob/8ca22dba9a94f28898bbce59f2537ff4d87c747d/LICENSE",
+      "review_scope": "Targeted workflow sections; not an exhaustive repository audit."
+    },
+    {
+      "repository": "https://github.com/addyosmani/agent-skills",
+      "commit": "2686b620fc1fed2e8f60c704839c766b8594c6b6",
+      "reviewed_paths": [
+        "README.md",
+        "skills/spec-driven-development/SKILL.md",
+        "skills/api-and-interface-design/SKILL.md",
+        "skills/source-driven-development/SKILL.md",
+        "agents/test-engineer.md",
+        "agents/code-reviewer.md"
+      ],
+      "local_license": "docs/licenses/addyosmani-agent-skills-MIT.txt",
+      "license": "MIT",
+      "upstream_license": "https://github.com/addyosmani/agent-skills/blob/2686b620fc1fed2e8f60c704839c766b8594c6b6/LICENSE",
+      "review_scope": "Targeted workflow sections; not an exhaustive repository audit."
+    },
+    {
+      "repository": "https://github.com/mattpocock/skills",
+      "commit": "c55ee46073ed923f86ce59a5eb3b6d895095d1b7",
+      "reviewed_paths": [
+        "README.md",
+        "skills/engineering/to-spec/SKILL.md",
+        "skills/engineering/codebase-design/SKILL.md",
+        "skills/engineering/tdd/SKILL.md",
+        "skills/engineering/to-tickets/SKILL.md"
+      ],
+      "local_license": "docs/licenses/mattpocock-skills-MIT.txt",
+      "license": "MIT",
+      "upstream_license": "https://github.com/mattpocock/skills/blob/c55ee46073ed923f86ce59a5eb3b6d895095d1b7/LICENSE",
+      "review_scope": "Targeted workflow sections; not an exhaustive repository audit."
+    },
+    {
+      "repository": "https://github.com/open-gsd/gsd-core",
+      "commit": "b3a055c07d6577f5bcbce8d360653ddd6979d1c5",
+      "reviewed_paths": [
+        "README.md",
+        "agents/gsd-planner.md",
+        "agents/gsd-plan-checker.md",
+        "agents/gsd-verifier.md",
+        "gsd-core/workflows/resume-project.md"
+      ],
+      "local_license": "docs/licenses/gsd-core-MIT.txt",
+      "license": "MIT",
+      "upstream_license": "https://github.com/open-gsd/gsd-core/blob/b3a055c07d6577f5bcbce8d360653ddd6979d1c5/LICENSE",
+      "review_scope": "Targeted workflow sections; not an exhaustive repository audit."
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Original simplified deer/calendar mark for Android themed icons. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
+    <group android:pivotX="54" android:pivotY="54" android:scaleX="0.72" android:scaleY="0.72">
+        <path android:fillColor="@android:color/transparent" android:strokeColor="#FFFFFFFF"
+            android:strokeWidth="6" android:strokeLineCap="round" android:strokeLineJoin="round"
+            android:pathData="M43,35L36,21L36,13M36,24L26,18M65,35L72,21L72,13M72,24L82,18" />
+        <path android:fillColor="#FFFFFFFF" android:fillType="evenOdd"
+            android:pathData="M35,36C27,28 20,31 18,33C20,44 25,49 33,48C32,52 32,59 35,63C39,69 69,69 73,63C76,59 76,52 75,48C83,49 88,44 90,33C85,29 79,29 73,36C63,27 45,27 35,36Z M42,49a3,4 0,1 0,0 8a3,4 0,1 0,0 -8Z M66,49a3,4 0,1 0,0 8a3,4 0,1 0,0 -8Z M49,60Q54,66 59,60Z" />
+        <path android:fillColor="#FFFFFFFF" android:fillType="evenOdd"
+            android:pathData="M34,70H74Q79,70 79,75V91Q79,96 74,96H34Q29,96 29,91V75Q29,70 34,70Z M35,79V90H73V79Z" />
+        <path android:fillColor="#FFFFFFFF" android:pathData="M49,81H57V88H49Z" />
+    </group>
+</vector>

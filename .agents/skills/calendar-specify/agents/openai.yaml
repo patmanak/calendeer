@@ -1,0 +1,4 @@
+interface:
+  display_name: "Calendar — Spécifier"
+  short_description: "Définir le besoin et les critères vérifiables"
+  default_prompt: "Utilise $calendar-specify pour préparer les spécifications de Calendar à partir de nos décisions."

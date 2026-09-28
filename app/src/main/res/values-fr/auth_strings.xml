@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="auth_sign_in_title">Connexion à Proton</string>
+    <string name="auth_sign_in_help">Connectez votre compte Proton à cette passerelle de calendriers.</string>
+    <string name="auth_username">Identifiant ou adresse e-mail</string>
+    <string name="auth_password">Mot de passe</string>
+    <string name="auth_code">Code de vérification</string>
+    <string name="auth_sign_in">Se connecter</string>
+    <string name="auth_continue">Continuer</string>
+    <string name="auth_cancel">Annuler</string>
+    <string name="auth_sign_out">Se déconnecter</string>
+    <string name="auth_cleanup_retry">Réessayer le nettoyage de la session</string>
+    <string name="auth_restoring_title">Restauration de la connexion</string>
+    <string name="auth_restoring_help">Vérification de la session enregistrée…</string>
+    <string name="auth_code_title">Vérification à deux facteurs</string>
+    <string name="auth_code_help">Saisissez un code de votre application de vérification. Les comptes utilisant uniquement une clé de sécurité ne sont pas pris en charge.</string>
+    <string name="auth_mailbox_title">Mot de passe de boîte mail</string>
+    <string name="auth_mailbox_help">Saisissez votre mot de passe de boîte mail distinct pour déverrouiller les clés du compte.</string>
+    <string name="auth_unlock_title">Déverrouillage des clés</string>
+    <string name="auth_unlock_help">Saisissez votre mot de passe Proton pour déverrouiller les clés du compte.</string>
+    <string name="auth_security_key_title">Clé de sécurité requise</string>
+    <string name="auth_security_key_help">Cette connexion ne prend pas en charge la vérification par clé de sécurité seule. Les paramètres de votre compte restent inchangés.</string>
+    <string name="auth_human_title">Vérification humaine</string>
+    <string name="auth_human_help">La vérification requise ne peut pas être affichée. Annulez et réessayez plus tard.</string>
+    <string name="auth_connected_title">Compte connecté</string>
+    <string name="auth_connected_help">Votre compte est connecté. Sur l’écran d’accueil, choisissez les calendriers dont importer les événements pris en charge dans Android en lecture seule.</string>
+    <string name="auth_input_required">Remplissez tous les champs requis.</string>
+    <string name="auth_rejected">Les identifiants ou le code ont été refusés. Réessayez.</string>
+    <string name="auth_already_connected">Ce compte est déjà connecté.</string>
+    <string name="auth_offline">Proton est inaccessible. Vérifiez votre connexion et l’accès au réseau de cette application.</string>
+    <string name="auth_open_app_settings">Ouvrir les paramètres de l’application</string>
+    <string name="auth_timeout">Le délai de la requête est dépassé. Réessayez.</string>
+    <string name="auth_rate_limited">Trop de tentatives. Patientez avant de réessayer.</string>
+    <string name="auth_crypto_failure">Impossible de déverrouiller les clés du compte.</string>
+    <string name="auth_client_unsupported">Ce client Proton n’est plus pris en charge.</string>
+    <string name="auth_cleanup_failed">Le nettoyage de la session a échoué. Réessayez avant de saisir vos identifiants.</string>
+    <string name="auth_try_again">La connexion n’a pas abouti. Réessayez.</string>
+    <string name="auth_retry_wait">Patientez avant une nouvelle tentative.</string>
+    <string name="auth_cleaning">Nettoyage de la tentative de connexion…</string>
+    <string name="auth_working">Connexion…</string>
+    <string name="auth_human_cancel">Annuler la vérification</string>
+</resources>

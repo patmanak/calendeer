@@ -1,0 +1,4 @@
+interface:
+  display_name: "Calendar — Vérifier"
+  short_description: "Tester les comportements et revoir les changements"
+  default_prompt: "Utilise $calendar-verify pour contrôler le résultat et les preuves de validation."

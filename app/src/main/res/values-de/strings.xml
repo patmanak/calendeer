@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_subtitle">Ihre Kalender, mit Android verbunden</string>
+    <string name="connection_heading">VERBINDUNG</string>
+    <string name="calendars_heading">Kalender</string>
+    <string name="calendars_empty">Keine Kalender verbunden</string>
+    <string name="calendars_description">Die Kalendersynchronisierung wird in einer späteren Version verfügbar sein.</string>
+    <string name="preferences_heading">Nach Ihren Wünschen</string>
+    <string name="appearance">Darstellung</string>
+    <string name="language">Sprache</string>
+    <string name="preferences_scope">Diese Einstellungen gelten nur für Calendeer. Andere Kalender-Apps und Termininhalte bleiben unverändert.</string>
+    <string name="development_notice">Entwicklungsversion · schreibgeschützter Import</string>
+    <string name="follow_system">Systemeinstellung</string>
+    <string name="theme_light">Hell</string>
+    <string name="theme_dark">Dunkel</string>
+    <string name="close">Schließen</string>
+    <string name="brand_settings">Einstellungen</string>
+    <string name="brand_back">Zurück</string>
+    <string name="brand_welcome">Ihre Tage, gut verbunden.</string>
+    <string name="brand_independent">Unabhängige Anwendung, nicht mit Proton verbunden.</string>
+</resources>

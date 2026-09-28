@@ -1,0 +1,24 @@
+# Local/private evidence and workstation files
+/AGENTS.local.md
+.local/
+.research/
+local.properties
+*.jks
+*.keystore
+.env
+.env.*
+!.env.example
+__pycache__/
+*.pyc
+.gradle/
+**/build/
+.idea/
+.kotlin/
+*.iml
+*.log
+captures/
+.externalNativeBuild/
+.cxx/
+/AGENTS.override.md
+
+# Keep .agents/ and .codex/ versionable: they are project configuration.

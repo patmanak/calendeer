@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="auth_sign_in_title">Ligar ao Proton</string>
+    <string name="auth_sign_in_help">Ligue a sua conta Proton a esta ponte de calendários.</string>
+    <string name="auth_username">Nome de utilizador ou email</string>
+    <string name="auth_password">Palavra-passe</string>
+    <string name="auth_code">Código de verificação</string>
+    <string name="auth_sign_in">Iniciar sessão</string>
+    <string name="auth_continue">Continuar</string>
+    <string name="auth_cancel">Cancelar</string>
+    <string name="auth_sign_out">Terminar sessão</string>
+    <string name="auth_cleanup_retry">Repetir limpeza da sessão</string>
+    <string name="auth_restoring_title">A restaurar ligação</string>
+    <string name="auth_restoring_help">A verificar a sessão guardada…</string>
+    <string name="auth_code_title">Verificação de dois fatores</string>
+    <string name="auth_code_help">Introduza um código da aplicação de autenticação. Contas que usam apenas uma chave de segurança não são suportadas.</string>
+    <string name="auth_mailbox_title">Palavra-passe da caixa de correio</string>
+    <string name="auth_mailbox_help">Introduza a palavra-passe separada da caixa de correio para desbloquear as chaves da conta.</string>
+    <string name="auth_unlock_title">Desbloquear chaves da conta</string>
+    <string name="auth_unlock_help">Introduza a palavra-passe Proton para desbloquear as chaves da conta.</string>
+    <string name="auth_security_key_title">Chave de segurança necessária</string>
+    <string name="auth_security_key_help">Esta ligação não suporta verificação apenas com chave de segurança. As definições da conta não foram alteradas.</string>
+    <string name="auth_human_title">Verificação humana</string>
+    <string name="auth_human_help">Não foi possível apresentar a verificação necessária. Cancele e tente mais tarde.</string>
+    <string name="auth_connected_title">Conta ligada</string>
+    <string name="auth_connected_help">A conta está ligada. Escolha os calendários no ecrã inicial para importar eventos suportados para Android em modo só de leitura.</string>
+    <string name="auth_input_required">Preencha todos os campos obrigatórios.</string>
+    <string name="auth_rejected">As credenciais ou o código foram rejeitados. Tente novamente.</string>
+    <string name="auth_already_connected">Esta conta já está ligada.</string>
+    <string name="auth_offline">Não é possível aceder ao Proton. Verifique a ligação e o acesso à rede desta aplicação.</string>
+    <string name="auth_open_app_settings">Abrir definições da aplicação</string>
+    <string name="auth_timeout">O pedido excedeu o tempo limite. Tente novamente.</string>
+    <string name="auth_rate_limited">Demasiadas tentativas. Aguarde antes de tentar novamente.</string>
+    <string name="auth_crypto_failure">Não foi possível desbloquear as chaves da conta.</string>
+    <string name="auth_client_unsupported">Este cliente Proton já não é suportado.</string>
+    <string name="auth_cleanup_failed">A limpeza da sessão falhou. Repita antes de introduzir credenciais.</string>
+    <string name="auth_try_again">Não foi possível concluir a ligação. Tente novamente.</string>
+    <string name="auth_retry_wait">Aguarde antes de outra tentativa.</string>
+    <string name="auth_cleaning">A limpar a tentativa de ligação…</string>
+    <string name="auth_working">A ligar…</string>
+    <string name="auth_human_cancel">Cancelar verificação</string>
+</resources>

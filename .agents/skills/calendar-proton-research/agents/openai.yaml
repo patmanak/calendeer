@@ -1,0 +1,4 @@
+interface:
+  display_name: "Calendar — Recherche Proton"
+  short_description: "Vérifier les API, le chiffrement et les sources"
+  default_prompt: "Utilise $calendar-proton-research pour vérifier les composants Proton réutilisables."

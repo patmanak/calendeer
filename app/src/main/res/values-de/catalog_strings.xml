@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="catalog_signed_out">Verbinde dein Proton-Konto, um seine Kalender zu laden.</string>
+    <string name="catalog_loading">Kalender werden geladen…</string>
+    <string name="catalog_refreshing">Kalender werden aktualisiert…</string>
+    <string name="catalog_empty">Proton hat keine Kalender zurückgegeben.</string>
+    <string name="catalog_stale">Vorherige Ergebnisse dieser Sitzung werden angezeigt. Sie sind möglicherweise veraltet.</string>
+    <string name="catalog_refresh">Kalender aktualisieren</string>
+    <string name="catalog_retry_wait">Warte vor der nächsten Aktualisierung.</string>
+    <string name="catalog_untitled">Unbenannter Kalender</string>
+    <string name="catalog_sync_unavailable">Wähle unten Kalender für den schreibgeschützten Import. Bearbeitung in Android und Uploads zu Proton sind noch nicht verfügbar.</string>
+    <string name="catalog_auth_required">Verbinde dein Konto erneut, um Kalender zu laden.</string>
+    <string name="catalog_unreachable">Proton ist nicht erreichbar. Prüfe deine Verbindung und den Netzwerkzugriff dieser App.</string>
+    <string name="catalog_timeout">Das Laden der Kalender hat zu lange gedauert. Versuche es erneut.</string>
+    <string name="catalog_rate_limited">Zu viele Anfragen. Warte vor der nächsten Aktualisierung.</string>
+    <string name="catalog_forbidden">Dieses Konto kann nicht auf die Kalenderliste zugreifen.</string>
+    <string name="catalog_unsupported">Die Kalenderliste konnte nicht vollständig gelesen werden. Es wird kein Teilergebnis angezeigt.</string>
+    <string name="catalog_try_again">Die Kalenderliste konnte nicht geladen werden. Versuche es erneut.</string>
+</resources>

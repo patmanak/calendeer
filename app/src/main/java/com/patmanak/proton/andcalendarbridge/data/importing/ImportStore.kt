@@ -1,0 +1,867 @@
+package com.patmanak.proton.andcalendarbridge.data.importing
+
+import android.content.ContentValues
+import android.content.Context
+import android.database.CursorWindow
+import android.database.sqlite.SQLiteCursor
+import android.database.sqlite.SQLiteDatabase
+import android.database.sqlite.SQLiteOpenHelper
+import com.patmanak.proton.andcalendarbridge.sync.*
+import com.patmanak.proton.andcalendarbridge.sync.catalog.CalendarSummary
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
+import org.json.JSONObject
+import org.json.JSONArray
+
+/** App-private, backup-excluded durable import queue. Every page and checkpoint commits together. */
+class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
+    SQLiteOpenHelper(context, name, null, 7), SyncStore {
+    private val lock = Mutex()
+    /** Check the run lease both before its transaction and before durable commit. */
+    @Volatile var admitTransaction: (CalendarScope) -> Boolean = { true }
+    override fun onCreate(db: SQLiteDatabase) {
+        db.execSQL("CREATE TABLE calendars (scope TEXT PRIMARY KEY, account TEXT NOT NULL, calendar TEXT NOT NULL, generation INTEGER NOT NULL, title TEXT NOT NULL, color INTEGER, enabled INTEGER NOT NULL DEFAULT 0, checkpoint TEXT, status TEXT NOT NULL DEFAULT 'PAUSED', completed_at INTEGER, next_attempt INTEGER NOT NULL DEFAULT 0)")
+        db.execSQL("CREATE TABLE records (scope TEXT NOT NULL, event TEXT NOT NULL, payload TEXT NOT NULL, pending INTEGER NOT NULL, PRIMARY KEY(scope,event))")
+        createStaging(db)
+        createDelta(db)
+        createReconciliation(db)
+        createCoverage(db)
+        createSeries(db)
+        createMappingProfiles(db)
+    }
+    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
+        check(oldVersion in 1..6 && newVersion == 7) { "Explicit import schema migration required" }
+        if (oldVersion < 2) createStaging(db)
+        if (oldVersion < 3) createDelta(db)
+        if (oldVersion < 4) createReconciliation(db)
+        if (oldVersion < 5) createCoverage(db)
+        if (oldVersion < 6) createSeries(db)
+        createMappingProfiles(db)
+    }
+    private fun createMappingProfiles(db: SQLiteDatabase) {
+        db.execSQL("CREATE TABLE mapping_profiles (scope TEXT PRIMARY KEY, adapter TEXT NOT NULL, version INTEGER NOT NULL, rescan_pending INTEGER NOT NULL DEFAULT 1)")
+    }
+    private fun createSeries(db: SQLiteDatabase) {
+        db.execSQL("CREATE TABLE series_members (scope TEXT NOT NULL, event TEXT NOT NULL, uid TEXT NOT NULL, role TEXT NOT NULL CHECK(role IN ('master','exception')), PRIMARY KEY(scope,event))")
+        db.execSQL("CREATE INDEX series_members_uid ON series_members(scope,uid,role)")
+    }
+    private fun createStaging(db: SQLiteDatabase) {
+        db.execSQL("CREATE TABLE inbox (scope TEXT PRIMARY KEY, request_checkpoint TEXT NOT NULL, request_limit INTEGER NOT NULL, payload TEXT NOT NULL)")
+        db.execSQL("CREATE TABLE deferred_events (scope TEXT NOT NULL, event TEXT NOT NULL, revision TEXT NOT NULL, adapter TEXT NOT NULL, version INTEGER NOT NULL, reason TEXT NOT NULL, payload TEXT NOT NULL, retry_pending INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(scope,event))")
+    }
+    private fun createDelta(db: SQLiteDatabase) {
+        db.execSQL("ALTER TABLE calendars ADD COLUMN available INTEGER NOT NULL DEFAULT 1")
+        db.execSQL("CREATE TABLE delta_state (scope TEXT PRIMARY KEY, cursor_adapter TEXT, cursor_version INTEGER, cursor_value TEXT, received_adapter TEXT, received_version INTEGER, received_after TEXT, received_payload TEXT, more INTEGER NOT NULL DEFAULT 0)")
+        db.execSQL("CREATE TABLE delta_jobs (scope TEXT NOT NULL, notice_id TEXT NOT NULL, event TEXT, notice TEXT NOT NULL, received TEXT, blocked INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(scope,notice_id))")
+    }
+    private fun createReconciliation(db: SQLiteDatabase) {
+        db.execSQL("CREATE TABLE delta_reconciliation (id INTEGER PRIMARY KEY, scope TEXT NOT NULL, adapter TEXT NOT NULL, version INTEGER NOT NULL, after_cursor TEXT NOT NULL, payload TEXT NOT NULL)")
+        db.execSQL("CREATE INDEX delta_reconciliation_scope ON delta_reconciliation(scope)")
+    }
+    private fun createCoverage(db: SQLiteDatabase) {
+        db.execSQL("CREATE TABLE coverage_state (scope TEXT PRIMARY KEY, payload TEXT NOT NULL)")
+        db.execSQL("ALTER TABLE inbox ADD COLUMN coverage TEXT")
+    }
+
+    data class Selection(val scope: CalendarScope, val summary: CalendarSummary, val enabled: Boolean,
+        val status: String, val completedAt: Long?, val nextAttempt: Long = 0, val deferredCount: Int = 0,
+        val unverifiedCount: Int = 0, val available: Boolean = true, val historyGap: Boolean = false,
+        val coverage: CoverageRun? = null, val pendingProjectionCount: Int = 0) {
+        override fun toString() = "ImportSelection(REDACTED)"
+    }
+
+    suspend fun remember(account: AccountId, calendars: List<CalendarSummary>) = access { db ->
+        db.beginTransaction()
+        try {
+            val present = calendars.map { it.id.value }.toSet()
+            db.query("calendars", arrayOf("scope", "calendar", "generation"), "account=?", arrayOf(account.value), null, null, null).use { cursor ->
+                while (cursor.moveToNext()) if (cursor.getString(1) !in present) {
+                    val scope = CalendarScope(account, CalendarId(cursor.getString(1)), cursor.getLong(2))
+                    val coverage = readCoverage(db, scope)
+                    val invalidated = coverage.copy(observed = null,
+                        active = coverage.active?.let { run -> run.copy(windows = run.windows.map { it.copy(prefixKnown = false) }) })
+                    if (invalidated != coverage) writeCoverage(db, scope, invalidated)
+                    db.update("calendars", ContentValues().apply { put("available", 0); put("status", "UNAVAILABLE") },
+                        "scope=?", arrayOf(cursor.getString(0)))
+                }
+            }
+            for (calendar in calendars) {
+                val scope = CalendarScope(account, calendar.id, 0)
+                val values = ContentValues().apply {
+                    put("scope", key(scope)); put("account", account.value); put("calendar", calendar.id.value)
+                    put("generation", scope.generation); put("title", calendar.title)
+                    if (calendar.colorRgb == null) putNull("color") else put("color", calendar.colorRgb)
+                }
+                db.insertWithOnConflict("calendars", null, values, SQLiteDatabase.CONFLICT_IGNORE)
+                db.execSQL("UPDATE calendars SET status=CASE WHEN enabled=1 THEN 'PENDING' ELSE 'PAUSED' END WHERE scope=? AND available=0", arrayOf(key(scope)))
+                db.update("calendars", ContentValues().apply {
+                    put("title", calendar.title); put("available", 1)
+                    if (calendar.colorRgb == null) putNull("color") else put("color", calendar.colorRgb)
+                }, "scope=?", arrayOf(key(scope)))
+            }
+            checkStagingCapacity(db)
+            db.setTransactionSuccessful()
+        } finally { db.endTransaction() }
+    }
+
+    suspend fun selections(account: AccountId): List<Selection> = access { db ->
+        db.query("calendars", null, "account=?", arrayOf(account.value), null, null, "rowid").use { cursor ->
+            buildList {
+                while (cursor.moveToNext()) {
+                    fun string(name: String) = cursor.getString(cursor.getColumnIndexOrThrow(name))
+                    fun long(name: String) = cursor.getLong(cursor.getColumnIndexOrThrow(name))
+                    val id = CalendarId(string("calendar"))
+                    val colorIndex = cursor.getColumnIndexOrThrow("color")
+                    val completedIndex = cursor.getColumnIndexOrThrow("completed_at")
+                    add(Selection(CalendarScope(account, id, long("generation")),
+                        CalendarSummary(id, string("title"), if (cursor.isNull(colorIndex)) null else cursor.getInt(colorIndex)),
+                        long("enabled") != 0L, string("status"),
+                        if (cursor.isNull(completedIndex)) null else cursor.getLong(completedIndex), long("next_attempt"),
+                        countDeferred(db, CalendarScope(account, id, long("generation"))),
+                        countUnverified(db, CalendarScope(account, id, long("generation"))), long("available") != 0L,
+                        hasReconciliation(db, CalendarScope(account, id, long("generation"))),
+                        readCoverage(db, CalendarScope(account, id, long("generation"))).active,
+                        countPending(db, CalendarScope(account, id, long("generation")))))
+                }
+            }
+        }
+    }
+    suspend fun deferNetwork(scope: CalendarScope, milliseconds: Long) = access { db ->
+        val now = System.currentTimeMillis()
+        val delay = milliseconds.coerceAtLeast(0).coerceAtMost(Long.MAX_VALUE - now)
+        db.update("calendars", ContentValues().apply { put("next_attempt", now + delay) }, "scope=?", arrayOf(key(scope)))
+    }
+
+    suspend fun setEnabled(scope: CalendarScope, enabled: Boolean) = access { db ->
+        requireKnown(db, scope)
+        db.update("calendars", ContentValues().apply {
+            put("enabled", if (enabled) 1 else 0)
+            put("status", if (!isAvailable(db, scope)) "UNAVAILABLE" else if (enabled) "PENDING" else "PAUSED")
+        }, "scope=?", arrayOf(key(scope)))
+    }
+    suspend fun status(scope: CalendarScope, status: String, completedAt: Long? = null) = access { db ->
+        require(status in setOf("PAUSED", "PENDING", "RUNNING", "IMPORTED", "PARTIAL", "INCOMPLETE", "SERIES_PENDING", "HISTORY_GAP", "CAPACITY", "PERMISSION", "AUTH", "NETWORK", "UNSUPPORTED", "LOCAL_KEYS", "UNAVAILABLE", "ERROR"))
+        requireKnown(db, scope)
+        db.update("calendars", ContentValues().apply {
+            put("status", if (isAvailable(db, scope)) status else "UNAVAILABLE")
+            if (completedAt != null && isAvailable(db, scope)) put("completed_at", completedAt)
+        }, "scope=?", arrayOf(key(scope)))
+    }
+
+    /** Admit local mapping semantics without discarding any received or unresolved remote evidence.
+     * A changed mapper must observe the old horizon again before rolling coverage can be reused.
+     */
+    suspend fun ensureMappingProfile(scope: CalendarScope, format: AdapterFormat): Unit = access { db ->
+        check(admitTransaction(scope)) { "Inactive import lease" }
+        db.beginTransaction()
+        try {
+            requireKnown(db, scope)
+            val previous = db.query("mapping_profiles", arrayOf("adapter", "version"), "scope=?",
+                arrayOf(key(scope)), null, null, null).use {
+                if (it.moveToFirst()) AdapterFormat(it.getString(0), it.getInt(1)) else null
+            }
+            if (previous != format) {
+                db.insertWithOnConflict("mapping_profiles", null, ContentValues().apply {
+                    put("scope", key(scope)); put("adapter", format.id); put("version", format.version)
+                    put("rescan_pending", 1)
+                }, SQLiteDatabase.CONFLICT_REPLACE).also { check(it != -1L) { "Could not retain mapping profile" } }
+                val coverage = readCoverage(db, scope)
+                val invalidated = coverage.copy(observed = null,
+                    active = coverage.active?.let { run -> run.copy(windows = run.windows.map { it.copy(prefixKnown = false) }) })
+                if (invalidated != coverage) writeCoverage(db, scope, invalidated)
+            }
+            checkStagingCapacity(db)
+            check(admitTransaction(scope)) { "Inactive import lease" }
+            db.setTransactionSuccessful()
+        } finally { db.endTransaction() }
+    }
+    /** Remains armed while an older traversal/receipt finishes, even after process restart. */
+    suspend fun mappingRescanPending(scope: CalendarScope): Boolean = access { db ->
+        requireKnown(db, scope)
+        db.query("mapping_profiles", arrayOf("rescan_pending"), "scope=?", arrayOf(key(scope)),
+            null, null, null).use { it.moveToFirst() && it.getInt(0) != 0 }
+    }
+
+    /** Call only under the shared account executor. Restart a completed traversal, never a pending one. */
+    suspend fun beginRefresh(scope: CalendarScope, planned: PageCheckpoint? = null,
+        expectedCoverage: CoverageLedger? = null): Unit = access { db ->
+        check(admitTransaction(scope)) { "Inactive import lease" }
+        db.beginTransaction()
+        try {
+            requireKnown(db, scope)
+            val checkpoint = db.query("calendars", arrayOf("checkpoint"), "scope=?", arrayOf(key(scope)), null, null, null).use {
+                check(it.moveToFirst()); if (it.isNull(0)) null else decodeCheckpoint(scope, it.getString(0))
+            }
+            val hasReceived = db.rawQuery("SELECT 1 FROM inbox WHERE scope=?", arrayOf(key(scope))).use { it.moveToFirst() }
+            if (planned != null) {
+                require(checkpoint != null && checkpoint.traversalComplete && !hasReceived) { "Cannot replace an unfinished traversal" }
+                require(planned.scope == scope && planned.format == checkpoint.format && planned.cursor != null &&
+                    planned.cursor?.format == planned.format && !planned.traversalComplete) { "Invalid planned checkpoint" }
+                require(expectedCoverage != null && readCoverage(db, scope) == expectedCoverage) { "Stale planned coverage" }
+                require(readDeltaCursor(db, scope) != null) { "Planned refresh requires an established change cursor" }
+            }
+            if ((checkpoint == null || checkpoint.traversalComplete) && !hasReceived) {
+                if (checkpoint != null) writeCoverage(db, scope, readCoverage(db, scope).restart(preserveObservation = planned != null))
+                db.update("calendars", ContentValues().apply {
+                    if (planned == null) putNull("checkpoint") else put("checkpoint", encodeCheckpoint(planned))
+                }, "scope=?", arrayOf(key(scope)))
+                requeueSupported(db, scope)
+                // The null checkpoint is now the durable obligation to start a complete scan.
+                // An extension or delta-only poll cannot satisfy a mapping change.
+                if (planned == null) db.update("mapping_profiles", ContentValues().apply { put("rescan_pending", 0) },
+                    "scope=?", arrayOf(key(scope)))
+                if (planned != null) check(db.update("delta_state", ContentValues().apply { put("more", 1) },
+                    "scope=?", arrayOf(key(scope))) == 1) { "Missing change state" }
+            }
+            checkStagingCapacity(db)
+            check(admitTransaction(scope)) { "Inactive import lease" }
+            db.setTransactionSuccessful()
+        } finally { db.endTransaction() }
+    }
+    suspend fun requeueAll(scope: CalendarScope) = access { db ->
+        requeueSupported(db, scope)
+    }
+    /** Admit a same-horizon poll durably without starting a new baseline traversal. */
+    suspend fun beginDeltaRefresh(scope: CalendarScope, expectedCoverage: CoverageLedger): Unit = access { db ->
+        check(admitTransaction(scope)) { "Inactive import lease" }
+        db.beginTransaction()
+        try {
+            requireKnown(db, scope)
+            val complete = db.query("calendars", arrayOf("checkpoint"), "scope=?", arrayOf(key(scope)), null, null, null).use {
+                check(it.moveToFirst()); !it.isNull(0) && decodeCheckpoint(scope, it.getString(0)).traversalComplete
+            }
+            require(complete && readReceived(db, scope) == null) { "Cannot poll before traversal completion" }
+            require(readCoverage(db, scope) == expectedCoverage) { "Stale planned coverage" }
+            require(readDeltaCursor(db, scope) != null) { "Refresh requires an established change cursor" }
+            requeueSupported(db, scope)
+            check(db.update("delta_state", ContentValues().apply { put("more", 1) },
+                "scope=?", arrayOf(key(scope))) == 1) { "Missing change state" }
+            checkStagingCapacity(db)
+            check(admitTransaction(scope)) { "Inactive import lease" }
+            db.setTransactionSuccessful()
+        } finally { db.endTransaction() }
+    }
+    private fun requeueSupported(db: SQLiteDatabase, scope: CalendarScope) {
+        db.update("records",
+        ContentValues().apply { put("pending", 1) },
+        "scope=? AND NOT EXISTS (SELECT 1 FROM deferred_events d WHERE d.scope=records.scope AND d.event=records.event)", arrayOf(key(scope)))
+        suppressInactiveChildren(db, scope)
+    }
+    suspend fun complete(scope: CalendarScope) = access { db ->
+        db.query("calendars", arrayOf("checkpoint"), "scope=?", arrayOf(key(scope)), null, null, null).use {
+            it.moveToFirst() && !it.isNull(0) && decodeCheckpoint(scope, it.getString(0)).traversalComplete
+        }
+    }
+    suspend fun pending(scope: CalendarScope, limit: Int = 100): List<ProjectionIntent> = access { db ->
+        require(limit in 1..100); requireKnown(db, scope)
+        val masters = masterStates(db, scope)
+        db.rawQuery("SELECT r.payload FROM records r LEFT JOIN series_members s ON s.scope=r.scope AND s.event=r.event WHERE r.scope=? AND r.pending=1 ORDER BY CASE WHEN s.role='master' THEN 0 ELSE 1 END,r.rowid", arrayOf(key(scope))).use { cursor ->
+            buildList {
+                while (size < limit && cursor.moveToNext()) {
+                    val change = decodeChange(cursor.getString(0))
+                    val recurrence = (change as? RemoteChange.Upsert)?.content?.recurrence
+                    if (recurrence == null || recurrence.isMaster || masters[recurrence.uid]?.accepts(recurrence.original) == true)
+                        add(ProjectionIntent(scope, change))
+                }
+            }
+        }
+    }
+    /** Missing or incompatible parents remain visible work without blocking their later pages. */
+    suspend fun blockedSeriesCount(scope: CalendarScope): Int = access { db ->
+        requireKnown(db, scope)
+        val masters = masterStates(db, scope)
+        db.rawQuery("SELECT r.payload FROM records r JOIN series_members s ON s.scope=r.scope AND s.event=r.event WHERE r.scope=? AND r.pending=1 AND s.role='exception'", arrayOf(key(scope))).use { cursor ->
+            var count = 0
+            while (cursor.moveToNext()) {
+                val recurrence = (decodeChange(cursor.getString(0)) as? RemoteChange.Upsert)?.content?.recurrence
+                if (recurrence != null && !recurrence.isMaster) {
+                    val parent = masters[recurrence.uid]
+                    if (parent != MasterState.INACTIVE && parent?.accepts(recurrence.original) != true) count++
+                }
+            }
+            count
+        }
+    }
+    suspend fun deletedSeriesUid(scope: CalendarScope, eventId: EventId): String? = access { db ->
+        requireKnown(db, scope)
+        seriesMember(db, scope, eventId)?.takeIf { it.role == "master" }?.uid
+    }
+    /** CAS acknowledgement: a newer pending value cannot be consumed by an old provider write. */
+    suspend fun acknowledge(intent: ProjectionIntent) = access { db ->
+        db.update("records", ContentValues().apply { put("pending", 0) },
+            "scope=? AND event=? AND payload=? AND pending=1",
+            arrayOf(key(intent.scope), intent.change.eventId.value, encodeChange(intent.change)))
+    }
+
+    /** Stable keyset pagination: retries may remove rows without skipping subsequent issues. */
+    suspend fun deferred(scope: CalendarScope, limit: Int = 4, afterEventId: EventId? = null): List<DeferredCalendarEvent> = access { db ->
+        require(limit in 1..4); requireKnown(db, scope)
+        val condition = if (afterEventId == null) "scope=?" else "scope=? AND event>?"
+        val args = if (afterEventId == null) arrayOf(key(scope)) else arrayOf(key(scope), afterEventId.value)
+        stagedQuery(db, "SELECT event,revision,adapter,version,reason,payload FROM deferred_events WHERE $condition ORDER BY event LIMIT $limit", args).use { cursor ->
+            buildList {
+                while (cursor.moveToNext()) add(DeferredCalendarEvent(EventId(cursor.getString(0)), Revision(cursor.getString(1)),
+                    AdapterFormat(cursor.getString(2), cursor.getInt(3)), DeferredEventReason.valueOf(cursor.getString(4)), cursor.getString(5)))
+            }
+        }
+    }
+    suspend fun deferredCount(scope: CalendarScope): Int = access { db ->
+        requireKnown(db, scope); countDeferred(db, scope)
+    }
+    /** Explicit refresh schedules one bounded retry of every retained issue, including after restart. */
+    suspend fun prepareDeferredRetry(scope: CalendarScope): Int = stagingMutation(scope) { db ->
+        db.update("deferred_events", ContentValues().apply { put("retry_pending", 1) }, "scope=?", arrayOf(key(scope)))
+    }
+    suspend fun pendingDeferredRetries(scope: CalendarScope, limit: Int = 4): List<DeferredCalendarEvent> = access { db ->
+        require(limit in 1..4); requireKnown(db, scope)
+        stagedQuery(db, "SELECT event,revision,adapter,version,reason,payload FROM deferred_events WHERE scope=? AND retry_pending=1 ORDER BY event LIMIT $limit", arrayOf(key(scope))).use { cursor ->
+            buildList {
+                while (cursor.moveToNext()) add(DeferredCalendarEvent(EventId(cursor.getString(0)), Revision(cursor.getString(1)),
+                    AdapterFormat(cursor.getString(2), cursor.getInt(3)), DeferredEventReason.valueOf(cursor.getString(4)), cursor.getString(5)))
+            }
+        }
+    }
+    /** A stale local retry cannot acknowledge different retained evidence for the same event. */
+    suspend fun acknowledgeDeferredRetry(scope: CalendarScope, event: DeferredCalendarEvent): Int = stagingMutation(scope) { db ->
+        db.update("deferred_events", ContentValues().apply { put("retry_pending", 0) },
+            "scope=? AND event=? AND revision=? AND adapter=? AND version=? AND reason=? AND payload=? AND retry_pending=1",
+            arrayOf(key(scope), event.eventId.value, event.revision.value, event.format.id, event.format.version.toString(), event.reason.name, event.protectedPayload))
+    }
+    private suspend fun <T> stagingMutation(scope: CalendarScope, action: (SQLiteDatabase) -> T): T = access { db ->
+        check(admitTransaction(scope)) { "Inactive import lease" }
+        db.beginTransaction()
+        try {
+            requireKnown(db, scope)
+            val result = action(db)
+            check(admitTransaction(scope)) { "Inactive import lease" }
+            db.setTransactionSuccessful()
+            result
+        } finally { db.endTransaction() }
+    }
+    private fun countDeferred(db: SQLiteDatabase, scope: CalendarScope): Int = db.rawQuery(
+        "SELECT COUNT(*) FROM deferred_events WHERE scope=?", arrayOf(key(scope)),
+    ).use { check(it.moveToFirst()); it.getInt(0) }
+    private fun countPending(db: SQLiteDatabase, scope: CalendarScope): Int = db.rawQuery(
+        "SELECT COUNT(*) FROM records WHERE scope=? AND pending=1", arrayOf(key(scope)),
+    ).use { check(it.moveToFirst()); it.getInt(0) }
+    private data class SeriesMember(val uid: String, val role: String)
+    private enum class MasterState {
+        INACTIVE, ALL_DAY, TIMED;
+        fun accepts(original: RecurrencePoint?): Boolean = when (this) {
+            INACTIVE -> false
+            ALL_DAY -> original is RecurrencePoint.AllDay
+            TIMED -> original is RecurrencePoint.Timed
+        }
+    }
+    private fun seriesMember(db: SQLiteDatabase, scope: CalendarScope, eventId: EventId): SeriesMember? =
+        db.rawQuery("SELECT uid,role FROM series_members WHERE scope=? AND event=?", arrayOf(key(scope), eventId.value)).use {
+            if (it.moveToFirst()) SeriesMember(it.getString(0), it.getString(1)) else null
+        }
+    /** Deferred parent contents cannot establish a usable dependency, even with a cached old copy. */
+    private fun masterStates(db: SQLiteDatabase, scope: CalendarScope): Map<String, MasterState> =
+        db.rawQuery("SELECT s.uid,r.payload,EXISTS(SELECT 1 FROM deferred_events d WHERE d.scope=s.scope AND d.event=s.event) FROM series_members s JOIN records r ON r.scope=s.scope AND r.event=s.event WHERE s.scope=? AND s.role='master'", arrayOf(key(scope))).use { cursor ->
+            buildMap {
+                val unusable = mutableSetOf<String>()
+                while (cursor.moveToNext()) {
+                    val uid = cursor.getString(0)
+                    if (cursor.getInt(2) != 0) { unusable.add(uid); continue }
+                    val content = (decodeChange(cursor.getString(1)) as? RemoteChange.Upsert)?.content
+                    val recurrence = content?.recurrence
+                    val active = recurrence != null && recurrence.isMaster && recurrence.uid == uid
+                    if (active) put(uid, if (content!!.time is EventTime.AllDay) MasterState.ALL_DAY else MasterState.TIMED)
+                    else if (uid !in this) put(uid, MasterState.INACTIVE)
+                }
+                // An older inactive association must not turn an unusable new parent into a deletion.
+                unusable.forEach { uid -> if (get(uid) == MasterState.INACTIVE) remove(uid) }
+            }
+        }
+    private fun suppressInactiveChildren(db: SQLiteDatabase, scope: CalendarScope) {
+        val masters = masterStates(db, scope)
+        db.rawQuery("SELECT r.event,r.payload FROM records r JOIN series_members s ON s.scope=r.scope AND s.event=r.event WHERE r.scope=? AND r.pending=1 AND s.role='exception'", arrayOf(key(scope))).use { cursor ->
+            while (cursor.moveToNext()) {
+                val recurrence = (decodeChange(cursor.getString(1)) as? RemoteChange.Upsert)?.content?.recurrence
+                if (recurrence != null && !recurrence.isMaster && masters[recurrence.uid] == MasterState.INACTIVE)
+                    db.update("records", ContentValues().apply { put("pending", 0) }, "scope=? AND event=?", arrayOf(key(scope), cursor.getString(0)))
+            }
+        }
+    }
+    private fun updateSeries(db: SQLiteDatabase, scope: CalendarScope, change: RemoteChange) {
+        val previous = seriesMember(db, scope, change.eventId)
+        val recurrence = (change as? RemoteChange.Upsert)?.content?.recurrence
+        if (recurrence != null) {
+            val role = if (recurrence.isMaster) "master" else "exception"
+            require(previous == null || previous == SeriesMember(recurrence.uid, role)) { "Recurrence identity changed" }
+            if (recurrence.isMaster) db.rawQuery("SELECT r.payload FROM series_members s JOIN records r ON r.scope=s.scope AND r.event=s.event WHERE s.scope=? AND s.uid=? AND s.role='master' AND s.event<>?",
+                arrayOf(key(scope), recurrence.uid, change.eventId.value)).use { cursor ->
+                while (cursor.moveToNext()) {
+                    val other = (decodeChange(cursor.getString(0)) as? RemoteChange.Upsert)?.content?.recurrence
+                    require(other == null || !other.isMaster || other.uid != recurrence.uid) { "Ambiguous recurrence master" }
+                }
+            }
+            db.insertWithOnConflict("series_members", null, ContentValues().apply {
+                put("scope", key(scope)); put("event", change.eventId.value); put("uid", recurrence.uid); put("role", role)
+            }, SQLiteDatabase.CONFLICT_REPLACE).also { check(it != -1L) }
+        } else if (change is RemoteChange.Upsert && previous?.role == "exception") {
+            db.delete("series_members", "scope=? AND event=?", arrayOf(key(scope), change.eventId.value))
+        }
+        // Deleted records retain the association. A master becoming simple does too.
+    }
+    private fun requeueSeriesChildren(db: SQLiteDatabase, scope: CalendarScope, uid: String) {
+        val state = masterStates(db, scope)[uid] ?: return
+        db.rawQuery("SELECT r.event,r.payload FROM records r JOIN series_members s ON s.scope=r.scope AND s.event=r.event WHERE r.scope=? AND s.uid=? AND s.role='exception' AND NOT EXISTS (SELECT 1 FROM deferred_events d WHERE d.scope=r.scope AND d.event=r.event)", arrayOf(key(scope), uid)).use { cursor ->
+            while (cursor.moveToNext()) {
+                val recurrence = (decodeChange(cursor.getString(1)) as? RemoteChange.Upsert)?.content?.recurrence
+                if (recurrence != null && !recurrence.isMaster)
+                    db.update("records", ContentValues().apply { put("pending", if (state != MasterState.INACTIVE) 1 else 0) },
+                        "scope=? AND event=?", arrayOf(key(scope), cursor.getString(0)))
+            }
+        }
+    }
+    private fun countUnverified(db: SQLiteDatabase, scope: CalendarScope): Int = db.rawQuery(
+        "SELECT COUNT(*) FROM deferred_events WHERE scope=? AND reason=?",
+        arrayOf(key(scope), DeferredEventReason.UNVERIFIED_CONTENT.name),
+    ).use { check(it.moveToFirst()); it.getInt(0) }
+
+    // The default CursorWindow is smaller than an admitted sealed page. Bound it explicitly;
+    // four UTF-8 bytes per allowed character also accommodates non-ASCII adapter envelopes.
+    private fun stagedQuery(db: SQLiteDatabase, sql: String, args: Array<String>): SQLiteCursor =
+        (db.rawQuery(sql, args) as SQLiteCursor).apply {
+            window = CursorWindow("Calendar sealed import", ReceivedCalendarPage.MAX_PAYLOAD_CHARS.toLong() * 4 + COVERAGE_MAX_BYTES + 64 * 1024)
+        }
+
+    private fun readReceived(db: SQLiteDatabase, scope: CalendarScope): ReceivedCalendarPage? = stagedQuery(db,
+        "SELECT request_checkpoint,request_limit,payload,coverage FROM inbox WHERE scope=?", arrayOf(key(scope)),
+    ).use {
+        if (!it.moveToFirst()) null else ReceivedCalendarPage(PageRequest(decodeCheckpoint(scope, it.getString(0)), it.getInt(1)), it.getString(2),
+            if (it.isNull(3)) null else decodePageCoverage(it.getString(3)))
+    }
+
+    private fun readCoverage(db: SQLiteDatabase, scope: CalendarScope): CoverageLedger = db.rawQuery(
+        "SELECT payload FROM coverage_state WHERE scope=?", arrayOf(key(scope)),
+    ).use { if (it.moveToFirst()) decodeCoverage(it.getString(0)) else CoverageLedger() }
+
+    private fun writeCoverage(db: SQLiteDatabase, scope: CalendarScope, value: CoverageLedger) {
+        db.insertWithOnConflict("coverage_state", null, ContentValues().apply {
+            put("scope", key(scope)); put("payload", encodeCoverage(value))
+        }, SQLiteDatabase.CONFLICT_REPLACE).also { check(it != -1L) { "Could not retain coverage" } }
+    }
+
+    // This schema stores project-owned observations, never adapter cursor internals.
+    private fun intervalJson(value: CoverageInterval) = JSONObject().apply {
+        put("start", value.start.toString()); put("end", value.endExclusive.toString()); put("zone", value.zone.id)
+    }
+    private fun readInterval(value: JSONObject) = CoverageInterval(LocalDate.parse(value.getString("start")),
+        LocalDate.parse(value.getString("end")), ZoneId.of(value.getString("zone")))
+    private fun boundedCoverage(payload: String): String {
+        require(payload.toByteArray(Charsets.UTF_8).size <= COVERAGE_MAX_BYTES) { "Coverage payload exceeds limit" }
+        return payload
+    }
+    private fun coverageJson(payload: String, maximumSchema: Int = 1): JSONObject = JSONObject(boundedCoverage(payload)).also {
+        require(it.getInt("schema") in 1..maximumSchema) { "Unknown coverage schema" }
+    }
+    private fun encodePageCoverage(value: PageCoverage): String = boundedCoverage(JSONObject().apply {
+        put("schema", 1); put("plan", JSONArray(value.plan.map(::intervalJson)))
+        put("index", value.windowIndex); put("starts", value.startsWindow); put("finishes", value.finishesWindow)
+    }.toString())
+    private fun decodePageCoverage(payload: String): PageCoverage = coverageJson(payload).let {
+        val plan = it.getJSONArray("plan")
+        require(plan.length() in 1..128)
+        PageCoverage((0 until plan.length()).map { index -> readInterval(plan.getJSONObject(index)) },
+            it.getInt("index"), it.getBoolean("starts"), it.getBoolean("finishes"))
+    }
+    private fun validateRun(value: CoverageRun) {
+        PageCoverage(value.windows.map { it.interval }, 0, true, false) // Validate disjoint dates and zone.
+        value.windows.forEach {
+            require((it.receivedAt ?: 0) >= 0)
+            require((it.appliedAt ?: 0) >= 0)
+            require(!it.prefixKnown || it.receivedPages > 0)
+            require(!it.terminalReceived || it.receivedPages > 0)
+            require(!it.terminalApplied || it.appliedPages == it.receivedPages)
+            require((it.receivedPages == 0L) == (it.receivedAt == null))
+            require((it.appliedPages == 0L) == (it.appliedAt == null))
+        }
+        require(value.lastIndex >= 0 || value.windows.all { it.receivedPages == 0L })
+        require(!value.finished || value.lastIndex == value.windows.lastIndex && value.windows.last().terminalApplied)
+    }
+    private fun runJson(value: CoverageRun): JSONObject {
+        validateRun(value)
+        return JSONObject().apply {
+            put("adapter", value.format.id); put("version", value.format.version)
+            put("lastIndex", value.lastIndex); put("finished", value.finished)
+            put("windows", JSONArray(value.windows.map { window -> JSONObject().apply {
+                put("interval", intervalJson(window.interval)); put("prefixKnown", window.prefixKnown)
+                put("receivedPages", window.receivedPages); put("appliedPages", window.appliedPages)
+                put("terminalReceived", window.terminalReceived); put("terminalApplied", window.terminalApplied)
+                put("receivedAt", window.receivedAt ?: JSONObject.NULL); put("appliedAt", window.appliedAt ?: JSONObject.NULL)
+            } }))
+        }
+    }
+    private fun readRun(value: JSONObject): CoverageRun {
+        val windows = value.getJSONArray("windows")
+        require(windows.length() in 1..128)
+        return CoverageRun(AdapterFormat(value.getString("adapter"), value.getInt("version")),
+            (0 until windows.length()).map { index -> windows.getJSONObject(index).let {
+                WindowCoverage(readInterval(it.getJSONObject("interval")), it.getBoolean("prefixKnown"),
+                    it.getLong("receivedPages"), it.getLong("appliedPages"), it.getBoolean("terminalReceived"),
+                    it.getBoolean("terminalApplied"), if (it.isNull("receivedAt")) null else it.getLong("receivedAt"),
+                    if (it.isNull("appliedAt")) null else it.getLong("appliedAt"))
+            } }, value.getInt("lastIndex"), value.getBoolean("finished")).also(::validateRun)
+    }
+    private fun encodeCoverage(value: CoverageLedger): String {
+        require(value.previous?.finished != false)
+        return boundedCoverage(JSONObject().apply {
+            put("schema", 2); put("epoch", value.epoch)
+            put("active", value.active?.let(::runJson) ?: JSONObject.NULL)
+            put("previous", value.previous?.let(::runJson) ?: JSONObject.NULL)
+            put("observed", value.observed?.let { observation -> JSONObject().apply {
+                put("adapter", observation.format.id); put("version", observation.format.version)
+                put("interval", intervalJson(observation.interval))
+            } } ?: JSONObject.NULL)
+        }.toString())
+    }
+    private fun decodeCoverage(payload: String): CoverageLedger = coverageJson(payload, maximumSchema = 2).let {
+        CoverageLedger(it.getLong("epoch"), if (it.isNull("active")) null else readRun(it.getJSONObject("active")),
+            if (it.isNull("previous")) null else readRun(it.getJSONObject("previous")),
+            if (it.getInt("schema") == 1 || it.isNull("observed")) null else it.getJSONObject("observed").let { observation ->
+                CoverageObservation(AdapterFormat(observation.getString("adapter"), observation.getInt("version")),
+                    readInterval(observation.getJSONObject("interval")))
+            }).also { ledger ->
+            require(ledger.previous?.finished != false)
+        }
+    }
+
+    private fun ensureDeltaState(db: SQLiteDatabase, scope: CalendarScope) {
+        db.insertWithOnConflict("delta_state", null, ContentValues().apply { put("scope", key(scope)) }, SQLiteDatabase.CONFLICT_IGNORE)
+    }
+    private fun hasReconciliation(db: SQLiteDatabase, scope: CalendarScope): Boolean = db.rawQuery(
+        "SELECT EXISTS(SELECT 1 FROM delta_reconciliation WHERE scope=?)", arrayOf(key(scope)),
+    ).use { check(it.moveToFirst()); it.getInt(0) != 0 }
+    private fun readReconciliationFormat(db: SQLiteDatabase, scope: CalendarScope): AdapterFormat? = db.rawQuery(
+        "SELECT adapter,version FROM delta_reconciliation WHERE scope=? ORDER BY id LIMIT 1", arrayOf(key(scope)),
+    ).use { if (it.moveToFirst()) AdapterFormat(it.getString(0), it.getInt(1)) else null }
+    private fun readDeltaCursor(db: SQLiteDatabase, scope: CalendarScope): OpaqueCursor? = db.rawQuery(
+        "SELECT cursor_adapter,cursor_version,cursor_value FROM delta_state WHERE scope=?", arrayOf(key(scope)),
+    ).use {
+        if (!it.moveToFirst() || it.isNull(2)) null else OpaqueCursor(AdapterFormat(it.getString(0), it.getInt(1)), it.getString(2))
+    }
+    private fun readDeltaReceived(db: SQLiteDatabase, scope: CalendarScope): ReceivedChangePage? = stagedQuery(db,
+        "SELECT received_adapter,received_version,received_after,received_payload FROM delta_state WHERE scope=?", arrayOf(key(scope)),
+    ).use {
+        if (!it.moveToFirst() || it.isNull(3)) null else ReceivedChangePage(scope,
+            OpaqueCursor(AdapterFormat(it.getString(0), it.getInt(1)), it.getString(2)), it.getString(3))
+    }
+    private fun encodeNotice(value: CalendarChangeNotice) = JSONObject().apply {
+        put("id", value.id); put("kind", value.kind.name)
+        value.eventId?.let { put("event", it.value) }; value.revision?.let { put("revision", it.value) }
+    }.toString()
+    private fun decodeNotice(payload: String): CalendarChangeNotice = JSONObject(payload).let {
+        CalendarChangeNotice(it.getString("id"), CalendarNoticeKind.valueOf(it.getString("kind")),
+            if (it.isNull("event")) null else EventId(it.getString("event")),
+            if (it.isNull("revision")) null else Revision(it.getString("revision")))
+    }
+    private fun encodeReceivedEvent(value: ReceivedCalendarEvent) = JSONObject().apply {
+        put("event", value.eventId.value); put("revision", value.revision.value)
+        put("adapter", value.format.id); put("version", value.format.version); put("payload", value.protectedPayload)
+    }.toString()
+    private fun decodeReceivedEvent(scope: CalendarScope, payload: String): ReceivedCalendarEvent = JSONObject(payload).let {
+        ReceivedCalendarEvent(scope, EventId(it.getString("event")), Revision(it.getString("revision")),
+            AdapterFormat(it.getString("adapter"), it.getInt("version")), it.getString("payload"))
+    }
+
+    private fun checkStagingCapacity(db: SQLiteDatabase) {
+        val bytes = db.rawQuery("SELECT COALESCE((SELECT SUM(length(CAST(payload AS BLOB))+COALESCE(length(CAST(coverage AS BLOB)),0)) FROM inbox),0) + COALESCE((SELECT SUM(length(CAST(payload AS BLOB))) FROM coverage_state),0) + COALESCE((SELECT SUM(length(CAST(payload AS BLOB))) FROM deferred_events),0) + COALESCE((SELECT SUM(length(CAST(received_payload AS BLOB))) FROM delta_state),0) + COALESCE((SELECT SUM(length(CAST(notice AS BLOB))+COALESCE(length(CAST(received AS BLOB)),0)) FROM delta_jobs),0) + COALESCE((SELECT SUM(length(CAST(payload AS BLOB))) FROM delta_reconciliation),0)", null).use {
+            check(it.moveToFirst()); it.getLong(0)
+        }
+        if (bytes > STAGING_BUDGET_BYTES) throw ImportCapacityException()
+    }
+
+    override suspend fun <T> transaction(scope: CalendarScope, block: SyncStore.Transaction.() -> T): T = access { db ->
+        check(admitTransaction(scope)) { "Inactive import lease" }
+        db.beginTransaction()
+        try {
+            requireKnown(db, scope)
+            val transaction = object : DeltaSyncTransaction {
+                override var coverage: CoverageLedger
+                    get() = readCoverage(db, scope)
+                    set(value) = writeCoverage(db, scope, value)
+                override val reconciliationFormat: AdapterFormat?
+                    get() = readReconciliationFormat(db, scope)
+                override fun retainReconciliation(receipt: ReceivedChangePage) {
+                    require(receipt.scope == scope)
+                    val format = receipt.after.format
+                    require(reconciliationFormat == null || reconciliationFormat == format)
+                    require(deltaCursor == null || deltaCursor?.format == format)
+                    require(deltaReceived == null || deltaReceived?.after?.format == format)
+                    db.insertOrThrow("delta_reconciliation", null, ContentValues().apply {
+                        put("scope", key(scope)); put("adapter", format.id); put("version", format.version)
+                        put("after_cursor", receipt.after.value); put("payload", receipt.protectedPayload)
+                    })
+                }
+                override var deltaCursor: OpaqueCursor?
+                    get() = readDeltaCursor(db, scope)
+                    set(value) {
+                        val previous = readDeltaCursor(db, scope)
+                        require(value == null || previous == null || value.format == previous.format)
+                        require(value == null || reconciliationFormat == null || value.format == reconciliationFormat)
+                        val pending = readDeltaReceived(db, scope)
+                        require(pending == null || value != null && value.format == pending.after.format)
+                        ensureDeltaState(db, scope)
+                        db.update("delta_state", ContentValues().apply {
+                            if (value == null) { putNull("cursor_adapter"); putNull("cursor_version"); putNull("cursor_value") }
+                            else { put("cursor_adapter", value.format.id); put("cursor_version", value.format.version); put("cursor_value", value.value) }
+                        }, "scope=?", arrayOf(key(scope)))
+                    }
+                override var deltaReceived: ReceivedChangePage?
+                    get() = readDeltaReceived(db, scope)
+                    set(value) {
+                        if (value != null) {
+                            require(value.scope == scope)
+                            require(reconciliationFormat == null || value.after.format == reconciliationFormat)
+                            val current = readDeltaCursor(db, scope)
+                            require(current == null || current == value.after)
+                            val previous = readDeltaReceived(db, scope)
+                            check(previous == null || previous == value) { "A received change page is still pending" }
+                        }
+                        ensureDeltaState(db, scope)
+                        db.update("delta_state", ContentValues().apply {
+                            if (value == null) { putNull("received_adapter"); putNull("received_version"); putNull("received_after"); putNull("received_payload") }
+                            else { put("received_adapter", value.after.format.id); put("received_version", value.after.format.version); put("received_after", value.after.value); put("received_payload", value.protectedPayload) }
+                        }, "scope=?", arrayOf(key(scope)))
+                    }
+                override var deltaMore: Boolean
+                    get() = db.rawQuery("SELECT more FROM delta_state WHERE scope=?", arrayOf(key(scope))).use { it.moveToFirst() && it.getInt(0) != 0 }
+                    set(value) {
+                        ensureDeltaState(db, scope)
+                        db.update("delta_state", ContentValues().apply { put("more", if (value) 1 else 0) }, "scope=?", arrayOf(key(scope)))
+                    }
+                override fun deltaJobs(limit: Int, blocked: Boolean): List<CalendarChangeJob> {
+                    require(limit in 1..20)
+                    // Only context/content notices lack an event ID. Refresh their keys/settings
+                    // before selecting a bounded group of individual event obligations.
+                    return stagedQuery(db, "SELECT notice,received,blocked FROM delta_jobs WHERE scope=? AND blocked=? ORDER BY CASE WHEN event IS NULL THEN 0 ELSE 1 END,rowid LIMIT $limit",
+                        arrayOf(key(scope), if (blocked) "1" else "0")).use { cursor ->
+                        buildList { while (cursor.moveToNext()) add(CalendarChangeJob(decodeNotice(cursor.getString(0)),
+                            if (cursor.isNull(1)) null else decodeReceivedEvent(scope, cursor.getString(1)), cursor.getInt(2) != 0)) }
+                    }
+                }
+                override fun putDeltaJob(job: CalendarChangeJob) {
+                    job.received?.let {
+                        require(job.notice.kind == CalendarNoticeKind.EVENT_CHANGED && it.scope == scope && it.eventId == job.notice.eventId)
+                        require(checkpoint == null || it.format == checkpoint?.format)
+                    }
+                    val values = ContentValues().apply {
+                        put("scope", key(scope)); put("notice_id", job.notice.id); put("notice", encodeNotice(job.notice))
+                        job.notice.eventId?.let { put("event", it.value) } ?: putNull("event")
+                        job.received?.let { put("received", encodeReceivedEvent(it)) } ?: putNull("received")
+                        put("blocked", if (job.blocked) 1 else 0)
+                    }
+                    if (db.update("delta_jobs", values, "scope=? AND notice_id=?", arrayOf(key(scope), job.notice.id)) == 0)
+                        db.insertOrThrow("delta_jobs", null, values)
+                }
+                override fun removeDeltaJob(expected: CalendarChangeJob): Boolean = db.delete("delta_jobs",
+                    "scope=? AND notice_id=? AND notice=? AND received IS ? AND blocked=?", arrayOf(key(scope), expected.notice.id,
+                        encodeNotice(expected.notice), expected.received?.let(::encodeReceivedEvent), if (expected.blocked) "1" else "0")) != 0
+                override fun clearBlockedEvent(eventId: EventId) {
+                    db.delete("delta_jobs", "scope=? AND event=? AND blocked=1", arrayOf(key(scope), eventId.value))
+                }
+                override fun retryBlockedJobs() {
+                    db.update("delta_jobs", ContentValues().apply { put("blocked", 0) }, "scope=? AND blocked=1", arrayOf(key(scope)))
+                }
+                override var received: ReceivedCalendarPage?
+                    get() = readReceived(db, scope)
+                    set(value) {
+                        if (value == null) {
+                            db.delete("inbox", "scope=?", arrayOf(key(scope)))
+                        } else {
+                            require(value.request.checkpoint.scope == scope && value.request.limit in 1..100)
+                            val previous = readReceived(db, scope)
+                            check(previous == null || previous == value) { "A received page is still pending" }
+                            if (previous == null) db.insertOrThrow("inbox", null, ContentValues().apply {
+                                put("scope", key(scope)); put("request_checkpoint", encodeCheckpoint(value.request.checkpoint))
+                                put("request_limit", value.request.limit); put("payload", value.protectedPayload)
+                                value.coverage?.let { put("coverage", encodePageCoverage(it)) } ?: putNull("coverage")
+                            })
+                        }
+                    }
+                override fun defer(event: DeferredCalendarEvent) {
+                    db.insertWithOnConflict("deferred_events", null, ContentValues().apply {
+                        put("scope", key(scope)); put("event", event.eventId.value); put("revision", event.revision.value)
+                        put("adapter", event.format.id); put("version", event.format.version); put("reason", event.reason.name)
+                        put("payload", event.protectedPayload); put("retry_pending", 0)
+                    }, SQLiteDatabase.CONFLICT_REPLACE).also { check(it != -1L) { "Could not retain deferred event" } }
+                }
+                override fun clearDeferred(eventId: EventId) {
+                    val removed = db.delete("deferred_events", "scope=? AND event=?", arrayOf(key(scope), eventId.value))
+                    if (removed != 0) seriesMember(db, scope, eventId)?.takeIf { it.role == "master" }?.let {
+                        requeueSeriesChildren(db, scope, it.uid)
+                    }
+                }
+                override fun deferred(eventId: EventId): DeferredCalendarEvent? = stagedQuery(db,
+                    "SELECT revision,adapter,version,reason,payload FROM deferred_events WHERE scope=? AND event=?",
+                    arrayOf(key(scope), eventId.value),
+                ).use {
+                    if (!it.moveToFirst()) null else DeferredCalendarEvent(eventId, Revision(it.getString(0)),
+                        AdapterFormat(it.getString(1), it.getInt(2)), DeferredEventReason.valueOf(it.getString(3)), it.getString(4))
+                }
+                override var checkpoint: PageCheckpoint?
+                    get() = db.query("calendars", arrayOf("checkpoint"), "scope=?", arrayOf(key(scope)), null, null, null).use {
+                        check(it.moveToFirst()); if (it.isNull(0)) null else decodeCheckpoint(scope, it.getString(0))
+                    }
+                    set(value) {
+                        require(value == null || value.scope == scope)
+                        db.update("calendars", ContentValues().apply {
+                            if (value == null) putNull("checkpoint") else put("checkpoint", encodeCheckpoint(value))
+                        }, "scope=?", arrayOf(key(scope)))
+                    }
+                override val access = CalendarAccess()
+                override fun remote(eventId: EventId): RemoteChange? = db.query("records", arrayOf("payload"),
+                    "scope=? AND event=?", arrayOf(key(scope), eventId.value), null, null, null).use {
+                    if (it.moveToFirst()) decodeChange(it.getString(0)) else null
+                }
+                override fun putRemote(change: RemoteChange) {
+                    updateSeries(db, scope, change)
+                    db.insertWithOnConflict("records", null, ContentValues().apply {
+                        put("scope", key(scope)); put("event", change.eventId.value)
+                        put("payload", encodeChange(change)); put("pending", 0)
+                    }, SQLiteDatabase.CONFLICT_REPLACE).also { check(it != -1L) }
+                    seriesMember(db, scope, change.eventId)?.takeIf { it.role == "master" }?.let {
+                        requeueSeriesChildren(db, scope, it.uid)
+                    }
+                }
+                override fun hasPendingMutation(eventId: EventId) = false
+                override fun putProjection(intent: ProjectionIntent) {
+                    require(intent.scope == scope && remote(intent.change.eventId) == intent.change)
+                    val recurrence = (intent.change as? RemoteChange.Upsert)?.content?.recurrence
+                    val inactiveParent = recurrence != null && !recurrence.isMaster && masterStates(db, scope)[recurrence.uid] == MasterState.INACTIVE
+                    db.update("records", ContentValues().apply { put("pending", if (inactiveParent) 0 else 1) },
+                        "scope=? AND event=?", arrayOf(key(scope), intent.change.eventId.value))
+                }
+                override fun removeProjection(eventId: EventId) {
+                    db.update("records", ContentValues().apply { put("pending", 0) },
+                        "scope=? AND event=?", arrayOf(key(scope), eventId.value))
+                }
+                override fun mutation(id: MutationId): Mutation? = null
+                override fun putMutation(mutation: Mutation): Unit = error("Outgoing changes are not enabled")
+            }
+            val result = block(transaction)
+            checkStagingCapacity(db)
+            check(admitTransaction(scope)) { "Inactive import lease" }
+            db.setTransactionSuccessful()
+            result
+        } finally { db.endTransaction() }
+    }
+
+    private suspend fun <T> access(action: (SQLiteDatabase) -> T): T = withContext(Dispatchers.IO) {
+        lock.withLock { action(writableDatabase) }
+    }
+    private fun requireKnown(db: SQLiteDatabase, scope: CalendarScope) {
+        db.rawQuery("SELECT 1 FROM calendars WHERE scope=?", arrayOf(key(scope))).use {
+            check(it.moveToFirst()) { "Unknown import scope" }
+        }
+    }
+    private fun isAvailable(db: SQLiteDatabase, scope: CalendarScope): Boolean = db.rawQuery(
+        "SELECT available FROM calendars WHERE scope=?", arrayOf(key(scope)),
+    ).use { it.moveToFirst() && it.getInt(0) != 0 }
+    private fun key(scope: CalendarScope) = org.json.JSONArray()
+        .put(scope.account.value).put(scope.calendar.value).put(scope.generation).toString()
+
+    private fun encodeCheckpoint(value: PageCheckpoint) = JSONObject().apply {
+        put("adapter", value.format.id); put("version", value.format.version)
+        put("cursor", value.cursor?.value ?: JSONObject.NULL); put("complete", value.traversalComplete)
+    }.toString()
+    private fun decodeCheckpoint(scope: CalendarScope, payload: String): PageCheckpoint = JSONObject(payload).let {
+        val format = AdapterFormat(it.getString("adapter"), it.getInt("version"))
+        PageCheckpoint(scope, format, if (it.isNull("cursor")) null else OpaqueCursor(format, it.getString("cursor")), it.getBoolean("complete"))
+    }
+    private fun encodeChange(value: RemoteChange) = JSONObject().apply {
+        put("id", value.eventId.value); put("revision", value.revision.value)
+        put("deleted", value is RemoteChange.Deleted)
+        if (value is RemoteChange.Upsert) {
+            val content = value.content
+            put("title", content.title); put("description", content.description); put("location", content.location)
+            // Omit null to preserve legacy payload encoding and pending acknowledgement equality.
+            content.colorRgb?.let { put("colorRgb", it) }
+            content.recurrence?.let { put("recurrence", encodeRecurrence(it)) }
+            content.details?.let { put("details", encodeDetails(it)) }
+            when (val time = content.time) {
+                is EventTime.AllDay -> { put("allDay", true); put("start", time.start.toString()); put("end", time.endExclusive.toString()) }
+                is EventTime.Timed -> { put("allDay", false); put("start", time.start.toString()); put("end", time.end.toString()); put("zone", time.zone.id) }
+            }
+        }
+    }.toString()
+    private fun decodeChange(payload: String): RemoteChange = JSONObject(payload).let {
+        val id = EventId(it.getString("id")); val revision = Revision(it.getString("revision"))
+        if (it.getBoolean("deleted")) RemoteChange.Deleted(id, revision) else {
+            val time = if (it.getBoolean("allDay")) EventTime.AllDay(LocalDate.parse(it.getString("start")), LocalDate.parse(it.getString("end")))
+            else EventTime.Timed(Instant.parse(it.getString("start")), Instant.parse(it.getString("end")), ZoneId.of(it.getString("zone")))
+            RemoteChange.Upsert(id, revision, EventContent(it.getString("title"), time, it.getString("description"),
+                it.getString("location"), if (it.isNull("colorRgb")) null else it.getInt("colorRgb"),
+                if (it.isNull("recurrence")) null else decodeRecurrence(it.getJSONObject("recurrence")),
+                if (it.isNull("details")) null else decodeDetails(it.getJSONObject("details"))))
+        }
+    }
+    private fun encodePerson(value: EventPerson) = JSONObject().apply {
+        put("email", value.email); put("name", value.name)
+    }
+    private fun decodePerson(value: JSONObject) = EventPerson(value.getString("email"), value.getString("name"))
+    private fun encodeDetails(value: EventDetails) = JSONObject().apply {
+        put("schema", 1)
+        put("reminders", JSONArray().apply { value.reminders.forEach { put(it.minutesBefore) } })
+        value.organizer?.let { put("organizer", encodePerson(it)) }
+        put("attendees", JSONArray().apply { value.attendees.forEach { attendee ->
+            put(JSONObject().apply {
+                put("person", encodePerson(attendee.person)); put("role", attendee.role.name); put("status", attendee.status.name)
+            })
+        } })
+    }
+    private fun decodeDetails(value: JSONObject): EventDetails {
+        require(value.getInt("schema") == 1) { "Unsupported event details schema" }
+        val reminders = value.getJSONArray("reminders")
+        val attendees = value.getJSONArray("attendees")
+        require(reminders.length() <= 5 && attendees.length() <= 100)
+        return EventDetails(List(reminders.length()) { EventReminder(reminders.getInt(it)) },
+            if (value.isNull("organizer")) null else decodePerson(value.getJSONObject("organizer")),
+            List(attendees.length()) { index -> attendees.getJSONObject(index).let {
+                EventAttendee(decodePerson(it.getJSONObject("person")), AttendanceRole.valueOf(it.getString("role")),
+                    AttendanceStatus.valueOf(it.getString("status")))
+            } })
+    }
+    private fun encodeRecurrence(value: EventRecurrence) = JSONObject().apply {
+        put("schema", 1); put("uid", value.uid)
+        value.rule?.let { put("rule", it) }
+        put("additional", JSONArray().apply { value.additionalDates.forEach { put(encodePoint(it)) } })
+        put("excluded", JSONArray().apply { value.excludedDates.forEach { put(encodePoint(it)) } })
+        value.original?.let { put("original", encodePoint(it)) }
+        put("cancelled", value.cancelled)
+    }
+    private fun encodePoint(value: RecurrencePoint) = JSONObject().apply {
+        when (value) {
+            is RecurrencePoint.AllDay -> { put("type", "date"); put("value", value.date.toString()) }
+            is RecurrencePoint.Timed -> { put("type", "instant"); put("value", value.instant.toString()) }
+        }
+    }
+    private fun decodePoint(value: JSONObject): RecurrencePoint = when (value.getString("type")) {
+        "date" -> RecurrencePoint.AllDay(LocalDate.parse(value.getString("value")))
+        "instant" -> RecurrencePoint.Timed(Instant.parse(value.getString("value")))
+        else -> error("Unsupported recurrence date type")
+    }
+    private fun decodeRecurrence(value: JSONObject): EventRecurrence {
+        require(value.getInt("schema") == 1) { "Unsupported recurrence schema" }
+        fun points(name: String): List<RecurrencePoint> = value.getJSONArray(name).let { array ->
+            require(array.length() <= 512)
+            List(array.length()) { decodePoint(array.getJSONObject(it)) }
+        }
+        return EventRecurrence(value.getString("uid"), if (value.isNull("rule")) null else value.getString("rule"),
+            points("additional"), points("excluded"), if (value.isNull("original")) null else decodePoint(value.getJSONObject("original")),
+            value.getBoolean("cancelled"))
+    }
+    companion object {
+        const val STAGING_BUDGET_BYTES: Long = 32L * 1024 * 1024
+        private const val COVERAGE_MAX_BYTES = 256 * 1024
+    }
+}

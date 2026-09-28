@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="auth_sign_in_title">Verbinden met Proton</string>
+    <string name="auth_sign_in_help">Verbind je Proton-account met deze kalenderbrug.</string>
+    <string name="auth_username">Gebruikersnaam of e-mail</string>
+    <string name="auth_password">Wachtwoord</string>
+    <string name="auth_code">Verificatiecode</string>
+    <string name="auth_sign_in">Inloggen</string>
+    <string name="auth_continue">Doorgaan</string>
+    <string name="auth_cancel">Annuleren</string>
+    <string name="auth_sign_out">Uitloggen</string>
+    <string name="auth_cleanup_retry">Sessie opnieuw opschonen</string>
+    <string name="auth_restoring_title">Verbinding herstellen</string>
+    <string name="auth_restoring_help">Opgeslagen accountsessie controleren…</string>
+    <string name="auth_code_title">Tweestapsverificatie</string>
+    <string name="auth_code_help">Voer een code uit je authenticator in. Accounts met alleen een beveiligingssleutel worden niet ondersteund.</string>
+    <string name="auth_mailbox_title">Mailboxwachtwoord</string>
+    <string name="auth_mailbox_help">Voer je aparte mailboxwachtwoord in om de accountsleutels te ontgrendelen.</string>
+    <string name="auth_unlock_title">Accountsleutels ontgrendelen</string>
+    <string name="auth_unlock_help">Voer je Proton-wachtwoord in om de accountsleutels te ontgrendelen.</string>
+    <string name="auth_security_key_title">Beveiligingssleutel vereist</string>
+    <string name="auth_security_key_help">Verificatie met alleen een beveiligingssleutel wordt niet ondersteund. Je accountinstellingen zijn niet gewijzigd.</string>
+    <string name="auth_human_title">Menselijke verificatie</string>
+    <string name="auth_human_help">De vereiste verificatie kon niet worden weergegeven. Annuleer en probeer het later opnieuw.</string>
+    <string name="auth_connected_title">Account verbonden</string>
+    <string name="auth_connected_help">Je account is verbonden. Kies kalenders op het startscherm om ondersteunde gebeurtenissen alleen-lezen in Android te importeren.</string>
+    <string name="auth_input_required">Vul alle verplichte velden in.</string>
+    <string name="auth_rejected">De inloggegevens of code zijn geweigerd. Probeer het opnieuw.</string>
+    <string name="auth_already_connected">Dit account is al verbonden.</string>
+    <string name="auth_offline">Proton is niet bereikbaar. Controleer je verbinding en de netwerktoegang voor deze app.</string>
+    <string name="auth_open_app_settings">App-instellingen openen</string>
+    <string name="auth_timeout">De aanvraag duurde te lang. Probeer het opnieuw.</string>
+    <string name="auth_rate_limited">Te veel pogingen. Wacht voordat je het opnieuw probeert.</string>
+    <string name="auth_crypto_failure">De accountsleutels konden niet worden ontgrendeld.</string>
+    <string name="auth_client_unsupported">Deze Proton-client wordt niet meer ondersteund.</string>
+    <string name="auth_cleanup_failed">Opschonen van de sessie mislukt. Probeer opnieuw voordat je inloggegevens invoert.</string>
+    <string name="auth_try_again">De verbinding kon niet worden voltooid. Probeer het opnieuw.</string>
+    <string name="auth_retry_wait">Wacht voordat je een nieuwe poging doet.</string>
+    <string name="auth_cleaning">Inlogpoging opschonen…</string>
+    <string name="auth_working">Verbinden…</string>
+    <string name="auth_human_cancel">Verificatie annuleren</string>
+</resources>

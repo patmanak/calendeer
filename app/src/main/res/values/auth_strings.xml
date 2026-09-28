@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="auth_sign_in_title">Connect to Proton</string>
+    <string name="auth_sign_in_help">Use your Proton account to connect this calendar bridge.</string>
+    <string name="auth_username">Username or email</string>
+    <string name="auth_password">Password</string>
+    <string name="auth_code">Verification code</string>
+    <string name="auth_sign_in">Sign in</string>
+    <string name="auth_continue">Continue</string>
+    <string name="auth_cancel">Cancel</string>
+    <string name="auth_sign_out">Sign out</string>
+    <string name="auth_cleanup_retry">Retry session cleanup</string>
+    <string name="auth_restoring_title">Restoring connection</string>
+    <string name="auth_restoring_help">Checking the saved account session…</string>
+    <string name="auth_code_title">Two-factor verification</string>
+    <string name="auth_code_help">Enter a code from your authenticator. Security-key-only accounts are not supported.</string>
+    <string name="auth_mailbox_title">Mailbox password</string>
+    <string name="auth_mailbox_help">Enter your separate mailbox password to unlock your account keys.</string>
+    <string name="auth_unlock_title">Unlock account keys</string>
+    <string name="auth_unlock_help">Enter your Proton password to unlock your account keys.</string>
+    <string name="auth_security_key_title">Security key required</string>
+    <string name="auth_security_key_help">This connection cannot complete security-key-only verification. Your account settings have not been changed.</string>
+    <string name="auth_human_title">Human verification</string>
+    <string name="auth_human_help">The required verification could not be displayed. Cancel and try again later.</string>
+    <string name="auth_connected_title">Account connected</string>
+    <string name="auth_connected_help">Your account is connected. Choose calendars on the home screen to import supported events into Android in read-only mode.</string>
+    <string name="auth_input_required">Enter all required fields.</string>
+    <string name="auth_rejected">The credentials or verification code were rejected. Try again.</string>
+    <string name="auth_already_connected">This account is already connected.</string>
+    <string name="auth_offline">Proton cannot be reached. Check your connection and network access for this app.</string>
+    <string name="auth_open_app_settings">Open app settings</string>
+    <string name="auth_timeout">The request timed out. Try again.</string>
+    <string name="auth_rate_limited">Too many attempts. Wait before trying again.</string>
+    <string name="auth_crypto_failure">The account keys could not be unlocked.</string>
+    <string name="auth_client_unsupported">This Proton client is no longer supported.</string>
+    <string name="auth_cleanup_failed">Session cleanup failed. Retry cleanup before entering credentials.</string>
+    <string name="auth_try_again">The connection could not be completed. Try again.</string>
+    <string name="auth_retry_wait">Please wait before submitting another attempt.</string>
+    <string name="auth_cleaning">Clearing the connection attempt…</string>
+    <string name="auth_working">Connecting…</string>
+    <string name="auth_human_cancel">Cancel verification</string>
+</resources>

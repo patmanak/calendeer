@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="import_title">Importeren in Android</string>
+    <string name="import_read_only">Geselecteerde kalenders worden alleen-lezen naar Android gekopieerd. Er wordt niets naar Proton geüpload.</string>
+    <string name="import_privacy">Gebeurtenisinhoud wordt opgeslagen in de Android-kalender en kan worden gelezen door andere apps met kalendertoegang.</string>
+    <string name="import_permission_help">Android heeft lees- en schrijfrechten voor kalenders nodig om deze lokale kopieën te maken en bij te werken, terwijl Proton alleen-lezen blijft.</string>
+    <string name="import_allow">Kalendertoegang toestaan</string>
+    <string name="import_settings">App-instellingen openen</string>
+    <string name="import_no_calendars">Laad de kalenderlijst om kalenders voor import te kiezen.</string>
+    <string name="import_last_completed">Laatste voltooide import: %1$s</string>
+    <string name="import_running">Importeren…</string>
+    <string name="import_sync">Nu importeren</string>
+    <string name="import_window">Nieuwe imports laden eerst de afgelopen en komende 30 dagen, daarna de volledige periode: 90 dagen terug en 365 dagen vooruit.</string>
+    <string name="import_pause_help">Pauzeren stopt toekomstige imports van deze kalender. Al in Android geïmporteerde gebeurtenissen blijven op het apparaat staan, ook na het uitloggen.</string>
+    <string name="import_field_limits">Titels, datums, beschrijvingen, locaties en kleuren worden geïmporteerd. Je agenda-app verwerkt ondersteunde herinneringen; e-mailherinneringen blijven in Proton. Deelnemers zijn alleen-lezen. Afspraken van externe auteurs kunnen nog verificatie vereisen.</string>
+    <string name="import_status_paused">Gepauzeerd</string>
+    <string name="import_status_pending">Wacht op import</string>
+    <string name="import_status_running">Import bezig</string>
+    <string name="import_status_imported">Ondersteunde gebeurtenissen voor de gekozen periode geïmporteerd</string>
+    <string name="import_status_permission">Kalenderrechten vereist</string>
+    <string name="import_status_auth">Verbind je Proton-account opnieuw</string>
+    <string name="import_status_network">Proton is niet bereikbaar. De import wordt opnieuw geprobeerd wanneer mogelijk.</string>
+    <string name="import_status_unsupported">Niet-ondersteunde gebeurtenisgegevens gevonden. De import is onvolledig.</string>
+    <string name="import_status_error">Import mislukt. Probeer het opnieuw.</string>
+    <string name="import_status_partial">Import voltooid met niet-ondersteunde afspraken</string>
+    <string name="import_status_capacity">Import gepauzeerd: een lokale verwerkings- of opslaglimiet is bereikt. Bestaande gegevens blijven bewaard.</string>
+    <string name="import_deferred_count">Bewaarde afspraken zonder import: %1$d. De gegevens worden bij verversen opnieuw gecontroleerd.</string>
+    <string name="import_deferred_categories">Niet-ondersteunde inhoud: %1$d · Verificatie vereist: %2$d</string>
+    <string name="import_status_local_keys">De ontsleutelingssleutels zijn niet beschikbaar op dit apparaat. Ontvangen gegevens blijven bewaard totdat de sleutels beschikbaar zijn.</string>
+    <string name="import_status_incomplete">Sommige externe wijzigingen zijn nog niet verwerkt. Bestaande afspraken blijven behouden; vernieuw om opnieuw te proberen.</string>
+    <string name="import_status_unavailable">Deze agenda is niet meer toegankelijk. Eerder geïmporteerde afspraken blijven behouden.</string>
+    <string name="import_status_history_gap">Recente wijzigingen geïmporteerd; oudere geschiedenis onvolledig</string>
+    <string name="import_history_gap_help">Proton heeft de wijzigingsgeschiedenis opnieuw ingesteld. Sommige oudere wijzigingen of verwijderingen konden niet worden gecontroleerd. Bestaande Android-afspraken blijven behouden; vernieuwen bevestigt niet alle oudere kopieën.</string>
+    <string name="import_coverage_progress">Perioden in deze scan: %1$d/%2$d ontvangen · %3$d/%2$d verwerkt</string>
+    <string name="import_coverage_help">Na verwerking kunnen niet-ondersteunde afspraken overblijven. Android-updates en hiaten in de wijzigingsgeschiedenis worden apart bijgehouden.</string>
+    <string name="import_projection_pending">Updates die nog naar Android moeten worden gekopieerd: %1$d</string>
+    <string name="import_status_series_pending">Sommige afspraken wachten op hun oorspronkelijke reeks voordat ze worden geïmporteerd. Vernieuw om opnieuw te proberen.</string>
+    <string name="import_recurrence_limits">Gangbare herhalingsregels en wijzigingen aan één afspraak worden geïmporteerd. Niet-ondersteunde vormen blijven in behandeling.</string>
+</resources>

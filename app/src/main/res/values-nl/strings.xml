@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_subtitle">Je agenda’s, verbonden met Android</string>
+    <string name="connection_heading">VERBINDING</string>
+    <string name="calendars_heading">Agenda’s</string>
+    <string name="calendars_empty">Geen agenda’s verbonden</string>
+    <string name="calendars_description">Kalendersynchronisatie komt beschikbaar in een volgende versie.</string>
+    <string name="preferences_heading">Naar jouw smaak</string>
+    <string name="appearance">Weergave</string>
+    <string name="language">Taal</string>
+    <string name="preferences_scope">Deze voorkeuren gelden alleen voor Calendeer. Andere agenda-apps en de inhoud van afspraken blijven ongewijzigd.</string>
+    <string name="development_notice">Ontwikkelversie · alleen-lezen import</string>
+    <string name="follow_system">Systeem volgen</string>
+    <string name="theme_light">Licht</string>
+    <string name="theme_dark">Donker</string>
+    <string name="close">Sluiten</string>
+    <string name="brand_settings">Instellingen</string>
+    <string name="brand_back">Terug</string>
+    <string name="brand_welcome">Je dagen, verbonden.</string>
+    <string name="brand_independent">Onafhankelijke app, niet verbonden aan Proton.</string>
+</resources>

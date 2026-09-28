@@ -1,0 +1,16 @@
+Calendar Bridge includes components adapted from Contako.
+Copyright (C) 2026 Patmanak.
+License: GPL-3.0-or-later.
+Source: https://github.com/patmanak/contako
+Source commit: 4a1d2e4f6626a2a1e1b194542bd175ac019013e0
+
+Adapted components: theme and language preferences, theme resolution,
+activity locale/theme wiring and backup exclusions.
+See app/PROVENANCE.md in the Calendar Bridge source for paths and changes.
+
+The original grant is in CONTAKO-LICENSE.txt. Paths in that verbatim text
+refer to the original Contako repository. The full GNU GPL version 3 text
+is available alongside it in GPL-3.0.txt; the original grant also permits
+later versions of the GPL.
+
+No Contako artwork, contacts, account data or stored sessions are included.

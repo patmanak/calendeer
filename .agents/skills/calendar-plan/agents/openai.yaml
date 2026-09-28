@@ -1,0 +1,4 @@
+interface:
+  display_name: "Calendar — Planifier"
+  short_description: "Découper le travail et isoler les adaptateurs"
+  default_prompt: "Utilise $calendar-plan pour découper les exigences retenues en étapes vérifiables."
