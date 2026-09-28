@@ -172,7 +172,11 @@ checks. Transient startup selection, catalog persistence and explicit-refresh
 storage failures now schedule durable local and network recovery rather than
 losing the trigger. Eight isolated recovery tests on a physical device and
 twelve related Provider regression tests passed. This is not yet full reboot,
-real storage failure, permission-revocation or Doze qualification.
+real storage failure or Doze qualification. A separate physical test revoked both
+calendar grants through Android while an isolated projection was pending: the
+intent stayed queued with `PERMISSION`, then projected once after grants returned.
+This does not establish revocation in the middle of a Provider batch or a live
+Proton change.
 
 Calendeer posts no notifications. Reminder data belongs to the Android calendar
 client; progress and errors are shown inside the bridge. The merged manifest

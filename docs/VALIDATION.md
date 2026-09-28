@@ -338,6 +338,18 @@ Provider rejections from temporary outages. Injected exceptions do not establish
 behavior during real disk exhaustion, reboot, Provider death or WorkManager timing;
 those require separately recorded physical journeys.
 
+`CalendarPermissionRevocationDeviceTest` is a separate opt-in, host-orchestrated
+system-grant journey. With existing `READ_CALENDAR` and `WRITE_CALENDAR` grants,
+run its `prepare` phase (`-e calendarPermissionRevocation true`,
+`-e revocationPhase prepare`) against an isolated SQLite store and owned Provider
+fixture. Revoke both permissions through Android, verify both are denied, then run
+`denied`: the local import must retain one pending projection and report
+`PERMISSION`. Restore the original grants, run `restored`, and require one Provider
+event, no pending projection and `IMPORTED`. Always restore grants and run `cleanup`
+in a host `finally` block. The fixture makes no Proton call or account mutation;
+it does not replace testing the initial runtime permission dialog or establish
+revocation during an in-flight Provider batch.
+
 ## Anonymous transport probe
 
 `ProtonConnectivityDeviceTest` is skipped unless instrumentation receives
