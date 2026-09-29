@@ -140,6 +140,20 @@ the empty traversal and key bootstrap. Repeat after retained-data process restar
 to qualify stable identities. Record OEM/client UI visibility separately: Provider
 success alone does not prove every calendar app supports the mirror.
 
+`CalendarMultiCalendarWorkerLiveDeviceTest` qualifies an unchanged refresh with
+at least two enabled, accessible, already imported calendars and one paused
+calendar in the same retained test account. Opt in with `calendarMultiWorker=true`.
+It waits for the existing unique network queue to finish, calls the application's
+`requestSync()`, and observes new production network work and its continuations
+until they succeed. It never calls the importer or remote adapter directly.
+It then checks complete coverage, drained baseline/delta/projection work, retained
+authentication, distinct read-only Provider mirrors, and unchanged Provider event
+identities/revisions and paused state. Counts and booleans are the only output.
+The periodic worker can contribute to convergence; polling for its running state
+does not establish its absence between polls. This journey qualifies a refresh
+after convergence, not the initial backlog, every event field, natural Doze or a
+specific calendar client's UI.
+
 ## Staged import recovery
 
 `ProtonEventImportTest` verifies priority-window ordering, full horizon coverage,

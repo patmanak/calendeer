@@ -196,8 +196,13 @@ as context changes, requires `Member.CalendarID` to match the calendar for
 create/update, and never interprets a bare member deletion as an event deletion.
 Focused tests failed before the change and passed afterward. On the physical test
 device, the same retained-cursor receipt/decode then passed for both calendars.
-One calendar still had unfinished coverage and `PENDING` status; complete
-multi-calendar network import and Worker behavior remain unqualified. The public
+Both selected calendars subsequently completed their coverage. A retained-session
+refresh through the production WorkManager network queue then passed with two
+enabled calendars and one paused calendar: baseline/delta/projection work drained,
+distinct read-only mirrors and Provider event identities/revisions were retained,
+and the paused calendar was preserved. This qualifies an unchanged refresh after
+convergence on that device; interrupted initial backlogs, network work under Doze,
+and other OEMs remain separate journeys. The public
 [Android Calendar DTO](https://github.com/ProtonMail/android-calendar/blob/83bbd6a15b0aaa135e424fb5ac195c0a52929b4f/app/src/main/java/me/proton/android/calendar/data/api/ServerEventsApiImpl.kt#L108-L180)
 inspected earlier lists this collection in the global feed, so the
 calendar-scoped variant is a live service observation rather than a claim about
