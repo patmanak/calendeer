@@ -7,7 +7,13 @@ import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 import com.patmanak.proton.andcalendarbridge.sync.AdapterFormat
 import com.patmanak.proton.andcalendarbridge.sync.CalendarScope
-import com.patmanak.proton.andcalendarbridge.sync.CreateAttemptJournal
+import com.patmanak.proton.andcalendarbridge.data.calendar.OwnedEventWitness
+import com.patmanak.proton.andcalendarbridge.sync.CreateAssociationJournal
+import com.patmanak.proton.andcalendarbridge.sync.CreateAttemptIdentity
+import com.patmanak.proton.andcalendarbridge.sync.CreateSubmissionObservation
+import com.patmanak.proton.andcalendarbridge.sync.CreatedEventBinding
+import com.patmanak.proton.andcalendarbridge.sync.EventId
+import com.patmanak.proton.andcalendarbridge.sync.Revision
 import com.patmanak.proton.andcalendarbridge.sync.CreateAttemptRecord
 import com.patmanak.proton.andcalendarbridge.sync.CreateAttemptState
 import com.patmanak.proton.andcalendarbridge.sync.MutationId
@@ -24,8 +30,9 @@ import kotlinx.coroutines.withContext
  * This does not capture Provider edits, send requests, or acknowledge remote creation.
  */
 class CreateAttemptStore(context: Context, name: String = "calendar-create-attempt-v1.db") :
-    SQLiteOpenHelper(context, name, null, 2), CreateAttemptJournal {
+    SQLiteOpenHelper(context, name, null, 3), CreateAssociationJournal {
     private val lock = Mutex()
+    @Volatile var admitAssociation: (CalendarScope) -> Boolean = { true }
 
     override fun onConfigure(db: SQLiteDatabase) {
         // Admission must return only after SQLite has durably recorded uncertainty.
@@ -47,11 +54,119 @@ class CreateAttemptStore(context: Context, name: String = "calendar-create-attem
                 PRIMARY KEY(account, calendar, generation, mutation)
             )
         """.trimIndent())
+        createBindings(db)
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        check(oldVersion == 1 && newVersion == 2) { "Explicit create journal schema migration required" }
-        db.execSQL("ALTER TABLE create_attempts ADD COLUMN evidence TEXT")
+        check(oldVersion in 1..2 && newVersion == 3) { "Explicit create journal schema migration required" }
+        if (oldVersion == 1) db.execSQL("ALTER TABLE create_attempts ADD COLUMN evidence TEXT")
+        createBindings(db)
+    }
+
+    private fun createBindings(db: SQLiteDatabase) {
+        db.execSQL("""
+            CREATE TABLE create_bindings (
+                account TEXT NOT NULL, calendar TEXT NOT NULL,
+                generation INTEGER NOT NULL CHECK(generation >= 0), mutation TEXT NOT NULL,
+                adapter TEXT NOT NULL, version INTEGER NOT NULL CHECK(version > 0),
+                fingerprint TEXT NOT NULL, event TEXT NOT NULL, verified_revision TEXT NOT NULL,
+                provider_calendar INTEGER, provider_event INTEGER, provider_revision TEXT,
+                PRIMARY KEY(account, calendar, generation, mutation),
+                UNIQUE(account, calendar, generation, event),
+                CHECK ((provider_calendar IS NULL AND provider_event IS NULL AND provider_revision IS NULL)
+                    OR (provider_calendar IS NOT NULL AND provider_event IS NOT NULL AND provider_revision IS NOT NULL
+                        AND provider_calendar > 0 AND provider_event > 0))
+            )
+        """.trimIndent())
+    }
+
+    override suspend fun bind(expectedUnknown: CreateAttemptRecord,
+        observation: CreateSubmissionObservation.Verified): CreatedEventBinding {
+        require(expectedUnknown.state == CreateAttemptState.OUTCOME_UNKNOWN) { "Binding requires unknown work" }
+        val attempt = CreateAttemptIdentity.of(expectedUnknown)
+        require(observation.attempt == attempt) { "Observation requires identical work" }
+        val wanted = CreatedEventBinding(attempt, observation.event.eventId, observation.event.revision)
+        return access { db ->
+            associationTransaction(db, attempt.scope) {
+                check(read(db, attempt.scope, attempt.id) == expectedUnknown) { "Binding requires identical unknown work" }
+                val existing = readBinding(db, attempt)
+                if (existing != null) {
+                    check(existing == wanted) { "Create binding is immutable" }
+                } else {
+                    db.insertOrThrow("create_bindings", null, ContentValues().apply {
+                        put("account", attempt.scope.account.value)
+                        put("calendar", attempt.scope.calendar.value)
+                        put("generation", attempt.scope.generation)
+                        put("mutation", attempt.id.value)
+                        put("adapter", attempt.format.id)
+                        put("version", attempt.format.version)
+                        put("fingerprint", attempt.payloadFingerprint)
+                        put("event", wanted.eventId.value)
+                        put("verified_revision", wanted.verifiedRevision.value)
+                    })
+                }
+                wanted
+            }
+        }
+    }
+
+    override suspend fun binding(identity: CreateAttemptIdentity): CreatedEventBinding? =
+        access { db -> readBinding(db, identity) }
+
+    /** Historical locator only: callers must inspect the current cache and owned Provider row again. */
+    suspend fun retainProjection(binding: CreatedEventBinding, witness: OwnedEventWitness) {
+        access { db ->
+            associationTransaction(db, binding.attempt.scope) {
+                check(readBinding(db, binding.attempt) == binding) { "Projection requires identical binding" }
+                check(db.update("create_bindings", ContentValues().apply {
+                    put("provider_calendar", witness.calendarRow)
+                    put("provider_event", witness.eventRow)
+                    put("provider_revision", witness.revision.value)
+                }, IDENTITY, identity(binding.attempt.scope, binding.attempt.id)) == 1) {
+                    "Projection witness was not retained"
+                }
+            }
+        }
+    }
+
+    suspend fun projectionWitness(attempt: CreateAttemptIdentity): OwnedEventWitness? = access { db ->
+        if (readBinding(db, attempt) == null) null else db.query("create_bindings",
+            arrayOf("provider_calendar", "provider_event", "provider_revision"), IDENTITY,
+            identity(attempt.scope, attempt.id), null, null, null).use { cursor ->
+            if (!cursor.moveToFirst() || cursor.isNull(0) || cursor.isNull(1) || cursor.isNull(2)) null
+            else OwnedEventWitness(cursor.getLong(0), cursor.getLong(1), Revision(cursor.getString(2)))
+        }
+    }
+
+    suspend fun clearProjection(attempt: CreateAttemptIdentity) {
+        access { db ->
+            associationTransaction(db, attempt.scope) {
+                if (readBinding(db, attempt) != null) db.update("create_bindings", ContentValues().apply {
+                    putNull("provider_calendar"); putNull("provider_event"); putNull("provider_revision")
+                }, IDENTITY, identity(attempt.scope, attempt.id))
+            }
+        }
+    }
+
+    private fun readBinding(db: SQLiteDatabase, attempt: CreateAttemptIdentity): CreatedEventBinding? {
+        val parent = read(db, attempt.scope, attempt.id) ?: return null
+        if (parent.state != CreateAttemptState.OUTCOME_UNKNOWN || CreateAttemptIdentity.of(parent) != attempt) return null
+        return db.query("create_bindings", arrayOf("adapter", "version", "fingerprint", "event", "verified_revision"),
+            IDENTITY, identity(attempt.scope, attempt.id), null, null, null).use { cursor ->
+            if (!cursor.moveToFirst() || cursor.getString(0) != attempt.format.id ||
+                cursor.getInt(1) != attempt.format.version || cursor.getString(2) != attempt.payloadFingerprint) null
+            else CreatedEventBinding(attempt, EventId(cursor.getString(3)), Revision(cursor.getString(4)))
+        }
+    }
+
+    private suspend fun <T> associationTransaction(db: SQLiteDatabase, scope: CalendarScope, action: () -> T): T {
+        currentCoroutineContext().ensureActive()
+        check(admitAssociation(scope)) { "Create association lease is not current" }
+        return transaction(db) {
+            val result = action()
+            check(admitAssociation(scope)) { "Create association lease is not current" }
+            result
+        }
     }
 
     override suspend fun remember(record: CreateAttemptRecord) {

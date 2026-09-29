@@ -94,6 +94,26 @@ serialized engine per account; durable state survives process death. Local-only
 processing is distinct from network work. WorkManager and provider registration
 will be integrated only with a persistent production repository and usable adapter.
 
+## Experimental CREATE association
+
+The experimental simple CREATE path keeps three separate facts: durable admission
+(`OUTCOME_UNKNOWN`, never automatically readmitted), an immutable authenticated
+remote event/revision observation, and a replaceable historical Android locator.
+The association journal is separate from the import database. It validates exact
+scoped work and sealed-payload identity transactionally before recording proof.
+It cannot acknowledge or erase a pending Provider edit.
+
+Association runs under the import coordinator's existing mutex and current
+account/generation leases. The remote observation does not replace the latest
+imported content: only a stabilized cached upsert, without pending projection or
+deferred work, supplies the revision to check in Android. Provider inspection
+requires one owned, clean, non-deleted matching row and rechecks calendar ownership;
+persisted numeric row IDs alone never qualify it. A locator is a momentary witness,
+not an atomic cross-database guarantee, and must be revalidated on later use.
+Missing imports schedule ordinary read-only recovery. A retained remote binding
+allows local reassociation without invoking the CREATE port. General outgoing
+lifecycle, edit capture and conflict transactions remain separate delivery work.
+
 ## Delivery slices and acceptance
 
 1. Buildable configuration app: eight languages/system mode and three persistent

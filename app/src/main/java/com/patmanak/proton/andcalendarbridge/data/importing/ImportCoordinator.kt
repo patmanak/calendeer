@@ -4,6 +4,7 @@ import android.content.Context
 import com.patmanak.proton.andcalendarbridge.data.calendar.CalendarProjection
 import com.patmanak.proton.andcalendarbridge.data.calendar.CalendarProjectionException
 import com.patmanak.proton.andcalendarbridge.data.calendar.CalendarProjectionFailure
+import com.patmanak.proton.andcalendarbridge.data.outgoing.CreateAttemptStore
 import com.patmanak.proton.andcalendarbridge.sync.*
 import com.patmanak.proton.andcalendarbridge.sync.catalog.CalendarCatalogState
 import com.patmanak.proton.andcalendarbridge.sync.catalog.CalendarCatalogStatus
@@ -17,6 +18,7 @@ import kotlinx.coroutines.sync.withLock
 
 data class ImportUiState(val selections: List<ImportStore.Selection> = emptyList(),
     val hasPermission: Boolean = false, val authenticated: Boolean = false, val busy: Boolean = false)
+enum class CreateAssociationResult { INACTIVE, UNRESOLVED, WAITING_IMPORT, WAITING_PROVIDER, ASSOCIATED }
 /** One process owner for foreground and durable worker triggers; no event content reaches UI. */
 class ImportCoordinator(
     private val context: Context,
@@ -75,6 +77,53 @@ class ImportCoordinator(
         } catch (failure: Exception) {
             if (!recoverTransientStorage(failure, expected)) throw failure
         }
+    }
+
+    /** Experimental identity reconciliation only. Never submits, overwrites import data, or consumes
+     * a Provider edit. The existing import owner excludes projection drains during this journey.
+     * Persisted bindings can resume offline; every Android witness is freshly resolved.
+     */
+    suspend fun associateCreate(record: CreateAttemptRecord, journal: CreateAttemptStore,
+        submissions: CalendarCreateSubmissionPort): CreateAssociationResult = mutex.withLock {
+        val expected = generation
+        val target = record.scope
+        if (!isCurrent(expected, target.account)) return@withLock CreateAssociationResult.INACTIVE
+        store.admitTransaction = { it.account == target.account && authenticated && generation == expected }
+        journal.admitAssociation = { it == target && authenticated && generation == expected }
+        projection.admitOperation = { authenticated && generation == expected }
+        try {
+            val selection = store.selections(target.account).singleOrNull { it.scope == target }
+            if (selection?.enabled != true || !selection.available) return@withLock CreateAssociationResult.INACTIVE
+            val unknown = journal.read(target, record.id) ?: return@withLock CreateAssociationResult.UNRESOLVED
+            val identity = CreateAttemptIdentity.of(record)
+            if (unknown.state != CreateAttemptState.OUTCOME_UNKNOWN || CreateAttemptIdentity.of(unknown) != identity)
+                return@withLock CreateAssociationResult.UNRESOLVED
+            val binding = journal.binding(identity) ?: run {
+                val observed = submissions.inspect(unknown) as? CreateSubmissionObservation.Verified
+                    ?: return@withLock CreateAssociationResult.UNRESOLVED
+                if (observed.attempt != identity) return@withLock CreateAssociationResult.UNRESOLVED
+                if (!isCurrent(expected, target.account)) return@withLock CreateAssociationResult.INACTIVE
+                journal.bind(unknown, observed)
+            }
+            // Historical row numbers are not evidence of the current mirror's ownership or contents.
+            journal.clearProjection(identity)
+            val imported = store.stabilizedProjection(target, binding.eventId)
+            if (imported == null) {
+                enqueueLocal(); scheduler.requestNetwork()
+                return@withLock CreateAssociationResult.WAITING_IMPORT
+            }
+            if (!projection.hasPermissions()) return@withLock CreateAssociationResult.WAITING_PROVIDER
+            val witness = projection.inspectOwnedEvent(target, binding.eventId, imported.revision)
+                ?: return@withLock CreateAssociationResult.WAITING_PROVIDER
+            if (witness.revision != imported.revision) return@withLock CreateAssociationResult.WAITING_PROVIDER
+            if (!isCurrent(expected, target.account)) return@withLock CreateAssociationResult.INACTIVE
+            if (store.stabilizedProjection(target, binding.eventId) != imported)
+                return@withLock CreateAssociationResult.WAITING_IMPORT
+            journal.retainProjection(binding, witness)
+            CreateAssociationResult.ASSOCIATED
+        } catch (cancelled: CancellationException) { throw cancelled }
+          catch (_: CalendarProjectionException) { CreateAssociationResult.WAITING_PROVIDER }
+          catch (_: Exception) { CreateAssociationResult.UNRESOLVED }
     }
 
     fun permissionsChanged() {

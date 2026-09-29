@@ -291,6 +291,21 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
         requireKnown(db, scope)
         seriesMember(db, scope, eventId)?.takeIf { it.role == "master" }?.uid
     }
+    /** Latest imported stable snapshot for identity reconciliation, never the earlier CREATE content.
+     * Deferred/pending/deleted work cannot prove a settled Android projection. No writes occur here.
+     */
+    suspend fun stabilizedProjection(scope: CalendarScope, eventId: EventId): RemoteChange.Upsert? = access { db ->
+        check(admitTransaction(scope)) { "Inactive import lease" }
+        requireKnown(db, scope)
+        db.rawQuery("SELECT r.payload FROM records r WHERE r.scope=? AND r.event=? AND r.pending=0 AND NOT EXISTS " +
+            "(SELECT 1 FROM deferred_events d WHERE d.scope=r.scope AND d.event=r.event)",
+            arrayOf(key(scope), eventId.value)).use { cursor ->
+            val snapshot = if (cursor.moveToFirst()) decodeChange(cursor.getString(0)) as? RemoteChange.Upsert else null
+            check(admitTransaction(scope)) { "Inactive import lease" }
+            snapshot
+        }
+    }
+
     /** CAS acknowledgement: a newer pending value cannot be consumed by an old provider write. */
     suspend fun acknowledge(intent: ProjectionIntent) = access { db ->
         db.update("records", ContentValues().apply { put("pending", 0) },

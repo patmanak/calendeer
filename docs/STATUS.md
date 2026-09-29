@@ -119,9 +119,24 @@ through the production read-only worker. The event and protected journal were re
 reopening refused readmission. Native signature/UID checks and SQLite evidence/migration
 fixtures also passed. This establishes simple live CREATE acceptance and current
 readback, not server UID idempotency or real response-loss recovery.
-The application still exposes no writable mirror or event editor. Durable
-acknowledgement/Provider association, outgoing account/access lifecycle integration,
-Provider edit capture and concurrent UPDATE/DELETE guarantees remain unqualified. See
+The experimental CREATE journal now retains an immutable authenticated remote
+association and a separately revalidated Android row locator. Its additive v3
+migration preserves admitted UNKNOWN work and sealed evidence. Association shares
+the import coordinator mutex and account/generation admission gates; it never
+replays CREATE or injects historical creation content into the current import.
+Only the latest stabilized, non-deferred imported event can qualify a unique,
+owned, clean Android row with its matching revision. Missing, changed, deleted or
+ambiguous rows leave the locator unresolved. Stored row IDs are historical hints,
+not permanent ownership or revision guarantees. Existing remote associations can
+be reused without calling the submission adapter.
+Physical SQLite/coordinator/Provider fixtures passed, including a deterministic
+concurrent-duplicate regression. A retained live CREATE was associated with its
+current Android projection, then reopened and associated again with the CREATE
+port unavailable. The event and admission state were preserved. This does not
+qualify power-loss recovery or general outgoing acknowledgement.
+The application still exposes no writable mirror or event editor. Outgoing
+account/access lifecycle integration, Provider edit capture, atomic conflict/import
+handling and concurrent UPDATE/DELETE guarantees remain unqualified. See
 [source adaptation](../proton-auth/PROVENANCE.md).
 Explicit remote deletion notices
 now use a durable, scoped path to the Android mirror; historical deletion recovery

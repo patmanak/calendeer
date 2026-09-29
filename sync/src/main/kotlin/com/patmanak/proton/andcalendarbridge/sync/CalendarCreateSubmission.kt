@@ -4,7 +4,7 @@ package com.patmanak.proton.andcalendarbridge.sync
 sealed interface CreateSubmissionObservation {
     data object Unknown : CreateSubmissionObservation
     /** Authenticated, verified current read, not server idempotency or atomicity evidence. */
-    class Verified(val event: RemoteChange.Upsert) : CreateSubmissionObservation {
+    class Verified(val attempt: CreateAttemptIdentity, val event: RemoteChange.Upsert) : CreateSubmissionObservation {
         override fun toString() = "CreateSubmissionObservation.Verified(redacted)"
     }
 }

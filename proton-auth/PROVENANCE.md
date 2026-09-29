@@ -34,8 +34,12 @@ lost response or failed verification remains unknown and never authorizes resend
 These adaptations retain the module's [GPL version 3 text](LICENSE) and Proton
 contributors' copyright. Local implementation is copyright 2026 Patmanak. No new
 production dependency is introduced. This experimental port is not connected to
-Provider edit capture or background outgoing work; a verified read is not a durable
-ACK, a Provider association, or proof of server UID idempotency/conditional writes.
+Provider edit capture or background outgoing work. A verified observation now carries
+the exact scoped/versioned preparation identity, including a ciphertext fingerprint.
+The application can persist its immutable remote association and independently
+revalidate the current imported Android projection. That local association is
+project-owned behavior, not an upstream protocol or a general outgoing ACK; it
+does not establish server UID idempotency or conditional writes.
 
 ## Offline simple CREATE preparation
 

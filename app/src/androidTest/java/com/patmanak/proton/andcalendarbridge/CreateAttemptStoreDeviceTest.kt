@@ -244,7 +244,7 @@ class CreateAttemptStoreDeviceTest {
             protectedPayload = "another-legacy-synthetic-payload", state = CreateAttemptState.OUTCOME_UNKNOWN)
         val path = context.getDatabasePath(name)
         path.parentFile?.mkdirs()
-        // Create the original schema independently, before the version-two helper opens it.
+        // Create the original schema independently, before the current helper opens it.
         SQLiteDatabase.openOrCreateDatabase(path, null).use { legacy ->
             legacy.execSQL("""CREATE TABLE create_attempts (
                 account TEXT NOT NULL, calendar TEXT NOT NULL,
@@ -264,7 +264,7 @@ class CreateAttemptStoreDeviceTest {
         assertEquals(prepared, store.read(scope, prepared.id))
         assertEquals(legacyUnknown, store.read(scope, legacyUnknown.id))
         SQLiteDatabase.openDatabase(path.absolutePath, null, SQLiteDatabase.OPEN_READONLY).use { migrated ->
-            assertEquals(2, migrated.version)
+            assertEquals(3, migrated.version)
         }
         assertTrue(store.claim(prepared))
         assertFalse(store.claim(legacyUnknown.copy(state = CreateAttemptState.PREPARED)))

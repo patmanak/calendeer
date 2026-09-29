@@ -24,7 +24,8 @@ class ProtonCreateSubmissionAdapterTest {
     }
     @Test fun freshContextAndDurableUnknownPrecedeTheOnlySendAndVerifiedReadback() = runTest {
         val f = CreateSubmissionFixture()
-        assertTrue(f.adapter.submit(f.record, f.journal) is CreateSubmissionObservation.Verified)
+        val observed = f.adapter.submit(f.record, f.journal) as CreateSubmissionObservation.Verified
+        assertEquals(CreateAttemptIdentity.of(f.record), observed.attempt)
         assertEquals(listOf("prepare", "claim", "send", "evidence", "uid:0", "event", "bootstrap", "verify"), f.steps)
         assertEquals(1, f.sends)
         assertEquals(CreateAttemptState.OUTCOME_UNKNOWN, f.journal.stored!!.state)

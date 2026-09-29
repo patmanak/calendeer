@@ -18,6 +18,8 @@ import android.provider.CalendarContract.Attendees
 import android.provider.CalendarContract.Reminders
 import androidx.core.content.ContextCompat
 import com.patmanak.proton.andcalendarbridge.sync.AccountId
+import com.patmanak.proton.andcalendarbridge.sync.EventId
+import com.patmanak.proton.andcalendarbridge.sync.Revision
 import com.patmanak.proton.andcalendarbridge.sync.CalendarScope
 import com.patmanak.proton.andcalendarbridge.sync.EventTime
 import com.patmanak.proton.andcalendarbridge.sync.ProjectionIntent
@@ -194,6 +196,23 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
         requirePermissions()
         resolver.applyBatch(CalendarContract.AUTHORITY, operations)
         Unit
+    }
+
+    override suspend fun inspectOwnedEvent(scope: CalendarScope, eventId: EventId, revision: Revision): OwnedEventWitness? = operation {
+        val account = accountFor(scope.account)
+        val calendar = calendarRow(scope, account) ?: return@operation null
+        val remoteId = digest("event-v1", calendarSyncId(scope), eventId.value)
+        val uri = syncUri(Events.CONTENT_URI, account)
+        val identity = Selection("${Events.CALENDAR_ID}=? AND (${Events.SYNC_DATA4}=? OR " +
+            "(${Events.SYNC_DATA4} IS NULL AND ${Events._SYNC_ID}=?))", arrayOf(calendar.toString(), remoteId, remoteId))
+        val row = ownedRow(uri, identity, Events.SYNC_DATA1) ?: return@operation null
+        val matching = resolver.query(uri, arrayOf(Events._ID, Events.SYNC_DATA2, Events.DIRTY, Events.DELETED, Events.SYNC_DATA1),
+            identity.sql, identity.args, null)?.use {
+            it.count == 1 && it.moveToFirst() && it.getLong(0) == row && it.getString(1) == digest("revision-v1", revision.value) &&
+                it.getInt(2) == 0 && it.getInt(3) == 0 && it.getString(4) == OWNER_MARKER
+        } ?: fail(CalendarProjectionFailure.PROVIDER_UNAVAILABLE)
+        requirePermissions()
+        if (matching && calendarRow(scope, account) == calendar) OwnedEventWitness(calendar, row, revision) else null
     }
 
     /** Child rows have no ownership marker; the parent assertions above guard this whole batch. */

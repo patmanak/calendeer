@@ -508,8 +508,50 @@ Rerun unresolved work with `-e createInspectOnly true`; never replace its token 
 reset the journal to obtain another CREATE. Aggregate status and numeric response
 codes are reported, without raw bodies or account/calendar identifiers.
 The fixture is intentionally retained, not automatically cleaned up.
-It does not qualify user editing, durable ACK/Provider association, real lost-ACK
+It does not qualify user editing, general durable ACK, real lost-ACK
 recovery, conditional writes, UPDATE/DELETE, or the future outbox account lifecycle.
+
+## Durable experimental CREATE association
+
+`CreatedEventBindingTest` checks that work identity includes account/calendar,
+generation, mutation ID, adapter format and protected-payload fingerprint, while
+admission/evidence changes do not substitute the immutable work.
+`CreatedEventBindingStoreDeviceTest`, with `-e providerFixture true`, uses isolated
+SQLite fixtures for exact UNKNOWN admission, immutable first proof, uniqueness,
+reopen, corrupted-parent rejection, lease/cancellation rollback, projection-locator
+replacement/clearing and additive v2-to-v3 migration. Existing journal migration
+fixtures also check v1-to-current preservation. None accesses the Proton account.
+
+`CreateAssociationCoordinatorDeviceTest` combines isolated real import/journal
+databases with fake ports. It checks newer imported content is preserved, retained
+bindings bypass remote inspection, pending/deferred/tombstoned imports stay
+unresolved, foreign work and prepared attempts are refused, and account loss,
+permissions, disabled scopes, missing/mismatched rows and concurrent import obey
+the gates. These fixtures do not qualify live service behavior.
+
+`CreateAssociationProviderDeviceTest`, with `-e providerFixture true`, inspects
+isolated real Provider rows. It checks scope/revision ownership, mirror recreation,
+dirty/deleted/duplicate rejection and a deterministic duplicate inserted between
+identity lookup and witness qualification. A controlled regression APK filtering
+the second query by the previously found numeric row fails that race assertion;
+the corrected whole-identity query passes. The fixture removes only its own local
+Provider data. Passing does not make the multi-query witness globally atomic.
+
+`CalendarCreateAssociationLiveDeviceTest` requires deliberate
+`-e calendarCreateAssociation true` and the same private `createFixtureToken` and
+`createAccountHash` used for the retained submission fixture. It requires the
+existing UNKNOWN journal and qualified retained account; it never prepares or
+submits another CREATE. Production inspection and the stabilized read-only import
+must yield a current owned Android witness. Reopening must retain the remote
+association; after clearing only the local locator, reassociation with an
+unavailable CREATE port must succeed without any call to that port. Selections,
+admission/evidence and the single retained synthetic event remain unchanged.
+Aggregate assertions only are reported. This is local recovery with the CREATE
+port unavailable, not physical airplane-mode or power-loss qualification.
+
+These association paths have passed physical fixtures and the retained-event live
+journey. They do not enable Samsung edit capture, writable mirrors, UPDATE/DELETE,
+general outgoing lifecycle or atomic cross-store conflict handling.
 
 ## Anonymous transport probe
 

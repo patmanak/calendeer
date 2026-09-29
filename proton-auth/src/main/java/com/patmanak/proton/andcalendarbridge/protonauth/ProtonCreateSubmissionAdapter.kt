@@ -94,7 +94,7 @@ internal class ProtonCreateSubmissionAdapter(private val preparations: CalendarC
         checkSession(session)
         if (actual.eventId.value != ids.single() || normalized(actual.content) != normalized(submission.draft.content))
             return@guarded CreateSubmissionObservation.Unknown
-        CreateSubmissionObservation.Verified(actual)
+        CreateSubmissionObservation.Verified(CreateAttemptIdentity.of(record), actual)
     }
     private fun normalized(content: EventContent) = content.copy(title = content.title.replace("\r\n", "\n"),
         description = content.description.replace("\r\n", "\n"), location = content.location.replace("\r\n", "\n"), details = null,
