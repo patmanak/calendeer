@@ -27,7 +27,7 @@ sessions and imported calendars. See [identity and interface](DESIGN.md).
 | `app` | Configuration, login, discovery and per-calendar read-only import controls; eight languages; durable import queue, Calendar Provider projection, permissions and background scheduling. | Broad Android/OEM qualification, editable mode or complete event feature coverage. |
 | `sync` | Pure scoped models, bounded transactional pagination, access gates, conflict checks, uncertain-outcome write states and a separate metadata catalog controller. | Production outgoing mutation storage/capture or bidirectional reconciliation. |
 | `auth` | Contako-derived secret contract and state controller, cancellation/cleanup gates, retry policy and focused tests. | Calendar bootstrap or per-calendar capability checks. |
-| `proton-auth` | Proton Core login/session integration, calendar discovery, Calendar key bootstrap, paginated decryption, sealed calendar change polling, individual event reads and a bounded recurrence mapping. | All challenge variants, external-author trust resolution, complete recurrence/history coverage or event writes. |
+| `proton-auth` | Proton Core login/session integration, discovery, Calendar key bootstrap, paginated decryption, sealed change polling, bounded recurrence mapping and experimental single simple-event CREATE with verified readback. | All challenge variants, external-author trust resolution, complete recurrence/history coverage or general event editing. |
 
 The development application offers real account sign-in and automatically loads
 calendar names and colors after session restoration or login. Manual refresh,
@@ -43,7 +43,8 @@ Custom per-event colors are preserved, with calendar color used only as fallback
 Received pages and bootstrap material are now Keystore-sealed before processing.
 Local decryption, deferred-event retries and projection can resume without network
 when their keys are already available; network refresh uses bounded pages
-and durable continuation. No data is uploaded to Proton. Server challenge variants
+and durable continuation. Ordinary synchronization remains read-only; outgoing
+qualification requires the explicit experimental path below. Server challenge variants
 still require separate live qualification.
 New scans prioritize the past and next 30 days before completing the wider horizon.
 Their cursor retains the frozen date range, timezone and order across restarts;
@@ -105,9 +106,22 @@ Physical SQLite fixtures verify reopening, immutable work, competing helpers,
 rollback and cancellation after admission. Real sealed preparations also survive
 reopening and refuse readmission after the unknown transition. These are controlled
 fixtures, not proof of power-loss recovery or simultaneous Android processes.
-There is still no live upload dispatcher or writable capability. Service
-acceptance, authenticated acknowledgement reconciliation, account/access lifecycle
-integration and concurrent UPDATE/DELETE guarantees remain unqualified. See
+An experimental submission port now composes a separate versioned CREATE request,
+freshly requalifies member/rights/key context and admits only one guarded request.
+The journal's additive v2 migration retains existing work and can attach immutable
+Keystore-sealed response evidence. Transport failure, cancellation and process
+restart cannot reopen admitted work. Inspection queries the scoped UID within a
+bounded pagination budget, individually reads the unique result, verifies both
+shared signatures and signed UIDs, and compares the expected supported content/time.
+An authorized physical-device fixture created one simple timed event through this
+port, verified its authenticated readback and observed exactly one Android projection
+through the production read-only worker. The event and protected journal were retained;
+reopening refused readmission. Native signature/UID checks and SQLite evidence/migration
+fixtures also passed. This establishes simple live CREATE acceptance and current
+readback, not server UID idempotency or real response-loss recovery.
+The application still exposes no writable mirror or event editor. Durable
+acknowledgement/Provider association, outgoing account/access lifecycle integration,
+Provider edit capture and concurrent UPDATE/DELETE guarantees remain unqualified. See
 [source adaptation](../proton-auth/PROVENANCE.md).
 Explicit remote deletion notices
 now use a durable, scoped path to the Android mirror; historical deletion recovery

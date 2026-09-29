@@ -24,7 +24,7 @@ import kotlinx.coroutines.withContext
  * This does not capture Provider edits, send requests, or acknowledge remote creation.
  */
 class CreateAttemptStore(context: Context, name: String = "calendar-create-attempt-v1.db") :
-    SQLiteOpenHelper(context, name, null, 1), CreateAttemptJournal {
+    SQLiteOpenHelper(context, name, null, 2), CreateAttemptJournal {
     private val lock = Mutex()
 
     override fun onConfigure(db: SQLiteDatabase) {
@@ -43,22 +43,27 @@ class CreateAttemptStore(context: Context, name: String = "calendar-create-attem
                 version INTEGER NOT NULL CHECK(version > 0),
                 payload TEXT NOT NULL,
                 state TEXT NOT NULL CHECK(state IN ('PREPARED', 'OUTCOME_UNKNOWN')),
+                evidence TEXT,
                 PRIMARY KEY(account, calendar, generation, mutation)
             )
         """.trimIndent())
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        error("Explicit create journal schema migration required")
+        check(oldVersion == 1 && newVersion == 2) { "Explicit create journal schema migration required" }
+        db.execSQL("ALTER TABLE create_attempts ADD COLUMN evidence TEXT")
     }
 
     override suspend fun remember(record: CreateAttemptRecord) {
-        require(record.state == CreateAttemptState.PREPARED) { "Only prepared work can be remembered" }
+        require(record.state == CreateAttemptState.PREPARED && record.protectedEvidence == null) {
+            "Only prepared work without evidence can be remembered"
+        }
         access { db ->
             transaction(db) {
                 val existing = read(db, record.scope, record.id)
                 if (existing != null) {
-                    check(existing.copy(state = CreateAttemptState.PREPARED) == record) {
+                    check((existing.state == CreateAttemptState.OUTCOME_UNKNOWN || existing.protectedEvidence == null) &&
+                        existing.copy(state = CreateAttemptState.PREPARED, protectedEvidence = null) == record) {
                         "Create attempt is immutable"
                     }
                 } else {
@@ -81,12 +86,12 @@ class CreateAttemptStore(context: Context, name: String = "calendar-create-attem
         access { db -> read(db, scope, id) }
 
     override suspend fun claim(expected: CreateAttemptRecord): Boolean {
-        if (expected.state != CreateAttemptState.PREPARED) return false
+        if (expected.state != CreateAttemptState.PREPARED || expected.protectedEvidence != null) return false
         return access { db ->
             transaction(db) {
                 db.update("create_attempts", ContentValues().apply {
                     put("state", CreateAttemptState.OUTCOME_UNKNOWN.name)
-                }, "$IDENTITY AND adapter=? AND version=? AND payload=? AND state=?",
+                }, "$IDENTITY AND adapter=? AND version=? AND payload=? AND state=? AND evidence IS NULL",
                     identity(expected.scope, expected.id) + arrayOf(expected.format.id,
                         expected.format.version.toString(), expected.protectedPayload,
                         CreateAttemptState.PREPARED.name)) == 1
@@ -94,12 +99,41 @@ class CreateAttemptStore(context: Context, name: String = "calendar-create-attem
         }
     }
 
+    override suspend fun retainEvidence(expectedUnknown: CreateAttemptRecord, protectedEvidence: String) {
+        require(expectedUnknown.state == CreateAttemptState.OUTCOME_UNKNOWN) {
+            "Evidence requires an unknown attempt"
+        }
+        require(protectedEvidence.isNotBlank()) { "Protected evidence must not be blank" }
+        access { db ->
+            transaction(db) {
+                val existing = read(db, expectedUnknown.scope, expectedUnknown.id)
+                check(existing != null && existing.state == CreateAttemptState.OUTCOME_UNKNOWN &&
+                    existing.copy(protectedEvidence = null) == expectedUnknown.copy(protectedEvidence = null)) {
+                    "Evidence requires identical unknown work"
+                }
+                if (existing.protectedEvidence != null) {
+                    check(existing.protectedEvidence == protectedEvidence) { "Create evidence is immutable" }
+                } else {
+                    check(db.update("create_attempts", ContentValues().apply {
+                        put("evidence", protectedEvidence)
+                    }, "$IDENTITY AND adapter=? AND version=? AND payload=? AND state=? AND evidence IS NULL",
+                        identity(expectedUnknown.scope, expectedUnknown.id) + arrayOf(expectedUnknown.format.id,
+                            expectedUnknown.format.version.toString(), expectedUnknown.protectedPayload,
+                            CreateAttemptState.OUTCOME_UNKNOWN.name)) == 1) {
+                        "Create evidence was not retained"
+                    }
+                }
+            }
+        }
+    }
+
     private fun read(db: SQLiteDatabase, scope: CalendarScope, id: MutationId): CreateAttemptRecord? =
-        db.query("create_attempts", arrayOf("adapter", "version", "payload", "state"),
+        db.query("create_attempts", arrayOf("adapter", "version", "payload", "state", "evidence"),
             IDENTITY, identity(scope, id), null, null, null).use { cursor ->
             if (!cursor.moveToFirst()) null else CreateAttemptRecord(id, scope,
                 AdapterFormat(cursor.getString(0), cursor.getInt(1)), cursor.getString(2),
-                CreateAttemptState.valueOf(cursor.getString(3)))
+                CreateAttemptState.valueOf(cursor.getString(3)),
+                if (cursor.isNull(4)) null else cursor.getString(4))
         }
 
     private fun identity(scope: CalendarScope, id: MutationId) = arrayOf(scope.account.value,

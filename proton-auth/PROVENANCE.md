@@ -1,5 +1,42 @@
 # Proton authentication adapter provenance
 
+## Experimental single CREATE submission and inspection
+
+`ProtonCreateSubmissionAdapter.kt` and `ProtonCreateSubmissionCodec.kt` adapt
+the GPL v3 Calendar request/response protocol from Android Calendar
+`83bbd6a15b0aaa135e424fb5ac195c0a52929b4f` and WebClients
+`914d7520eff52aafed9a1adfe19859143bdf1dc9`:
+
+- [Web request and response interfaces](https://github.com/ProtonMail/WebClients/blob/914d7520eff52aafed9a1adfe19859143bdf1dc9/packages/shared/lib/interfaces/calendar/Api.ts#L169)
+  place `MemberID`, `IsImport` and `Events` at the root. A simple CREATE wraps
+  an identifier-free `Event` with `Overwrite=0`; it sends no `Action` field.
+- [Web Calendar endpoints](https://github.com/ProtonMail/WebClients/blob/914d7520eff52aafed9a1adfe19859143bdf1dc9/packages/shared/lib/api/calendars.ts#L296)
+  define the sync PUT and calendar-scoped individual event GET.
+- [Android sync DTOs](https://github.com/ProtonMail/android-calendar/blob/83bbd6a15b0aaa135e424fb5ac195c0a52929b4f/app/src/main/java/me/proton/android/calendar/data/api/CalendarsApiImpl.kt#L521)
+  define `IsImport`, the event wrapper, `SharedEventContent`, and the single-operation response.
+- [Web UID lookup](https://github.com/ProtonMail/WebClients/blob/914d7520eff52aafed9a1adfe19859143bdf1dc9/applications/calendar/src/app/containers/calendar/getAllEventsByUID.ts#L7)
+  and [pagination helper](https://github.com/ProtonMail/WebClients/blob/914d7520eff52aafed9a1adfe19859143bdf1dc9/packages/shared/lib/api/helpers/paginatedFetch.ts)
+  establish scoped UID queries with page zero and page size 100.
+
+Local restrictions freeze a separate versioned, scoped, protected submission
+receipt. Fresh authenticated preparation must retain its UID, member, rights and
+key fingerprints before durable UNKNOWN admission. The one-shot permit is created
+once outside Core's callback. The bounded raw response or a transport-incomplete
+marker is Keystore-sealed and retained without acknowledging or reopening the attempt.
+Cancellation or process loss before evidence storage can leave no response evidence;
+the prior UNKNOWN admission still survives and inspection remains read-only.
+Inspection never writes. It refuses ambiguous/foreign UID results and incomplete
+pagination (at most 100 pages), individually reads the unique event, verifies both
+shared-part signatures and each signed UID, and compares supported content and time.
+UTC aliases and logical newlines are normalized. A missing event, service error,
+lost response or failed verification remains unknown and never authorizes resending.
+
+These adaptations retain the module's [GPL version 3 text](LICENSE) and Proton
+contributors' copyright. Local implementation is copyright 2026 Patmanak. No new
+production dependency is introduced. This experimental port is not connected to
+Provider edit capture or background outgoing work; a verified read is not a durable
+ACK, a Provider association, or proof of server UID idempotency/conditional writes.
+
 ## Offline simple CREATE preparation
 
 `ProtonSimpleEventPreparation.kt` adapts the bounded simple-event partition and
@@ -97,7 +134,8 @@ fixture qualifies real context reads and sealed local preparations, not remote
 CREATE acceptance. The published Core 36.8.0 and OkHttp 4.12.0 call paths can
 redispatch or follow up requests despite the read-side no-connection-retry flag.
 An outgoing transport must establish a single dispatch before any live CREATE.
-The guards below address these re-entries; no live CREATE dispatcher is enabled.
+The guards below address these re-entries; the experimental submission port above
+uses them without enabling writable Android mirrors.
 
 ### Single-dispatch transport guards
 
@@ -106,7 +144,7 @@ transport, rather than a copied HTTP/authentication stack. The production factor
 adds guards to its supplied client; Core 36.8.0 copies that client for its primary
 and alternative backends and preserves request tags while preparing headers.
 The existing certificate, header, cookie and read transport configuration remains
-owned by Core. No live CREATE endpoint is invoked by this addition.
+owned by Core. The guards themselves do not invoke endpoints.
 
 The guard requires the same scoped URL, PUT method, body object and attempt tag
 at application entry and network exchange. Atomic guards also prevent reuse by

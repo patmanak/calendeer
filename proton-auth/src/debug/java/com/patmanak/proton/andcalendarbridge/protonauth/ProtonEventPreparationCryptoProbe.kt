@@ -13,6 +13,7 @@ import me.proton.core.crypto.android.context.AndroidCryptoContext
 import me.proton.core.crypto.common.keystore.PlainByteArray
 import me.proton.core.crypto.common.keystore.encrypt
 import me.proton.core.domain.entity.UserId
+import me.proton.core.network.domain.session.SessionId
 import me.proton.core.key.domain.*
 import me.proton.core.key.domain.entity.key.KeyId
 import me.proton.core.key.domain.entity.key.PrivateKey
@@ -95,6 +96,7 @@ object ProtonEventPreparationCryptoProbe {
                     // No request was sent and this is not an observed server response.
                     val row = buildJsonObject {
                         put("ID", "synthetic-event"); put("CalendarID", "synthetic-calendar"); put("ModifyTime", 1)
+                        put("UID", "synthetic-stable@calendeer.invalid")
                         put("SharedKeyPacket", prepared.event.getValue("SharedKeyPacket"))
                         put("SharedEvents", JsonArray(requestParts.map { JsonObject(it + ("Author" to JsonPrimitive(email))) }))
                         put("CalendarEvents", JsonArray(emptyList())); put("AttendeesEvents", JsonArray(emptyList()))
@@ -104,6 +106,13 @@ object ProtonEventPreparationCryptoProbe {
                     val actual = decoder.decrypt(user, "synthetic-calendar", bootstrap, listOf(row)).single().content
                     check(actual.copy(description = actual.description.replace("\r\n", "\n"), details = null) == content)
                     check(actual.details == EventDetails())
+                    stage = "SIGNED_UID_BINDING"
+                    val session = CatalogSession(user, SessionId("synthetic-session"))
+                    check(decoder.decodeCreated(session, "synthetic-calendar", bootstrap, row,
+                        "synthetic-stable@calendeer.invalid") != null)
+                    val foreign = "foreign@calendeer.invalid"
+                    val substituted = JsonObject(row + ("UID" to JsonPrimitive(foreign)))
+                    check(decoder.decodeCreated(session, "synthetic-calendar", bootstrap, substituted, foreign) == null)
                     for (index in requestParts.indices) {
                         stage = if (index == 0) "CLEAR_SIGNATURE" else "ENCRYPTED_SIGNATURE"
                         val parts = row.array("SharedEvents").map { it as JsonObject }.toMutableList()

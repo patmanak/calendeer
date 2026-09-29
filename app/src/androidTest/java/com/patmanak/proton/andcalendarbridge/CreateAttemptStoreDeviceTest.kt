@@ -33,6 +33,7 @@ class CreateAttemptStoreDeviceTest {
     private val scope = CalendarScope(AccountId("create-fixture-account"), CalendarId("create-fixture-calendar"), 0)
     private val prepared = CreateAttemptRecord(MutationId("fixture-mutation"), scope,
         AdapterFormat("synthetic-protected-fixture", 1), "synthetic-opaque-string-not-keystore-proof")
+    private val evidence = "synthetic-opaque-response-not-keystore-proof"
 
     private fun fixture(block: suspend (Context, String, CreateAttemptStore) -> Unit) = runBlocking {
         assumeTrue(InstrumentationRegistry.getArguments().getString("providerFixture") == "true")
@@ -172,6 +173,107 @@ class CreateAttemptStoreDeviceTest {
         CreateAttemptStore(context, name).use { reopened ->
             assertEquals(CreateAttemptState.OUTCOME_UNKNOWN, reopened.read(scope, prepared.id)?.state)
             assertFalse(CreateAttemptAdmission(reopened).dispatch(prepared) { fail("Must not resend") })
+        }
+    }
+
+    @Test fun evidenceRequiresExistingIdenticalUnknownWork() = fixture { _, _, store ->
+        store.remember(prepared)
+        try { store.retainEvidence(prepared, evidence); fail("Prepared evidence must be refused") }
+        catch (_: IllegalArgumentException) { }
+        val unknown = prepared.copy(state = CreateAttemptState.OUTCOME_UNKNOWN)
+        try { store.retainEvidence(unknown, evidence); fail("Unclaimed evidence must be refused") }
+        catch (_: IllegalStateException) { }
+        assertEquals(prepared, store.read(scope, prepared.id))
+        assertTrue(store.claim(prepared))
+        try { store.retainEvidence(unknown, " "); fail("Blank evidence must be refused") }
+        catch (_: IllegalArgumentException) { }
+        for (changed in listOf(
+            unknown.copy(scope = scope.copy(account = AccountId("wrong-fixture-account"))),
+            unknown.copy(scope = scope.copy(calendar = CalendarId("wrong-fixture-calendar"))),
+            unknown.copy(scope = scope.copy(generation = 1)),
+            unknown.copy(id = MutationId("wrong-fixture-mutation")),
+            unknown.copy(format = AdapterFormat("wrong-fixture-format", 1)),
+            unknown.copy(format = unknown.format.copy(version = 2)),
+            unknown.copy(protectedPayload = "wrong-synthetic-payload"))) {
+            try { store.retainEvidence(changed, evidence); fail("Changed work must be refused") }
+            catch (_: IllegalStateException) { }
+            assertEquals(unknown, store.read(scope, prepared.id))
+        }
+        try { prepared.copy(protectedEvidence = " "); fail("Blank record evidence must be refused") }
+        catch (_: IllegalArgumentException) { }
+    }
+
+    @Test fun evidenceIsImmutableAndSurvivesReopenWithoutResetOrResend() = fixture { context, name, store ->
+        store.remember(prepared)
+        assertTrue(store.claim(prepared))
+        val unknown = prepared.copy(state = CreateAttemptState.OUTCOME_UNKNOWN)
+        val retained = unknown.copy(protectedEvidence = evidence)
+        store.retainEvidence(unknown, evidence)
+        store.retainEvidence(unknown, evidence)
+        store.retainEvidence(retained, evidence)
+        try { store.retainEvidence(unknown, "different-synthetic-response"); fail("Evidence must be immutable") }
+        catch (_: IllegalStateException) { }
+        try { store.remember(prepared.copy(protectedEvidence = evidence)); fail("Evidence must not be remembered") }
+        catch (_: IllegalArgumentException) { }
+        store.close()
+        CreateAttemptStore(context, name).use { reopened ->
+            assertEquals(retained, reopened.read(scope, prepared.id))
+            reopened.remember(prepared)
+            reopened.retainEvidence(unknown, evidence)
+            assertEquals(retained, reopened.read(scope, prepared.id))
+            assertFalse(reopened.claim(prepared))
+            assertFalse(reopened.claim(prepared.copy(protectedEvidence = evidence)))
+            assertFalse(CreateAttemptAdmission(reopened).dispatch(prepared) { fail("Evidence must not enable resend") })
+        }
+    }
+
+    @Test fun inconsistentPreparedEvidenceCannotBeClaimed() = fixture { context, name, store ->
+        store.remember(prepared)
+        SQLiteDatabase.openDatabase(context.getDatabasePath(name).absolutePath, null,
+            SQLiteDatabase.OPEN_READWRITE).use { raw ->
+            raw.execSQL("UPDATE create_attempts SET evidence=?", arrayOf(evidence))
+        }
+        assertFalse(store.claim(prepared))
+        try { store.remember(prepared); fail("Inconsistent prepared evidence must be refused") }
+        catch (_: IllegalStateException) { }
+        assertEquals(prepared.copy(protectedEvidence = evidence), store.read(scope, prepared.id))
+    }
+
+    @Test fun realVersionOneMigrationPreservesPayloadsAndAdmissionStates() = fixture { context, name, store ->
+        val legacyUnknown = prepared.copy(id = MutationId("legacy-unknown-fixture"),
+            protectedPayload = "another-legacy-synthetic-payload", state = CreateAttemptState.OUTCOME_UNKNOWN)
+        val path = context.getDatabasePath(name)
+        path.parentFile?.mkdirs()
+        // Create the original schema independently, before the version-two helper opens it.
+        SQLiteDatabase.openOrCreateDatabase(path, null).use { legacy ->
+            legacy.execSQL("""CREATE TABLE create_attempts (
+                account TEXT NOT NULL, calendar TEXT NOT NULL,
+                generation INTEGER NOT NULL CHECK(generation >= 0), mutation TEXT NOT NULL,
+                adapter TEXT NOT NULL, version INTEGER NOT NULL CHECK(version > 0), payload TEXT NOT NULL,
+                state TEXT NOT NULL CHECK(state IN ('PREPARED', 'OUTCOME_UNKNOWN')),
+                PRIMARY KEY(account, calendar, generation, mutation)
+            )""".trimIndent())
+            for (record in listOf(prepared, legacyUnknown)) {
+                legacy.execSQL("INSERT INTO create_attempts VALUES (?, ?, ?, ?, ?, ?, ?, ?)", arrayOf<Any>(
+                    record.scope.account.value, record.scope.calendar.value, record.scope.generation,
+                    record.id.value, record.format.id, record.format.version, record.protectedPayload,
+                    record.state.name))
+            }
+            legacy.version = 1
+        }
+        assertEquals(prepared, store.read(scope, prepared.id))
+        assertEquals(legacyUnknown, store.read(scope, legacyUnknown.id))
+        SQLiteDatabase.openDatabase(path.absolutePath, null, SQLiteDatabase.OPEN_READONLY).use { migrated ->
+            assertEquals(2, migrated.version)
+        }
+        assertTrue(store.claim(prepared))
+        assertFalse(store.claim(legacyUnknown.copy(state = CreateAttemptState.PREPARED)))
+        store.retainEvidence(legacyUnknown, evidence)
+        store.close()
+        CreateAttemptStore(context, name).use { reopened ->
+            assertEquals(legacyUnknown.copy(protectedEvidence = evidence), reopened.read(scope, legacyUnknown.id))
+            assertFalse(CreateAttemptAdmission(reopened).dispatch(
+                legacyUnknown.copy(state = CreateAttemptState.PREPARED)) { fail("Migration must not enable resend") })
         }
     }
 }

@@ -35,7 +35,13 @@ internal class ProtonEventDecryptor(private val crypto: CryptoContext, private v
         if (result.deferred.isNotEmpty()) unsupportedEvents()
         return result.changes
     }
-    suspend fun decodePage(user: UserId, calendar: String, bootstrap: JsonObject, rows: List<JsonObject>): EventDecodeResult {
+    suspend fun decodeCreated(session: CatalogSession, calendar: String, bootstrap: JsonObject, row: JsonObject,
+        uid: String): RemoteChange.Upsert? {
+        if (row.string("UID") != uid || row.array("SharedEvents").map { (it as JsonObject).number("Type") }.sorted() != listOf(2L, 3L) ||
+            row.array("CalendarEvents").isNotEmpty() || row.array("AttendeesEvents").isNotEmpty()) return null
+        return decodePage(session.userId, calendar, bootstrap, listOf(row), uid).changes.singleOrNull()
+    }
+    suspend fun decodePage(user: UserId, calendar: String, bootstrap: JsonObject, rows: List<JsonObject>, expectedUid: String? = null): EventDecodeResult {
         val addresses = localAddresses.get(user)
         if (addresses.isEmpty() || addresses.none { address -> address.keys.any { it.privateKey.isActive } }) missingLocalKeys()
         return try {
@@ -95,7 +101,7 @@ internal class ProtonEventDecryptor(private val crypto: CryptoContext, private v
                         texts.add(plain)
                     }
                 }
-                val content = ProtonICalendar.parse(texts, row, bootstrap).copy(colorRgb = row.eventColorRgb())
+                val content = ProtonICalendar.parse(texts, row, bootstrap, expectedUid).copy(colorRgb = row.eventColorRgb())
                 pageBudget.accept(eventBudget)
                 changes.add(RemoteChange.Upsert(eventId, revision, content))
                 } catch (cancelled: CancellationException) { throw cancelled }

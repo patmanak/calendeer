@@ -454,7 +454,7 @@ sealed preparations in an isolated journal fixture, reopens it, and verifies tha
 unknown admission is committed before a local-only callback and cannot be
 readmitted after reopening. The isolated database is deleted afterwards;
 no event is created. Aggregate counts only are
-reported. No outgoing dispatcher exists and no test event is uploaded. Ordinary
+reported. This preparation fixture uploads no event. Ordinary
 application startup and background import behavior still run normally.
 This does not qualify remote CREATE, lost acknowledgements or writable Provider
 calendars.
@@ -481,8 +481,35 @@ after durable admission. A separate connection checks UNKNOWN is committed
 before the callback. These fixtures do not qualify simultaneous processes,
 physical power loss or disk exhaustion. The journal has no automatic reset or
 remote acknowledgement API and is not wired to Provider capture or logout.
-Before live creation, integrate fresh rights/context validation, the complete
-scoped request, protected response evidence and authenticated reconciliation.
+The schema-v2 fixtures additionally verify first-evidence immutability, exact
+work matching, reopening without readmission, anomalous prepared rows with evidence,
+and additive v1 migration preserving both prepared and unknown work.
+
+`ProtonCreateSubmissionAdapterTest` and `ProtonCreateSubmissionCodecTest` cover
+the complete request shape, version/scope binding, changed context before admission,
+session replacement during claim, HTTP success without readback, response loss,
+cancellation, duplicate/foreign UID results and verified content mismatch.
+These synthetic ports establish policy only. `SharedProtonPortsTest` checks all
+submission entry points require authentication and serialize with logout.
+`ProtonICalendarTest` and the native preparation probe additionally reject a
+foreign expected UID even when all signed parts agree with each other.
+
+`CalendarCreateSubmissionLiveDeviceTest` requires deliberate
+`-e calendarCreateSubmission true`, a 12-character hexadecimal
+`-e createFixtureToken`, and the SHA-256 of the normalized authorized test username
+in `-e createAccountHash`. Do not put private account hashes or fixture identities
+in public execution reports. It verifies the exact retained account before mutation,
+persists the chosen scope/token, and retains one synthetic timed event plus its journal.
+Fresh context reads precede admission. Only authenticated signed readback establishes
+a verified observation. Reopening refuses admission, repeated submit only inspects
+unknown work, and the production read-only worker must project the fixture exactly once.
+If the journal disappears after a submission request, the fixture refuses re-creation.
+Rerun unresolved work with `-e createInspectOnly true`; never replace its token or
+reset the journal to obtain another CREATE. Aggregate status and numeric response
+codes are reported, without raw bodies or account/calendar identifiers.
+The fixture is intentionally retained, not automatically cleaned up.
+It does not qualify user editing, durable ACK/Provider association, real lost-ACK
+recovery, conditional writes, UPDATE/DELETE, or the future outbox account lifecycle.
 
 ## Anonymous transport probe
 

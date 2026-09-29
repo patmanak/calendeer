@@ -1,0 +1,140 @@
+// SPDX-License-Identifier: GPL-3.0-only
+package com.patmanak.proton.andcalendarbridge.protonauth
+
+import com.patmanak.proton.andcalendarbridge.sync.*
+import kotlinx.coroutines.CancellationException
+import kotlinx.serialization.json.*
+import me.proton.core.network.data.ApiProvider
+import me.proton.core.network.data.protonApi.BaseRetrofitApi
+import okhttp3.*
+import okhttp3.HttpUrl.Companion.toHttpUrl
+import retrofit2.http.*
+
+internal fun interface CreateEventVerifier {
+    suspend fun verify(session: CatalogSession, calendar: String, bootstrap: JsonObject, row: JsonObject, uid: String): RemoteChange.Upsert?
+}
+internal interface CreateSubmissionRemote {
+    suspend fun send(session: CatalogSession, calendar: String, request: JsonObject): String
+    suspend fun byUid(session: CatalogSession, calendar: String, uid: String, page: Int): List<JsonObject>
+    suspend fun event(session: CatalogSession, calendar: String, id: String): JsonObject
+}
+
+internal class ProtonCreateSubmissionAdapter(private val preparations: CalendarCreatePreparationPort,
+    private val protector: EventPayloadProtector, private val sessions: CatalogSessionSource,
+    private val remote: CreateSubmissionRemote, private val events: EventImportRemote,
+    private val verifier: CreateEventVerifier) : CalendarCreateSubmissionPort {
+    override suspend fun prepareSubmission(draft: CalendarCreateDraft) = preparations.prepareCreate(draft)
+
+    override suspend fun submit(record: CreateAttemptRecord, journal: CreateAttemptJournal): CreateSubmissionObservation = guarded {
+        val stored = journal.read(record.scope, record.id) ?: createUnavailable(CreatePreparationFailure.CONTEXT)
+        if (stored.format != record.format || stored.protectedPayload != record.protectedPayload)
+            createUnavailable(CreatePreparationFailure.CONTEXT)
+        if (stored.state == CreateAttemptState.OUTCOME_UNKNOWN) return@guarded inspect(stored)
+        val submission = ProtonCreateSubmissionCodec.open(stored, protector)
+        val session = session(record.scope)
+        // Requalify keys, rights and scope using authenticated reads immediately before admission.
+        val freshReceipt = preparations.prepareCreate(submission.draft)
+        val fresh = ProtonCreateSubmissionCodec.open(CreateAttemptRecord(record.id, record.scope, freshReceipt.format,
+            freshReceipt.protectedPayload), protector)
+        if (fresh.uid != submission.uid || fresh.context != submission.context) createUnavailable(CreatePreparationFailure.CONTEXT)
+        checkSession(session)
+        var body: String? = null
+        val admitted = CreateAttemptAdmission(journal).dispatch(stored) { unknown ->
+            checkSession(session)
+            try { body = remote.send(session, record.scope.calendar.value, submission.request) }
+            catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { /* Every transport failure remains unknown, never resendable. */ }
+            val evidence = buildJsonObject {
+                put("version", 1); put("account", record.scope.account.value); put("calendar", record.scope.calendar.value)
+                put("generation", record.scope.generation); put("correlation", record.id.value)
+                put("complete", body != null); put("body", body ?: "")
+            }
+            journal.retainEvidence(unknown, protector.seal(evidence.toString()))
+        }
+        if (!admitted) return@guarded inspect(journal.read(record.scope, record.id) ?: return@guarded CreateSubmissionObservation.Unknown)
+        checkSession(session)
+        inspect(journal.read(record.scope, record.id) ?: return@guarded CreateSubmissionObservation.Unknown)
+    }
+
+    override suspend fun inspect(record: CreateAttemptRecord): CreateSubmissionObservation = guarded {
+        if (record.state != CreateAttemptState.OUTCOME_UNKNOWN) return@guarded CreateSubmissionObservation.Unknown
+        val submission = ProtonCreateSubmissionCodec.open(record, protector)
+        val session = session(record.scope)
+        var candidateId: String? = null
+        record.protectedEvidence?.let { sealed ->
+            val evidence = Json.parseToJsonElement(protector.open(sealed)) as JsonObject
+            if (evidence.number("version") != 1L || evidence.string("account") != record.scope.account.value ||
+                evidence.string("calendar") != record.scope.calendar.value || evidence.number("generation") != record.scope.generation ||
+                evidence.string("correlation") != record.id.value) return@guarded CreateSubmissionObservation.Unknown
+            val response = ProtonCreateResponseParser.parse(evidence.string("body"), record.scope.calendar.value, submission.uid)
+            if (response is ProtonCreateResponse.Candidate) candidateId = response.event.string("ID")
+        }
+        val ids = mutableSetOf<String>()
+        var finished = false
+        for (page in 0 until 100) {
+            val rows = remote.byUid(session, record.scope.calendar.value, submission.uid, page)
+            checkSession(session)
+            if (rows.size > 100) return@guarded CreateSubmissionObservation.Unknown
+            for (row in rows) {
+                if (row.string("CalendarID") != record.scope.calendar.value || row.string("UID") != submission.uid || row.string("ID").isBlank() ||
+                    !ids.add(row.string("ID"))) return@guarded CreateSubmissionObservation.Unknown
+            }
+            if (ids.size > 1) return@guarded CreateSubmissionObservation.Unknown
+            if (rows.size < 100) { finished = true; break }
+        }
+        if (!finished || ids.size != 1 || (candidateId != null && candidateId != ids.single())) return@guarded CreateSubmissionObservation.Unknown
+        val row = remote.event(session, record.scope.calendar.value, ids.single())
+        checkSession(session)
+        if (row.string("ID") != ids.single() || row.string("CalendarID") != record.scope.calendar.value || row.string("UID") != submission.uid)
+            return@guarded CreateSubmissionObservation.Unknown
+        val bootstrap = events.bootstrap(session, record.scope.calendar.value)
+        checkSession(session)
+        val actual = verifier.verify(session, record.scope.calendar.value, bootstrap, row, submission.uid)
+            ?: return@guarded CreateSubmissionObservation.Unknown
+        checkSession(session)
+        if (actual.eventId.value != ids.single() || normalized(actual.content) != normalized(submission.draft.content))
+            return@guarded CreateSubmissionObservation.Unknown
+        CreateSubmissionObservation.Verified(actual)
+    }
+    private fun normalized(content: EventContent) = content.copy(title = content.title.replace("\r\n", "\n"),
+        description = content.description.replace("\r\n", "\n"), location = content.location.replace("\r\n", "\n"), details = null,
+        time = when (val time = content.time) {
+            is EventTime.Timed -> if (time.zone.normalized() == java.time.ZoneOffset.UTC) time.copy(zone = java.time.ZoneOffset.UTC) else time
+            is EventTime.AllDay -> time
+        })
+    private suspend fun session(scope: CalendarScope) = sessions.current()?.takeIf { it.userId.id == scope.account.value }
+        ?: createUnavailable(CreatePreparationFailure.AUTHENTICATION)
+    private suspend fun checkSession(expected: CatalogSession) {
+        if (sessions.current() != expected) createUnavailable(CreatePreparationFailure.AUTHENTICATION)
+    }
+    private suspend fun guarded(block: suspend () -> CreateSubmissionObservation): CreateSubmissionObservation = try { block() }
+        catch (cancelled: CancellationException) { throw cancelled }
+        catch (_: Exception) { CreateSubmissionObservation.Unknown }
+}
+
+internal interface ProtonCreateSubmissionApi : BaseRetrofitApi {
+    @Streaming @PUT("calendar/v1/{calendar}/events/sync")
+    suspend fun create(@Path("calendar") calendar: String, @Body body: RequestBody, @Tag attempt: ProtonSingleDispatchAttempt): ResponseBody
+    @Streaming @GET("calendar/v1/{calendar}/events")
+    suspend fun byUid(@Path("calendar") calendar: String, @Query("UID") uid: String, @Query("Page") page: Int, @Query("PageSize") size: Int): ResponseBody
+    @Streaming @GET("calendar/v1/{calendar}/events/{event}")
+    suspend fun event(@Path("calendar") calendar: String, @Path("event") id: String): ResponseBody
+}
+internal class ProtonCreateSubmissionRemote(private val provider: ApiProvider) : CreateSubmissionRemote {
+    override suspend fun send(session: CatalogSession, calendar: String, request: JsonObject): String {
+        val url = "https://calendar-api.proton.me/".toHttpUrl().newBuilder()
+            .addPathSegment("calendar").addPathSegment("v1").addPathSegment(calendar).addPathSegment("events").addPathSegment("sync").build()
+        val attempt = ProtonSingleDispatchAttempt(url, request.toString()) // Outside every Core callback.
+        return provider.get<ProtonCreateSubmissionApi>(sessionId = session.sessionId).invoke(forceNoRetryOnConnectionErrors = true) {
+            create(calendar, attempt.requestBody, attempt).use(CalendarCatalogBodyReader::read)
+        }.valueOrThrow
+    }
+    override suspend fun byUid(session: CatalogSession, calendar: String, uid: String, page: Int): List<JsonObject> =
+        provider.get<ProtonCreateSubmissionApi>(sessionId = session.sessionId).invoke(forceNoRetryOnConnectionErrors = true) {
+            byUid(calendar, uid, page, 100).use { eventResponse(it).array("Events").map { value -> value as JsonObject } }
+        }.valueOrThrow
+    override suspend fun event(session: CatalogSession, calendar: String, id: String): JsonObject =
+        provider.get<ProtonCreateSubmissionApi>(sessionId = session.sessionId).invoke(forceNoRetryOnConnectionErrors = true) {
+            event(calendar, id).use { eventResponse(it).obj("Event") }
+        }.valueOrThrow
+}

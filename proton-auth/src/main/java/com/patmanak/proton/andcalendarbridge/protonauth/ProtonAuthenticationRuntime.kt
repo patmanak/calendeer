@@ -6,6 +6,9 @@ import android.content.Context
 import com.patmanak.proton.andcalendarbridge.auth.AuthenticationFlowPort
 import com.patmanak.proton.andcalendarbridge.sync.CalendarDeltaRemote
 import com.patmanak.proton.andcalendarbridge.sync.CalendarCreatePreparationPort
+import com.patmanak.proton.andcalendarbridge.sync.CalendarCreateSubmissionPort
+import com.patmanak.proton.andcalendarbridge.sync.AccountId
+import kotlinx.coroutines.flow.first
 import com.patmanak.proton.andcalendarbridge.sync.CreatePreparationFailure
 import com.patmanak.proton.andcalendarbridge.sync.catalog.CalendarCatalogPort
 import android.database.SQLException
@@ -74,6 +77,8 @@ internal data class ProtonAuthenticationGraph(
     val authentication: AuthenticationFlowPort,
     val events: CalendarDeltaRemote,
     val preparations: CalendarCreatePreparationPort = CalendarCreatePreparationPort { createUnavailable(CreatePreparationFailure.UNSUPPORTED) },
+    val submissions: CalendarCreateSubmissionPort? = null,
+    val matchesIdentityHash: suspend (AccountId, String) -> Boolean = { _, _ -> false },
     val catalog: CalendarCatalogPort,
 )
 
@@ -182,9 +187,21 @@ internal object ProtonAuthenticationRuntime {
                 sessions = readSession,
                 remote = ProtonCalendarCatalogRemote(network.apiProvider),
             ),
+            matchesIdentityHash = { expectedAccount, expectedHash ->
+                val account = accountRepository.getAccounts().first().singleOrNull()
+                account != null && account.userId.id == expectedAccount.value &&
+                    java.security.MessageDigest.getInstance("SHA-256")
+                        .digest(account.username.orEmpty().trim().lowercase(java.util.Locale.ROOT).toByteArray(Charsets.UTF_8))
+                        .joinToString("") { "%02x".format(it) } == expectedHash
+            },
             preparations = ProtonCreatePreparationAdapter(readSession, contextRefresher,
                 ProtonCreateCalendarMetadataRemote(network.apiProvider), eventRemote, localAddresses,
                 ProtonCreateContextResolver(cryptoContext)::prepare, eventProtector),
+            submissions = ProtonCreateSubmissionAdapter(ProtonCreatePreparationAdapter(readSession, contextRefresher,
+                ProtonCreateCalendarMetadataRemote(network.apiProvider), eventRemote, localAddresses,
+                ProtonCreateContextResolver(cryptoContext)::prepare, eventProtector, submission = true),
+                eventProtector, readSession, ProtonCreateSubmissionRemote(network.apiProvider), eventRemote,
+                eventDecoder::decodeCreated),
             events = ProtonCalendarDeltaAdapter(baseline, readSession,
                 ProtonChangeFeed(readSession, ProtonChangeFeedRemote(network.apiProvider)), eventRemote,
                 eventDecoder, eventProtector, contextRefresher),

@@ -20,7 +20,7 @@ import java.time.ZoneOffset
 import kotlinx.serialization.json.JsonObject
 
 internal object ProtonICalendar {
-    fun parse(parts: List<String>, row: JsonObject? = null, bootstrap: JsonObject? = null): EventContent {
+    fun parse(parts: List<String>, row: JsonObject? = null, bootstrap: JsonObject? = null, expectedUid: String? = null): EventContent {
         if (parts.isEmpty() || parts.any { it.length > 1_048_576 }) unsupportedEvents()
         try {
             val calendars = parts.map { text ->
@@ -39,6 +39,7 @@ internal object ProtonICalendar {
             val calendar = calendars.first()
             val event = calendar.events.single()
             val uid = event.uid?.value ?: unsupportedEvents()
+            if (expectedUid != null && calendars.any { it.events.single().uid?.value != expectedUid }) unsupportedEvents()
             for (other in calendars.drop(1)) {
                 val addition = other.events.single()
                 if (addition.uid?.value != null && addition.uid.value != uid) unsupportedEvents()

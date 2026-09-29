@@ -19,6 +19,34 @@ import org.junit.Test
 
 @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class SharedProtonPortsTest {
+    @Test fun createSubmissionSharesLogoutMutexAndEveryEntryRequiresAuthentication() = runTest {
+        val auth = FakeAuth()
+        val entered = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        val f = CreateSubmissionFixture()
+        val submission = object : CalendarCreateSubmissionPort {
+            override suspend fun prepareSubmission(draft: CalendarCreateDraft) = PreparedCalendarCreate(draft.scope, f.record.format, "sealed")
+            override suspend fun submit(record: CreateAttemptRecord, journal: CreateAttemptJournal): CreateSubmissionObservation {
+                entered.complete(Unit); release.await(); return CreateSubmissionObservation.Unknown
+            }
+            override suspend fun inspect(record: CreateAttemptRecord) = CreateSubmissionObservation.Unknown
+        }
+        val port = SerializedAuthenticationPort({
+            ProtonAuthenticationGraph(auth, NoEvents, submissions = submission) { CalendarCatalogResult.Success(AccountId("a"), emptyList()) }
+        }, {}, StandardTestDispatcher(testScheduler))
+        suspend fun denied() {
+            for (call in listOf<suspend () -> Any>({ port.prepareSubmission(f.draft) },
+                { port.submit(f.record, f.journal) }, { port.inspect(f.record) })) {
+                try { call(); fail("Submission must require authentication") }
+                catch (failure: CreatePreparationException) { assertEquals(CreatePreparationFailure.AUTHENTICATION, failure.reason) }
+            }
+        }
+        denied(); port.restore()
+        val work = async { port.submit(f.record, f.journal) }; entered.await()
+        val logout = async { port.cancel() }; runCurrent()
+        assertEquals(0, auth.cancellations)
+        release.complete(Unit); work.await(); logout.await(); denied()
+    }
     @Test fun createPreparationSharesLogoutMutexAndAuthenticationGate() = runTest {
         val auth = FakeAuth()
         val entered = CompletableDeferred<Unit>()

@@ -22,7 +22,7 @@ internal fun interface CreateContextPreparation {
 internal class ProtonCreatePreparationAdapter(private val sessions: CatalogSessionSource,
     private val context: EventContextRefresher, private val metadata: CreateCalendarMetadataRemote, private val events: EventImportRemote,
     private val addresses: LocalEventAddresses, private val prepare: CreateContextPreparation,
-    private val protector: EventPayloadProtector) : CalendarCreatePreparationPort {
+    private val protector: EventPayloadProtector, private val submission: Boolean = false) : CalendarCreatePreparationPort {
     override suspend fun prepareCreate(draft: CalendarCreateDraft): PreparedCalendarCreate = try {
         val initial = localStorage { sessions.current() }?.takeIf { it.userId.id == draft.scope.account.value }
             ?: createUnavailable(CreatePreparationFailure.AUTHENTICATION)
@@ -37,13 +37,19 @@ internal class ProtonCreatePreparationAdapter(private val sessions: CatalogSessi
         val uid = correlationUid(draft)
         val prepared = prepare.prepare(draft.scope, calendar, bootstrap, local, uid, draft)
         checkSession(initial)
+        val selection = if (submission) ProtonCreateContextPolicy.select(draft.scope, calendar, bootstrap, local) else null
+        val format = if (submission) CREATE_SUBMISSION_FORMAT else CREATE_PREPARATION_FORMAT
         val envelope = buildJsonObject {
-            put("version", CREATE_PREPARATION_FORMAT.version); put("account", draft.scope.account.value)
+            put("version", format.version); put("account", draft.scope.account.value)
             put("calendar", draft.scope.calendar.value); put("generation", draft.scope.generation)
             put("correlation", draft.correlation.value); put("uid", uid); put("timestamp", draft.timestamp.toString())
-            put("event", prepared.event)
+            if (selection == null) put("event", prepared.event) else {
+                put("context", ProtonCreateSubmissionCodec.context(selection))
+                put("request", ProtonCreateSubmissionCodec.request(selection.member.string("ID"), prepared.event))
+                put("expected", ProtonCreateSubmissionCodec.expected(draft.content))
+            }
         }
-        val receipt = PreparedCalendarCreate(draft.scope, CREATE_PREPARATION_FORMAT, localStorage { protector.seal(envelope.toString()) })
+        val receipt = PreparedCalendarCreate(draft.scope, format, localStorage { protector.seal(envelope.toString()) })
         checkSession(initial)
         receipt
     } catch (cancelled: CancellationException) { throw cancelled }

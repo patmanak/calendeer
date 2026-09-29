@@ -8,6 +8,15 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class ProtonICalendarTest {
+    @Test fun confirmationBindsEverySignedPartUidToExpectedUid() {
+        val date = ics("DTSTART:20261001T100000Z\nDTEND:20261001T110000Z")
+        val display = ics("SUMMARY:Meet")
+        assertEquals("Meet", ProtonICalendar.parse(listOf(date, display), expectedUid = "synthetic").title)
+        try {
+            ProtonICalendar.parse(listOf(date, display), expectedUid = "foreign")
+            fail("Expected signed UID refusal")
+        } catch (failure: RemoteImportException) { assertEquals(RemoteImportFailure.UNSUPPORTED, failure.reason) }
+    }
     @Test fun parsesTimedEventAndMergesEncryptedParts() {
         val content = ProtonICalendar.parse(listOf(ics("DTSTART:20261001T100000Z\nDTEND:20261001T110000Z\nSUMMARY:Meet"),
             ics("DESCRIPTION:Notes\nLOCATION:Room")))

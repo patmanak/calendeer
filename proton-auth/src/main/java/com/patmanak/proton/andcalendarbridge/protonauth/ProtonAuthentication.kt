@@ -26,6 +26,9 @@ object ProtonAuthentication {
     fun catalog(context: Context): CalendarCatalogPort = shared(context)
     fun events(context: Context): CalendarDeltaRemote = shared(context)
     fun createPreparations(context: Context): CalendarCreatePreparationPort = shared(context)
+    fun createSubmissions(context: Context): CalendarCreateSubmissionPort = shared(context)
+    internal suspend fun matchesIdentityHash(context: Context, account: AccountId, expectedHash: String): Boolean =
+        shared(context).matchesIdentityHash(account, expectedHash)
 
     private fun shared(context: Context): SerializedAuthenticationPort = instance ?: synchronized(this) {
         instance ?: SerializedAuthenticationPort(context.applicationContext, verification)
@@ -54,7 +57,7 @@ internal class SerializedAuthenticationPort(
     private val createGraph: () -> ProtonAuthenticationGraph,
     private val cancelVerification: () -> Unit,
     private val dispatcher: CoroutineDispatcher = Dispatchers.IO,
-) : AuthenticationFlowPort, CalendarCatalogPort, CalendarDeltaRemote, RollingCalendarRemote, ContentMappingRemote, CalendarCreatePreparationPort {
+) : AuthenticationFlowPort, CalendarCatalogPort, CalendarDeltaRemote, RollingCalendarRemote, ContentMappingRemote, CalendarCreatePreparationPort, CalendarCreateSubmissionPort {
     override val contentMapping = EVENT_CONTENT_MAPPING
     constructor(context: Context, verification: HumanVerificationHost) : this(
         { ProtonAuthenticationRuntime.build(context, verification.delegate.hooks) },
@@ -75,6 +78,19 @@ internal class SerializedAuthenticationPort(
         lock.withLock {
             if (!authenticated) createUnavailable(CreatePreparationFailure.AUTHENTICATION)
             checkNotNull(graph).preparations.prepareCreate(draft)
+        }
+    }
+    override suspend fun prepareSubmission(draft: CalendarCreateDraft): PreparedCalendarCreate = submissionOperation { it.prepareSubmission(draft) }
+    internal suspend fun matchesIdentityHash(account: AccountId, expectedHash: String): Boolean = withContext(dispatcher) {
+        lock.withLock { authenticated && graph?.matchesIdentityHash?.invoke(account, expectedHash) == true }
+    }
+    override suspend fun submit(record: CreateAttemptRecord, journal: CreateAttemptJournal): CreateSubmissionObservation =
+        submissionOperation { it.submit(record, journal) }
+    override suspend fun inspect(record: CreateAttemptRecord): CreateSubmissionObservation = submissionOperation { it.inspect(record) }
+    private suspend fun <T> submissionOperation(block: suspend (CalendarCreateSubmissionPort) -> T): T = withContext(dispatcher) {
+        lock.withLock {
+            if (!authenticated) createUnavailable(CreatePreparationFailure.AUTHENTICATION)
+            block(checkNotNull(graph).submissions ?: createUnavailable(CreatePreparationFailure.UNSUPPORTED))
         }
     }
     override suspend fun fetch(request: PageRequest): RemotePage = withContext(dispatcher) {
