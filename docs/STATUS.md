@@ -186,6 +186,14 @@ calendar grants through Android while an isolated projection was pending: the
 intent stayed queued with `PERMISSION`, then projected once after grants returned.
 This does not establish revocation in the middle of a Provider batch or a live
 Proton change.
+An opt-in read-only network-stage probe on the retained test session passed
+context refresh, event-page receipt/decode and current delta-page receipt/decode
+for both enabled calendars. One bounded production coordinator pass still
+reported one `UNSUPPORTED` calendar while the other was `IMPORTED`; its baseline
+was complete, with an open delta obligation and no pending event job.
+A later pass moved that calendar to `PENDING` with unfinished coverage, so full
+multi-calendar network completion and the exact cause of the earlier block remain
+unqualified. The probe exposes only stage categories and aggregate state.
 
 Calendeer posts no notifications. Reminder data belongs to the Android calendar
 client; progress and errors are shown inside the bridge. The merged manifest

@@ -256,6 +256,17 @@ synchronization. `awaitSettled=true` waits for any `RUNNING` status to clear;
 already present. A successful diagnostic run is not proof that every calendar
 finished importing; inspect its returned status counts.
 
+`CalendarNetworkStageDeviceTest` is an opt-in (`calendarNetworkStage=true`)
+retained-session diagnostic for multiple enabled calendars. It reads the
+production adapter's context, one initial event page, and a current delta page,
+then runs one bounded coordinator continuation without starting a fresh scan.
+It reports only closed stage/failure categories and aggregate durable-state
+counts; it never reports identifiers, cursor values or event content. The
+coordinator pass can advance an existing read-only import and launch ordinary
+local follow-up work. `COMPLETE` means that pass finished, not that every
+calendar has reached `IMPORTED`. The probe does not replace a full network
+Worker or server-interoperability journey.
+
 `CalendarDozeSchedulingDeviceTest` is an opt-in, host-orchestrated local Worker
 journey (`calendarDozeScheduling=true`, phases `prepare`, `verify`, `cleanup`).
 `prepare` queues the production `CalendarImportWorker` with a 45-second initial
