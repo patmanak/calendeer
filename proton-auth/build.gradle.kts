@@ -42,5 +42,6 @@ dependencies {
         "user-domain", "user-data", "key-domain", "key-data", "crypto-android", "data-room",
     ).forEach { implementation("me.proton.core:$it:36.8.0") }
     testImplementation("junit:junit:4.13.2")
+    testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2")
 }

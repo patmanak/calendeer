@@ -6,10 +6,12 @@ import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.patmanak.proton.andcalendarbridge.protonauth.ProtonAuthentication
+import com.patmanak.proton.andcalendarbridge.data.outgoing.CreateAttemptStore
 import com.patmanak.proton.andcalendarbridge.sync.*
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
+import java.util.UUID
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
@@ -37,24 +39,41 @@ class CalendarCreatePreparationLiveDeviceTest {
             EventTime.AllDay(LocalDate.parse("2026-10-02"), LocalDate.parse("2026-10-03")))
         var preparedCalendars = 0
         var permissionRefusals = 0
-        for (selection in selected) {
-            try {
-                for ((index, time) in times.withIndex()) {
-                    val draft = CalendarCreateDraft(selection.scope, MutationId("synthetic-preparation-$index"),
-                        Instant.parse("2026-09-29T10:00:00Z"), EventContent("Synthetic preparation only", time))
-                    val receipt = port.prepareCreate(draft)
-                    assertTrue("Preparation must retain scope", receipt.scope == selection.scope)
-                    assertTrue("Preparation requires a versioned format", receipt.format == AdapterFormat("proton-calendar-create-preparation", 1))
-                    assertTrue("Protected preparation must be nonempty", receipt.protectedPayload.isNotEmpty())
-                    assertTrue("Protected preparation must hide display text", !receipt.protectedPayload.contains(draft.content.title))
-                    assertTrue("Diagnostics must hide display text", !receipt.toString().contains(draft.content.title))
+        val journalName = "create-live-preparation-fixture-${UUID.randomUUID()}.db"
+        try {
+            for (selection in selected) {
+                try {
+                    for ((index, time) in times.withIndex()) {
+                        val draft = CalendarCreateDraft(selection.scope, MutationId("synthetic-preparation-$index"),
+                            Instant.parse("2026-09-29T10:00:00Z"), EventContent("Synthetic preparation only", time))
+                        val receipt = port.prepareCreate(draft)
+                        assertTrue("Preparation must retain scope", receipt.scope == selection.scope)
+                        assertTrue("Preparation requires a versioned format", receipt.format == AdapterFormat("proton-calendar-create-preparation", 1))
+                        assertTrue("Protected preparation must be nonempty", receipt.protectedPayload.isNotEmpty())
+                        assertTrue("Protected preparation must hide display text", !receipt.protectedPayload.contains(draft.content.title))
+                        assertTrue("Diagnostics must hide display text", !receipt.toString().contains(draft.content.title))
+                        val record = CreateAttemptRecord(draft.correlation, receipt.scope, receipt.format, receipt.protectedPayload)
+                        CreateAttemptStore(app, journalName).use { it.remember(record) }
+                        CreateAttemptStore(app, journalName).use { reopened ->
+                            assertTrue("Protected preparation must survive reopen", reopened.read(record.scope, record.id) == record)
+                            assertTrue("Admission must record uncertainty before its local-only callback",
+                                CreateAttemptAdmission(reopened).dispatch(record) { admitted ->
+                                    CreateAttemptStore(app, journalName).use { observer ->
+                                        assertTrue("Independent connection must observe committed uncertainty", observer.read(record.scope, record.id) == admitted)
+                                    }
+                                })
+                        }
+                        CreateAttemptStore(app, journalName).use { reopened ->
+                            assertTrue("Restart must not readmit uncertain preparation", !reopened.claim(record))
+                        }
+                    }
+                    preparedCalendars++
+                } catch (failure: CreatePreparationException) {
+                    assertTrue("Only a verified permission refusal is allowed for another selected calendar", failure.reason == CreatePreparationFailure.PERMISSION)
+                    permissionRefusals++
                 }
-                preparedCalendars++
-            } catch (failure: CreatePreparationException) {
-                assertTrue("Only a verified permission refusal is allowed for another selected calendar", failure.reason == CreatePreparationFailure.PERMISSION)
-                permissionRefusals++
             }
-        }
+        } finally { app.deleteDatabase(journalName) }
         assertTrue("At least one real calendar must prepare successfully", preparedCalendars > 0)
         assertTrue("Session must remain authenticated", app.imports.state.value.authenticated)
         assertTrue("Selections must remain unchanged", app.imports.state.value.selections.map { it.scope to it.enabled } == before.map { it.scope to it.enabled })
@@ -63,6 +82,7 @@ class CalendarCreatePreparationLiveDeviceTest {
             putInt("prepared_draft_count", preparedCalendars * times.size)
             putInt("permission_refusal_count", permissionRefusals)
             putBoolean("outgoing_dispatch_implemented", false)
+            putBoolean("sealed_journal_reopen_and_unknown_preserved", true)
         })
     }
 }

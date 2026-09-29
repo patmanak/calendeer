@@ -449,13 +449,40 @@ With a retained authorized test session and selected calendars, run only
 `CalendarCreatePreparationLiveDeviceTest` with
 `-e calendarCreatePreparation true`. It refreshes identity and calendar context
 using production reads, prepares timed/all-day synthetic drafts locally, and
-checks protected receipts and unchanged selections. Aggregate counts only are
+checks protected receipts and unchanged selections. It also persists those
+sealed preparations in an isolated journal fixture, reopens it, and verifies that
+unknown admission is committed before a local-only callback and cannot be
+readmitted after reopening. The isolated database is deleted afterwards;
+no event is created. Aggregate counts only are
 reported. No outgoing dispatcher exists and no test event is uploaded. Ordinary
 application startup and background import behavior still run normally.
 This does not qualify remote CREATE, lost acknowledgements or writable Provider
-calendars. The next transport qualification must measure request counts under
-timeouts, lost responses, HTTP follow-ups and Core redispatch, then establish
-durable unknown-outcome admission before a live write fixture.
+calendars.
+
+`ProtonSingleDispatchTest` counts requests received by a loopback MockWebServer.
+It reproduces the unsafe two-request HTTP 503/Retry-After behavior with the old
+client flags, then verifies one request with the guarded body. Other cases cover
+redirect refusal, response loss, timeout, cancellation, competing callers,
+interceptor re-entry and unmarked/rebound writes, plus an unaffected ordinary GET.
+`ProtonCoreSingleDispatchTest` uses published Core 36.8.0, Retrofit 2.9.0 and
+OkHttp 4.12.0 with synthetic sessions. Its real TokenErrorHandler performs one
+refresh and re-enters the block twice, while only one PUT reaches the server.
+A successful request preserves body and client/session headers. A Retrofit
+Content-Type annotation that wraps the body is refused before any exchange.
+The fixture uses an internal Core backend, a JVM-only monotonic clock for its
+logger, and a loopback security strategy; it does not qualify remote certificate
+pins, the full Android factory, DoH/challenge variants or server acceptance.
+The clock shim is unit-test source only and is not packaged into either APK.
+
+`CreateAttemptStoreDeviceTest`, with `-e providerFixture true`, exercises an
+isolated SQLite database: immutable/idempotent preparation, exact scope and
+format matching, reopening, competing helpers, rollback and failure/cancellation
+after durable admission. A separate connection checks UNKNOWN is committed
+before the callback. These fixtures do not qualify simultaneous processes,
+physical power loss or disk exhaustion. The journal has no automatic reset or
+remote acknowledgement API and is not wired to Provider capture or logout.
+Before live creation, integrate fresh rights/context validation, the complete
+scoped request, protected response evidence and authenticated reconciliation.
 
 ## Anonymous transport probe
 

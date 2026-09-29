@@ -96,8 +96,35 @@ selection without secondary fallback, and signing/decryption. An opt-in live
 fixture qualifies real context reads and sealed local preparations, not remote
 CREATE acceptance. The published Core 36.8.0 and OkHttp 4.12.0 call paths can
 redispatch or follow up requests despite the read-side no-connection-retry flag.
-An outgoing transport must establish a single dispatch before any live CREATE;
-the current implementation adds no such transport.
+An outgoing transport must establish a single dispatch before any live CREATE.
+The guards below address these re-entries; no live CREATE dispatcher is enabled.
+
+### Single-dispatch transport guards
+
+`ProtonSingleDispatch.kt` is a local guard around the published OkHttp/Core
+transport, rather than a copied HTTP/authentication stack. The production factory
+adds guards to its supplied client; Core 36.8.0 copies that client for its primary
+and alternative backends and preserves request tags while preparing headers.
+The existing certificate, header, cookie and read transport configuration remains
+owned by Core. No live CREATE endpoint is invoked by this addition.
+
+The guard requires the same scoped URL, PUT method, body object and attempt tag
+at application entry and network exchange. Atomic guards also prevent reuse by
+competing calls. The body declares `isOneShot`, refuses a second write and clears
+its byte buffer after writing. The attempt must be constructed once outside the
+Core invocation callback, after durable admission; reconstructing attempts in a
+retry callback is not supported. Unmarked canonical CREATE endpoints fail closed.
+These safeguards do not provide server-side idempotency or event acknowledgement.
+
+Dependency behavior was checked in the published Core 36.8.0 and OkHttp 4.12.0
+artifacts and is exercised through a real local-server test. Core's token error
+handler can redispatch the same callback after refresh. OkHttp's
+RetryAndFollowUpInterceptor can follow a 503 despite no connection retry; its
+one-shot-body check blocks that path. Retrofit 2.9.0's Content-Type overriding
+wrapper loses the one-shot property, so the guard refuses a wrapped/replaced body.
+The MIME type belongs to the body, not a future endpoint's Content-Type annotation.
+Library upgrades require requalification. MockWebServer 4.12.0 is a unit-test-only
+Apache-2.0 dependency; no new production networking library is introduced.
 
 ## Read-only reminders and participant details
 

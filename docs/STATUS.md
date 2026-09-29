@@ -92,10 +92,22 @@ mutex. Real retained-account preparation has passed timed and all-day fixtures
 on two selected calendars. This does not establish service acceptance.
 The internal CREATE response parser rejects incomplete, foreign, duplicate-key
 and ambiguous responses. Reported success is only a candidate for authenticated
-refetch; a reported error never proves that resending is safe. There is no upload
-transport, outgoing-store wiring or writable capability. Single-dispatch transport,
-durable uncertain-outcome admission, acknowledgement reconciliation and concurrent
-UPDATE/DELETE guarantees remain unqualified. See
+refetch; a reported error never proves that resending is safe.
+The shared network factory now guards CREATE attempts at the application and
+network-exchange boundaries, with a non-repeatable request body. Controlled local
+tests reproduce the original HTTP 503 follow-up and exercise published Core's
+401 token-refresh re-entry while observing only one PUT. Rebound or unmarked
+CREATE requests are refused; ordinary reads continue. A separate scoped SQLite
+dispatch journal commits `OUTCOME_UNKNOWN` before admitting an attempt and has
+no automatic requeue. It is not connected to Provider capture or background
+outgoing work, and does not replace the future capture/conflict transaction.
+Physical SQLite fixtures verify reopening, immutable work, competing helpers,
+rollback and cancellation after admission. Real sealed preparations also survive
+reopening and refuse readmission after the unknown transition. These are controlled
+fixtures, not proof of power-loss recovery or simultaneous Android processes.
+There is still no live upload dispatcher or writable capability. Service
+acceptance, authenticated acknowledgement reconciliation, account/access lifecycle
+integration and concurrent UPDATE/DELETE guarantees remain unqualified. See
 [source adaptation](../proton-auth/PROVENANCE.md).
 Explicit remote deletion notices
 now use a durable, scoped path to the Android mirror; historical deletion recovery

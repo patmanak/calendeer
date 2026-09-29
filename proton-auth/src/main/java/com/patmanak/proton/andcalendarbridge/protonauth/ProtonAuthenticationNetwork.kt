@@ -115,7 +115,7 @@ internal object ProtonGateCNetworkFactory {
             sessionStorage = MemoryCookieStorage(),
         )
         val okHttpClient = OkHttpClient.Builder()
-            .followRedirects(false).followSslRedirects(false).retryOnConnectionFailure(false).build()
+            .withSingleDispatchGuards().build()
         val clientIdProvider = GateCPreAuthClientIdProvider(ClientIdProviderImpl(baseUrl, cookieStore))
         val managerFactory = ApiManagerFactory(
             baseUrl = baseUrl,
