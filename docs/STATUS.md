@@ -171,8 +171,13 @@ diagnostic failures release the busy state. Worker orchestration has focused JVM
 checks. Transient startup selection, catalog persistence and explicit-refresh
 storage failures now schedule durable local and network recovery rather than
 losing the trigger. Eight isolated recovery tests on a physical device and
-twelve related Provider regression tests passed. This is not yet full reboot,
-real storage failure or Doze qualification. A separate physical test revoked both
+twelve related Provider regression tests passed. A retained-session physical
+reboot with multiple selected calendars preserved five owned Provider events and
+allowed local processing offline after the first device unlock. The network
+settings and private verification fixture were restored afterward. One selected
+calendar already had a blocking status before that local run, so this is a
+retention/restart result, not full multi-calendar import completion. Real storage
+failure and Doze remain unqualified. A separate physical test revoked both
 calendar grants through Android while an isolated projection was pending: the
 intent stayed queued with `PERMISSION`, then projected once after grants returned.
 This does not establish revocation in the middle of a Provider batch or a live

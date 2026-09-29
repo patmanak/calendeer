@@ -237,10 +237,24 @@ processing without introducing a new blocking error.
 Only a digest and counts are retained in private fixture preferences; event data
 and identifiers are not included in test diagnostics. Restore the exact original
 network settings in a host `finally` block and always run `offlinePhase=cleanup`.
-Finally run the opt-in live import to qualify reconnection separately. No app-data
-reset or session logout is part of this journey. It proves retained-session/Provider
+For a physical reboot journey, compare the kernel boot identity before/after,
+wait for the first user unlock before launching the app, and keep networking off
+through `verify`. Restore settings even if the device remains locked, then defer
+fixture cleanup until the encrypted app storage becomes available.
+Qualify reconnection separately: the existing live import fixture requires exactly
+one selected calendar and cannot be applied unchanged to a multi-calendar account.
+No app-data reset or session logout is part of this journey. It proves retained-session/Provider
 recovery; it does not prove an interrupted encrypted receipt was decoded after
 process death, since no pending receipt is deliberately staged in this fixture.
+
+`CalendarStatusSnapshotDeviceTest` is an opt-in (`calendarStatusSnapshot=true`)
+retained-session diagnostic. It reports only aggregate calendar statuses, coverage
+and pending-work counts, plus validated connectivity, without calendar/event
+identifiers or content. Launching the app may itself trigger normal read-only
+synchronization. `awaitSettled=true` waits for any `RUNNING` status to clear;
+`requestSync=true` explicitly requests a read-only network refresh if one was
+already present. A successful diagnostic run is not proof that every calendar
+finished importing; inspect its returned status counts.
 
 `CalendarRemoteMutationDeviceTest` observes a disposable event created, modified
 and deleted through the official Proton client in an authorized test account.
