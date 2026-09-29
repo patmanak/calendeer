@@ -1,5 +1,55 @@
 # Proton authentication adapter provenance
 
+## Offline simple CREATE preparation
+
+`ProtonSimpleEventPreparation.kt` adapts the bounded simple-event partition and
+encryption assembly from Proton Android Calendar at
+`83bbd6a15b0aaa135e424fb5ac195c0a52929b4f`, under GPL version 3:
+
+- [ICalUtilsImpl](https://github.com/ProtonMail/android-calendar/blob/83bbd6a15b0aaa135e424fb5ac195c0a52929b4f/app/src/main/java/me/proton/android/calendar/common/utils/ICalUtilsImpl.kt#L301-L431)
+  splits UID/date metadata into a signed clear shared part and display text into
+  a signed encrypted shared part. Its timezone assignments retain Olson TZIDs
+  without embedding VTIMEZONE. `printToString` delegates to Biweekly.
+- [EditCreateEventUseCase](https://github.com/ProtonMail/android-calendar/blob/83bbd6a15b0aaa135e424fb5ac195c0a52929b4f/app/src/main/java/me/proton/android/calendar/domain/usecase/EditCreateEventUseCase.kt)
+  signs with the member-address private key, encrypts display text with a fresh
+  session key, and encrypts that key for the primary active calendar public key.
+  The CREATE path supplies an empty author for the service to resolve.
+- [Event.EventPart](https://github.com/ProtonMail/android-calendar/blob/83bbd6a15b0aaa135e424fb5ac195c0a52929b4f/app/src/main/java/me/proton/android/calendar/domain/model/Event.kt#L600-L658)
+  defines Type/Data/Signature/Author.
+- [SyncEvent](https://github.com/ProtonMail/android-calendar/blob/83bbd6a15b0aaa135e424fb5ac195c0a52929b4f/app/src/main/java/me/proton/android/calendar/data/api/CalendarsApiImpl.kt#L642-L705)
+  defines the request fragment names, including `SharedEventContent` rather than
+  the read response's `SharedEvents`.
+- [EditCreateEventUseCaseTest](https://github.com/ProtonMail/android-calendar/blob/83bbd6a15b0aaa135e424fb5ac195c0a52929b4f/app/src/test/java/me/proton/android/calendar/domain/usecase/EditCreateEventUseCaseTest.kt)
+  supplies the partition/all-day/timezone expectations. Its encryption test is
+  an unfinished TODO; local native evidence is required instead.
+
+Copyright remains with the respective Proton contributors for adapted material;
+the local implementation is copyright 2026 Patmanak. The module's existing
+[GPL version 3 text](LICENSE) accompanies this adaptation. Biweekly 0.6.8 is reused
+for escaping, folding and date serialization. Core 36.8.0 supplies `signText`,
+session-key generation, `encryptData` and public-key `encryptSessionKey`; the
+inspected upstream client uses Core 36.2.0, so version compatibility is tested
+rather than assumed.
+
+Local changes restrict preparation to CREATE with no recurrence, explicit
+details/reminders/participants or color override. UID and timestamp are supplied
+by the caller; no identity or clock is generated inside serialization. UTF-8 is
+strict, LF/CRLF logical text is normalized, precision is bounded to seconds and
+dates to 1970–9999. Ambiguous local timestamps, fixed-offset non-UTC zones and
+inconsistent Java timezone offsets are refused. No Calendar/Attendees part is
+invented. Optional future fields must be qualified before adding them; never
+rebuild UPDATE from this display-only model.
+
+The encryptor checks primary/active/capability metadata on already selected keys;
+the caller must establish their calendar, member and permission context. It has
+no transport, capture or outbox wiring. The prepared fragment has its own
+format/version and redacted
+diagnostics; it is not a persistable, scoped intent or server acknowledgement.
+`ProtonEventPreparationCryptoProbe` uses synthetic keys and an explicitly
+fabricated service read shape to qualify signing/decryption and altered-signature
+rejection. It does not demonstrate live CREATE acceptance, UID idempotency,
+conditional writes or unknown-field preservation during UPDATE.
+
 ## Read-only reminders and participant details
 
 `ProtonEventDetails` adapts the current personal notification selection and

@@ -120,6 +120,22 @@ fresh in-memory keys. It exercises the production decryptor and rejects altered
 signatures, without opening the account database, contacting Proton or projecting
 events. It is not evidence of every real account's key configuration.
 
+`ProtonSimpleEventPreparationTest` exercises offline simple CREATE partition,
+escaping/folding, stable supplied UID/timestamp, literal DST/timezone output and
+exclusive all-day dates under different default timezones. It checks refusal of
+unsupported fields, ambiguous local times, subsecond precision, historical dates,
+invalid Unicode and unsuitable keys, plus sanitized crypto errors. Run it with
+`:proton-auth:testDebugUnitTest --tests '*ProtonSimpleEventPreparationTest'`.
+
+`ProtonEventPreparationCryptoDeviceTest` exercises the production preparer with
+fresh synthetic member/calendar keys. It signs clear metadata and encrypts/signs
+display text, using Core `signText` and the existing reader's `verifyData`. Timed
+and all-day cases round-trip; separate alterations to each signature must yield
+no accepted change. The probe fabricates author resolution and a read-response
+shape explicitly; its code has no transport or account/Provider access. This
+qualifies native preparation and local verification, not service acceptance, real member
+selection, UID idempotency, outgoing intent durability or safe UPDATE/DELETE.
+
 The live pipeline test is intentionally opt-in and requires a retained test session,
 one calendar and granted calendar access:
 

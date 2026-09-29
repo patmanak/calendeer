@@ -77,6 +77,17 @@ read-only Provider projection have been verified on an authorized physical test
 device. This does not establish every account configuration or calendar app.
 The [initial import boundary](READ_ONLY_IMPORT.md) documents supported fields,
 coverage, offline recovery and limits. Bidirectional editing remains unavailable.
+An internal offline CREATE preparer now reuses Proton's simple-event partition:
+signed clear date metadata and signed encrypted display text. It uses Biweekly
+and Proton Core primitives, with caller-supplied UID/timestamp and selected keys.
+Focused JVM checks cover escaping, timezones/DST, exclusive all-day dates,
+unsupported-field refusal, Unicode/precision/date limits and sanitized key/crypto
+failures. A synthetic native physical-device test round-trips timed and all-day
+preparations through the production decryptor and rejects alterations to both
+signatures. This helper has no transport or outgoing-store wiring and advertises
+no writable capability. Real member/key/permission selection, service acceptance,
+CREATE acknowledgement reconciliation and concurrent UPDATE/DELETE guarantees
+remain unqualified. See [source adaptation](../proton-auth/PROVENANCE.md).
 Explicit remote deletion notices
 now use a durable, scoped path to the Android mirror; historical deletion recovery
 after a server feed reset remains unavailable.
