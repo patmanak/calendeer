@@ -229,10 +229,11 @@ across a date boundary remains separate from controlled-clock tests.
 
 `CalendarOfflineRestartDeviceTest` is an opt-in host-orchestrated journey. Run with
 `calendarOfflineRestart=true` and `offlinePhase=prepare` on an already connected,
-authorized test account with one selected calendar and imported events. Stop the
+authorized test account with at least one selected calendar and imported events. Stop the
 application process, disable networking, then run with `offlinePhase=verify`.
 The test checks a different process, no active network, restored authentication,
-identical owned Provider contents and local processing without a blocking error.
+identical owned Provider contents across all bridge-owned calendars and local
+processing without introducing a new blocking error.
 Only a digest and counts are retained in private fixture preferences; event data
 and identifiers are not included in test diagnostics. Restore the exact original
 network settings in a host `finally` block and always run `offlinePhase=cleanup`.
