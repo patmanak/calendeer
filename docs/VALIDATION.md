@@ -256,6 +256,17 @@ synchronization. `awaitSettled=true` waits for any `RUNNING` status to clear;
 already present. A successful diagnostic run is not proof that every calendar
 finished importing; inspect its returned status counts.
 
+`CalendarDozeSchedulingDeviceTest` is an opt-in, host-orchestrated local Worker
+journey (`calendarDozeScheduling=true`, phases `prepare`, `verify`, `cleanup`).
+`prepare` queues the production `CalendarImportWorker` with a 45-second initial
+delay and no network input. The host confirms deep idle is enabled and initially
+inactive, forces deep idle, observes the named WorkManager row without starting
+the app, then always calls `unforce` in a `finally` block. `verify` waits up to
+three minutes for `SUCCEEDED`; `cleanup` cancels only the fixture work and clears
+its private ID. Record the observed WorkManager state and elapsed wait. Forced
+idle on one device does not establish natural Doze timing, network-worker
+completion or another OEM's scheduling policy.
+
 `CalendarRemoteMutationDeviceTest` observes a disposable event created, modified
 and deleted through the official Proton client in an authorized test account.
 It never uploads or directly edits Provider rows. Use `calendarRemoteMutation=true`,

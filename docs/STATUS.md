@@ -176,8 +176,12 @@ reboot with multiple selected calendars preserved five owned Provider events and
 allowed local processing offline after the first device unlock. The network
 settings and private verification fixture were restored afterward. One selected
 calendar already had a blocking status before that local run, so this is a
-retention/restart result, not full multi-calendar import completion. Real storage
-failure and Doze remain unqualified. A separate physical test revoked both
+retention/restart result, not full multi-calendar import completion. On the same
+physical device, a delayed production local import worker remained queued after
+65 seconds of forced deep idle and completed at its first attempt after idle was
+released. This qualifies local WorkManager recovery under forced Doze on that
+device; natural Doze timing, the network worker, other OEMs and real storage
+failure remain unqualified. A separate physical test revoked both
 calendar grants through Android while an isolated projection was pending: the
 intent stayed queued with `PERMISSION`, then projected once after grants returned.
 This does not establish revocation in the middle of a Provider batch or a live
