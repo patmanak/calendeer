@@ -282,16 +282,27 @@ local follow-up work. `COMPLETE` means that pass finished, not that every
 calendar has reached `IMPORTED`. The probe does not replace a full network
 Worker or server-interoperability journey.
 
-`CalendarDozeSchedulingDeviceTest` is an opt-in, host-orchestrated local Worker
+`CalendarDozeSchedulingDeviceTest` is an opt-in, host-orchestrated Worker
 journey (`calendarDozeScheduling=true`, phases `prepare`, `verify`, `cleanup`).
 `prepare` queues the production `CalendarImportWorker` with a 45-second initial
-delay and no network input. The host confirms deep idle is enabled and initially
-inactive, forces deep idle, observes the named WorkManager row without starting
-the app, then always calls `unforce` in a `finally` block. `verify` waits up to
-three minutes for `SUCCEEDED`; `cleanup` cancels only the fixture work and clears
-its private ID. Record the observed WorkManager state and elapsed wait. Forced
-idle on one device does not establish natural Doze timing, network-worker
-completion or another OEM's scheduling policy.
+delay. The default variant has no network input; `dozeNetwork=true` adds the
+production network input and connected-network constraint, requires at least two
+completed accessible imports, and uses a separate fixture name and preferences.
+The host confirms deep idle is enabled and initially inactive, forces deep idle,
+then reads the exact prepared WorkManager ID without starting the app. Require
+`ENQUEUED` and zero recorded execution attempts after the observation interval;
+always call `unforce` in a `finally` block. `verify` waits up to three minutes for
+`SUCCEEDED`. The network variant additionally waits for the normal network queue
+to settle and checks the retained enabled calendar scopes, authentication,
+complete coverage and drained durable baseline/delta/projection state.
+`cleanup` cancels only the chosen fixture work and clears its private preferences.
+Record the observed WorkManager state, attempt count and elapsed wait. Normal
+production continuations or startup work can contribute to final convergence;
+verification starts the application process, so completion without reopening it
+requires a separate host observation.
+Forced idle on one device does not establish natural Doze timing, six-hour
+periodic delivery, an interrupted initial backlog or another OEM's scheduling
+policy.
 
 `CalendarRemoteMutationDeviceTest` observes a disposable event created, modified
 and deleted through the official Proton client in an authorized test account.

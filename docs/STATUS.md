@@ -180,7 +180,7 @@ retention/restart result, not full multi-calendar import completion. On the same
 physical device, a delayed production local import worker remained queued after
 65 seconds of forced deep idle and completed at its first attempt after idle was
 released. This qualifies local WorkManager recovery under forced Doze on that
-device; natural Doze timing, the network worker, other OEMs and real storage
+device; natural Doze timing, other OEMs and real storage
 failure remain unqualified. A separate physical test revoked both
 calendar grants through Android while an isolated projection was pending: the
 intent stayed queued with `PERMISSION`, then projected once after grants returned.
@@ -201,8 +201,14 @@ refresh through the production WorkManager network queue then passed with two
 enabled calendars and one paused calendar: baseline/delta/projection work drained,
 distinct read-only mirrors and Provider event identities/revisions were retained,
 and the paused calendar was preserved. This qualifies an unchanged refresh after
-convergence on that device; interrupted initial backlogs, network work under Doze,
-and other OEMs remain separate journeys. The public
+convergence on that device; interrupted initial backlogs and other OEMs remain
+separate journeys. A separately queued production network import worker also
+remained `ENQUEUED` with zero recorded attempts after 65 seconds of forced deep
+idle. After idle exit and verification process startup, it succeeded and both
+retained enabled calendar scopes had complete coverage and drained durable work.
+Normal startup work or continuations can contribute to that convergence. Natural
+Doze, completion without reopening the process and six-hour periodic delivery
+remain unqualified. The public
 [Android Calendar DTO](https://github.com/ProtonMail/android-calendar/blob/83bbd6a15b0aaa135e424fb5ac195c0a52929b4f/app/src/main/java/me/proton/android/calendar/data/api/ServerEventsApiImpl.kt#L108-L180)
 inspected earlier lists this collection in the global feed, so the
 calendar-scoped variant is a live service observation rather than a claim about
