@@ -25,6 +25,7 @@ object ProtonAuthentication {
     fun create(context: Context): AuthenticationFlowPort = shared(context)
     fun catalog(context: Context): CalendarCatalogPort = shared(context)
     fun events(context: Context): CalendarDeltaRemote = shared(context)
+    fun createPreparations(context: Context): CalendarCreatePreparationPort = shared(context)
 
     private fun shared(context: Context): SerializedAuthenticationPort = instance ?: synchronized(this) {
         instance ?: SerializedAuthenticationPort(context.applicationContext, verification)
@@ -53,7 +54,7 @@ internal class SerializedAuthenticationPort(
     private val createGraph: () -> ProtonAuthenticationGraph,
     private val cancelVerification: () -> Unit,
     private val dispatcher: CoroutineDispatcher = Dispatchers.IO,
-) : AuthenticationFlowPort, CalendarCatalogPort, CalendarDeltaRemote, RollingCalendarRemote, ContentMappingRemote {
+) : AuthenticationFlowPort, CalendarCatalogPort, CalendarDeltaRemote, RollingCalendarRemote, ContentMappingRemote, CalendarCreatePreparationPort {
     override val contentMapping = EVENT_CONTENT_MAPPING
     constructor(context: Context, verification: HumanVerificationHost) : this(
         { ProtonAuthenticationRuntime.build(context, verification.delegate.hooks) },
@@ -68,6 +69,13 @@ internal class SerializedAuthenticationPort(
 
     override suspend fun currentAccount(): AccountId? = withContext(dispatcher) {
         lock.withLock { if (authenticated) graph?.events?.currentAccount() else null }
+    }
+
+    override suspend fun prepareCreate(draft: CalendarCreateDraft): PreparedCalendarCreate = withContext(dispatcher) {
+        lock.withLock {
+            if (!authenticated) createUnavailable(CreatePreparationFailure.AUTHENTICATION)
+            checkNotNull(graph).preparations.prepareCreate(draft)
+        }
     }
     override suspend fun fetch(request: PageRequest): RemotePage = withContext(dispatcher) {
         lock.withLock {

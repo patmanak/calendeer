@@ -84,10 +84,19 @@ Focused JVM checks cover escaping, timezones/DST, exclusive all-day dates,
 unsupported-field refusal, Unicode/precision/date limits and sanitized key/crypto
 failures. A synthetic native physical-device test round-trips timed and all-day
 preparations through the production decryptor and rejects alterations to both
-signatures. This helper has no transport or outgoing-store wiring and advertises
-no writable capability. Real member/key/permission selection, service acceptance,
-CREATE acknowledgement reconciliation and concurrent UPDATE/DELETE guarantees
-remain unqualified. See [source adaptation](../proton-auth/PROVENANCE.md).
+signatures. An authenticated preparation port now refreshes account/calendar
+context using reads, selects one owned active member with explicit WRITE permission,
+verifies the address-signed passphrase and unlocks the primary active calendar key.
+It returns a scoped, versioned Keystore-sealed preparation and shares the logout
+mutex. Real retained-account preparation has passed timed and all-day fixtures
+on two selected calendars. This does not establish service acceptance.
+The internal CREATE response parser rejects incomplete, foreign, duplicate-key
+and ambiguous responses. Reported success is only a candidate for authenticated
+refetch; a reported error never proves that resending is safe. There is no upload
+transport, outgoing-store wiring or writable capability. Single-dispatch transport,
+durable uncertain-outcome admission, acknowledgement reconciliation and concurrent
+UPDATE/DELETE guarantees remain unqualified. See
+[source adaptation](../proton-auth/PROVENANCE.md).
 Explicit remote deletion notices
 now use a durable, scoped path to the Android mirror; historical deletion recovery
 after a server feed reset remains unavailable.

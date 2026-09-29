@@ -19,6 +19,29 @@ import org.junit.Test
 
 @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class SharedProtonPortsTest {
+    @Test fun createPreparationSharesLogoutMutexAndAuthenticationGate() = runTest {
+        val auth = FakeAuth()
+        val entered = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        val scope = CalendarScope(AccountId("a"), CalendarId("c"), 0)
+        val draft = CalendarCreateDraft(scope, MutationId("synthetic"), java.time.Instant.EPOCH,
+            EventContent("Synthetic", EventTime.AllDay(java.time.LocalDate.of(2026, 1, 1), java.time.LocalDate.of(2026, 1, 2))))
+        val preparation = CalendarCreatePreparationPort {
+            entered.complete(Unit); release.await(); PreparedCalendarCreate(scope, AdapterFormat("synthetic", 1), "sealed")
+        }
+        val port = SerializedAuthenticationPort({
+            ProtonAuthenticationGraph(auth, NoEvents, preparation) { CalendarCatalogResult.Success(AccountId("a"), emptyList()) }
+        }, {}, StandardTestDispatcher(testScheduler))
+        suspend fun denied() {
+            try { port.prepareCreate(draft); fail("Preparation must require authentication") }
+            catch (failure: CreatePreparationException) { assertEquals(CreatePreparationFailure.AUTHENTICATION, failure.reason) }
+        }
+        denied(); port.restore()
+        val work = async { port.prepareCreate(draft) }; entered.await()
+        val logout = async { port.cancel() }; runCurrent()
+        assertEquals(0, auth.cancellations)
+        release.complete(Unit); work.await(); logout.await(); denied()
+    }
     @Test fun sharedProductionBoundarySupportsDurableCalendarDeltas() {
         val port: Any = SerializedAuthenticationPort({ error("No runtime needed") }, {})
         assertTrue("The shared production boundary must expose calendar deltas", port is CalendarDeltaRemote)

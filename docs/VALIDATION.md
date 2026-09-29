@@ -429,6 +429,34 @@ in a host `finally` block. The fixture makes no Proton call or account mutation;
 it does not replace testing the initial runtime permission dialog or establish
 revocation during an in-flight Provider batch.
 
+## CREATE preparation boundary
+
+`ProtonCreateContextTest`, `ProtonCreatePreparationAdapterTest` and
+`ProtonCreateResponseParserTest` check scope, explicit WRITE permission,
+ambiguous members/keys, session replacement at every stage, cancellation,
+network versus protected-storage failures, protected preparation and conservative
+response handling. Duplicate JSON property names (including escaped equivalents)
+and excessive nesting remain unknown. `SharedProtonPortsTest` checks that
+preparation and logout share a mutex and authentication gate.
+
+`ProtonEventPreparationCryptoDeviceTest` uses native synthetic keys without
+network or account access in the probe. It exercises the real context resolver,
+timed/all-day round trips, both shared-part signatures, an altered passphrase
+signature and an unusable primary key with a usable secondary present.
+Its service read shape is fabricated, not an observed CREATE acknowledgement.
+
+With a retained authorized test session and selected calendars, run only
+`CalendarCreatePreparationLiveDeviceTest` with
+`-e calendarCreatePreparation true`. It refreshes identity and calendar context
+using production reads, prepares timed/all-day synthetic drafts locally, and
+checks protected receipts and unchanged selections. Aggregate counts only are
+reported. No outgoing dispatcher exists and no test event is uploaded. Ordinary
+application startup and background import behavior still run normally.
+This does not qualify remote CREATE, lost acknowledgements or writable Provider
+calendars. The next transport qualification must measure request counts under
+timeouts, lost responses, HTTP follow-ups and Core redispatch, then establish
+durable unknown-outcome admission before a live write fixture.
+
 ## Anonymous transport probe
 
 `ProtonConnectivityDeviceTest` is skipped unless instrumentation receives

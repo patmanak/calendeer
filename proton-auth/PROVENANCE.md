@@ -50,6 +50,55 @@ fabricated service read shape to qualify signing/decryption and altered-signatur
 rejection. It does not demonstrate live CREATE acceptance, UID idempotency,
 conditional writes or unknown-field preservation during UPDATE.
 
+## Authenticated CREATE context and response preparation
+
+`ProtonCreateContext.kt` adapts member permission/key selection and signed
+passphrase verification from the same Android Calendar commit, under GPL v3:
+
+- [MemberEntity](https://github.com/ProtonMail/android-calendar/blob/83bbd6a15b0aaa135e424fb5ac195c0a52929b4f/app/src/main/java/me/proton/android/calendar/data/entity/MemberEntity.kt)
+  defines active-member flags and the explicit WRITE permission bit (16).
+- [CalendarKeyEntity](https://github.com/ProtonMail/android-calendar/blob/83bbd6a15b0aaa135e424fb5ac195c0a52929b4f/app/src/main/java/me/proton/android/calendar/data/entity/CalendarKeyEntity.kt)
+  identifies the primary active key (flags 3) and its passphrase association.
+- [CacheCalendarPassphraseUseCase](https://github.com/ProtonMail/android-calendar/blob/83bbd6a15b0aaa135e424fb5ac195c0a52929b4f/app/src/main/java/me/proton/android/calendar/domain/usecase/CacheCalendarPassphraseUseCase.kt)
+  decrypts the selected member packet and verifies the passphrase signature
+  against that address's active keys.
+- [EditCreateEventUseCase](https://github.com/ProtonMail/android-calendar/blob/83bbd6a15b0aaa135e424fb5ac195c0a52929b4f/app/src/main/java/me/proton/android/calendar/domain/usecase/EditCreateEventUseCase.kt)
+  supplies the address signer and primary calendar encryption key.
+
+Local restrictions admit a type-0 calendar, exactly one owned member/address,
+fully active member flags, an enabled sending address and unambiguous active
+primary keys. Shared type-0 calendars with WRITE are not rejected solely for
+being shared. Missing address IDs, maintenance flags or ambiguous ownership
+remain unsupported context; this is stricter than the upstream clients.
+The selected primary calendar key must unlock; no secondary fallback is used.
+Core 36.8.0 supplies local address mapping, key unlock, passphrase signature
+verification, PGP preparation and Keystore protection. The project-owned port
+uses explicit context reads and returns a protected format/version; it neither
+sets up keys nor uploads events. Its deterministic scoped UID is correlation,
+not an idempotency guarantee. A future dispatcher must revalidate context and
+establish durable admission rather than dispatch this fragment directly.
+
+`ProtonCreateResponseParser.kt` adapts the single-operation response shape from
+[CalendarsApiImpl](https://github.com/ProtonMail/android-calendar/blob/83bbd6a15b0aaa135e424fb5ac195c0a52929b4f/app/src/main/java/me/proton/android/calendar/data/api/CalendarsApiImpl.kt)
+and WebClients commit `914d7520eff52aafed9a1adfe19859143bdf1dc9`,
+[calendar API interfaces](https://github.com/ProtonMail/WebClients/blob/914d7520eff52aafed9a1adfe19859143bdf1dc9/packages/shared/lib/interfaces/calendar/Api.ts).
+The adaptation retains raw candidate event fields, requires one response at
+index zero, checks event scope/UID and refuses duplicate JSON keys or excessive
+nesting. Even a success candidate requires authenticated refetch and verified
+content before acknowledgement. Individual errors keep their numeric code only
+and remain uncertain outcomes; no error message or resend permission escapes.
+The same GPL-3.0-only notices and accompanying [license](LICENSE) apply;
+upstream copyright remains with Proton contributors, local adaptation with
+Patmanak (2026).
+
+Native synthetic fixtures qualify signed passphrase verification, primary-key
+selection without secondary fallback, and signing/decryption. An opt-in live
+fixture qualifies real context reads and sealed local preparations, not remote
+CREATE acceptance. The published Core 36.8.0 and OkHttp 4.12.0 call paths can
+redispatch or follow up requests despite the read-side no-connection-retry flag.
+An outgoing transport must establish a single dispatch before any live CREATE;
+the current implementation adds no such transport.
+
 ## Read-only reminders and participant details
 
 `ProtonEventDetails` adapts the current personal notification selection and

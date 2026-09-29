@@ -52,6 +52,7 @@ object ProtonEventPreparationCryptoProbe {
                     putJsonArray("Members") { add(buildJsonObject {
                         put("ID", "synthetic-member"); put("CalendarID", "synthetic-calendar")
                         put("AddressID", addressId.id); put("Email", email)
+                        put("Flags", 1); put("Permissions", 16)
                     }) }
                     putJsonArray("Keys") { add(buildJsonObject {
                         put("ID", "synthetic-calendar-key"); put("CalendarID", "synthetic-calendar")
@@ -64,6 +65,9 @@ object ProtonEventPreparationCryptoProbe {
                     }
                 }
                 val encryptor = ProtonSimpleEventEncryptor(crypto)
+                val resolver = ProtonCreateContextResolver(crypto)
+                val scope = CalendarScope(AccountId(user.id), CalendarId("synthetic-calendar"), 1)
+                val metadata = buildJsonObject { put("ID", scope.calendar.value); put("Type", 0) }
                 val decoder = ProtonEventDecryptor(crypto) { listOf(address) }
                 val stamp = Instant.parse("2026-09-29T10:00:00Z")
                 val times = listOf<EventTime>(EventTime.Timed(Instant.parse("2027-03-28T00:30:00Z"),
@@ -73,8 +77,12 @@ object ProtonEventPreparationCryptoProbe {
                     val content = EventContent("Création; café, \\" + "é".repeat(100), time,
                         "Description\nLigne suivante", "Lieu de test")
                     stage = "PREPARE"
-                    val prepared = encryptor.prepare("synthetic-stable@calendeer.invalid", stamp, content,
+                    val direct = encryptor.prepare("synthetic-stable@calendeer.invalid", stamp, content,
                         addressKey, calendarKey.publicKey(crypto))
+                    check(direct.format == AdapterFormat("proton-calendar-simple-create", 1))
+                    val draft = CalendarCreateDraft(scope, MutationId("synthetic-correlation"), stamp, content)
+                    val prepared = resolver.prepare(scope, metadata, bootstrap, listOf(address),
+                        "synthetic-stable@calendeer.invalid", draft)
                     check(prepared.format == AdapterFormat("proton-calendar-simple-create", 1))
                     check(!prepared.toString().contains(content.title))
                     val requestParts = prepared.event.array("SharedEventContent").map { it as JsonObject }
@@ -105,9 +113,25 @@ object ProtonEventPreparationCryptoProbe {
                         check(tampered.changes.isEmpty() && tampered.deferred.single().reason == DeferredEventReason.UNVERIFIED_CONTENT)
                     }
                 }
+                val draft = CalendarCreateDraft(scope, MutationId("synthetic-correlation"), stamp,
+                    EventContent("Synthetic", times.last()))
+                stage = "PASSPHRASE_SIGNATURE"
+                val tamperedPacket = JsonObject(memberPacket + ("Signature" to JsonPrimitive(addressKey.signText(crypto, "different"))))
+                val passphrase = JsonObject(bootstrap.obj("Passphrase") + ("MemberPassphrases" to JsonArray(listOf(tamperedPacket))))
+                refused { resolver.prepare(scope, metadata, JsonObject(bootstrap + ("Passphrase" to passphrase)), listOf(address), "synthetic@invalid", draft) }
+                stage = "PRIMARY_NO_FALLBACK"
+                val primary = bootstrap.array("Keys").single() as JsonObject
+                val wrongPrimary = JsonObject(primary + ("PrivateKey" to JsonPrimitive(addressArmored)))
+                val secondary = JsonObject(primary + mapOf("ID" to JsonPrimitive("synthetic-secondary"), "Flags" to JsonPrimitive(1)))
+                refused { resolver.prepare(scope, metadata, JsonObject(bootstrap + ("Keys" to JsonArray(listOf(wrongPrimary, secondary)))),
+                    listOf(address), "synthetic@invalid", draft) }
                 "RESULT=SUCCESS"
             } finally { addressSecret.fill(0); calendarSecret.fill(0) }
         } catch (cancelled: CancellationException) { throw cancelled }
           catch (_: Exception) { "RESULT=FAILURE STAGE=$stage" }
+    }
+    private fun refused(action: () -> Any) {
+        try { action(); error("Invalid crypto context accepted") }
+        catch (failure: CreatePreparationException) { check(failure.reason == CreatePreparationFailure.LOCAL_KEYS); check(failure.cause == null) }
     }
 }

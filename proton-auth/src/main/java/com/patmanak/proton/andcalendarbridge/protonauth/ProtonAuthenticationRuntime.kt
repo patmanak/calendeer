@@ -5,6 +5,8 @@ package com.patmanak.proton.andcalendarbridge.protonauth
 import android.content.Context
 import com.patmanak.proton.andcalendarbridge.auth.AuthenticationFlowPort
 import com.patmanak.proton.andcalendarbridge.sync.CalendarDeltaRemote
+import com.patmanak.proton.andcalendarbridge.sync.CalendarCreatePreparationPort
+import com.patmanak.proton.andcalendarbridge.sync.CreatePreparationFailure
 import com.patmanak.proton.andcalendarbridge.sync.catalog.CalendarCatalogPort
 import android.database.SQLException
 import com.patmanak.proton.andcalendarbridge.protonauth.AccountScope
@@ -71,6 +73,7 @@ import me.proton.core.util.kotlin.DefaultDispatcherProvider
 internal data class ProtonAuthenticationGraph(
     val authentication: AuthenticationFlowPort,
     val events: CalendarDeltaRemote,
+    val preparations: CalendarCreatePreparationPort = CalendarCreatePreparationPort { createUnavailable(CreatePreparationFailure.UNSUPPORTED) },
     val catalog: CalendarCatalogPort,
 )
 
@@ -157,12 +160,18 @@ internal object ProtonAuthenticationRuntime {
                 }
             }
             val eventRemote = ProtonEventImportRemote(network.apiProvider)
-            val eventDecoder = ProtonEventDecryptor(cryptoContext) { user ->
+            val localAddresses = LocalEventAddresses { user ->
                 // Unlike getAddresses(refresh=false), the DAO has no network fallback.
                 database.addressWithKeysDao().getByUserId(user).map(ProtonLocalAddressMapper::map)
             }
+            val eventDecoder = ProtonEventDecryptor(cryptoContext, localAddresses)
             val eventProtector = ProtonEventPayloadProtector(cryptoContext.keyStoreCrypto)
             val baseline = ProtonEventImportAdapter(readSession, eventRemote, eventDecoder, eventProtector)
+            val contextRefresher = EventContextRefresher { session ->
+                // Explicit Core reads only; never set up keys or change account attributes.
+                userManager.getUser(session.userId, refresh = true)
+                userManager.getAddresses(session.userId, refresh = true)
+            }
         return ProtonAuthenticationGraph(
             authentication = ProtonAuthenticationFlowAdapter(
                 accountScope,
@@ -173,13 +182,12 @@ internal object ProtonAuthenticationRuntime {
                 sessions = readSession,
                 remote = ProtonCalendarCatalogRemote(network.apiProvider),
             ),
+            preparations = ProtonCreatePreparationAdapter(readSession, contextRefresher,
+                ProtonCreateCalendarMetadataRemote(network.apiProvider), eventRemote, localAddresses,
+                ProtonCreateContextResolver(cryptoContext)::prepare, eventProtector),
             events = ProtonCalendarDeltaAdapter(baseline, readSession,
                 ProtonChangeFeed(readSession, ProtonChangeFeedRemote(network.apiProvider)), eventRemote,
-                eventDecoder, eventProtector, EventContextRefresher { session ->
-                    // Refresh the existing encrypted keys through Core reads only. Never set up new keys.
-                    userManager.getUser(session.userId, refresh = true)
-                    userManager.getAddresses(session.userId, refresh = true)
-                }),
+                eventDecoder, eventProtector, contextRefresher),
         )
     }
 }
