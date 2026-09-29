@@ -19,6 +19,30 @@ class ProtonCalendarDeltaAdapterTest {
     private var current: CatalogSession? = session
     private val source = CatalogSessionSource { current }
 
+    @Test fun calendarMemberNoticeRefreshesContextWithoutTreatingItAsAnEvent() = runTest {
+        val network = Network().apply { changes = obj("""{"Code":1000,"CalendarModelEventID":"next","More":0,"Refresh":0,
+            "CalendarMembers":[{"ID":"member","Action":2,
+            "Member":{"ID":"member","CalendarID":"synthetic-calendar"}}]}""") }
+        val adapter = adapter(network, Decoder())
+        val receipt = adapter.receiveChanges(scope, adapter.latestChanges(scope))
+        network.forbidNetwork = true
+        val notices = adapter.decodeChanges(receipt).notices
+        assertEquals(listOf(CalendarNoticeKind.CONTEXT_CHANGED), notices.map { it.kind })
+        assertNull(notices.single().eventId)
+        assertEquals(0, network.bootstrapCalls)
+    }
+
+    @Test fun bareCalendarMemberDeletionDoesNotBecomeAnEventDeletion() = runTest {
+        val network = Network().apply { changes = obj("""{"Code":1000,"CalendarModelEventID":"next","More":0,"Refresh":0,
+            "CalendarMembers":[{"ID":"member","Action":0}]}""") }
+        val adapter = adapter(network, Decoder())
+        val receipt = adapter.receiveChanges(scope, adapter.latestChanges(scope))
+        network.forbidNetwork = true
+        val notice = adapter.decodeChanges(receipt).notices.single()
+        assertEquals(CalendarNoticeKind.CONTEXT_CHANGED, notice.kind)
+        assertNull(notice.eventId)
+    }
+
     @Test fun stagedFeedDecodesAfterRestartWithoutNetworkAndPlacesContextBeforeEvents() = runTest {
         val network = Network()
         val decoder = Decoder()

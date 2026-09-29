@@ -77,7 +77,8 @@ internal class ProtonChangeFeed(
 }
 
 internal object ProtonChangeFeedParser {
-    private val calendarCollections = mapOf("CalendarEvents" to "Event", "CalendarKeys" to "Key",
+    private val calendarCollections = mapOf("CalendarEvents" to "Event", "CalendarMembers" to "Member",
+        "CalendarKeys" to "Key",
         "CalendarPassphrases" to "Passphrase", "CalendarSettings" to "CalendarSettings",
         "CalendarAlarms" to "Alarm", "CalendarSubscriptions" to "CalendarSubscription")
     private val globalCollections = mapOf("Calendars" to "Calendar", "CalendarMembers" to "Member",
@@ -129,7 +130,8 @@ internal object ProtonChangeFeedParser {
                     if (collection != "CalendarSubscriptions" && payload.string("ID") != id) feedUnsupported()
                     val calendar = cursor.scope.calendar
                     if (calendar != null) {
-                        if (collection in setOf("CalendarEvents", "CalendarSubscriptions") && payload.string("CalendarID") != calendar) feedUnsupported()
+                        if (collection in setOf("CalendarEvents", "CalendarMembers", "CalendarSubscriptions") &&
+                            payload.string("CalendarID") != calendar) feedUnsupported()
                         if (payload["CalendarID"] != null && payload.string("CalendarID") != calendar) feedUnsupported()
                     }
                 }

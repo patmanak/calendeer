@@ -17,6 +17,22 @@ class ProtonChangeFeedTest {
     private val cursor = ProtonFeedCursor(scope, "cursor-before")
     private val session = CatalogSession(UserId(scope.account), SessionId("fixture-session"))
 
+    @Test fun calendarMemberNoticeIsAcceptedOnlyForItsCalendar() {
+        val root = obj("""{"Code":1000,"CalendarModelEventID":"next","More":0,"Refresh":0,
+            "CalendarMembers":[{"ID":"member","Action":2,
+            "Member":{"ID":"member","CalendarID":"fixture-calendar"}}]}""")
+        val change = ProtonChangeFeedParser.page(cursor, root).changes.single()
+        assertEquals("CalendarMembers", change.collection)
+        assertEquals(ProtonFeedAction.UPDATE, change.action)
+        unsupported { ProtonChangeFeedParser.page(cursor.copy(scope = scope.copy(calendar = "other-calendar")), root) }
+        unsupported { ProtonChangeFeedParser.page(cursor, obj("""{"Code":1000,"CalendarModelEventID":"next","More":0,"Refresh":0,
+            "CalendarMembers":[{"ID":"member","Action":1,"Member":{"ID":"member"}}]}""")) }
+        val deletion = ProtonChangeFeedParser.page(cursor, obj("""{"Code":1000,"CalendarModelEventID":"next","More":0,"Refresh":0,
+            "CalendarMembers":[{"ID":"member","Action":0}]}""")).changes.single()
+        assertEquals(ProtonFeedAction.DELETE, deletion.action)
+        assertNull(deletion.payload)
+    }
+
     @Test fun subscriptionContextPayloadUsesItsCalendarIdentityWithoutAnInventedIdField() {
         // Pinned CalendarSubscriptionEntity has CalendarID but no ID property.
         val root = obj("""{"Code":1000,"CalendarModelEventID":"next","More":0,"Refresh":0,

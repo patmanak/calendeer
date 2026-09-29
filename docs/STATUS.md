@@ -188,16 +188,20 @@ This does not establish revocation in the middle of a Provider batch or a live
 Proton change.
 An opt-in read-only network-stage probe on the retained test session passed
 context refresh, event-page receipt/decode and current delta-page receipt/decode
-for both enabled calendars. One bounded production coordinator pass still
-reported one `UNSUPPORTED` calendar while the other was `IMPORTED`; its baseline
-was complete, with an open delta obligation and no pending event job.
-A later pass moved that calendar to `PENDING` with unfinished coverage, so full
-multi-calendar network completion and the exact cause of the earlier block remain
-unqualified. Reading the retained delta cursor before another coordinator pass
-reproduced `UNSUPPORTED` for one calendar while its current/latest cursor passed.
-The next step is to classify the old-page rejection inside the Proton adapter
-without exposing the page or silently skipping changes. The probe exposes only
-stage categories and aggregate state.
+for both enabled calendars. It reproduced an `UNSUPPORTED` response only when
+reading one retained delta cursor. A temporary, sanitized parser trace showed
+that this real calendar-scoped response contained `CalendarMembers`, previously
+accepted only in the global feed. The adapter now treats calendar member notices
+as context changes, requires `Member.CalendarID` to match the calendar for
+create/update, and never interprets a bare member deletion as an event deletion.
+Focused tests failed before the change and passed afterward. On the physical test
+device, the same retained-cursor receipt/decode then passed for both calendars.
+One calendar still had unfinished coverage and `PENDING` status; complete
+multi-calendar network import and Worker behavior remain unqualified. The public
+[Android Calendar DTO](https://github.com/ProtonMail/android-calendar/blob/83bbd6a15b0aaa135e424fb5ac195c0a52929b4f/app/src/main/java/me/proton/android/calendar/data/api/ServerEventsApiImpl.kt#L108-L180)
+inspected earlier lists this collection in the global feed, so the
+calendar-scoped variant is a live service observation rather than a claim about
+that published DTO.
 
 Calendeer posts no notifications. Reminder data belongs to the Android calendar
 client; progress and errors are shown inside the bridge. The merged manifest
