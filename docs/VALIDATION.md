@@ -259,7 +259,8 @@ finished importing; inspect its returned status counts.
 `CalendarNetworkStageDeviceTest` is an opt-in (`calendarNetworkStage=true`)
 retained-session diagnostic for multiple enabled calendars. It reads the
 production adapter's context, one initial event page, and a current delta page,
-then runs one bounded coordinator continuation without starting a fresh scan.
+then probes any retained delta cursors and runs one bounded coordinator
+continuation without starting a fresh scan.
 It reports only closed stage/failure categories and aggregate durable-state
 counts; it never reports identifiers, cursor values or event content. The
 coordinator pass can advance an existing read-only import and launch ordinary

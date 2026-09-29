@@ -69,6 +69,29 @@ class CalendarNetworkStageDeviceTest {
                 }
             }
         }
+        runBlocking {
+            for (selection in selections) {
+                val cursor = app.imports.store.transaction(selection.scope) {
+                    (this as DeltaSyncTransaction).deltaCursor
+                } ?: continue
+                var stage = "pre_stored_delta_receive"
+                try {
+                    withTimeout(120_000) {
+                        val page = remote.receiveChanges(selection.scope, cursor)
+                        record(stage, "OK")
+                        stage = "pre_stored_delta_decode"
+                        remote.decodeChanges(page)
+                        record(stage, "OK")
+                    }
+                } catch (failure: RemoteImportException) {
+                    record(stage, failure.reason.name)
+                } catch (_: kotlinx.coroutines.TimeoutCancellationException) {
+                    record(stage, "TIMEOUT")
+                } catch (_: Exception) {
+                    record(stage, "OTHER")
+                }
+            }
+        }
         val coordinatorResult = runBlocking {
             try {
                 withTimeout(240_000) { app.imports.run(network = true, fresh = false).name }

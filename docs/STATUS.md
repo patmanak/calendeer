@@ -193,7 +193,11 @@ reported one `UNSUPPORTED` calendar while the other was `IMPORTED`; its baseline
 was complete, with an open delta obligation and no pending event job.
 A later pass moved that calendar to `PENDING` with unfinished coverage, so full
 multi-calendar network completion and the exact cause of the earlier block remain
-unqualified. The probe exposes only stage categories and aggregate state.
+unqualified. Reading the retained delta cursor before another coordinator pass
+reproduced `UNSUPPORTED` for one calendar while its current/latest cursor passed.
+The next step is to classify the old-page rejection inside the Proton adapter
+without exposing the page or silently skipping changes. The probe exposes only
+stage categories and aggregate state.
 
 Calendeer posts no notifications. Reminder data belongs to the Android calendar
 client; progress and errors are shown inside the bridge. The merged manifest
