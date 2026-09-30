@@ -55,7 +55,7 @@ class LocalCreateStoreDeviceTest {
         LocalCreateStore(context, name).use { reopened ->
             assertEquals(reservation, reopened.readReservation(scope, reservation.localId))
             assertFalse(reopened.reserve(reservation)); assertNull(reopened.readIntent(scope, reservation.localId))
-            assertEquals(2, reopened.readableDatabase.version)
+            assertEquals(3, reopened.readableDatabase.version)
         }
     }
     @Test fun firstCapturedIntentSurvivesReopenAndExactReplayDoesNotReplaceContent() = fixture { context, name, store ->

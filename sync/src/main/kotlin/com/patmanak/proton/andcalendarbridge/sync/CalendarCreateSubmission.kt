@@ -17,6 +17,11 @@ sealed interface CreateSubmissionObservation {
  * reconciliation and outgoing resolution remain separate obligations.
  */
 interface CalendarCreateSubmissionPort {
+    /** Local, stable declaration for separately preparing known-empty captured creates.
+     * Null refuses staging; this performs no IO and grants no dispatch or editable capability.
+     * Existing local preparation formats must never be converted or reinterpreted.
+     */
+    val knownEmptySubmissionFormat: AdapterFormat? get() = null
     suspend fun prepareSubmission(draft: CalendarCreateDraft): PreparedCalendarCreate
     suspend fun submit(record: CreateAttemptRecord, journal: CreateAttemptJournal): CreateSubmissionObservation
     suspend fun inspect(record: CreateAttemptRecord): CreateSubmissionObservation

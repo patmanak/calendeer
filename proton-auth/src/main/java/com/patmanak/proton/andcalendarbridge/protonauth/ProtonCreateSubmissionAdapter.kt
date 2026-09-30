@@ -18,6 +18,7 @@ internal class ProtonCreateSubmissionAdapter(private val preparations: CalendarC
     private val protector: EventPayloadProtector, private val sessions: CatalogSessionSource,
     private val remote: CreateSubmissionRemote, private val events: EventImportRemote,
     verifier: CreateEventVerifier) : CalendarCreateSubmissionPort {
+    override val knownEmptySubmissionFormat = KNOWN_EMPTY_SUBMISSION_FORMAT
     private val readback = ProtonCreatedEventReadback(sessions, remote, events, verifier)
     override suspend fun prepareSubmission(draft: CalendarCreateDraft) = preparations.prepareCreate(draft)
 

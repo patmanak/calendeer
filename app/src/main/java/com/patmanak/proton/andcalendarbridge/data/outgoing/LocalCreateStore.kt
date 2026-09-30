@@ -10,6 +10,7 @@ import com.patmanak.proton.andcalendarbridge.sync.*
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
@@ -18,16 +19,33 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 
+/** Volatile permission held only by the invocation that inserted the durable link.
+ * It cannot be obtained from a reader, reused, transferred to another helper or reopened.
+ */
+class LocalCreateSubmissionPermit internal constructor(private val owner: Any,
+    private val reservation: LocalCreateSubmissionReservation) {
+    private val consumed = AtomicBoolean()
+    internal fun consume(owner: Any, reservation: LocalCreateSubmissionReservation) {
+        check(this.owner === owner && this.reservation == reservation) { "Foreign local submission permit" }
+        check(consumed.compareAndSet(false, true)) { "Local submission permit is consumed" }
+    }
+    override fun toString() = "LocalCreateSubmissionPermit(REDACTED)"
+}
+
 /** Backup-excluded local capture journal, separate from remote dispatch and the import database.
  * Reserving identity permanently consumes the right to attempt a Provider stamp. Existing work is
  * inspect-only; no erase, resume, dispatch, row-ID fallback or automatic intent replacement exists.
  */
 class LocalCreateStore(context: Context, name: String = "calendar-local-create-v1.db") :
-    SQLiteOpenHelper(context, name, null, 2) {
+    SQLiteOpenHelper(context, name, null, 3) {
     private val lock = Mutex()
+    private val submissionPermitOwner = Any()
     @Volatile var admitCapture: (CalendarScope) -> Boolean = { true }
 
-    override fun onConfigure(db: SQLiteDatabase) { db.execSQL("PRAGMA synchronous=FULL") }
+    override fun onConfigure(db: SQLiteDatabase) {
+        db.setForeignKeyConstraintsEnabled(true)
+        db.execSQL("PRAGMA synchronous=FULL")
+    }
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL("""
             CREATE TABLE local_creates (
@@ -44,14 +62,32 @@ class LocalCreateStore(context: Context, name: String = "calendar-local-create-v
                     OR (prep_adapter IS NOT NULL AND prep_version IS NOT NULL AND prep_payload IS NOT NULL AND prep_version > 0))
             )
         """.trimIndent())
+        createSubmissions(db)
     }
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        check(oldVersion == 1 && newVersion == 2) { "Explicit local create journal migration required" }
-        db.execSQL("ALTER TABLE local_creates ADD COLUMN prep_adapter TEXT")
-        db.execSQL("ALTER TABLE local_creates ADD COLUMN prep_version INTEGER")
-        db.execSQL("""ALTER TABLE local_creates ADD COLUMN prep_payload TEXT CHECK (
-            (prep_adapter IS NULL AND prep_version IS NULL AND prep_payload IS NULL)
-            OR (prep_adapter IS NOT NULL AND prep_version IS NOT NULL AND prep_payload IS NOT NULL AND prep_version > 0))""".trimIndent())
+        check(oldVersion in 1..2 && newVersion == 3) { "Explicit local create journal migration required" }
+        if (oldVersion == 1) {
+            db.execSQL("ALTER TABLE local_creates ADD COLUMN prep_adapter TEXT")
+            db.execSQL("ALTER TABLE local_creates ADD COLUMN prep_version INTEGER")
+            db.execSQL("""ALTER TABLE local_creates ADD COLUMN prep_payload TEXT CHECK (
+                (prep_adapter IS NULL AND prep_version IS NULL AND prep_payload IS NULL)
+                OR (prep_adapter IS NOT NULL AND prep_version IS NOT NULL AND prep_payload IS NOT NULL AND prep_version > 0))""".trimIndent())
+        }
+        createSubmissions(db)
+    }
+    private fun createSubmissions(db: SQLiteDatabase) {
+        db.execSQL("""
+            CREATE TABLE local_create_submissions (
+                account TEXT NOT NULL, calendar TEXT NOT NULL,
+                generation INTEGER NOT NULL CHECK(generation >= 0), local_event TEXT NOT NULL,
+                attempt TEXT NOT NULL, adapter TEXT NOT NULL, version INTEGER NOT NULL CHECK(version > 0),
+                captured_content TEXT NOT NULL, payload TEXT CHECK(payload IS NULL OR length(trim(payload)) > 0),
+                PRIMARY KEY(account, calendar, generation, local_event),
+                UNIQUE(account, calendar, generation, attempt),
+                FOREIGN KEY(account, calendar, generation, local_event)
+                    REFERENCES local_creates(account, calendar, generation, local_event)
+            )
+        """.trimIndent())
     }
 
     /** Returns true only for the first durable reservation. A lost return can never reopen it. */
@@ -61,6 +97,8 @@ class LocalCreateStore(context: Context, name: String = "calendar-local-create-v
             check(existing.reservation == reservation) { "Local create reservation is immutable" }
             false
         } else {
+            check(!submissionAttemptExists(db, reservation.scope, reservation.id.value) &&
+                !submissionAttemptExists(db, reservation.scope, reservation.localId.value)) { "Local identity conflicts with a submission" }
             db.insertOrThrow("local_creates", null, ContentValues().apply {
                 put("account", reservation.scope.account.value); put("calendar", reservation.scope.calendar.value)
                 put("generation", reservation.scope.generation); put("local_event", reservation.localId.value)
@@ -71,6 +109,80 @@ class LocalCreateStore(context: Context, name: String = "calendar-local-create-v
             true
         }
     }
+
+    /** Reserve before adapter IO. Existing work is inspect-only, including a reservation with no payload. */
+    suspend fun reserveSubmission(value: LocalCreateSubmissionReservation): LocalCreateSubmissionPermit? =
+        mutation(value.intent.reservation.scope) { db ->
+            val intent = value.intent
+            val reservation = intent.reservation
+            val captured = checkNotNull(read(db, reservation.scope, reservation.localId)) { "Submission requires captured work" }
+            check(captured.reservation == reservation && captured.content != null &&
+                LocalCreateIntent(reservation, decodeContent(captured.content, reservation)) == intent) { "Submission requires exact captured content" }
+            val existing = readSubmissionRow(db, reservation.scope, reservation.localId)
+            if (existing != null) {
+                check(existing.reservation == value) { "Local submission reservation is immutable" }
+                null
+            } else {
+                db.query("local_creates", arrayOf("local_event"),
+                    "account=? AND calendar=? AND generation=? AND (mutation=? OR local_event=?)",
+                    arrayOf(reservation.scope.account.value, reservation.scope.calendar.value, reservation.scope.generation.toString(),
+                        value.attempt.value, value.attempt.value), null, null, null).use {
+                    check(it.count == 0) { "Submission attempt conflicts with captured identity" }
+                }
+                db.insertOrThrow("local_create_submissions", null, ContentValues().apply {
+                    put("account", reservation.scope.account.value); put("calendar", reservation.scope.calendar.value)
+                    put("generation", reservation.scope.generation); put("local_event", reservation.localId.value)
+                    put("attempt", value.attempt.value); put("adapter", value.format.id); put("version", value.format.version)
+                    put("captured_content", captured.content); putNull("payload")
+                })
+                LocalCreateSubmissionPermit(submissionPermitOwner, value)
+            }
+        }
+
+    suspend fun readSubmissionReservation(scope: CalendarScope, localId: LocalEventId): LocalCreateSubmissionReservation? =
+        guardedRead(scope) { db -> readSubmissionRow(db, scope, localId)?.reservation }
+
+    suspend fun readSubmission(scope: CalendarScope, localId: LocalEventId): LocalCreateSubmission? =
+        guardedRead(scope) { db -> readSubmissionRow(db, scope, localId)?.let { row ->
+            row.payload?.let { LocalCreateSubmission(row.reservation, it) }
+        } }
+
+    /** The permit is consumed even if the transaction fails or is cancelled. Lost commits stay unresolved. */
+    suspend fun retainSubmission(permit: LocalCreateSubmissionPermit, value: LocalCreateSubmission): LocalCreateSubmission {
+        permit.consume(submissionPermitOwner, value.reservation)
+        return mutation(value.reservation.intent.reservation.scope) { db ->
+            val identity = value.reservation.intent.reservation
+            val row = checkNotNull(readSubmissionRow(db, identity.scope, identity.localId)) { "Submission reservation missing" }
+            check(row.reservation == value.reservation && row.payload == null) { "Submission reservation is immutable" }
+            check(db.update("local_create_submissions", ContentValues().apply { put("payload", value.protectedPayload) },
+                "$IDENTITY AND attempt=? AND adapter=? AND version=? AND payload IS NULL",
+                identity(identity.scope, identity.localId) + arrayOf(value.reservation.attempt.value,
+                    value.reservation.format.id, value.reservation.format.version.toString())) == 1) { "Submission reservation changed" }
+            value
+        }
+    }
+
+    private data class LocalSubmissionRow(val reservation: LocalCreateSubmissionReservation, val payload: String?) {
+        override fun toString() = "LocalSubmissionRow(REDACTED)"
+    }
+    private fun readSubmissionRow(db: SQLiteDatabase, scope: CalendarScope, localId: LocalEventId): LocalSubmissionRow? =
+        db.query("local_create_submissions", null, IDENTITY, identity(scope, localId), null, null, null).use { cursor ->
+            check(cursor.count <= 1) { "Ambiguous local submission" }
+            if (!cursor.moveToFirst()) null else {
+                fun string(name: String) = cursor.getString(cursor.getColumnIndexOrThrow(name))
+                val captured = checkNotNull(read(db, scope, localId)) { "Submission capture missing" }
+                check(captured.content != null && captured.content == string("captured_content")) { "Submission snapshot differs" }
+                val intent = LocalCreateIntent(captured.reservation, decodeContent(captured.content, captured.reservation))
+                val reservation = LocalCreateSubmissionReservation(intent, MutationId(string("attempt")),
+                    AdapterFormat(string("adapter"), cursor.getInt(cursor.getColumnIndexOrThrow("version"))))
+                val payloadIndex = cursor.getColumnIndexOrThrow("payload")
+                val payload = if (cursor.isNull(payloadIndex)) null else string("payload").also { check(it.isNotBlank()) }
+                LocalSubmissionRow(reservation, payload)
+            }
+        }
+    private fun submissionAttemptExists(db: SQLiteDatabase, scope: CalendarScope, attempt: String) =
+        db.query("local_create_submissions", arrayOf("attempt"), "account=? AND calendar=? AND generation=? AND attempt=?",
+            arrayOf(scope.account.value, scope.calendar.value, scope.generation.toString(), attempt), null, null, null).use { it.count != 0 }
     suspend fun readReservation(scope: CalendarScope, localId: LocalEventId): LocalCreateReservation? =
         guardedRead(scope) { db -> read(db, scope, localId)?.reservation }
     suspend fun readIntent(scope: CalendarScope, localId: LocalEventId): LocalCreateIntent? =

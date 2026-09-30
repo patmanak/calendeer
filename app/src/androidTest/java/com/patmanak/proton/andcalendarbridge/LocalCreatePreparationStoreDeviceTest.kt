@@ -72,7 +72,7 @@ class LocalCreatePreparationStoreDeviceTest {
     @Test fun preparationReopenRetainsFirstSealedPayloadAndNeverReopensStampPermission() = fixture { context, name, store ->
         store.capture(); store.retainPreparation(preparation); store.close()
         LocalCreateStore(context, name).use { reopened ->
-            assertEquals(2, reopened.readableDatabase.version)
+            assertEquals(3, reopened.readableDatabase.version)
             assertEquals(preparation, reopened.readPreparation(scope, reservation.localId)); assertFalse(reopened.reserve(reservation))
             assertEquals(preparation, reopened.retainPreparation(preparation)); assertEquals(intent, reopened.readIntent(scope, reservation.localId))
         }
@@ -235,7 +235,7 @@ class LocalCreatePreparationStoreDeviceTest {
                 db.version = 1
             }
             LocalCreateStore(context, name).use { store ->
-                assertEquals(2, store.readableDatabase.version)
+                assertEquals(3, store.readableDatabase.version)
                 assertEquals(reservation, store.readReservation(scope, reservation.localId)); assertEquals(uncaptured, store.readReservation(scope, uncaptured.localId))
                 assertEquals(intent, store.readIntent(scope, reservation.localId)); assertNull(store.readIntent(scope, uncaptured.localId))
                 assertFalse(store.reserve(reservation)); assertFalse(store.reserve(uncaptured))

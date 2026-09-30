@@ -3,7 +3,7 @@
 `ImportCoordinator.captureLocalCreate` explicitly retains a simple new Android
 event offline. The application owns its capture journal, separate from the import
 database and experimental remote CREATE admission journal. No observer, editable
-calendar mode, submission or remote acknowledgement is enabled. A separate explicit
+calendar mode, dispatch or remote acknowledgement is enabled. A separate explicit
 read-only preparation entry point can retain a protected, non-dispatchable payload.
 
 ## Identity and supported content
@@ -118,8 +118,9 @@ than silently replaced. An already explicitly empty list is compatible.
 
 Historical preparation v1 retains its `EXPLICIT_EMPTY_REQUIRED` obligation and
 original protected payload. A v2 adapter cannot reuse or replace it automatically;
-it remains retained and unqualified. The journal schema is still v2. This format
-change is distinct from a database migration and requires future explicit resolution.
+it remains retained and unqualified. These preparation columns were introduced in
+journal schema v2 and are preserved by schema v3. This adapter format change is
+distinct from a database migration and requires future explicit resolution.
 
 Shared iCalendar text without `VALARM` does not disable calendar-default reminders.
 The new fragment prepares the override but does not claim that a server accepted
@@ -132,3 +133,46 @@ authenticated readback must have `Notifications` present, non-null and a genuine
 empty JSON array in addition to signature, UID and content checks. Empty mapped
 Android reminders alone are insufficient: defaults may be empty and personal
 EMAIL notifications are intentionally absent from that Android model.
+
+## Separate captured submission staging
+
+`ImportCoordinator.stageLocalCreateSubmission` explicitly links a captured
+intention to a separately prepared opaque submission. It performs no dispatch,
+remote acknowledgement, import association or Provider write. No observer,
+worker or UI calls it automatically. It returns only a closed qualification result.
+The adapter's local `knownEmptySubmissionFormat` declaration is required; Proton
+declares submission v2. Another adapter may declare its own compatible format
+without introducing protocol types into the owner or captured domain models.
+
+A canonical attempt UUID is distinct from the captured mutation and local event
+identities. The draft uses that new correlation with the exact captured content
+and original second-precision timestamp. The local journal reserves this link
+before calling `prepareSubmission`, using a separate table in schema v3. The link
+is unique per captured identity and per scoped attempt; aliases with other
+captured identities are refused. The additive migrations from v1 and v2 preserve
+raw captured content and any historical preparation without inventing submission
+work. Protected local preparations v1/v2 are never opened, promoted or converted.
+
+Only the inserting invocation receives a volatile ticket bound to that SQLite
+helper and reservation. It is consumed once before payload retention, including
+when a transaction fails or is cancelled. The first opaque payload is immutable
+and remains distinct from `CreateAttemptRecord`. A reopened reservation without
+payload returns `UNRESOLVED`; it never yields another ticket, calls the adapter
+again or adopts a new attempt identity. Resolution of such gaps is future work.
+A completed payload can be reused without new context reads or crypto through
+the preparation port, after qualification of current local session and evidence.
+
+Both fresh staging and reuse require the exact capture, current account/session,
+permissions, available enabled selection, compatible import checkpoint and stable
+declared submission format. Unique marker inspection must still match the frozen
+content. These gates are rechecked after preparation and Provider inspection
+before retaining or returning work. Changed, missing, deleted, ambiguous or
+unsupported Provider data leaves historical work retained and unqualified. The
+owner serializes this operation with import and account lifecycle operations.
+Provider observation, import state and the local journal are separate operations;
+this does not establish atomicity against another process or an external editor.
+
+This staging path does not insert anything into the dispatch journal or qualify
+an existing admission. Final dispatch gates, durable pause policy, transfer to
+one-shot UNKNOWN admission and reconciliation with the original local row must
+be implemented before captured creations can upload or writable mode is enabled.

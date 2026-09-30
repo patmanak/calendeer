@@ -258,6 +258,16 @@ and exact parsed content. Native timed/all-day, altered-signature, foreign-autho
 key-refusal and binary-import regressions passed. This establishes the retained
 timed service journey, not all-day service behavior, UID idempotency, real response
 loss or a system calendar editing UI.
+Captured simple creations now have a separate explicit submission-staging entry
+point. Local journal v3 immutably reserves a distinct outgoing identity against
+the exact captured snapshot before read-only preparation. Only the reserving
+invocation can retain the separately protected payload. Reopened gaps are unresolved
+and never prepare again; completed work requires current account, selection,
+checkpoint, format and unique Provider marker/content qualification before reuse.
+Historical local preparations remain unchanged and are never converted. This path
+does not admit dispatch or acknowledge the original Android row. SQLite migration,
+owner gates and Provider qualification passed isolated physical-device fixtures; final
+captured dispatch admission and duplicate-free association remain separate work.
 The application still exposes no writable mirror or event editor. General outgoing
 queue/resolution, automatic Provider capture and conditional Proton UPDATE/DELETE
 guarantees remain unqualified. See

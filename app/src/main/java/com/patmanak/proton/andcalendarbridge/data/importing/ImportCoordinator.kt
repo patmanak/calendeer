@@ -27,6 +27,7 @@ data class ImportUiState(val selections: List<ImportStore.Selection> = emptyList
 enum class CreateAssociationResult { INACTIVE, UNRESOLVED, WAITING_IMPORT, WAITING_PROVIDER, ASSOCIATED }
 enum class LocalEditCaptureResult { INACTIVE, UNQUALIFIED, RETAINED, CONFLICT, UNAVAILABLE }
 enum class LocalCreatePreparationResult { INACTIVE, UNQUALIFIED, RETAINED, UNSUPPORTED, UNAVAILABLE }
+enum class LocalCreateSubmissionResult { INACTIVE, UNQUALIFIED, RETAINED, UNRESOLVED, UNSUPPORTED, UNAVAILABLE }
 /** One process owner for foreground and durable worker triggers; no event content reaches UI. */
 class ImportCoordinator(
     private val context: Context,
@@ -477,6 +478,85 @@ class ImportCoordinator(
                   else -> LocalCreatePreparationResult.UNAVAILABLE
               }
           } catch (_: Exception) { LocalCreatePreparationResult.UNAVAILABLE }
+          finally {
+              store.admitTransaction = { false }
+              projection.admitOperation = { false }
+              journal.admitCapture = { false }
+          }
+    }
+
+    /** Explicit read-only staging only; no dispatch journal, upload or Provider acknowledgement. */
+    suspend fun stageLocalCreateSubmission(target: CalendarScope, localId: LocalEventId, id: MutationId,
+        attempt: MutationId, port: CalendarCreateSubmissionPort): LocalCreateSubmissionResult = mutex.withLock {
+        val journal = localCreates ?: return@withLock LocalCreateSubmissionResult.UNAVAILABLE
+        val expected = generation
+        val policy = createPolicyRevision.get()
+        if (!isCurrent(expected, target.account) || !hasCalendarPermissions()) return@withLock LocalCreateSubmissionResult.INACTIVE
+        val active = { authenticated && generation == expected && createPolicyRevision.get() == policy && hasCalendarPermissions() }
+        store.admitTransaction = { it == target && active() }
+        projection.admitOperation = active
+        journal.admitCapture = { it == target && active() }
+        try {
+            suspend fun admission(): LocalCreateSubmissionResult? {
+                if (!isCurrent(expected, target.account) || !active()) return LocalCreateSubmissionResult.INACTIVE
+                val selection = store.selections(target.account).singleOrNull { it.scope == target }
+                if (selection?.enabled != true || !selection.available) return LocalCreateSubmissionResult.INACTIVE
+                return null
+            }
+            admission()?.let { return@withLock it }
+            val importFormat = store.transaction(target) { checkpoint?.format }
+            if (importFormat != remote.format) return@withLock LocalCreateSubmissionResult.UNQUALIFIED
+            val intent = journal.readIntent(target, localId) ?: return@withLock LocalCreateSubmissionResult.UNQUALIFIED
+            val captured = intent.reservation
+            if (captured.scope != target || captured.localId != localId || captured.id != id ||
+                captured.format != importFormat || captured.markerProtocol != 1) return@withLock LocalCreateSubmissionResult.UNQUALIFIED
+            val submissionFormat = port.knownEmptySubmissionFormat ?: return@withLock LocalCreateSubmissionResult.UNSUPPORTED
+            val reservation = try { LocalCreateSubmissionReservation(intent, attempt, submissionFormat) }
+                catch (_: IllegalArgumentException) { return@withLock LocalCreateSubmissionResult.UNQUALIFIED }
+
+            suspend fun qualify(): LocalCreateSubmissionResult? {
+                admission()?.let { return it }
+                if (port.knownEmptySubmissionFormat != submissionFormat || remote.format != importFormat ||
+                    store.transaction(target) { checkpoint?.format } != importFormat) return LocalCreateSubmissionResult.UNQUALIFIED
+                val observed = projection.inspectStampedSimpleCreate(target, localId)
+                if (observed?.content != intent.content) return LocalCreateSubmissionResult.UNQUALIFIED
+                // Provider inspection and SQLite are separate. Recheck app state after every external await.
+                admission()?.let { return it }
+                if (port.knownEmptySubmissionFormat != submissionFormat || remote.format != importFormat ||
+                    store.transaction(target) { checkpoint?.format } != importFormat) return LocalCreateSubmissionResult.UNQUALIFIED
+                if (!active()) return LocalCreateSubmissionResult.INACTIVE
+                return null
+            }
+            qualify()?.let { return@withLock it }
+            val existing = journal.readSubmissionReservation(target, localId)
+            if (existing != null && existing != reservation) return@withLock LocalCreateSubmissionResult.UNQUALIFIED
+            if (existing != null) {
+                val retained = journal.readSubmission(target, localId)
+                qualify()?.let { return@withLock it }
+                return@withLock if (retained != null) LocalCreateSubmissionResult.RETAINED else LocalCreateSubmissionResult.UNRESOLVED
+            }
+            val permit = journal.reserveSubmission(reservation)
+            if (permit == null) {
+                // Another helper won. Never acquire its preparation right or regenerate a blob.
+                val retained = journal.readSubmission(target, localId)
+                qualify()?.let { return@withLock it }
+                return@withLock if (retained != null) LocalCreateSubmissionResult.RETAINED else LocalCreateSubmissionResult.UNRESOLVED
+            }
+            qualify()?.let { return@withLock it }
+            val prepared = port.prepareSubmission(reservation.draft)
+            if (prepared.scope != target || prepared.format != submissionFormat || prepared.protectedPayload.isBlank())
+                return@withLock LocalCreateSubmissionResult.UNQUALIFIED
+            qualify()?.let { return@withLock it }
+            journal.retainSubmission(permit, LocalCreateSubmission(reservation, prepared.protectedPayload))
+            LocalCreateSubmissionResult.RETAINED
+        } catch (cancelled: CancellationException) { throw cancelled }
+          catch (failure: CreatePreparationException) {
+              when (failure.reason) {
+                  CreatePreparationFailure.UNSUPPORTED -> LocalCreateSubmissionResult.UNSUPPORTED
+                  CreatePreparationFailure.AUTHENTICATION, CreatePreparationFailure.PERMISSION -> LocalCreateSubmissionResult.INACTIVE
+                  else -> LocalCreateSubmissionResult.UNAVAILABLE
+              }
+          } catch (_: Exception) { LocalCreateSubmissionResult.UNAVAILABLE }
           finally {
               store.admitTransaction = { false }
               projection.admitOperation = { false }

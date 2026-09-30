@@ -861,6 +861,44 @@ reminders. No second submission, event replacement or account change was used.
 This does not establish a successful immediate readback inside SUBMIT, which was
 the original failing journey, or power-loss/server-idempotency behavior.
 
+## Captured CREATE submission staging
+
+`LocalCreateSubmissionTest` verifies independent canonical attempt identity and
+the frozen captured draft. `LocalCreateSubmissionStoreDeviceTest` uses isolated
+SQLite databases and synthetic opaque payloads to check exact capture dependency,
+immutable reservation/payload, scoped uniqueness, competing helper admission,
+cross-helper ticket refusal, reopening, corruption refusal and additive v2 migration.
+Existing capture/preparation tests qualify direct v1 migration and preserve historical
+preparations. Cancellation fixtures distinguish rollback before commit from a
+committed reservation whose ticket delivery is cancelled, and a consumed ticket
+whose payload commit fails. None of these fixtures submits an event.
+
+`LocalCreateSubmissionCoordinatorDeviceTest` checks the exact frozen draft,
+historical preparation preservation, completed cache reuse and unresolved gaps
+without preparing again. Current account, permission, selection, checkpoint,
+marker/content and declared/returned format changes refuse staging. Fake submission
+and inspection methods fail if called. A physical failing owner reproduction precedes
+the wiring. These controlled ports are not evidence of Proton acceptance or encryption.
+
+`LocalCreateSubmissionIntegrationDeviceTest` opts in with `providerFixture=true`.
+It uses the real Calendar Provider and local journals with a controlled preparation
+port. Reopening must retain the same submission and original dirty/unacknowledged
+row. Concurrent content changes, duplicate marker tombstones, deleted rows, a new
+reminder child and an interrupted payload commit cannot qualify work or regenerate
+an attempt. Isolated databases, calendars and accounts are removed after each fixture;
+retained live Proton examples are separate and are not mutated by this suite.
+
+The scope is read-only preparation and same-process helper concurrency. Multiple
+Android processes, physical power loss, transfer to the dispatch journal, live
+captured upload and reconciliation with the original local row remain unqualified.
+The 42 staging store/owner/Provider cases and 80 related capture/preparation
+regressions passed on an authorized physical target. The cancelled ticket-delivery
+case retained the already committed reservation without returning a reusable
+preparation right. The Provider reminder case uses an actual reminder child;
+setting the derived `HAS_ALARM` flag alone was insufficient to construct that fixture.
+Host sync, Proton adapter and app tests and Android lint also passed. No new
+native crypto or live Proton creation is claimed by this staging qualification.
+
 ## Anonymous transport probe
 
 `ProtonConnectivityDeviceTest` is skipped unless instrumentation receives
