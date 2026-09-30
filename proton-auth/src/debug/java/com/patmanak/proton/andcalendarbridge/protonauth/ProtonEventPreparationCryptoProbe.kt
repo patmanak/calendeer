@@ -266,10 +266,48 @@ object ProtonEventPreparationCryptoProbe {
                     stage = "KNOWN_EMPTY_ROUND_TRIP"
                     val actual = decoder.decrypt(user, calendar, bootstrap, listOf(row)).single().content
                     check(actual.copy(description = actual.description.replace("\r\n", "\n")) == content)
+                    stage = "STRICT_READBACK"
+                    var readRow = row
+                    var readBootstrapCalls = 0
+                    var uidReads = 0
+                    val readback = ProtonCreatedEventReadback(CatalogSessionSource { session }, object : CreateReadbackRemote {
+                        override suspend fun byUid(actual: CatalogSession, actualCalendar: String, expectedUid: String, page: Int): List<JsonObject> {
+                            check(actual == session && actualCalendar == calendar && expectedUid == uid && page == 0)
+                            uidReads++; return listOf(row)
+                        }
+                        override suspend fun event(actual: CatalogSession, actualCalendar: String, id: String): JsonObject {
+                            check(actual == session && actualCalendar == calendar && id == row.string("ID")); return readRow
+                        }
+                    }, object : EventImportRemote {
+                        override suspend fun bootstrap(actual: CatalogSession, actualCalendar: String): JsonObject {
+                            check(actual == session && actualCalendar == calendar); readBootstrapCalls++; return bootstrap
+                        }
+                        override suspend fun page(session: CatalogSession, calendar: String, window: EventWindow): EncryptedEventPage =
+                            error("Readback must not scan event windows")
+                    }, decoder::decodeCreated)
+                    val strict = CreatedEventReadbackPolicy.KNOWN_EMPTY_V2
+                    val observed = readback.inspect(session, scope, uid, content, strict)?.content
+                        ?: error("Known-empty readback was not verified")
+                    check(observed.copy(description = observed.description.replace("\r\n", "\n")) == content)
+                    check(uidReads == 1 && readBootstrapCalls == 1)
+                    check(readback.inspect(session, scope, uid, content.copy(title = "Changed expectation"), strict) == null)
+                    val changedTime = when (time) {
+                        is EventTime.AllDay -> time.copy(start = time.start.plusDays(1), endExclusive = time.endExclusive.plusDays(1))
+                        is EventTime.Timed -> time.copy(start = time.start.plusSeconds(60), end = time.end.plusSeconds(60))
+                    }
+                    check(readback.inspect(session, scope, uid, content.copy(time = changedTime), strict) == null)
                     stage = "DEFAULT_NOTIFICATION_COUNTERPROOF"
                     val inherited = EventDetails(listOf(EventReminder(if (time is EventTime.AllDay) 1440 else 15)))
                     for (variant in listOf(JsonObject(row - "Notifications"), JsonObject(row + ("Notifications" to JsonNull)))) {
                         check(decoder.decrypt(user, calendar, bootstrap, listOf(variant)).single().content.details == inherited)
+                    }
+                    val emptyDefaults = JsonObject(bootstrap + ("CalendarSettings" to buildJsonObject {
+                        put("CalendarID", calendar); put("DefaultPartDayNotifications", JsonArray(emptyList()))
+                        put("DefaultFullDayNotifications", JsonArray(emptyList()))
+                    }))
+                    for (variant in listOf(JsonObject(row - "Notifications"), JsonObject(row + ("Notifications" to JsonNull)))) {
+                        check(decoder.decrypt(user, calendar, emptyDefaults, listOf(variant)).single().content.details == EventDetails())
+                        check(decoder.decodeCreated(session, calendar, emptyDefaults, variant, uid, strict) == null)
                     }
                     // EMAIL notifications are filtered from the Android display model. Decoded empty
                     // details alone therefore cannot prove an explicitly empty raw notification array.
@@ -277,11 +315,24 @@ object ProtonEventPreparationCryptoProbe {
                     val emailRow = JsonObject(row + ("Notifications" to emailOnly))
                     check((emailRow.getValue("Notifications") as JsonArray).isNotEmpty())
                     check(decoder.decrypt(user, calendar, bootstrap, listOf(emailRow)).single().content.details == EventDetails())
+                    stage = "STRICT_PERSONAL_REFUSAL"
+                    val invalidOverrides = listOf(JsonObject(row - "Notifications"), JsonObject(row + ("Notifications" to JsonNull)),
+                        emailRow, JsonObject(row + ("Notifications" to JsonPrimitive("[]"))),
+                        JsonObject(row + ("Notifications" to JsonArray(listOf(buildJsonObject { put("Type", 1); put("Trigger", "-PT15M") })))))
+                    val noKeyDecoder = ProtonEventDecryptor(crypto) { error("Invalid override must be refused before local keys") }
+                    val beforeBootstrap = readBootstrapCalls
+                    for (variant in invalidOverrides) {
+                        readRow = variant
+                        check(readback.inspect(session, scope, uid, content, strict) == null)
+                        check(noKeyDecoder.decodeCreated(session, calendar, buildJsonObject {}, variant, uid, strict) == null)
+                    }
+                    check(readBootstrapCalls == beforeBootstrap)
+                    readRow = row
                     stage = "SIGNED_UID_BINDING"
-                    check(decoder.decodeCreated(session, calendar, bootstrap, row, uid) != null)
+                    check(decoder.decodeCreated(session, calendar, bootstrap, row, uid, strict) != null)
                     val foreign = "foreign-known-empty@calendeer.invalid"
                     check(decoder.decodeCreated(session, calendar, bootstrap,
-                        JsonObject(row + ("UID" to JsonPrimitive(foreign))), foreign) == null)
+                        JsonObject(row + ("UID" to JsonPrimitive(foreign))), foreign, strict) == null)
                     for (partIndex in shared.indices) {
                         stage = if (partIndex == 0) "CLEAR_SIGNATURE" else "ENCRYPTED_SIGNATURE"
                         val parts = row.array("SharedEvents").map { it as JsonObject }.toMutableList()
@@ -290,6 +341,8 @@ object ProtonEventPreparationCryptoProbe {
                         val tampered = decoder.decodePage(user, calendar, bootstrap,
                             listOf(JsonObject(row + ("SharedEvents" to JsonArray(parts)))))
                         check(tampered.changes.isEmpty() && tampered.deferred.single().reason == DeferredEventReason.UNVERIFIED_CONTENT)
+                        readRow = JsonObject(row + ("SharedEvents" to JsonArray(parts)))
+                        check(readback.inspect(session, scope, uid, content, strict) == null)
                     }
                 }
                 stage = "READ_ONLY_CONTEXT"

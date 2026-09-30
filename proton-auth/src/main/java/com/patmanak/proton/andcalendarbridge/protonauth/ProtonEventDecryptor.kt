@@ -36,8 +36,8 @@ internal class ProtonEventDecryptor(private val crypto: CryptoContext, private v
         return result.changes
     }
     suspend fun decodeCreated(session: CatalogSession, calendar: String, bootstrap: JsonObject, row: JsonObject,
-        uid: String): RemoteChange.Upsert? {
-        if (row.string("UID") != uid || row.array("SharedEvents").map { (it as JsonObject).number("Type") }.sorted() != listOf(2L, 3L) ||
+        uid: String, policy: CreatedEventReadbackPolicy = CreatedEventReadbackPolicy.SHARED_ONLY_V1): RemoteChange.Upsert? {
+        if (!policy.accepts(row) || row.string("UID") != uid || row.array("SharedEvents").map { (it as JsonObject).number("Type") }.sorted() != listOf(2L, 3L) ||
             row.array("CalendarEvents").isNotEmpty() || row.array("AttendeesEvents").isNotEmpty()) return null
         return decodePage(session.userId, calendar, bootstrap, listOf(row), uid).changes.singleOrNull()
     }

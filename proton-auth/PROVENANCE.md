@@ -119,6 +119,18 @@ code is separate from physical execution and live acceptance. Future readback
 must qualify the raw empty array: mapped Android reminders omit EMAIL notifications
 and cannot alone prove a personal override.
 
+`ProtonCreatedEventReadback.kt` factors the existing bounded UID/individual GET and
+shared-content verification into a read-only helper. Its internal versioned profiles
+preserve legacy shared-only inspection and separately require explicit-empty personal
+data without discarding known-empty details during comparison. The existing submission
+codec and admission formats are unchanged; local preparations remain non-dispatchable.
+`ProtonCreatedEventResponse.kt` reuses the project's bounded UTF-8 reader and unique-key
+scanner to reject ambiguous GET responses before JSON normalization. These are local
+verification restrictions, with no additional upstream copy or dependency. Shared
+signatures cover their iCalendar parts, not the `Notifications` sibling. Native
+synthetic readback and a retained live legacy read qualify different paths; acceptance
+and readback of a new explicitly empty override by the service remain unqualified.
+
 ## Authenticated CREATE context and response preparation
 
 `ProtonCreateContext.kt` adapts member permission/key selection and signed

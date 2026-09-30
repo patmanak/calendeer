@@ -39,7 +39,7 @@ internal object ProtonCreateResponseParser {
 /** Reject duplicate names (including escaped equivalents) before Json can silently keep the last.
  * This bounded preflight checks containers and names; Json remains responsible for value syntax.
  */
-private class UniqueJsonKeys(private val source: String) {
+internal class UniqueJsonKeys(private val source: String) {
     private var offset = 0
     fun validate(): Boolean = try { value(0); space(); offset == source.length } catch (_: Exception) { false }
     private fun space() { while (offset < source.length && source[offset] in " \t\r\n") offset++ }

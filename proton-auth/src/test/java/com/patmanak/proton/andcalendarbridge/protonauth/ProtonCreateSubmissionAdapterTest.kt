@@ -248,7 +248,8 @@ internal class CreateSubmissionFixture(content: EventContent? = null) {
     }, object : EventImportRemote {
         override suspend fun page(session: CatalogSession, calendar: String, window: EventWindow): EncryptedEventPage = error("No window fetch")
         override suspend fun bootstrap(session: CatalogSession, calendar: String): JsonObject { step("bootstrap"); return buildJsonObject {} }
-    }, CreateEventVerifier { _, _, _, _, expectedUid -> assertEquals(uid, expectedUid); step("verify"); verified })
+    }, CreateEventVerifier { _, _, _, _, expectedUid, policy ->
+        assertEquals(uid, expectedUid); assertEquals(CreatedEventReadbackPolicy.SHARED_ONLY_V1, policy); step("verify"); verified })
 }
 
 internal class MemoryCreateJournal(initial: CreateAttemptRecord, private val step: (String) -> Unit) : CreateAttemptJournal {

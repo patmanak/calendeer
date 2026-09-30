@@ -220,6 +220,21 @@ gates and Provider preparation/cache fixtures have passed. The native fixture al
 passed timed/all-day round-trips, reopened protected storage, signed UID/content
 checks, altered-signature refusal and explicit-empty versus inherited defaults.
 No request was submitted; live service notification checks remain unqualified.
+Created-event inspection now shares a read-only bounded UID lookup, individual
+event read, key bootstrap and content comparison. The existing submission v1 path
+always uses its shared-content-only profile. A separate internal known-empty v2
+profile requires an actual empty `Notifications` array before key access and
+preserves known-empty details in the comparison. Missing/null, malformed or non-empty
+overrides cannot qualify even when inherited defaults or filtered email notifications
+produce no Android reminders. GET readback bodies reject duplicate JSON names,
+including escaped equivalents, before parsing; the general import parser is unchanged.
+Focused JVM tests and synthetic native timed/all-day fixtures passed, including
+signature/UID refusal and changed content/dates. A retained live legacy event also
+passed the strict GET parser and existing inspection path without changing its
+admission record or protected response; its Android association remains usable.
+This does not qualify known-empty v2 service readback. Shared signatures do not
+sign the personal notification field. No new dispatch format, journal migration,
+app entrypoint or captured-creation upload was introduced.
 The application still exposes no writable mirror or event editor. General outgoing
 queue/resolution, automatic Provider capture and conditional Proton UPDATE/DELETE
 guarantees remain unqualified. See

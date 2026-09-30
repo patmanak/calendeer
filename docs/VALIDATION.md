@@ -777,6 +777,44 @@ replacement. A future service journey must qualify an authenticated raw empty
 notification array, signatures, UID and content. No test here qualifies editable
 mode, automatic observation or upload of a captured creation.
 
+## Created-event readback profiles
+
+`ProtonCreatedEventReadbackTest` exercises the common read-only UID lookup,
+individual GET, bootstrap and verifier path with controlled ports. Shared-only v1
+preserves the previous normalization of personal details. Known-empty v2 accepts
+only the simple known-empty expectation, keeps those details in final comparison
+and requires a raw empty `Notifications` array on the individually read event.
+Absent/null, wrong types, non-empty DISPLAY/EMAIL overrides, mismatched content,
+dates or identity, ambiguous/foreign/oversized UID results and session changes
+remain unresolved. CRLF and UTC aliases retain their existing semantics. Cancellation
+propagates; other read/verification failures remain unresolved without admission.
+No journal, preparation opener or send method is available to this helper.
+
+`ProtonCreatedEventResponseTest` tests the GET-specific bounded UTF-8 reader and
+reused unique-key scanner. Duplicate names, including escaped equivalents and
+nested unknown fields, fail before JSON can overwrite a prior value. Truncated,
+non-successful, oversized, invalid UTF-8 and excessively nested bodies are refused.
+Both UID and individual GET use this parser; general import parsing is separate.
+
+The known-empty native probe additionally calls the same readback helper with the
+real decoder and controlled reads. It refuses absent/null overrides even with
+empty calendar defaults, and EMAIL-only overrides despite empty mapped reminders.
+It checks refusal before bootstrap and, directly through the decoder, before local
+keys. Timed/all-day content/date comparisons and both signature/UID protections
+have passed on an authorized physical target. Fabricated responses do not qualify
+the service's handling of personal notification overrides.
+
+`CalendarCreateReadbackLiveDeviceTest` requires `-e calendarCreateReadback true`
+and the existing retained fixture's `createFixtureToken` and `createAccountHash`.
+It refuses an absent fixture, unavailable scope or non-UNKNOWN record, calls only
+`inspect`, and verifies the exact record/evidence after reopening and the existing
+association's event identity. It never prepares, submits, admits or creates an event.
+This passed against a retained legacy live event, as did the existing Android
+association regression. It qualifies authenticated GET parsing and shared-only v1
+readback, not known-empty v2 service behavior or stable selection across the read.
+The personal array is an authenticated observation separate from shared signatures.
+Submission v1 still rejects local preparations v1/v2 before opening or admission.
+
 ## Anonymous transport probe
 
 `ProtonConnectivityDeviceTest` is skipped unless instrumentation receives
