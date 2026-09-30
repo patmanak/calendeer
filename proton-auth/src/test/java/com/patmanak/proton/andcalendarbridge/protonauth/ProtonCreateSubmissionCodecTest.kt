@@ -36,7 +36,7 @@ class ProtonCreateSubmissionCodecTest {
     @Test fun oldFragmentFormatCannotBeInterpretedAsDispatchableSubmission() {
         val f = CreateSubmissionFixture()
         refused(CreatePreparationFailure.UNSUPPORTED) { ProtonCreateSubmissionCodec.open(f.record.copy(format = CREATE_PREPARATION_FORMAT), f.protector) }
-        refused(CreatePreparationFailure.UNSUPPORTED) { ProtonCreateSubmissionCodec.open(f.record.copy(format = CREATE_SUBMISSION_FORMAT.copy(version = 2)), f.protector) }
+        refused(CreatePreparationFailure.UNSUPPORTED) { ProtonCreateSubmissionCodec.open(f.record.copy(format = CREATE_SUBMISSION_FORMAT.copy(version = 3)), f.protector) }
         for (format in listOf(LOCAL_CREATE_PREPARATION_FORMAT.copy(version = 1), LOCAL_CREATE_PREPARATION_FORMAT)) {
             refused(CreatePreparationFailure.UNSUPPORTED) { ProtonCreateSubmissionCodec.open(f.record.copy(format = format),
                 object : EventPayloadProtector {

@@ -135,6 +135,13 @@ internal class ProtonEventDecryptor(private val crypto: CryptoContext, private v
         // External author pinning is intentionally unsupported until its contact/key trust path is qualified.
         val address = addresses.firstOrNull { it.email.equals(part.string("Author"), ignoreCase = true) } ?: return false
         val signature = part.optionalString("Signature") ?: return false
-        return address.useKeys(crypto) { publicKeyRing.keys.any { it.verifyData(crypto, plain.toByteArray(Charsets.UTF_8), signature) } }
+        return address.useKeys(crypto) {
+            publicKeyRing.keys.any {
+                // Core signText canonicalizes text (including line-end whitespace). Keep binary
+                // signatures compatible, then use Proton's matching text verifier on the same key.
+                it.verifyData(crypto, plain.toByteArray(Charsets.UTF_8), signature) ||
+                    it.verifyText(crypto, plain, signature)
+            }
+        }
     }
 }

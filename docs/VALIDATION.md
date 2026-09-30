@@ -731,7 +731,7 @@ v2 format with a sealed explicit-empty notification policy, `Notifications: []`
 inside the event and no submission request. They refuse unexpected null, malformed,
 DISPLAY or EMAIL overrides from the preparer instead of silently replacing data.
 Unknown-profile preparation retains its original format. Submission rejects
-non-null details before session/context/crypto reads, and both decoding and
+non-empty details before session/context/crypto reads, and both decoding and
 dispatch reject local preparation v1 and v2 before opening the payload or admitting
 an attempt. These tests use controlled crypto/context
 ports; they do not qualify native encryption or service reminder behavior.
@@ -770,11 +770,11 @@ matching source-level constructor/ABI contracts. Keep the original frozen artifa
 and build corrected fixtures against their corresponding application revision.
 An ABI crash or an inactive test hook is not evidence of a production regression.
 
-The preparation is historical and paused. Cached replay does not requalify server
+The local preparation is historical and paused. Cached replay does not requalify server
 keys or rights. Provider inspection and journal commit remain separate. Old v1
 blobs keep their unresolved obligation and are refused by a v2 adapter without
-replacement. A future service journey must qualify an authenticated raw empty
-notification array, signatures, UID and content. No test here qualifies editable
+replacement. The separate submission service journey must qualify an authenticated
+raw empty notification array, signatures, UID and content. These preparation tests do not qualify editable
 mode, automatic observation or upload of a captured creation.
 
 ## Created-event readback profiles
@@ -813,7 +813,53 @@ This passed against a retained legacy live event, as did the existing Android
 association regression. It qualifies authenticated GET parsing and shared-only v1
 readback, not known-empty v2 service behavior or stable selection across the read.
 The personal array is an authenticated observation separate from shared signatures.
-Submission v1 still rejects local preparations v1/v2 before opening or admission.
+Both submission profiles reject local preparations v1/v2 before opening or admission.
+
+## Experimental explicit-empty CREATE submission
+
+`ProtonKnownEmptySubmissionTest` checks submission v2's protected format, explicit
+notification policy, complete frozen expectation and exact raw empty request array.
+It rejects inconsistent version/policy/expected/request data before preparation or
+claim. Fresh format or draft drift refuses admission. Existing UNKNOWN work only
+inspects; absent/null/non-empty readback, response loss and cancellation never
+permit another PUT. Legacy submission tests retain the v1 interpretation. These
+controlled ports establish orchestration and refusal behavior, not live acceptance.
+
+`CreateAttemptStoreDeviceTest` treats submission v2 as opaque, retaining its exact
+payload and response evidence through UNKNOWN admission and reopening without a
+schema change or readmission. The separate native submission fixture exercises
+production preparation, codec, reopened Keystore, Core signatures/decryption and
+strict UNKNOWN inspection with synthetic context/response data. It has no usable
+prepare, admission or send path during inspection.
+Its additional folded-whitespace case constructs an actual physical iCalendar
+line ending in a space. It reproduces rejection by byte-only verification of
+Core text signatures, then requires exact timed/all-day content, strict empty
+readback and refusal of both altered signatures through the production decoder.
+`ProtonEventCryptoDeviceTest` remains the native binary-signature/import regression.
+
+`CalendarKnownEmptySubmissionLiveDeviceTest` requires explicit opt-in
+`calendarKnownEmptyCreate=true`, an authorized account hash, a fresh fixture token
+and frozen creation/start timestamps. PREPARE freezes scope and retains an unadmitted protected
+dispatch record using read-only context preparation; SUBMIT marks the request
+before entering the one-shot port; subsequent journeys use INSPECT only. Missing
+journal or changed identity blocks reconstruction. A dedicated journal and
+preferences keep the earlier legacy fixture separate. Success requires authenticated
+raw empty notifications, verified shared signatures/UID/content, exact UNKNOWN work
+after reopening and refusal of readmission. Ordinary import must produce the unique
+owned Provider row for the verified remote ID and revision, with matching time/title,
+`HAS_ALARM=0` and no reminder rows; ownership is rechecked after child queries.
+The recognizable synthetic event is retained. No captured local intention, editable
+UI or automatic outgoing queue is involved. All-day service behavior, real response
+loss and notification delivery by another application require separate qualification.
+The native preparation/readback cases, binary-import regression and journal/lifecycle
+fixtures have passed on an authorized physical target. The retained legacy event
+still verifies. The new timed attempt initially remained unresolved because byte-only
+verification refused its text signature. After the reproduced decoder correction,
+INSPECT of that same UNKNOWN attempt passed strict authenticated readback, exact
+work/evidence reopening, readmission refusal and owned Android projection without
+reminders. No second submission, event replacement or account change was used.
+This does not establish a successful immediate readback inside SUBMIT, which was
+the original failing journey, or power-loss/server-idempotency behavior.
 
 ## Anonymous transport probe
 

@@ -142,7 +142,10 @@ object ProtonEventPreparationCryptoProbe {
     /** Real preparation adapter and protection, with controlled context reads and fabricated server shape.
      * Explicit raw notification emptiness is checked independently of the decoded display model.
      */
-    suspend fun runKnownEmpty(): String = withContext(Dispatchers.IO) {
+    suspend fun runKnownEmpty(): String = runKnownEmpty(submission = false)
+    suspend fun runKnownEmptySubmission(): String = runKnownEmpty(submission = true)
+    suspend fun runKnownEmptySubmissionWithFoldedWhitespace(): String = runKnownEmpty(submission = true, foldedWhitespace = true)
+    private suspend fun runKnownEmpty(submission: Boolean, foldedWhitespace: Boolean = false): String = withContext(Dispatchers.IO) {
         var stage = "GENERATE"
         try {
             val crypto = AndroidCryptoContext()
@@ -220,9 +223,9 @@ object ProtonEventPreparationCryptoProbe {
                     prepare = CreateContextPreparation { actualScope, actualMetadata, actualBootstrap, local, uid, draft ->
                         resolver.prepare(actualScope, actualMetadata, actualBootstrap, local, uid, draft)
                     },
-                    protector = protector)
-                val expectedFormat = AdapterFormat("proton-calendar-local-create-preparation", 2)
-                check(adapter.localCreateFormat == expectedFormat)
+                    protector = protector, submission = submission)
+                val expectedFormat = if (submission) KNOWN_EMPTY_SUBMISSION_FORMAT else LOCAL_CREATE_PREPARATION_FORMAT
+                check(adapter.localCreateFormat == if (submission) null else expectedFormat)
                 val decoder = ProtonEventDecryptor(crypto) { listOf(address) }
                 val stamp = Instant.parse("2026-09-29T10:00:00Z")
                 val times = listOf<EventTime>(EventTime.Timed(Instant.parse("2027-03-28T00:30:00Z"),
@@ -230,7 +233,13 @@ object ProtonEventPreparationCryptoProbe {
                     EventTime.AllDay(LocalDate.parse("2027-03-28"), LocalDate.parse("2027-03-30")))
                 for ((index, time) in times.withIndex()) {
                     val content = EventContent("Known-empty creation; café, \\" + "é".repeat(100), time,
-                        "Description\nLigne suivante", "Lieu de test", details = EventDetails())
+                        if (foldedWhitespace) "x".repeat(62) + " " + "y".repeat(30) else "Description\nLigne suivante",
+                        "Lieu de test", details = EventDetails())
+                    if (foldedWhitespace) {
+                        stage = "FOLDED_WHITESPACE_FIXTURE"
+                        check(ProtonSimpleEventSerializer.serialize("synthetic@calendeer.invalid", stamp, content)
+                            .encryptedShared.split("\r\n").any { it.endsWith(" ") })
+                    }
                     val draft = CalendarCreateDraft(scope, MutationId("synthetic-known-empty-$index"), stamp, content)
                     stage = "PREPARE"
                     val prepared = adapter.prepareCreate(draft)
@@ -239,20 +248,38 @@ object ProtonEventPreparationCryptoProbe {
                     stage = "KEYSTORE_REOPEN"
                     val reopened = ProtonEventPayloadProtector(AndroidCryptoContext().keyStoreCrypto)
                     val envelope = Json.parseToJsonElement(reopened.open(prepared.protectedPayload)) as JsonObject
-                    check(envelope.number("version") == 2L && envelope.getValue("knownEmptyDetails").jsonPrimitive.boolean)
+                    check(envelope.number("version") == 2L)
                     check(envelope.string("notificationPolicy") == "EXPLICIT_EMPTY")
-                    check(listOf("request", "context", "expected").none { it in envelope })
+                    if (!submission) {
+                        check(envelope.getValue("knownEmptyDetails").jsonPrimitive.boolean)
+                        check(listOf("request", "context", "expected").none { it in envelope })
+                    }
                     check(envelope.string("account") == scope.account.value && envelope.string("calendar") == calendar)
                     check(envelope.number("generation") == scope.generation && envelope.string("correlation") == draft.correlation.value)
                     val uid = envelope.string("uid")
                     check(uid == adapter.correlationUid(draft) && envelope.string("timestamp") == stamp.toString())
-                    val event = envelope.obj("event")
+                    val event = if (submission) {
+                        val decoded = ProtonCreateSubmissionCodec.open(CreateAttemptRecord(draft.correlation, scope,
+                            prepared.format, prepared.protectedPayload), reopened)
+                        check(decoded.draft == draft && decoded.policy == CreatedEventReadbackPolicy.KNOWN_EMPTY_V2)
+                        check(decoded.uid == uid && decoded.context == ProtonCreateSubmissionCodec.context(
+                            ProtonCreateContextPolicy.select(scope, metadata, bootstrap, listOf(address))))
+                        decoded.request.array("Events").single().jsonObject.obj("Event")
+                    } else envelope.obj("event")
                     stage = "EXPLICIT_NOTIFICATION_OVERRIDE"
                     val notifications = event.getValue("Notifications")
                     check(notifications is JsonArray && notifications.isEmpty())
                     val shared = event.array("SharedEventContent").map { it as JsonObject }
                     check(shared.map { it.number("Type") } == listOf(2L, 3L))
                     check(shared.all { it.string("Author").isEmpty() })
+                    if (foldedWhitespace) {
+                        stage = "TEXT_SIGNATURE_PROFILE"
+                        val original = ProtonSimpleEventSerializer.serialize(uid, stamp, content).encryptedShared
+                        val signature = shared.single { it.number("Type") == 3L }.string("Signature")
+                        val public = addressKey.publicKey(crypto)
+                        check(!public.verifyData(crypto, original.toByteArray(Charsets.UTF_8), signature))
+                        check(public.verifyText(crypto, original, signature))
+                    }
                     // Author and response field normalization are synthetic. Notifications are copied
                     // from the reopened protected preparation, never manufactured for the decoder.
                     val row = buildJsonObject {
@@ -266,11 +293,28 @@ object ProtonEventPreparationCryptoProbe {
                     stage = "KNOWN_EMPTY_ROUND_TRIP"
                     val actual = decoder.decrypt(user, calendar, bootstrap, listOf(row)).single().content
                     check(actual.copy(description = actual.description.replace("\r\n", "\n")) == content)
+                    if (foldedWhitespace) {
+                        stage = "TEXT_SIGNATURE_TRUST_GATES"
+                        for (deniedKey in listOf(addressKey.copy(canVerify = false), addressKey.copy(isActive = false))) {
+                            val deniedAddress = address.copy(keys = listOf(address.keys.single().copy(privateKey = deniedKey)))
+                            val denied = try {
+                                ProtonEventDecryptor(crypto) { listOf(deniedAddress) }
+                                    .decodeCreated(session, calendar, bootstrap, row, uid, CreatedEventReadbackPolicy.KNOWN_EMPTY_V2)
+                            } catch (_: RemoteImportException) { null }
+                            check(denied == null)
+                        }
+                        val foreignAuthor = JsonObject(row + ("SharedEvents" to JsonArray(row.array("SharedEvents").map {
+                            JsonObject(it.jsonObject + ("Author" to JsonPrimitive("foreign@example.invalid")))
+                        })))
+                        check(decoder.decodeCreated(session, calendar, bootstrap, foreignAuthor, uid, CreatedEventReadbackPolicy.KNOWN_EMPTY_V2) == null)
+                    }
                     stage = "STRICT_READBACK"
                     var readRow = row
                     var readBootstrapCalls = 0
                     var uidReads = 0
-                    val readback = ProtonCreatedEventReadback(CatalogSessionSource { session }, object : CreateReadbackRemote {
+                    val readRemote = object : CreateSubmissionRemote {
+                        override suspend fun send(session: CatalogSession, calendar: String, request: JsonObject): String =
+                            error("Native UNKNOWN readback must never dispatch")
                         override suspend fun byUid(actual: CatalogSession, actualCalendar: String, expectedUid: String, page: Int): List<JsonObject> {
                             check(actual == session && actualCalendar == calendar && expectedUid == uid && page == 0)
                             uidReads++; return listOf(row)
@@ -278,18 +322,30 @@ object ProtonEventPreparationCryptoProbe {
                         override suspend fun event(actual: CatalogSession, actualCalendar: String, id: String): JsonObject {
                             check(actual == session && actualCalendar == calendar && id == row.string("ID")); return readRow
                         }
-                    }, object : EventImportRemote {
+                    }
+                    val readEvents = object : EventImportRemote {
                         override suspend fun bootstrap(actual: CatalogSession, actualCalendar: String): JsonObject {
                             check(actual == session && actualCalendar == calendar); readBootstrapCalls++; return bootstrap
                         }
                         override suspend fun page(session: CatalogSession, calendar: String, window: EventWindow): EncryptedEventPage =
                             error("Readback must not scan event windows")
-                    }, decoder::decodeCreated)
+                    }
+                    val readback = ProtonCreatedEventReadback(CatalogSessionSource { session }, readRemote, readEvents, decoder::decodeCreated)
                     val strict = CreatedEventReadbackPolicy.KNOWN_EMPTY_V2
                     val observed = readback.inspect(session, scope, uid, content, strict)?.content
                         ?: error("Known-empty readback was not verified")
                     check(observed.copy(description = observed.description.replace("\r\n", "\n")) == content)
                     check(uidReads == 1 && readBootstrapCalls == 1)
+                    if (submission) {
+                        val submissions = ProtonCreateSubmissionAdapter(CalendarCreatePreparationPort { error("No preparation during UNKNOWN inspection") },
+                            reopened, CatalogSessionSource { session }, readRemote, readEvents, decoder::decodeCreated)
+                        val unknown = CreateAttemptRecord(draft.correlation, scope, prepared.format, prepared.protectedPayload,
+                            state = CreateAttemptState.OUTCOME_UNKNOWN)
+                        check(submissions.inspect(unknown) is CreateSubmissionObservation.Verified)
+                        readRow = JsonObject(row - "Notifications")
+                        check(submissions.inspect(unknown) == CreateSubmissionObservation.Unknown)
+                        readRow = row
+                    }
                     check(readback.inspect(session, scope, uid, content.copy(title = "Changed expectation"), strict) == null)
                     val changedTime = when (time) {
                         is EventTime.AllDay -> time.copy(start = time.start.plusDays(1), endExclusive = time.endExclusive.plusDays(1))

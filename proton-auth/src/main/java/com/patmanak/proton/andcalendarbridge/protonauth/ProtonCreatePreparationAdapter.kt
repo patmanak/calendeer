@@ -27,8 +27,8 @@ internal class ProtonCreatePreparationAdapter(private val sessions: CatalogSessi
     private val protector: EventPayloadProtector, private val submission: Boolean = false) : CalendarCreatePreparationPort {
     override val localCreateFormat: AdapterFormat? get() = if (submission) null else LOCAL_CREATE_PREPARATION_FORMAT
     override suspend fun prepareCreate(draft: CalendarCreateDraft): PreparedCalendarCreate = try {
-        // Shared text cannot express personal notification overrides. Do not widen submission v1.
-        if (draft.content.details != null && (submission || draft.content.details != EventDetails()))
+        // Only the dedicated submission v2 may carry the supported explicit-empty personal profile.
+        if (draft.content.details != null && draft.content.details != EventDetails())
             createUnavailable(CreatePreparationFailure.UNSUPPORTED)
         val initial = localStorage { sessions.current() }?.takeIf { it.userId.id == draft.scope.account.value }
             ?: createUnavailable(CreatePreparationFailure.AUTHENTICATION)
@@ -53,13 +53,15 @@ internal class ProtonCreatePreparationAdapter(private val sessions: CatalogSessi
                 createUnavailable(CreatePreparationFailure.CONTEXT)
             JsonObject(prepared.event + ("Notifications" to JsonArray(emptyList())))
         } else prepared.event
-        val format = if (submission) CREATE_SUBMISSION_FORMAT else if (knownEmpty) LOCAL_CREATE_PREPARATION_FORMAT else CREATE_PREPARATION_FORMAT
+        val format = if (submission) {
+            if (knownEmpty) KNOWN_EMPTY_SUBMISSION_FORMAT else CREATE_SUBMISSION_FORMAT
+        } else if (knownEmpty) LOCAL_CREATE_PREPARATION_FORMAT else CREATE_PREPARATION_FORMAT
         val envelope = buildJsonObject {
             put("version", format.version); put("account", draft.scope.account.value)
             put("calendar", draft.scope.calendar.value); put("generation", draft.scope.generation)
             put("correlation", draft.correlation.value); put("uid", uid); put("timestamp", draft.timestamp.toString())
             if (knownEmpty) {
-                put("knownEmptyDetails", true)
+                if (!submission) put("knownEmptyDetails", true)
                 put("notificationPolicy", "EXPLICIT_EMPTY")
             }
             if (selection == null) put("event", event) else {

@@ -19,8 +19,8 @@ the GPL v3 Calendar request/response protocol from Android Calendar
   establish scoped UID queries with page zero and page size 100.
 
 Local restrictions freeze a separate versioned, scoped, protected submission
-receipt. Fresh authenticated preparation must retain its UID, member, rights and
-key fingerprints before durable UNKNOWN admission. The one-shot permit is created
+receipt. Fresh authenticated preparation must retain its complete draft, format,
+UID, member, rights and key fingerprints before durable UNKNOWN admission. The one-shot permit is created
 once outside Core's callback. The bounded raw response or a transport-incomplete
 marker is Keystore-sealed and retained without acknowledging or reopening the attempt.
 Cancellation or process loss before evidence storage can leave no response evidence;
@@ -28,6 +28,10 @@ the prior UNKNOWN admission still survives and inspection remains read-only.
 Inspection never writes. It refuses ambiguous/foreign UID results and incomplete
 pagination (at most 100 pages), individually reads the unique event, verifies both
 shared-part signatures and each signed UID, and compares supported content and time.
+Submission v1 keeps the legacy unknown-personal-data interpretation. Submission
+v2 additionally binds `EXPLICIT_EMPTY`, known-empty expected details and a raw
+`Notifications: []` event override. The stored format selects the strict readback
+profile; there is no fallback or conversion from either local preparation format.
 UTC aliases and logical newlines are normalized. A missing event, service error,
 lost response or failed verification remains unknown and never authorizes resending.
 
@@ -112,8 +116,9 @@ The separate local preparation v2 seals `knownEmptyDetails=true`, policy
 crypto part or extra personal-update request is introduced. Unexpected preexisting
 personal data is refused. Historical v1 blobs retain `EXPLICIT_EMPTY_REQUIRED`;
 they are not migrated or overwritten. Neither format contains a submission request
-or can be opened/dispatched by the existing submission codec. Submission preparation
-still rejects every non-null details profile before session/context reads.
+or can be opened/dispatched by the submission codec. Submission preparation
+rejects non-empty details profiles before session/context reads; exactly empty
+details use the separate experimental submission v2 format.
 JVM format tests establish these restrictions. Synthetic Core/Keystore fixture
 code is separate from physical execution and live acceptance. Future readback
 must qualify the raw empty array: mapped Android reminders omit EMAIL notifications
@@ -123,13 +128,38 @@ and cannot alone prove a personal override.
 shared-content verification into a read-only helper. Its internal versioned profiles
 preserve legacy shared-only inspection and separately require explicit-empty personal
 data without discarding known-empty details during comparison. The existing submission
-codec and admission formats are unchanged; local preparations remain non-dispatchable.
+codec selects the profile from its submission format; local preparations remain non-dispatchable.
 `ProtonCreatedEventResponse.kt` reuses the project's bounded UTF-8 reader and unique-key
 scanner to reject ambiguous GET responses before JSON normalization. These are local
 verification restrictions, with no additional upstream copy or dependency. Shared
 signatures cover their iCalendar parts, not the `Notifications` sibling. Native
-synthetic readback and a retained live legacy read qualify different paths; acceptance
-and readback of a new explicitly empty override by the service remain unqualified.
+synthetic readback and a retained live legacy read qualify different paths. A separate
+retained timed submission v2 now passes authenticated raw-empty readback and owned
+Android projection after the text-verification correction below, without resubmission.
+This does not qualify all-day service behavior or immediate readback inside the
+initial submission call.
+
+### Text-signature verification compatibility
+
+The published Core 36.8.0 source artifacts
+([key-domain](https://repo.maven.apache.org/maven2/me/proton/core/key-domain/36.8.0/key-domain-36.8.0-sources.jar),
+[crypto-common](https://repo.maven.apache.org/maven2/me/proton/core/crypto-common/36.8.0/crypto-common-36.8.0-sources.jar)
+and [crypto-android](https://repo.maven.apache.org/maven2/me/proton/core/crypto-android/36.8.0/crypto-android-36.8.0-sources.jar))
+define `signText` and `verifyText` with `trimTrailingSpaces=true`, including spaces
+and tabs at each physical line end. `GOpenPGPCrypto` applies that text normalization;
+`verifyData` handles the supplied bytes. A folded iCalendar property can end a line
+with whitespace while retaining it in the encrypted plaintext. Binary verification
+alone therefore refuses some text produced by our existing Core `signText` call.
+
+The decoder retains binary verification compatibility and uses Core's text
+verification on the same locally trusted author key through the official
+`PublicKey` wrappers, retaining active/verifying-key and verification-time checks.
+It does not trim the parsed
+event, accept unsigned parts, change author resolution or relax signed UID/content
+comparison. A native synthetic fixture reproduces the original refusal with a
+whitespace-ending fold and exercises timed/all-day recovery and altered-signature
+rejection. This is a local compatibility change to the pinned Calendar adaptation,
+not a copied cryptographic primitive or a dependency upgrade.
 
 ## Authenticated CREATE context and response preparation
 

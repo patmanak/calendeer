@@ -123,10 +123,11 @@ change is distinct from a database migration and requires future explicit resolu
 
 Shared iCalendar text without `VALARM` does not disable calendar-default reminders.
 The new fragment prepares the override but does not claim that a server accepted
-it. The envelope contains no submission request. Submission v1 refuses both local
-preparation versions before opening them, and its preparation entry point still
-refuses any non-null details before session/network/crypto work. Legacy unknown-
-profile preparation remains unchanged. Before future dispatch qualification,
+it. The envelope contains no submission request. Both experimental submission
+profiles refuse the two local preparation versions before opening them. Exactly
+empty details can be separately prepared as submission v2; this neither promotes
+a captured intention nor converts its historical protected fragment. Legacy unknown-
+profile preparation remains unchanged. For explicit-empty dispatch qualification,
 authenticated readback must have `Notifications` present, non-null and a genuinely
 empty JSON array in addition to signature, UID and content checks. Empty mapped
 Android reminders alone are insufficient: defaults may be empty and personal

@@ -30,9 +30,12 @@ internal class ProtonCreateSubmissionAdapter(private val preparations: CalendarC
         val session = session(record.scope)
         // Requalify keys, rights and scope using authenticated reads immediately before admission.
         val freshReceipt = preparations.prepareCreate(submission.draft)
+        if (freshReceipt.scope != record.scope || freshReceipt.format != record.format)
+            createUnavailable(CreatePreparationFailure.CONTEXT)
         val fresh = ProtonCreateSubmissionCodec.open(CreateAttemptRecord(record.id, record.scope, freshReceipt.format,
             freshReceipt.protectedPayload), protector)
-        if (fresh.uid != submission.uid || fresh.context != submission.context) createUnavailable(CreatePreparationFailure.CONTEXT)
+        if (fresh.uid != submission.uid || fresh.context != submission.context || fresh.policy != submission.policy ||
+            fresh.draft != submission.draft) createUnavailable(CreatePreparationFailure.CONTEXT)
         checkSession(session)
         var body: String? = null
         val admitted = CreateAttemptAdmission(journal).dispatch(stored) { unknown ->
@@ -66,7 +69,7 @@ internal class ProtonCreateSubmissionAdapter(private val preparations: CalendarC
             if (response is ProtonCreateResponse.Candidate) candidateId = response.event.string("ID")
         }
         val actual = readback.inspect(session, record.scope, submission.uid, submission.draft.content,
-            CreatedEventReadbackPolicy.SHARED_ONLY_V1, candidateId) ?: return@guarded CreateSubmissionObservation.Unknown
+            submission.policy, candidateId) ?: return@guarded CreateSubmissionObservation.Unknown
         CreateSubmissionObservation.Verified(CreateAttemptIdentity.of(record), actual)
     }
     private suspend fun session(scope: CalendarScope) = sessions.current()?.takeIf { it.userId.id == scope.account.value }

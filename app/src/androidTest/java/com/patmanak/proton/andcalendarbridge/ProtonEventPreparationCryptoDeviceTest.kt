@@ -16,4 +16,10 @@ class ProtonEventPreparationCryptoDeviceTest {
     @Test fun knownEmptyPreparationUsesExplicitNotificationsThroughAdapterKeystoreAndNativeDecoder() = runBlocking {
         assertEquals("RESULT=SUCCESS", ProtonEventPreparationCryptoProbe.runKnownEmpty())
     }
+    @Test fun knownEmptySubmissionRoundTripsAndUsesStrictReadbackAfterReopeningWithoutDispatch() = runBlocking {
+        assertEquals("RESULT=SUCCESS", ProtonEventPreparationCryptoProbe.runKnownEmptySubmission())
+    }
+    @Test fun textSignedFoldedWhitespaceRetainsExactContentAndRejectsAlteredSignatures() = runBlocking {
+        assertEquals("RESULT=SUCCESS", ProtonEventPreparationCryptoProbe.runKnownEmptySubmissionWithFoldedWhitespace())
+    }
 }

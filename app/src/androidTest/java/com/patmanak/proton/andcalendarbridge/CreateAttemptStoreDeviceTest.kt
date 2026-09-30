@@ -44,6 +44,20 @@ class CreateAttemptStoreDeviceTest {
         finally { store.close(); context.deleteDatabase(name) }
     }
 
+    @Test fun knownEmptySubmissionVersionIsOpaqueAndSurvivesClaimAndReopenWithoutMigration() = fixture { context, name, store ->
+        val versionTwo = prepared.copy(format = AdapterFormat("proton-calendar-create-submission", 2))
+        store.remember(versionTwo)
+        assertTrue(store.claim(versionTwo))
+        val unknown = versionTwo.copy(state = CreateAttemptState.OUTCOME_UNKNOWN)
+        store.retainEvidence(unknown, evidence)
+        store.close()
+        CreateAttemptStore(context, name).use { reopened ->
+            assertEquals(unknown.copy(protectedEvidence = evidence), reopened.read(scope, versionTwo.id))
+            assertFalse(reopened.claim(versionTwo))
+            assertFalse(CreateAttemptAdmission(reopened).dispatch(versionTwo) { fail("Never resend") })
+        }
+    }
+
     @Test fun preparedAndUnknownSurviveReopenWithoutResendingOrResetting() = fixture { context, name, store ->
         store.remember(prepared)
         store.close()

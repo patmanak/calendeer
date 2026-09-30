@@ -211,15 +211,16 @@ is reused without network or fresh crypto; changed or missing Android evidence
 leaves it unqualified. Proton's dedicated known-empty preparation v2 seals an
 explicit `Notifications: []` personal override alongside the unchanged shared
 cryptographic parts. Historical v1 blobs retain their unresolved obligation and
-cannot be reused or replaced automatically. Both versions are refused by submission
-v1 before opening/admission and never enter the experimental dispatch journal.
+cannot be reused or replaced automatically. Both local formats are refused by the
+submission codec before opening/admission and never enter the experimental dispatch journal.
 JVM tests check placement and refusal of unexpected personal data. A separate
 synthetic native fixture exercises Core/Keystore and defaults through the production
 preparer with controlled context/read shapes. Physical journal migration, owner
 gates and Provider preparation/cache fixtures have passed. The native fixture also
 passed timed/all-day round-trips, reopened protected storage, signed UID/content
 checks, altered-signature refusal and explicit-empty versus inherited defaults.
-No request was submitted; live service notification checks remain unqualified.
+These local preparation fixtures submit no request; separate submission qualification
+is described below.
 Created-event inspection now shares a read-only bounded UID lookup, individual
 event read, key bootstrap and content comparison. The existing submission v1 path
 always uses its shared-content-only profile. A separate internal known-empty v2
@@ -232,9 +233,31 @@ Focused JVM tests and synthetic native timed/all-day fixtures passed, including
 signature/UID refusal and changed content/dates. A retained live legacy event also
 passed the strict GET parser and existing inspection path without changing its
 admission record or protected response; its Android association remains usable.
-This does not qualify known-empty v2 service readback. Shared signatures do not
-sign the personal notification field. No new dispatch format, journal migration,
-app entrypoint or captured-creation upload was introduced.
+Shared signatures do not sign the personal notification field.
+A separate experimental submission v2 now seals an explicit-empty notification
+policy, the known-empty expected content and `Event.Notifications: []`. Opening
+selects the strict readback profile from the immutable submission format. Legacy
+submission v1 retains its shared-only interpretation. Fresh authenticated
+preparation must match the full draft, format, UID and member/key context before
+the existing durable UNKNOWN admission and single guarded PUT. Neither local
+preparation format is converted or dispatched. Unsupported personal data remains
+refused; response loss, cancellation and failed readback never authorize another
+submission. JVM tests cover format/policy drift, invalid overrides and inspection
+without preparation or upload. This adds no journal migration, writable mirror or
+captured-creation upload.
+Native submission v2, opaque SQLite journal reopening and retained live legacy
+inspection have passed on an authorized physical target. A separate retained timed
+creation now has authenticated strict readback with raw empty notifications,
+verified shared signatures/UID/content and exactly one owned Android projection
+without alarms or reminder rows. The same admitted attempt was inspected after
+reopening, without another PUT; UNKNOWN remains permanently non-resendable.
+A folded-whitespace fixture also identified byte-only verification refusing Core
+text signatures. The decoder now uses the official binary/text verification
+wrappers on the same trusted author keys, preserving activity/capability guards
+and exact parsed content. Native timed/all-day, altered-signature, foreign-author,
+key-refusal and binary-import regressions passed. This establishes the retained
+timed service journey, not all-day service behavior, UID idempotency, real response
+loss or a system calendar editing UI.
 The application still exposes no writable mirror or event editor. General outgoing
 queue/resolution, automatic Provider capture and conditional Proton UPDATE/DELETE
 guarantees remain unqualified. See

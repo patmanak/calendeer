@@ -145,8 +145,8 @@ class ProtonCreatePreparationAdapterTest {
         adapter().prepareCreate(draft.copy(content = draft.content.copy(details = EventDetails())))
         assertEquals(preparedEvent, sealed!!.obj("event"))
     }
-    @Test fun submissionCannotAcceptKnownEmptyOrNonemptyDetailsBeforeAnyReads() = runTest {
-        for (details in listOf(EventDetails(), EventDetails(reminders = listOf(EventReminder(10))))) {
+    @Test fun submissionCannotAcceptNonemptyDetailsBeforeAnyReads() = runTest {
+        for (details in listOf(EventDetails(reminders = listOf(EventReminder(10))))) {
             refused(CreatePreparationFailure.UNSUPPORTED) { adapter(submission = true).prepareCreate(draft.copy(content = draft.content.copy(details = details))) }
             assertEquals(0, sessionReads); assertTrue(steps.isEmpty()); assertNull(sealed)
         }
