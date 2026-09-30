@@ -18,13 +18,14 @@ import com.patmanak.proton.andcalendarbridge.ui.theme.AndroidThemePreferenceStor
 import com.patmanak.proton.andcalendarbridge.data.calendar.AndroidCalendarProjection
 import com.patmanak.proton.andcalendarbridge.data.importing.ImportCoordinator
 import com.patmanak.proton.andcalendarbridge.data.importing.ImportStore
+import com.patmanak.proton.andcalendarbridge.data.outgoing.CreateAttemptStore
 
 class BridgeApplication : Application() {
     private val authenticationScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     val imports by lazy {
         ImportCoordinator(this, ImportStore(this), ProtonAuthentication.events(this),
-            AndroidCalendarProjection(this), authenticationScope)
+            AndroidCalendarProjection(this), authenticationScope, creates = CreateAttemptStore(this))
     }
 
     // App-owned: activity recreation must neither repeat login nor revoke a retained session.
@@ -62,5 +63,10 @@ class BridgeApplication : Application() {
         super.onCreate()
         themePreferences = AndroidThemePreferenceStore(this)
         languagePreferences = AndroidLanguagePreferenceStore(this)
+        authenticationScope.launch {
+            try { imports.initializeCreates() }
+            catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (_: Exception) { /* Experimental writes stay closed until initialization succeeds. */ }
+        }
     }
 }

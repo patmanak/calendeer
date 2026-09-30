@@ -6,6 +6,7 @@ import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 import com.patmanak.proton.andcalendarbridge.sync.AdapterFormat
+import com.patmanak.proton.andcalendarbridge.sync.AccountId
 import com.patmanak.proton.andcalendarbridge.sync.CalendarScope
 import com.patmanak.proton.andcalendarbridge.data.calendar.OwnedEventWitness
 import com.patmanak.proton.andcalendarbridge.sync.CreateAssociationJournal
@@ -24,15 +25,21 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
+/** Permanent dispatch hold; historical work and any later evidence remain intact. */
+enum class CreatePauseReason {
+    PROCESS_RESTART, SESSION_CHANGED, CALENDAR_DISABLED, CALENDAR_UNAVAILABLE, PERMISSION_LOST
+}
+
 /**
  * App-private, backup-excluded dispatch journal. Payloads must already be adapter-protected.
  * Independent SQLite helpers/processes arbitrate admission through the same committed row.
  * This does not capture Provider edits, send requests, or acknowledge remote creation.
  */
 class CreateAttemptStore(context: Context, name: String = "calendar-create-attempt-v1.db") :
-    SQLiteOpenHelper(context, name, null, 3), CreateAssociationJournal {
+    SQLiteOpenHelper(context, name, null, 4), CreateAssociationJournal {
     private val lock = Mutex()
     @Volatile var admitAssociation: (CalendarScope) -> Boolean = { true }
+    @Volatile var admitDispatch: (CalendarScope) -> Boolean = { true }
 
     override fun onConfigure(db: SQLiteDatabase) {
         // Admission must return only after SQLite has durably recorded uncertainty.
@@ -55,12 +62,58 @@ class CreateAttemptStore(context: Context, name: String = "calendar-create-attem
             )
         """.trimIndent())
         createBindings(db)
+        createPauses(db)
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        check(oldVersion in 1..2 && newVersion == 3) { "Explicit create journal schema migration required" }
+        check(oldVersion in 1..3 && newVersion == 4) { "Explicit create journal schema migration required" }
         if (oldVersion == 1) db.execSQL("ALTER TABLE create_attempts ADD COLUMN evidence TEXT")
-        createBindings(db)
+        if (oldVersion < 3) createBindings(db)
+        createPauses(db)
+    }
+
+    private fun createPauses(db: SQLiteDatabase) {
+        db.execSQL("""
+            CREATE TABLE create_pauses (
+                account TEXT NOT NULL, calendar TEXT NOT NULL,
+                generation INTEGER NOT NULL CHECK(generation >= 0), mutation TEXT NOT NULL,
+                reason TEXT NOT NULL CHECK(reason IN (
+                    'PROCESS_RESTART', 'SESSION_CHANGED', 'CALENDAR_DISABLED',
+                    'CALENDAR_UNAVAILABLE', 'PERMISSION_LOST')),
+                PRIMARY KEY(account, calendar, generation, mutation)
+            )
+        """.trimIndent())
+    }
+
+    /** Pause only unadmitted work. The first reason is retained and no resume operation exists. */
+    suspend fun pausePrepared(reason: CreatePauseReason, account: AccountId? = null, target: CalendarScope? = null) {
+        val selection: String
+        val arguments: Array<String>
+        when {
+            target != null -> {
+                selection = " AND account=? AND calendar=? AND generation=?"
+                arguments = arrayOf(target.account.value, target.calendar.value, target.generation.toString())
+            }
+            account != null -> {
+                selection = " AND account=?"
+                arguments = arrayOf(account.value)
+            }
+            else -> { selection = ""; arguments = emptyArray() }
+        }
+        access { db ->
+            transaction(db) {
+                db.execSQL("""INSERT OR IGNORE INTO create_pauses (account, calendar, generation, mutation, reason)
+                    SELECT account, calendar, generation, mutation, ? FROM create_attempts
+                    WHERE state='PREPARED' AND evidence IS NULL$selection""".trimIndent(),
+                    arrayOf(reason.name) + arguments)
+            }
+        }
+    }
+
+    suspend fun pauseReason(scope: CalendarScope, id: MutationId): CreatePauseReason? = access { db ->
+        db.query("create_pauses", arrayOf("reason"), IDENTITY, identity(scope, id), null, null, null).use { cursor ->
+            if (cursor.moveToFirst()) CreatePauseReason.valueOf(cursor.getString(0)) else null
+        }
     }
 
     private fun createBindings(db: SQLiteDatabase) {
@@ -174,7 +227,7 @@ class CreateAttemptStore(context: Context, name: String = "calendar-create-attem
             "Only prepared work without evidence can be remembered"
         }
         access { db ->
-            transaction(db) {
+            dispatchTransaction(db, record.scope, { error("Create dispatch lease is not current") }) {
                 val existing = read(db, record.scope, record.id)
                 if (existing != null) {
                     check((existing.state == CreateAttemptState.OUTCOME_UNKNOWN || existing.protectedEvidence == null) &&
@@ -203,10 +256,13 @@ class CreateAttemptStore(context: Context, name: String = "calendar-create-attem
     override suspend fun claim(expected: CreateAttemptRecord): Boolean {
         if (expected.state != CreateAttemptState.PREPARED || expected.protectedEvidence != null) return false
         return access { db ->
-            transaction(db) {
+            dispatchTransaction(db, expected.scope, { false }) {
                 db.update("create_attempts", ContentValues().apply {
                     put("state", CreateAttemptState.OUTCOME_UNKNOWN.name)
-                }, "$IDENTITY AND adapter=? AND version=? AND payload=? AND state=? AND evidence IS NULL",
+                }, "$IDENTITY AND adapter=? AND version=? AND payload=? AND state=? AND evidence IS NULL" +
+                    " AND NOT EXISTS (SELECT 1 FROM create_pauses p WHERE p.account=create_attempts.account" +
+                    " AND p.calendar=create_attempts.calendar AND p.generation=create_attempts.generation" +
+                    " AND p.mutation=create_attempts.mutation)",
                     identity(expected.scope, expected.id) + arrayOf(expected.format.id,
                         expected.format.version.toString(), expected.protectedPayload,
                         CreateAttemptState.PREPARED.name)) == 1
@@ -271,6 +327,17 @@ class CreateAttemptStore(context: Context, name: String = "calendar-create-attem
         } finally {
             // A failed commit throws before the caller can admit dispatch.
             db.endTransaction()
+        }
+    }
+
+    private suspend fun <T> dispatchTransaction(db: SQLiteDatabase, scope: CalendarScope,
+        denied: () -> T, action: () -> T): T {
+        currentCoroutineContext().ensureActive()
+        if (!admitDispatch(scope)) return denied()
+        return transaction(db) {
+            val result = action()
+            check(admitDispatch(scope)) { "Create dispatch lease is not current" }
+            result
         }
     }
 

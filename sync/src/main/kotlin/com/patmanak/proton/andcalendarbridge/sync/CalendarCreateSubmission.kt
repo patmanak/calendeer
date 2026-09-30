@@ -13,7 +13,8 @@ sealed interface CreateSubmissionObservation {
  * Prepare is read-only. Submit revalidates rights/context then durably claims UNKNOWN before one
  * request. Every uncertain or existing claim is read-only thereafter. inspect never sends/requeues.
  * Raw responses are protected and retained before inspection. A verified read does not consume the
- * journal: mapping/reconciliation and account/access lifecycle remain separate future obligations.
+ * journal. The app owns experimental association and admission lifecycle; general Provider intent
+ * reconciliation and outgoing resolution remain separate obligations.
  */
 interface CalendarCreateSubmissionPort {
     suspend fun prepareSubmission(draft: CalendarCreateDraft): PreparedCalendarCreate

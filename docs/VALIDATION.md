@@ -553,6 +553,40 @@ These association paths have passed physical fixtures and the retained-event liv
 journey. They do not enable Samsung edit capture, writable mirrors, UPDATE/DELETE,
 general outgoing lifecycle or atomic cross-store conflict handling.
 
+## Experimental CREATE lifecycle
+
+`CreateAttemptPauseStoreDeviceTest`, with `-e providerFixture true`, uses isolated
+SQLite databases. It checks exact account/calendar/generation pauses, immutable
+first cause, independent helpers and reopen, no reset through repeated remember,
+atomic pause/claim competition, v3-to-v4 migration, closed dispatch gates,
+pre-commit invalidation/cancellation and failed bulk-pause rollback. Already UNKNOWN
+work retains protected late evidence and existing associations when dispatch closes.
+An intentionally unguarded claim in a controlled regression APK must fail the
+paused-work/reopen assertion; the production paused-work SQL guard must pass it.
+
+`CreateLifecycleCoordinatorDeviceTest` combines isolated real import/journal
+databases with controlled ports and fake Provider permission state. It checks
+production-owner admission, startup pausing across reopen, foreign preparation and
+caller rejection, one dispatch followed only by inspection, authentication loss
+during preparation/before claim/after claim/inspection, account replacement without
+an authenticated-flag transition, and sticky calendar/permission pauses. A complete
+successful catalog absence differs from a catalog error. Suspended preparation
+fixtures exercise immediate policy fences before serialized selection updates.
+SQLite triggers inject pause failures, then restore account/catalog/permission
+availability; pending pause obligations must still block the old preparation.
+
+These fixtures do not change the retained Proton session, system grants or real
+account attributes. They qualify orchestration and persistence, not server rights
+revocation or a user-facing logout journey. The retained-event association live
+fixture can be rerun without submitting another CREATE to check session/import
+compatibility after deployment. General outgoing resolution, Provider edit capture
+and UPDATE/DELETE remain separate qualification.
+The lifecycle fixtures, retained-event association and read-only delta/recovery
+regressions have passed on an authorized physical target. The worker catalog-pause
+failure fixture also guards an observed native runtime crash: access refresh is
+isolated from the larger import coroutine while preserving its mutex, failure
+propagation and cleanup. Runtime behavior on other devices remains unqualified.
+
 ## Anonymous transport probe
 
 `ProtonConnectivityDeviceTest` is skipped unless instrumentation receives

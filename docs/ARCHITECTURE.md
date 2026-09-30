@@ -112,7 +112,27 @@ persisted numeric row IDs alone never qualify it. A locator is a momentary witne
 not an atomic cross-database guarantee, and must be revalidated on later use.
 Missing imports schedule ordinary read-only recovery. A retained remote binding
 allows local reassociation without invoking the CREATE port. General outgoing
-lifecycle, edit capture and conflict transactions remain separate delivery work.
+queue/resolution, edit capture and conflict transactions remain separate delivery work.
+
+The application-owned journal also participates in experimental CREATE lifecycle.
+Startup closes its dispatch gate and permanently pauses old PREPARED work before
+any explicit staging/submission. The shared import owner serializes those commands
+with calendar selection and catalog persistence. It checks the real current account
+before and after preparation, not just the authenticated UI flag. Session/policy
+changes immediately invalidate local admission; complete catalog disappearance,
+calendar disabling and observed permission loss record a pause before later writes.
+Failed pause persistence retains the obligation in memory; restart conservatively
+pauses all old unadmitted work. SQLite claim checks the exact permanent pause in the
+same transaction, including between independent helpers. A pause records its first
+cause, not current access, and has no automatic reset on reactivation.
+
+The Proton submission adapter continues to own fresh session/rights/key validation
+under its authentication mutex. Its journal claim callback checks only local app
+leases, avoiding re-entry into that non-reentrant mutex. Evidence storage for an
+already UNKNOWN attempt is independent of the dispatch gate: a late response is
+retained even after app admission closes. Inspection with current access never
+readmits UNKNOWN work. These safeguards do not provide edit capture, cross-store
+atomicity, general outgoing resolution or a new user-facing logout policy.
 
 ## Delivery slices and acceptance
 

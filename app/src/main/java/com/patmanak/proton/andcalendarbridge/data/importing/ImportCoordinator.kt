@@ -5,12 +5,17 @@ import com.patmanak.proton.andcalendarbridge.data.calendar.CalendarProjection
 import com.patmanak.proton.andcalendarbridge.data.calendar.CalendarProjectionException
 import com.patmanak.proton.andcalendarbridge.data.calendar.CalendarProjectionFailure
 import com.patmanak.proton.andcalendarbridge.data.outgoing.CreateAttemptStore
+import com.patmanak.proton.andcalendarbridge.data.outgoing.CreatePauseReason
 import com.patmanak.proton.andcalendarbridge.sync.*
 import com.patmanak.proton.andcalendarbridge.sync.catalog.CalendarCatalogState
 import com.patmanak.proton.andcalendarbridge.sync.catalog.CalendarCatalogStatus
 import com.patmanak.proton.andcalendarbridge.sync.catalog.CalendarCatalogPort
 import com.patmanak.proton.andcalendarbridge.sync.catalog.CalendarCatalogResult
 import com.patmanak.proton.andcalendarbridge.sync.catalog.CalendarCatalogFailure
+import com.patmanak.proton.andcalendarbridge.sync.catalog.CalendarSummary
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicReference
+import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.sync.Mutex
@@ -27,6 +32,7 @@ class ImportCoordinator(
     private val projection: CalendarProjection,
     private val scope: CoroutineScope,
     private val scheduler: ImportScheduler = WorkManagerImportScheduler(context),
+    private val creates: CreateAttemptStore? = null,
 ) {
     private val mutex = Mutex()
     private val serial = AccountSerialExecutor()
@@ -37,13 +43,172 @@ class ImportCoordinator(
     val state = mutableState.asStateFlow()
     @Volatile private var authenticated = false
     @Volatile private var generation = 0L
+    private val createPolicyRevision = AtomicLong()
+    private var createInitialized = false
+    private var createGeneration = -1L
+    private val createAccount = AtomicReference<AccountId?>()
+    private val pendingCreatePauses = ConcurrentHashMap<CalendarScope, CreatePauseReason>()
+    private val pendingAccountPauses = ConcurrentHashMap.newKeySet<AccountId>()
+    @Volatile private var pendingPermissionPause = false
     private val providerIds = context.getSharedPreferences("calendar-provider-mappings", Context.MODE_PRIVATE)
+
+    init { creates?.admitDispatch = { false } }
+
+    /** Production startup is conservative: legacy preparations require explicit future resolution. */
+    suspend fun initializeCreates() = mutex.withLock { ensureCreateLifecycle() }
+
+    private suspend fun ensureCreateLifecycle() {
+        val journal = creates ?: return
+        journal.admitDispatch = { false }
+        if (!createInitialized) {
+            journal.pausePrepared(CreatePauseReason.PROCESS_RESTART)
+            createInitialized = true
+        }
+        val expected = generation
+        if (createGeneration != expected) {
+            journal.pausePrepared(CreatePauseReason.SESSION_CHANGED)
+            createGeneration = expected
+        }
+        if (pendingPermissionPause) {
+            val policy = createPolicyRevision.get()
+            journal.pausePrepared(CreatePauseReason.PERMISSION_LOST)
+            if (createPolicyRevision.get() == policy) pendingPermissionPause = false
+        }
+        for ((target, reason) in pendingCreatePauses) {
+            journal.pausePrepared(reason, target = target)
+            pendingCreatePauses.remove(target, reason)
+        }
+        for (account in pendingAccountPauses) {
+            journal.pausePrepared(CreatePauseReason.SESSION_CHANGED, account = account)
+            pendingAccountPauses.remove(account)
+        }
+        check(generation == expected) { "CREATE session changed" }
+    }
+
+    private fun retainObservedCreateAccount(account: AccountId?) {
+        if (creates == null) return
+        val previous = createAccount.getAndSet(account)
+        if (previous != null && previous != account) {
+            createPolicyRevision.incrementAndGet()
+            creates?.admitDispatch = { false }
+            pendingAccountPauses.add(previous)
+        }
+    }
+
+    private suspend fun currentObservedAccount(): AccountId? {
+        val account = remote.currentAccount()
+        retainObservedCreateAccount(account)
+        return account
+    }
+
+    private suspend fun observeCreateAccount(account: AccountId?) {
+        retainObservedCreateAccount(account)
+        ensureCreateLifecycle()
+    }
+
+    /** Retain observed permission loss even if grants return before the next explicit write. */
+    private fun retainCreatePermissionLoss() {
+        if (creates == null) return
+        createPolicyRevision.incrementAndGet()
+        pendingPermissionPause = true
+        creates.admitDispatch = { false }
+    }
+
+    private fun hasCalendarPermissions(): Boolean {
+        val available = projection.hasPermissions()
+        if (!available) retainCreatePermissionLoss()
+        return available
+    }
+
+    private suspend fun qualifyCreate(target: CalendarScope, expected: Long, policy: Long) {
+        val account = currentObservedAccount()
+        observeCreateAccount(account)
+        check(authenticated && generation == expected && createPolicyRevision.get() == policy && account == target.account) {
+            "CREATE session is not current"
+        }
+        val selected = store.selections(target.account).singleOrNull { it.scope == target }
+        check(selected?.enabled == true && selected.available) { "CREATE calendar is inactive" }
+        if (!hasCalendarPermissions()) {
+            creates?.pausePrepared(CreatePauseReason.PERMISSION_LOST, account = target.account)
+            error("CREATE calendar permissions are unavailable")
+        }
+    }
+
+    /** Explicit experimental entry point only; no UI capture or background upload is enabled. */
+    suspend fun stageCreate(draft: CalendarCreateDraft, port: CalendarCreateSubmissionPort): CreateAttemptRecord = mutex.withLock {
+        val journal = checkNotNull(creates) { "CREATE journal is unavailable" }
+        ensureCreateLifecycle()
+        val expected = generation
+        val policy = createPolicyRevision.get()
+        try {
+            qualifyCreate(draft.scope, expected, policy)
+            check(journal.pauseReason(draft.scope, draft.correlation) == null) { "CREATE work is paused" }
+            val prepared = port.prepareSubmission(draft)
+            qualifyCreate(draft.scope, expected, policy)
+            check(prepared.scope == draft.scope) { "CREATE preparation scope differs" }
+            val record = CreateAttemptRecord(draft.correlation, draft.scope, prepared.format, prepared.protectedPayload)
+            check(journal.pauseReason(record.scope, record.id) == null) { "CREATE work is paused" }
+            journal.admitDispatch = { it == draft.scope && authenticated && generation == expected && createPolicyRevision.get() == policy && hasCalendarPermissions() }
+            journal.remember(record)
+            record
+        } finally { journal.admitDispatch = { false } }
+    }
+
+    /** UNKNOWN work can only be inspected; pause and session changes never authorize resending. */
+    suspend fun submitCreate(record: CreateAttemptRecord, port: CalendarCreateSubmissionPort): CreateSubmissionObservation = mutex.withLock {
+        val journal = checkNotNull(creates) { "CREATE journal is unavailable" }
+        ensureCreateLifecycle()
+        val expected = generation
+        val policy = createPolicyRevision.get()
+        try {
+            qualifyCreate(record.scope, expected, policy)
+            val actual = checkNotNull(journal.read(record.scope, record.id)) { "CREATE work is unavailable" }
+            check(CreateAttemptIdentity.of(actual) == CreateAttemptIdentity.of(record)) { "CREATE work differs" }
+            if (actual.state == CreateAttemptState.OUTCOME_UNKNOWN) {
+                val observation = port.inspect(actual)
+                qualifyCreate(actual.scope, expected, policy)
+                return@withLock observation
+            }
+            check(journal.pauseReason(actual.scope, actual.id) == null) { "CREATE work is paused" }
+            journal.admitDispatch = { it == actual.scope && authenticated && generation == expected && createPolicyRevision.get() == policy && hasCalendarPermissions() }
+            // The adapter requalifies its own session/rights/keys; this wrapper rechecks app admission.
+            val guarded = object : CreateAttemptJournal by journal {
+                override suspend fun claim(expectedWork: CreateAttemptRecord): Boolean {
+                    // submit holds Proton's non-reentrant authentication mutex. Do not call
+                    // currentAccount here: the adapter owns that session check; app leases are local.
+                    check(authenticated && generation == expected && createPolicyRevision.get() == policy && hasCalendarPermissions()) {
+                        "CREATE admission is not current"
+                    }
+                    check(expectedWork == actual) { "CREATE work differs" }
+                    return journal.claim(expectedWork)
+                }
+            }
+            port.submit(actual, guarded)
+        } finally { journal.admitDispatch = { false } }
+    }
+
+    private suspend fun rememberAccessibleCatalog(account: AccountId, calendars: List<CalendarSummary>) {
+        ensureCreateLifecycle()
+        observeCreateAccount(account)
+        val present = calendars.map { it.id }.toSet()
+        for (selected in store.selections(account).filter { it.scope.calendar !in present }) {
+            pendingCreatePauses.putIfAbsent(selected.scope, CreatePauseReason.CALENDAR_UNAVAILABLE)
+        }
+        ensureCreateLifecycle()
+        store.remember(account, calendars)
+    }
 
     fun authenticationChanged(value: Boolean) {
         if (authenticated == value) return
         authenticated = value
         generation++
-        mutableState.value = ImportUiState(hasPermission = projection.hasPermissions(), authenticated = value)
+        creates?.admitDispatch = { false }
+        scope.launch {
+            try { initializeCreates() }
+            catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { /* Writes remain closed; the next explicit command retries initialization. */ }
+        }
+        mutableState.value = ImportUiState(hasPermission = hasCalendarPermissions(), authenticated = value)
         if (!value) {
             scheduler.cancel()
         } else {
@@ -66,10 +231,16 @@ class ImportCoordinator(
         val account = catalog.account ?: return
         if (!authenticated || catalog.status != CalendarCatalogStatus.READY) return
         val expected = generation
+        val present = catalog.calendars.map { it.id }.toSet()
+        val missing = state.value.selections.filter { it.scope.account == account && it.scope.calendar !in present }
+        if (missing.isNotEmpty()) {
+            createPolicyRevision.incrementAndGet()
+            for (selected in missing) pendingCreatePauses.putIfAbsent(selected.scope, CreatePauseReason.CALENDAR_UNAVAILABLE)
+        }
         try {
             mutex.withLock {
                 if (!isCurrent(expected, account)) return
-                store.remember(account, catalog.calendars)
+                rememberAccessibleCatalog(account, catalog.calendars)
                 refreshState()
             }
         } catch (cancelled: CancellationException) {
@@ -112,7 +283,7 @@ class ImportCoordinator(
                 enqueueLocal(); scheduler.requestNetwork()
                 return@withLock CreateAssociationResult.WAITING_IMPORT
             }
-            if (!projection.hasPermissions()) return@withLock CreateAssociationResult.WAITING_PROVIDER
+            if (!hasCalendarPermissions()) return@withLock CreateAssociationResult.WAITING_PROVIDER
             val witness = projection.inspectOwnedEvent(target, binding.eventId, imported.revision)
                 ?: return@withLock CreateAssociationResult.WAITING_PROVIDER
             if (witness.revision != imported.revision) return@withLock CreateAssociationResult.WAITING_PROVIDER
@@ -122,21 +293,38 @@ class ImportCoordinator(
             journal.retainProjection(binding, witness)
             CreateAssociationResult.ASSOCIATED
         } catch (cancelled: CancellationException) { throw cancelled }
-          catch (_: CalendarProjectionException) { CreateAssociationResult.WAITING_PROVIDER }
+          catch (failure: CalendarProjectionException) {
+              if (failure.category == CalendarProjectionFailure.PERMISSION_REQUIRED) retainCreatePermissionLoss()
+              CreateAssociationResult.WAITING_PROVIDER
+          }
           catch (_: Exception) { CreateAssociationResult.UNRESOLVED }
     }
 
     fun permissionsChanged() {
         val previouslyGranted = state.value.hasPermission
-        mutableState.value = state.value.copy(hasPermission = projection.hasPermissions())
-        if (authenticated && projection.hasPermissions()) enqueueLocal()
+        mutableState.value = state.value.copy(hasPermission = hasCalendarPermissions())
+        if (!state.value.hasPermission) {
+            scope.launch {
+                try { initializeCreates() }
+                catch (cancelled: CancellationException) { throw cancelled }
+                catch (_: Exception) { /* Retain the pending pause; explicit writes retry it first. */ }
+            }
+        }
+        if (authenticated && hasCalendarPermissions()) enqueueLocal()
         if (!previouslyGranted && state.value.hasPermission && state.value.selections.any { it.enabled }) requestSync()
     }
 
     fun setEnabled(selection: ImportStore.Selection, enabled: Boolean) {
+        if (!enabled) {
+            createPolicyRevision.incrementAndGet()
+            pendingCreatePauses.putIfAbsent(selection.scope, CreatePauseReason.CALENDAR_DISABLED)
+            creates?.admitDispatch = { false }
+        }
         scope.launch {
             mutex.withLock {
                 if (!isCurrent(generation, selection.scope.account)) return@withLock
+                ensureCreateLifecycle()
+                if (!enabled) creates?.pausePrepared(CreatePauseReason.CALENDAR_DISABLED, target = selection.scope)
                 store.setEnabled(selection.scope, enabled)
                 refreshState()
             }
@@ -151,7 +339,7 @@ class ImportCoordinator(
             try {
             mutex.withLock {
                 val expected = generation
-                val account = remote.currentAccount() ?: return@launch
+                val account = currentObservedAccount() ?: return@launch
                 if (!isCurrent(expected, account)) return@launch
                 store.admitTransaction = { it.account == account && authenticated && generation == expected }
                 // Arm local reprocessing before scheduling a network-constrained worker.
@@ -196,9 +384,37 @@ class ImportCoordinator(
     }
 
     /** Successful continuation and transient retry are distinct; the store owns pending work. */
-    suspend fun run(network: Boolean, fresh: Boolean = true): ImportRunResult = mutex.withLock {
+    suspend fun run(network: Boolean, fresh: Boolean = true): ImportRunResult = mutex.withLock { runLocked(network, fresh) }
+
+    private suspend fun refreshAccess(account: AccountId, expected: Long): ImportRunResult? {
+        val catalogPort = remote as? CalendarCatalogPort ?: return null
+        val enabled = store.selections(account).filter { it.enabled && it.available }
+        if (enabled.isNotEmpty() && enabled.all { it.nextAttempt > System.currentTimeMillis() })
+            return ImportRunResult.RETRY
+        when (val catalog = catalogPort.load()) {
+            is CalendarCatalogResult.Success -> {
+                if (catalog.account != account || !isCurrent(expected, account)) return ImportRunResult.COMPLETE
+                rememberAccessibleCatalog(account, catalog.calendars)
+            }
+            is CalendarCatalogResult.Failure -> {
+                val status = when (catalog.category) {
+                    CalendarCatalogFailure.AUTHENTICATION_REQUIRED -> "AUTH"
+                    CalendarCatalogFailure.UNSUPPORTED_RESPONSE, CalendarCatalogFailure.FORBIDDEN -> "UNSUPPORTED"
+                    else -> "NETWORK"
+                }
+                for (item in store.selections(account).filter { it.enabled && it.available }) {
+                    store.status(item.scope, status)
+                    catalog.retryAfterMillis?.let { store.deferNetwork(item.scope, it) }
+                }
+                return ImportRunResult.RETRY
+            }
+        }
+        return null
+    }
+
+    private suspend fun runLocked(network: Boolean, fresh: Boolean): ImportRunResult {
         val expected = generation
-        val account = remote.currentAccount() ?: return ImportRunResult.COMPLETE
+        val account = currentObservedAccount() ?: return ImportRunResult.COMPLETE
         if (!isCurrent(expected, account)) return ImportRunResult.COMPLETE
         store.admitTransaction = { it.account == account && authenticated && generation == expected }
         projection.admitOperation = { authenticated && generation == expected }
@@ -208,33 +424,11 @@ class ImportCoordinator(
         var runFailure: Exception? = null
         try {
             // Re-establish access on retries too; WorkManager retries are not fresh runs.
-            if (network && remote is CalendarCatalogPort) {
-                val enabled = store.selections(account).filter { it.enabled && it.available }
-                if (enabled.isNotEmpty() && enabled.all { it.nextAttempt > System.currentTimeMillis() })
-                    return ImportRunResult.RETRY
-                when (val catalog = remote.load()) {
-                    is CalendarCatalogResult.Success -> {
-                        if (catalog.account != account || !isCurrent(expected, account)) return ImportRunResult.COMPLETE
-                        store.remember(account, catalog.calendars)
-                    }
-                    is CalendarCatalogResult.Failure -> {
-                        val status = when (catalog.category) {
-                            CalendarCatalogFailure.AUTHENTICATION_REQUIRED -> "AUTH"
-                            CalendarCatalogFailure.UNSUPPORTED_RESPONSE, CalendarCatalogFailure.FORBIDDEN -> "UNSUPPORTED"
-                            else -> "NETWORK"
-                        }
-                        for (item in store.selections(account).filter { it.enabled && it.available }) {
-                            store.status(item.scope, status)
-                            catalog.retryAfterMillis?.let { store.deferNetwork(item.scope, it) }
-                        }
-                        return ImportRunResult.RETRY
-                    }
-                }
-            }
+            if (network) refreshAccess(account, expected)?.let { return it }
             for (selection in store.selections(account).filter { it.enabled && it.available }) {
                 if (!isCurrent(expected, account)) return ImportRunResult.COMPLETE
                 val calendarScope = selection.scope
-                if (!projection.hasPermissions()) {
+                if (!hasCalendarPermissions()) {
                     store.status(calendarScope, "PERMISSION")
                     continue
                 }
@@ -347,8 +541,10 @@ class ImportCoordinator(
                 } catch (_: ImportCapacityException) {
                     store.status(calendarScope, "CAPACITY")
                 } catch (_: SecurityException) {
+                    retainCreatePermissionLoss()
                     store.status(calendarScope, "PERMISSION")
                 } catch (failure: CalendarProjectionException) {
+                    if (failure.category == CalendarProjectionFailure.PERMISSION_REQUIRED) retainCreatePermissionLoss()
                     val recoverable = retryableImportFailure(failure)
                     retry = retry || recoverable
                     // A local retry must clear itself after a successful offline drain. ERROR
@@ -396,11 +592,11 @@ class ImportCoordinator(
                 if (network && authenticated && runFailure == null) enqueueLocal()
             }
         }
-        when { retry -> ImportRunResult.RETRY; continuation -> ImportRunResult.CONTINUE; else -> ImportRunResult.COMPLETE }
+        return when { retry -> ImportRunResult.RETRY; continuation -> ImportRunResult.CONTINUE; else -> ImportRunResult.COMPLETE }
     }
 
     private suspend fun isCurrent(expected: Long, account: AccountId) =
-        authenticated && generation == expected && remote.currentAccount() == account
+        authenticated && generation == expected && currentObservedAccount() == account
 
     private suspend fun tryRollingRefresh(selection: ImportStore.Selection): Boolean {
         val planner = remote as? RollingCalendarRemote ?: return false
@@ -432,9 +628,9 @@ class ImportCoordinator(
 
     private suspend fun refreshState() {
         val expected = generation
-        val account = if (authenticated) remote.currentAccount() else null
+        val account = if (authenticated) currentObservedAccount() else null
         val selections = if (account == null) emptyList() else store.selections(account)
         if (generation == expected) mutableState.value = state.value.copy(selections = selections,
-            authenticated = authenticated, hasPermission = projection.hasPermissions())
+            authenticated = authenticated, hasPermission = hasCalendarPermissions())
     }
 }

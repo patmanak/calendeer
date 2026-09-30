@@ -134,9 +134,26 @@ concurrent-duplicate regression. A retained live CREATE was associated with its
 current Android projection, then reopened and associated again with the CREATE
 port unavailable. The event and admission state were preserved. This does not
 qualify power-loss recovery or general outgoing acknowledgement.
-The application still exposes no writable mirror or event editor. Outgoing
-account/access lifecycle integration, Provider edit capture, atomic conflict/import
-handling and concurrent UPDATE/DELETE guarantees remain unqualified. See
+The application now owns the experimental CREATE journal and serializes explicit
+staging/submission with import. Journal v4 adds a separate permanent pause with its
+first cause; it preserves the attempt's admission state and protected evidence. Startup pauses
+legacy unadmitted preparations across accounts. Session changes, calendar
+disabling/complete-catalog disappearance and observed calendar permission loss
+close admission and pause affected preparations. Reconnection, calendar return
+and restored permissions never automatically resume paused work. Account identity
+is checked separately from the authenticated UI flag. Failed pause persistence
+retains an in-memory obligation, retried before the next explicit write; a new
+process conservatively pauses all old preparations. Already admitted UNKNOWN work
+can retain late response evidence and only be inspected with current access.
+This conservative pause policy is provisional; explicit resolution remains future
+work. No new logout control, capture or automatic outgoing worker is exposed.
+Physical journal/owner fixtures, injected pause failures and read-only import
+recovery regressions passed. The retained live association still resolves one
+owned Android projection without readmitting CREATE. These results do not qualify
+real server rights revocation or a user-facing logout journey.
+The application still exposes no writable mirror or event editor. General outgoing
+queue/resolution, Provider edit capture, atomic conflict/import handling and
+concurrent UPDATE/DELETE guarantees remain unqualified. See
 [source adaptation](../proton-auth/PROVENANCE.md).
 Explicit remote deletion notices
 now use a durable, scoped path to the Android mirror; historical deletion recovery
