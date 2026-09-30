@@ -25,7 +25,7 @@ sessions and imported calendars. See [identity and interface](DESIGN.md).
 | Module | Implemented | Not established by this slice |
 | --- | --- | --- |
 | `app` | Configuration, login, discovery and per-calendar read-only import controls; eight languages; durable import queue, Calendar Provider projection, permissions and background scheduling. | Broad Android/OEM qualification, editable mode or complete event feature coverage. |
-| `sync` | Pure scoped models, bounded transactional pagination, access gates, immutable simple local UPDATE/DELETE intents, conflict checks, uncertain-outcome write states and a separate metadata catalog controller. | General outgoing queue, automatic capture or bidirectional reconciliation. |
+| `sync` | Pure scoped models, bounded transactional pagination, access gates, immutable simple local CREATE/UPDATE/DELETE intents, conflict checks, uncertain-outcome write states and a separate metadata catalog controller. | General outgoing queue, automatic capture or bidirectional reconciliation. |
 | `auth` | Contako-derived secret contract and state controller, cancellation/cleanup gates, retry policy and focused tests. | Calendar bootstrap or per-calendar capability checks. |
 | `proton-auth` | Proton Core login/session integration, discovery, Calendar key bootstrap, paginated decryption, sealed change polling, bounded recurrence mapping and experimental single simple-event CREATE with verified readback. | All challenge variants, external-author trust resolution, complete recurrence/history coverage or general event editing. |
 
@@ -188,6 +188,16 @@ tombstone does not acknowledge a local deletion, and captures cannot coalesce
 different kinds or replace retained work. Source review and JVM checks have passed;
 physical Provider/SQLite, ordinary Android deletion and migration qualification
 remain pending. The app exposes no outgoing DELETE path.
+An explicit internal simple CREATE capture now reserves a scoped local UUID in a
+separate journal before its one permitted Provider identity stamp. Reopening without
+a captured intention inspects that marker only; missing or ambiguous evidence never
+falls back to a row ID. The first committed supported content and timestamp remain
+immutable and paused. This does not connect to the experimental remote CREATE path
+or qualify a system calendar creation UI. The import database remains at schema 10.
+Interrupted claims can sacrifice availability or lose an uncommitted snapshot;
+they cannot automatically rebind an identity after row purge. Source review and
+JVM checks have passed; physical qualification remains pending.
+See [local creation capture](LOCAL_CREATE_CAPTURE.md).
 The application still exposes no writable mirror or event editor. General outgoing
 queue/resolution, automatic Provider capture and conditional Proton UPDATE/DELETE
 guarantees remain unqualified. See

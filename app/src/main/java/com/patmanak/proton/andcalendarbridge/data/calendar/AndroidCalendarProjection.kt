@@ -31,6 +31,7 @@ import com.patmanak.proton.andcalendarbridge.sync.RecurrencePoint
 import com.patmanak.proton.andcalendarbridge.sync.RemoteChange
 import com.patmanak.proton.andcalendarbridge.sync.EventContent
 import com.patmanak.proton.andcalendarbridge.sync.EventDetails
+import com.patmanak.proton.andcalendarbridge.sync.LocalEventId
 import com.patmanak.proton.andcalendarbridge.sync.EventPerson
 import com.patmanak.proton.andcalendarbridge.sync.AttendanceRole
 import com.patmanak.proton.andcalendarbridge.sync.AttendanceStatus
@@ -337,6 +338,75 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
             checks += ContentProviderOperation.newAssertQuery(syncUri(child, account))
                 .withSelection("$column=?", arrayOf(row.toString())).withExpectedCount(0).build()
         }
+        requirePermissions()
+        resolver.applyBatch(CalendarContract.AUTHORITY, checks)
+        requirePermissions()
+        return OwnedLocalEditSnapshot(calendar, row, content)
+    }
+
+    override suspend fun captureAndStampSimpleCreate(scope: CalendarScope, eventRow: Long, localId: LocalEventId): OwnedLocalEditSnapshot? = operation {
+        readLocalCreate(scope, localId, eventRow)
+    }
+
+    override suspend fun inspectStampedSimpleCreate(scope: CalendarScope, localId: LocalEventId): OwnedLocalEditSnapshot? = operation {
+        readLocalCreate(scope, localId, null)
+    }
+
+    /** A row locator can select a candidate only for the durable claim's first invocation. */
+    private fun readLocalCreate(scope: CalendarScope, localId: LocalEventId, firstRow: Long?): OwnedLocalEditSnapshot? {
+        if (firstRow != null && firstRow <= 0) return null
+        val account = accountFor(scope.account)
+        val calendar = calendarRow(scope, account) ?: return null
+        val uri = syncUri(Events.CONTENT_URI, account)
+        val marker = digest("local-create-v1", calendarSyncId(scope), localId.value)
+        val markerSelection = Selection("${Events.CALENDAR_ID}=? AND ${Events.SYNC_DATA5}=?", arrayOf(calendar.toString(), marker))
+        val selection = if (firstRow == null) markerSelection else Selection(
+            "${Events.CALENDAR_ID}=? AND ${Events._ID}=?", arrayOf(calendar.toString(), firstRow.toString()))
+        val syncColumns = arrayOf(Events._SYNC_ID, Events.SYNC_DATA1, Events.SYNC_DATA2, Events.SYNC_DATA3,
+            Events.SYNC_DATA4, Events.SYNC_DATA5, Events.SYNC_DATA6, Events.SYNC_DATA7, Events.SYNC_DATA8,
+            Events.SYNC_DATA9, Events.SYNC_DATA10)
+        val unsupported = arrayOf(Events.RRULE, Events.RDATE, Events.EXRULE, Events.EXDATE, Events.DURATION,
+            Events.ORIGINAL_ID, Events.ORIGINAL_SYNC_ID, Events.ORIGINAL_INSTANCE_TIME, Events.ORIGINAL_ALL_DAY,
+            Events.ORGANIZER, Events.EVENT_COLOR, Events.EVENT_COLOR_KEY, Events.CUSTOM_APP_PACKAGE, Events.CUSTOM_APP_URI)
+        val emptyFlags = arrayOf(Events.HAS_ATTENDEE_DATA, Events.IS_ORGANIZER, Events.GUESTS_CAN_MODIFY,
+            Events.GUESTS_CAN_INVITE_OTHERS, Events.GUESTS_CAN_SEE_GUESTS, Events.HAS_ALARM,
+            Events.SELF_ATTENDEE_STATUS, Events.ACCESS_LEVEL)
+        val columns = arrayOf(Events._ID, Events.CALENDAR_ID, Events.DIRTY, Events.DELETED, Events.TITLE,
+            Events.DESCRIPTION, Events.EVENT_LOCATION, Events.DTSTART, Events.DTEND, Events.ALL_DAY,
+            Events.EVENT_TIMEZONE, Events.EVENT_END_TIMEZONE, Events.STATUS, Events.AVAILABILITY) +
+            syncColumns + unsupported + emptyFlags
+        val values = resolver.query(uri, columns, selection.sql, selection.args, null)?.use {
+            if (it.count != 1 || !it.moveToFirst()) return null
+            ContentValues().apply { DatabaseUtils.cursorRowToContentValues(it, this) }
+        } ?: fail(CalendarProjectionFailure.PROVIDER_UNAVAILABLE)
+        val row = values.getAsLong(Events._ID) ?: return null
+        if (row <= 0 || values.getAsLong(Events.CALENDAR_ID) != calendar ||
+            values.getAsInteger(Events.DIRTY) != 1 || values.getAsInteger(Events.DELETED) != 0) return null
+        if (syncColumns.any { column ->
+                if (firstRow == null && column == Events.SYNC_DATA5) values.getAsString(column) != marker
+                else values[column] != null
+            } || unsupported.any { values[it] != null } || emptyFlags.any { values.getAsInteger(it) != 0 } ||
+            values.getAsInteger(Events.STATUS) != Events.STATUS_CONFIRMED ||
+            values.getAsInteger(Events.AVAILABILITY) != Events.AVAILABILITY_BUSY) return null
+        val time = readSimpleTime(values) ?: return null
+        val content = EventContent(values.getAsString(Events.TITLE) ?: "", time,
+            values.getAsString(Events.DESCRIPTION) ?: "", values.getAsString(Events.EVENT_LOCATION) ?: "",
+            details = EventDetails())
+        val checks = arrayListOf(assertion(syncUri(Calendars.CONTENT_URI, account), calendarSelection(scope, account), calendar),
+            ContentProviderOperation.newAssertQuery(uri).withSelection(selection.sql, selection.args)
+                .withValues(values).withExpectedCount(1).build(),
+            ContentProviderOperation.newAssertQuery(uri).withSelection(markerSelection.sql, markerSelection.args)
+                .withExpectedCount(if (firstRow == null) 1 else 0).build())
+        for ((child, column) in listOf(Reminders.CONTENT_URI to Reminders.EVENT_ID,
+            Attendees.CONTENT_URI to Attendees.EVENT_ID, ExtendedProperties.CONTENT_URI to ExtendedProperties.EVENT_ID)) {
+            val absent = resolver.query(syncUri(child, account), arrayOf("_id"), "$column=?", arrayOf(row.toString()), null)
+                ?.use { it.count == 0 } ?: fail(CalendarProjectionFailure.PROVIDER_UNAVAILABLE)
+            if (!absent) return null
+            checks += ContentProviderOperation.newAssertQuery(syncUri(child, account))
+                .withSelection("$column=?", arrayOf(row.toString())).withExpectedCount(0).build()
+        }
+        if (firstRow != null) checks += ContentProviderOperation.newUpdate(uri)
+            .withSelection(selection.sql, selection.args).withValue(Events.SYNC_DATA5, marker).withExpectedCount(1).build()
         requirePermissions()
         resolver.applyBatch(CalendarContract.AUTHORITY, checks)
         requirePermissions()

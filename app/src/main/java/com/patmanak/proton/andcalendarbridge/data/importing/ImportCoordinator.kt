@@ -6,6 +6,7 @@ import com.patmanak.proton.andcalendarbridge.data.calendar.CalendarProjectionExc
 import com.patmanak.proton.andcalendarbridge.data.calendar.CalendarProjectionFailure
 import com.patmanak.proton.andcalendarbridge.data.outgoing.CreateAttemptStore
 import com.patmanak.proton.andcalendarbridge.data.outgoing.CreatePauseReason
+import com.patmanak.proton.andcalendarbridge.data.outgoing.LocalCreateStore
 import com.patmanak.proton.andcalendarbridge.sync.*
 import com.patmanak.proton.andcalendarbridge.sync.catalog.CalendarCatalogState
 import com.patmanak.proton.andcalendarbridge.sync.catalog.CalendarCatalogStatus
@@ -34,6 +35,7 @@ class ImportCoordinator(
     private val scope: CoroutineScope,
     private val scheduler: ImportScheduler = WorkManagerImportScheduler(context),
     private val creates: CreateAttemptStore? = null,
+    private val localCreates: LocalCreateStore? = null,
 ) {
     private val mutex = Mutex()
     private val serial = AccountSerialExecutor()
@@ -53,7 +55,10 @@ class ImportCoordinator(
     @Volatile private var pendingPermissionPause = false
     private val providerIds = context.getSharedPreferences("calendar-provider-mappings", Context.MODE_PRIVATE)
 
-    init { creates?.admitDispatch = { false } }
+    init {
+        creates?.admitDispatch = { false }
+        localCreates?.admitCapture = { false }
+    }
 
     /** Production startup is conservative: legacy preparations require explicit future resolution. */
     suspend fun initializeCreates() = mutex.withLock { ensureCreateLifecycle() }
@@ -366,6 +371,56 @@ class ImportCoordinator(
           finally {
               store.admitTransaction = { false }
               projection.admitOperation = { false }
+          }
+    }
+
+    /** Explicit internal capture only; no preparation, submission or Android acknowledgement. */
+    suspend fun captureLocalCreate(target: CalendarScope, eventRow: Long, localId: LocalEventId,
+        id: MutationId, timestamp: java.time.Instant): LocalEditCaptureResult = mutex.withLock {
+        val journal = localCreates ?: return@withLock LocalEditCaptureResult.UNAVAILABLE
+        val expected = generation
+        val policy = createPolicyRevision.get()
+        if (!isCurrent(expected, target.account) || !hasCalendarPermissions())
+            return@withLock LocalEditCaptureResult.INACTIVE
+        val active = { authenticated && generation == expected && createPolicyRevision.get() == policy && hasCalendarPermissions() }
+        store.admitTransaction = { it == target && active() }
+        projection.admitOperation = active
+        journal.admitCapture = { it == target && active() }
+        try {
+            val selected = store.selections(target.account).singleOrNull { it.scope == target }
+            if (selected?.enabled != true || !selected.available) return@withLock LocalEditCaptureResult.INACTIVE
+            val format = store.transaction(target) { checkpoint?.format }
+            if (format != remote.format) return@withLock LocalEditCaptureResult.UNQUALIFIED
+            val previous = journal.readReservation(target, localId)
+            if (previous != null && (previous.id != id || previous.format != format || previous.markerProtocol != 1))
+                return@withLock LocalEditCaptureResult.UNQUALIFIED
+            // A retained intention is historical work, not a witness of the current Android row.
+            val retained = journal.readIntent(target, localId)
+            if (retained != null) {
+                val identity = retained.reservation
+                if (identity.id != id || identity.localId != localId || identity.scope != target ||
+                    identity.format != format || identity.markerProtocol != 1 ||
+                    (previous != null && identity != previous)) return@withLock LocalEditCaptureResult.UNQUALIFIED
+                return@withLock LocalEditCaptureResult.RETAINED
+            }
+            if (previous == null && (eventRow <= 0 || timestamp.nano != 0)) return@withLock LocalEditCaptureResult.UNQUALIFIED
+            val reservation = previous ?: LocalCreateReservation(id, localId, target, format, timestamp)
+            val firstClaim = journal.reserve(reservation)
+            val snapshot = if (firstClaim) projection.captureAndStampSimpleCreate(target, eventRow, localId)
+                else projection.inspectStampedSimpleCreate(target, localId)
+            if (snapshot == null) return@withLock LocalEditCaptureResult.UNQUALIFIED
+            if (!isCurrent(expected, target.account) || !active()) return@withLock LocalEditCaptureResult.INACTIVE
+            val currentSelection = store.selections(target.account).singleOrNull { it.scope == target }
+            if (currentSelection?.enabled != true || !currentSelection.available) return@withLock LocalEditCaptureResult.INACTIVE
+            if (store.transaction(target) { checkpoint?.format } != format) return@withLock LocalEditCaptureResult.UNQUALIFIED
+            journal.retain(LocalCreateIntent(reservation, snapshot.content))
+            LocalEditCaptureResult.RETAINED
+        } catch (cancelled: CancellationException) { throw cancelled }
+          catch (_: Exception) { LocalEditCaptureResult.UNAVAILABLE }
+          finally {
+              store.admitTransaction = { false }
+              projection.admitOperation = { false }
+              journal.admitCapture = { false }
           }
     }
 

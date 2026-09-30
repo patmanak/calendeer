@@ -685,6 +685,39 @@ local accounts, calendars and databases.
 Live conditional DELETE, editable-calendar UI, automatic observation, undo of
 unobservable data, power-loss recovery and cross-store atomicity remain unqualified.
 
+## Internal local CREATE capture
+
+`LocalCreateIntentTest` checks canonical local identity, frozen timestamp/protocol,
+known-empty details, unsupported recurrence/details/color, second precision,
+timezones, exclusive all-day dates and redacted diagnostics on the JVM.
+
+`LocalCreateStoreDeviceTest` uses isolated real SQLite for the one-shot reservation,
+immutable first content, exact identity/format/timestamp, scoped uniqueness,
+competing helpers, reopen, lease/cancellation and rollback. No Provider locator is
+stored. Existing reservations never renew the right to stamp, even when they have
+no content. Backup exclusion applies to the entire database domain.
+
+`LocalCreateProviderDeviceTest` checks supported dirty rows, scoped identity stamp,
+unchanged flags/content, marker-only reopen inspection, imported/foreign metadata,
+duplicate markers including tombstones, unsupported fields/children and races.
+`LocalCreateCaptureCoordinatorDeviceTest` composes the production owner with real
+isolated journals and controlled ports for admission gates, first-commit replay,
+orphan reservations, marker recovery without row fallback and cancellation.
+The principal owner case must fail before wiring and pass afterward. These checks
+send no Proton mutation and establish neither Samsung creation UI behavior nor
+remote CREATE acceptance. Physical qualification remains required separately.
+`LocalCreateCaptureIntegrationDeviceTest` joins the real owner, Provider and both
+SQLite journals for timed/all-day capture, a failed content commit after stamping,
+marker-only recovery, replacement rows and duplicate tombstones. The competing
+helper fixture must also reproduce a foreign retained intention inserted between
+the two owner reads; replay must validate the intention actually read. Its debug
+stack hook makes the interleaving deterministic, without qualifying multiple
+Android processes.
+
+Lost uncommitted content, sacrificed unstamped reservations, physical power loss,
+automatic discovery, editable mode and outgoing reconciliation remain separate
+limits or work. See [local creation capture](LOCAL_CREATE_CAPTURE.md).
+
 ## Anonymous transport probe
 
 `ProtonConnectivityDeviceTest` is skipped unless instrumentation receives

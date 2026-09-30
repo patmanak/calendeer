@@ -136,6 +136,14 @@ atomicity, general outgoing resolution or a new user-facing logout policy.
 
 ## Internal simple local capture
 
+Explicit simple local CREATE capture uses a separate backup-excluded journal v1.
+An immutable scoped UUID reservation commits before a single Provider identity
+stamp; every restart is marker-only inspection. The first committed supported
+snapshot stays paused and cannot authorize the experimental submission journal.
+Android row IDs are transient selectors for the first claim only and never durable
+domain identities. See [local creation capture](LOCAL_CREATE_CAPTURE.md) for the
+protocol and interrupted-claim availability limits.
+
 The import database retains the latest remote record, last acknowledged Provider
 upsert and immutable local UPDATE intent separately. Capture and import conflict
 changes commit with projection suppression under the same SQLite transaction.

@@ -10,6 +10,7 @@ import com.patmanak.proton.andcalendarbridge.sync.RemoteChange
 import com.patmanak.proton.andcalendarbridge.sync.EventContent
 import com.patmanak.proton.andcalendarbridge.sync.ProjectionReceipt
 import com.patmanak.proton.andcalendarbridge.sync.AppliedProjectionWitness
+import com.patmanak.proton.andcalendarbridge.sync.LocalEventId
 import com.patmanak.proton.andcalendarbridge.sync.catalog.CalendarSummary
 
 /** Android-layer boundary. A failed apply leaves its durable intent unacknowledged for replay. */
@@ -35,6 +36,10 @@ interface CalendarProjection {
     suspend fun captureOwnedSimpleEdit(scope: CalendarScope, base: RemoteChange.Upsert): OwnedLocalEditSnapshot? = null
     /** Present, dirty local tombstone only; absence never establishes deletion intent. No ACK. */
     suspend fun captureOwnedSimpleDelete(scope: CalendarScope, base: RemoteChange.Upsert): OwnedLocalEditSnapshot? = null
+    /** One-shot identity stamp after a durable claim; preserves DIRTY and never assigns remote IDs. */
+    suspend fun captureAndStampSimpleCreate(scope: CalendarScope, eventRow: Long, localId: LocalEventId): OwnedLocalEditSnapshot? = null
+    /** Reopening is marker-only inspection. Missing markers never fall back to a row locator. */
+    suspend fun inspectStampedSimpleCreate(scope: CalendarScope, localId: LocalEventId): OwnedLocalEditSnapshot? = null
 }
 
 /** Android locator is diagnostic context only and never enters the durable domain intent. */

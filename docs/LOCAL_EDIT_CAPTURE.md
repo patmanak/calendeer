@@ -123,8 +123,10 @@ and permission gates apply to preparation and recovery as well as normal import.
 Provider snapshot and private database commit are not one atomic transaction.
 An edit made after snapshot qualification remains dirty and protected in Android;
 it does not silently replace the immutable first capture. Automatic observation,
-additional local edits, local CREATE capture, conflict controls and conditional
+additional local edits, automatic CREATE capture, conflict controls and conditional
 Proton UPDATE/DELETE remain separate work.
+Explicit internal [local CREATE capture](LOCAL_CREATE_CAPTURE.md) has its own
+one-shot identity reservation and permanently paused journal, without dispatch.
 
 Nonce-backed recovery covers simple upserts only. Recurrences, nonempty event
 details, Provider DELETE projections and legacy rows without receipts retain their conservative

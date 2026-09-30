@@ -19,13 +19,15 @@ import com.patmanak.proton.andcalendarbridge.data.calendar.AndroidCalendarProjec
 import com.patmanak.proton.andcalendarbridge.data.importing.ImportCoordinator
 import com.patmanak.proton.andcalendarbridge.data.importing.ImportStore
 import com.patmanak.proton.andcalendarbridge.data.outgoing.CreateAttemptStore
+import com.patmanak.proton.andcalendarbridge.data.outgoing.LocalCreateStore
 
 class BridgeApplication : Application() {
     private val authenticationScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     val imports by lazy {
         ImportCoordinator(this, ImportStore(this), ProtonAuthentication.events(this),
-            AndroidCalendarProjection(this), authenticationScope, creates = CreateAttemptStore(this))
+            AndroidCalendarProjection(this), authenticationScope, creates = CreateAttemptStore(this),
+            localCreates = LocalCreateStore(this))
     }
 
     // App-owned: activity recreation must neither repeat login nor revoke a retained session.
