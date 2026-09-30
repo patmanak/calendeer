@@ -22,7 +22,7 @@ class ProtonCreatePreparationAdapterTest {
     private var sealed: JsonObject? = null
     private var sessionReads = 0
     private var sessionFailureAt = -1
-    private fun adapter() = ProtonCreatePreparationAdapter({
+    private fun adapter(submission: Boolean = false) = ProtonCreatePreparationAdapter({
         sessionReads++
         if (sessionReads == sessionFailureAt) throw java.io.IOException("private session storage detail")
         current
@@ -38,7 +38,7 @@ class ProtonCreatePreparationAdapterTest {
         object : EventPayloadProtector {
             override fun seal(plain: String): String { steps += "seal"; sealed = Json.parseToJsonElement(plain) as JsonObject; after("seal"); return "synthetic-sealed" }
             override fun open(protected: String): String = error("Preparation must not reopen")
-        })
+        }, submission = submission)
 
     @Test fun refreshReadPrepareAndSealKeepScopePrivateAndCorrelationStable() = runTest {
         val port = adapter()
@@ -98,6 +98,32 @@ class ProtonCreatePreparationAdapterTest {
             sessionReads = 0; sessionFailureAt = read
             refused(CreatePreparationFailure.STORAGE) { adapter().prepareCreate(draft) }
         }
+    }
+    @Test fun capturedKnownEmptyProfileHasADedicatedSealedNotificationObligation() = runTest {
+        val timed = EventTime.Timed(Instant.parse("2030-10-01T10:00:00Z"), Instant.parse("2030-10-01T11:00:00Z"), java.time.ZoneId.of("UTC"))
+        for (time in listOf(draft.content.time, timed)) {
+            val captured = draft.copy(content = draft.content.copy(time = time, details = EventDetails()))
+            val receipt = adapter().prepareCreate(captured)
+            assertEquals(LOCAL_CREATE_PREPARATION_FORMAT, receipt.format)
+            assertTrue(sealed!!["knownEmptyDetails"]!!.jsonPrimitive.boolean)
+            assertEquals("EXPLICIT_EMPTY_REQUIRED", sealed!!.string("notificationPolicy"))
+            assertEquals(captured.timestamp.toString(), sealed!!.string("timestamp"))
+            assertTrue(sealed!!.containsKey("event"))
+            assertFalse(sealed!!.containsKey("request")); assertFalse(sealed!!.containsKey("context"))
+            assertFalse(sealed!!.containsKey("Notifications"))
+        }
+    }
+    @Test fun submissionCannotAcceptKnownEmptyOrNonemptyDetailsBeforeAnyReads() = runTest {
+        for (details in listOf(EventDetails(), EventDetails(reminders = listOf(EventReminder(10))))) {
+            refused(CreatePreparationFailure.UNSUPPORTED) { adapter(submission = true).prepareCreate(draft.copy(content = draft.content.copy(details = details))) }
+            assertEquals(0, sessionReads); assertTrue(steps.isEmpty()); assertNull(sealed)
+        }
+    }
+    @Test fun nonemptyLocalDetailsCannotBeReducedToThePreparationSubset() = runTest {
+        refused(CreatePreparationFailure.UNSUPPORTED) {
+            adapter().prepareCreate(draft.copy(content = draft.content.copy(details = EventDetails(reminders = listOf(EventReminder(10))))))
+        }
+        assertEquals(0, sessionReads); assertTrue(steps.isEmpty()); assertNull(sealed)
     }
     private suspend fun refused(reason: CreatePreparationFailure, action: suspend () -> Any) {
         try { action(); fail("Preparation must not escape failed admission") }

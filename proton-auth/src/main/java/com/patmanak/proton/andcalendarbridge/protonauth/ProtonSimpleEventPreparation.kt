@@ -12,6 +12,7 @@ import biweekly.util.ICalDate
 import com.patmanak.proton.andcalendarbridge.sync.AdapterFormat
 import com.patmanak.proton.andcalendarbridge.sync.EventContent
 import com.patmanak.proton.andcalendarbridge.sync.EventTime
+import com.patmanak.proton.andcalendarbridge.sync.EventDetails
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneOffset
@@ -44,7 +45,7 @@ internal object ProtonSimpleEventSerializer {
         try {
             if (!uid.matches(Regex("[A-Za-z0-9][A-Za-z0-9@._+-]{0,254}")) || timestamp.nano != 0 ||
                 timestamp.atOffset(ZoneOffset.UTC).year !in MIN_YEAR..9999 || content.recurrence != null ||
-                content.details != null || content.colorRgb != null) unsupported()
+                (content.details != null && content.details != EventDetails()) || content.colorRgb != null) unsupported()
             val text = listOf(content.title, content.description, content.location)
                 .map { it.replace("\r\n", "\n") }
             if (text.any { it.length > MAX_BYTES || '\u0000' in it ||

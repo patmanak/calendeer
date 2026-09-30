@@ -81,7 +81,18 @@ class ProtonSimpleEventPreparationTest {
         refused { ProtonSimpleEventSerializer.serialize(uid, stamp, simple.copy(recurrence = EventRecurrence(uid, "FREQ=DAILY"))) }
         refused { ProtonSimpleEventSerializer.serialize(uid, stamp, simple.copy(details = EventDetails(listOf(EventReminder(15))))) }
         refused { ProtonSimpleEventSerializer.serialize(uid, stamp, simple.copy(details = EventDetails(organizer = EventPerson("host@example.invalid")))) }
-        refused { ProtonSimpleEventSerializer.serialize(uid, stamp, simple.copy(details = EventDetails())) }
+    }
+
+    @Test fun knownEmptyDetailsCanBePartitionedWithoutInventingPersonalNotifications() {
+        val unknown = EventContent("Synthetic", timed)
+        val legacy = ProtonSimpleEventSerializer.serialize(uid, stamp, unknown)
+        val known = ProtonSimpleEventSerializer.serialize(uid, stamp, unknown.copy(details = EventDetails()))
+        assertEquals(legacy.clearShared, known.clearShared)
+        assertEquals(legacy.encryptedShared, known.encryptedShared)
+        assertTrue(Biweekly.parse(known.clearShared).first().events.single().alarms.isEmpty())
+        assertTrue(Biweekly.parse(known.encryptedShared).first().events.single().alarms.isEmpty())
+        // Shared text has no personal Notifications override. This alone proves no reminder policy.
+        assertFalse(known.clearShared.contains("Notifications"))
     }
 
     @Test fun precisionAmbiguousLocalTimesAndUnsafeIdentitiesCannotSilentlyChange() {

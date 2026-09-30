@@ -26,6 +26,7 @@ data class ImportUiState(val selections: List<ImportStore.Selection> = emptyList
     val hasPermission: Boolean = false, val authenticated: Boolean = false, val busy: Boolean = false)
 enum class CreateAssociationResult { INACTIVE, UNRESOLVED, WAITING_IMPORT, WAITING_PROVIDER, ASSOCIATED }
 enum class LocalEditCaptureResult { INACTIVE, UNQUALIFIED, RETAINED, CONFLICT, UNAVAILABLE }
+enum class LocalCreatePreparationResult { INACTIVE, UNQUALIFIED, RETAINED, UNSUPPORTED, UNAVAILABLE }
 /** One process owner for foreground and durable worker triggers; no event content reaches UI. */
 class ImportCoordinator(
     private val context: Context,
@@ -417,6 +418,65 @@ class ImportCoordinator(
             LocalEditCaptureResult.RETAINED
         } catch (cancelled: CancellationException) { throw cancelled }
           catch (_: Exception) { LocalEditCaptureResult.UNAVAILABLE }
+          finally {
+              store.admitTransaction = { false }
+              projection.admitOperation = { false }
+              journal.admitCapture = { false }
+          }
+    }
+
+    /** Explicit read-only preparation; no outgoing journal, dispatch, or Provider acknowledgement. */
+    suspend fun prepareLocalCreate(target: CalendarScope, localId: LocalEventId, id: MutationId,
+        port: CalendarCreatePreparationPort): LocalCreatePreparationResult = mutex.withLock {
+        val journal = localCreates ?: return@withLock LocalCreatePreparationResult.UNAVAILABLE
+        val expected = generation
+        val policy = createPolicyRevision.get()
+        if (!isCurrent(expected, target.account) || !hasCalendarPermissions())
+            return@withLock LocalCreatePreparationResult.INACTIVE
+        val active = { authenticated && generation == expected && createPolicyRevision.get() == policy && hasCalendarPermissions() }
+        store.admitTransaction = { it == target && active() }
+        projection.admitOperation = active
+        journal.admitCapture = { it == target && active() }
+        try {
+            val selected = store.selections(target.account).singleOrNull { it.scope == target }
+            if (selected?.enabled != true || !selected.available) return@withLock LocalCreatePreparationResult.INACTIVE
+            val format = store.transaction(target) { checkpoint?.format }
+            if (format != remote.format) return@withLock LocalCreatePreparationResult.UNQUALIFIED
+            val intent = journal.readIntent(target, localId) ?: return@withLock LocalCreatePreparationResult.UNQUALIFIED
+            val reservation = intent.reservation
+            if (reservation.scope != target || reservation.localId != localId || reservation.id != id ||
+                reservation.format != format || reservation.markerProtocol != 1) return@withLock LocalCreatePreparationResult.UNQUALIFIED
+            val preparationFormat = port.localCreateFormat ?: return@withLock LocalCreatePreparationResult.UNSUPPORTED
+            val observed = projection.inspectStampedSimpleCreate(target, localId)
+                ?: return@withLock LocalCreatePreparationResult.UNQUALIFIED
+            if (observed.content != intent.content) return@withLock LocalCreatePreparationResult.UNQUALIFIED
+            val retained = journal.readPreparation(target, localId)
+            if (retained != null) {
+                if (retained.intent != intent || retained.format != preparationFormat)
+                    return@withLock LocalCreatePreparationResult.UNQUALIFIED
+                if (!isCurrent(expected, target.account) || !active()) return@withLock LocalCreatePreparationResult.INACTIVE
+                return@withLock LocalCreatePreparationResult.RETAINED
+            }
+            val prepared = port.prepareCreate(CalendarCreateDraft(target, reservation.id, reservation.timestamp, intent.content))
+            if (prepared.scope != target || prepared.format != preparationFormat || port.localCreateFormat != preparationFormat ||
+                prepared.protectedPayload.isBlank()) return@withLock LocalCreatePreparationResult.UNQUALIFIED
+            if (!isCurrent(expected, target.account) || !active()) return@withLock LocalCreatePreparationResult.INACTIVE
+            val currentSelection = store.selections(target.account).singleOrNull { it.scope == target }
+            if (currentSelection?.enabled != true || !currentSelection.available) return@withLock LocalCreatePreparationResult.INACTIVE
+            if (store.transaction(target) { checkpoint?.format } != format) return@withLock LocalCreatePreparationResult.UNQUALIFIED
+            val current = projection.inspectStampedSimpleCreate(target, localId)
+                ?: return@withLock LocalCreatePreparationResult.UNQUALIFIED
+            if (current.content != intent.content) return@withLock LocalCreatePreparationResult.UNQUALIFIED
+            journal.retainPreparation(LocalCreatePreparation(intent, preparationFormat, prepared.protectedPayload))
+            LocalCreatePreparationResult.RETAINED
+        } catch (cancelled: CancellationException) { throw cancelled }
+          catch (failure: CreatePreparationException) {
+              when (failure.reason) {
+                  CreatePreparationFailure.UNSUPPORTED -> LocalCreatePreparationResult.UNSUPPORTED
+                  CreatePreparationFailure.AUTHENTICATION, CreatePreparationFailure.PERMISSION -> LocalCreatePreparationResult.INACTIVE
+                  else -> LocalCreatePreparationResult.UNAVAILABLE
+              }
+          } catch (_: Exception) { LocalCreatePreparationResult.UNAVAILABLE }
           finally {
               store.admitTransaction = { false }
               projection.admitOperation = { false }

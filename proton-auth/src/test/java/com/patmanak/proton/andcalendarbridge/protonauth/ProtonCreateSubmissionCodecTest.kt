@@ -37,6 +37,11 @@ class ProtonCreateSubmissionCodecTest {
         val f = CreateSubmissionFixture()
         refused(CreatePreparationFailure.UNSUPPORTED) { ProtonCreateSubmissionCodec.open(f.record.copy(format = CREATE_PREPARATION_FORMAT), f.protector) }
         refused(CreatePreparationFailure.UNSUPPORTED) { ProtonCreateSubmissionCodec.open(f.record.copy(format = CREATE_SUBMISSION_FORMAT.copy(version = 2)), f.protector) }
+        refused(CreatePreparationFailure.UNSUPPORTED) { ProtonCreateSubmissionCodec.open(f.record.copy(format = LOCAL_CREATE_PREPARATION_FORMAT),
+            object : EventPayloadProtector {
+                override fun seal(plain: String): String = error("No crypto")
+                override fun open(protected: String): String = error("Local preparation must be refused before opening")
+            }) }
     }
 
     @Test fun envelopeScopeVersionAndCorrelationCannotBeSubstituted() {

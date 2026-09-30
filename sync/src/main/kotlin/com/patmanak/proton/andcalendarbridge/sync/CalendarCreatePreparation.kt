@@ -24,5 +24,10 @@ class CreatePreparationException(val reason: CreatePreparationFailure) :
  * dispatched without durable admission, fresh rights/context validation and outcome reconciliation.
  */
 fun interface CalendarCreatePreparationPort {
+    /** Local declaration, stable during each operation, with no storage/network/crypto work. Null refuses captured known-empty
+     * preparation. A changed format requires explicit reconciliation of cached protected payloads.
+     * This capability never grants submission, personal notification support, or writable mode.
+     */
+    val localCreateFormat: AdapterFormat? get() = null
     suspend fun prepareCreate(draft: CalendarCreateDraft): PreparedCalendarCreate
 }

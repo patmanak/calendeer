@@ -136,10 +136,15 @@ atomicity, general outgoing resolution or a new user-facing logout policy.
 
 ## Internal simple local capture
 
-Explicit simple local CREATE capture uses a separate backup-excluded journal v1.
+Explicit simple local CREATE capture uses a separate backup-excluded journal.
 An immutable scoped UUID reservation commits before a single Provider identity
 stamp; every restart is marker-only inspection. The first committed supported
 snapshot stays paused and cannot authorize the experimental submission journal.
+Journal v2 can separately retain a protected read-only preparation against that
+exact snapshot. The owner checks current marker/content before and after preparation,
+and requires a declared adapter format for cache compatibility. Proton's dedicated
+known-empty preparation retains an unresolved personal-notification obligation;
+neither its format nor its journal grants submission admission.
 Android row IDs are transient selectors for the first claim only and never durable
 domain identities. See [local creation capture](LOCAL_CREATE_CAPTURE.md) for the
 protocol and interrupted-claim availability limits.

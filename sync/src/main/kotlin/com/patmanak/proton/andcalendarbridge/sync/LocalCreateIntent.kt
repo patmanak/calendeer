@@ -32,3 +32,9 @@ data class LocalCreateIntent(val reservation: LocalCreateReservation, val conten
     }
     override fun toString() = "LocalCreateIntent(REDACTED)"
 }
+
+/** Immutable adapter-protected preparation of one captured snapshot, never dispatch admission. */
+data class LocalCreatePreparation(val intent: LocalCreateIntent, val format: AdapterFormat, val protectedPayload: String) {
+    init { require(protectedPayload.isNotBlank()) }
+    override fun toString() = "LocalCreatePreparation(REDACTED)"
+}

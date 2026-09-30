@@ -57,4 +57,12 @@ class LocalCreateIntentTest {
             reservation.scope.account.value, reservation.scope.calendar.value, content.title))
             assertFalse(diagnostics.contains(privateValue))
     }
+    @Test fun protectedPreparationBindsTheCapturedIntentAndRejectsEmptyPayload() {
+        val intent = LocalCreateIntent(reservation, content)
+        val prepared = LocalCreatePreparation(intent, AdapterFormat("fixture-local-preparation", 1), "protected-fixture")
+        assertEquals(intent, prepared.intent)
+        refused { prepared.copy(protectedPayload = " ") }
+        assertFalse(prepared.toString().contains(prepared.protectedPayload))
+        assertNotEquals(prepared, prepared.copy(protectedPayload = "different-protected-fixture"))
+    }
 }

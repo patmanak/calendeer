@@ -3,7 +3,8 @@
 `ImportCoordinator.captureLocalCreate` explicitly retains a simple new Android
 event offline. The application owns its capture journal, separate from the import
 database and experimental remote CREATE admission journal. No observer, editable
-calendar mode, preparation, submission or remote acknowledgement is enabled.
+calendar mode, submission or remote acknowledgement is enabled. A separate explicit
+read-only preparation entry point can retain a protected, non-dispatchable payload.
 
 ## Identity and supported content
 
@@ -22,11 +23,12 @@ all-day dates use UTC with an exclusive end. Color overrides, recurrence,
 organizer/participant fields, reminders, extended properties, custom app data and
 unsupported flags are refused. This newly created content has an explicitly
 known-empty details profile; no unknown remote fields are inferred to be empty.
-Acceptance by the existing Proton preparation adapter is a separate capability.
+Proton preparation uses a dedicated known-empty format. This is distinct from
+acceptance by the experimental submission adapter.
 
 ## One-shot claim and first committed intention
 
-The backup-excluded local journal v1 first commits an immutable reservation.
+The backup-excluded local journal first commits an immutable reservation.
 Scoped UUID and mutation ID are independently unique. Only the invocation that
 inserted it may attempt an identity stamp. Reserving does not capture content,
 authorize upload or establish that a Provider operation happened.
@@ -77,3 +79,42 @@ association, user-facing capture and outgoing reconciliation remain separate wor
 See [validation](VALIDATION.md) for domain, SQLite, controlled-owner and Provider
 checks. Source/JVM evidence does not qualify a system calendar application's UI or
 the Proton service.
+
+## Protected read-only preparation
+
+`prepareLocalCreate` requires the exact committed intention, current account,
+permissions, available selection and compatible import checkpoint. The preparation
+port declares its known-empty format locally, without network or cryptographic
+work. Missing capability is unsupported; a changed format cannot silently reuse
+or replace an old protected payload.
+
+Marker inspection must still qualify the intention's exact current content. A
+fresh preparation receives the frozen mutation ID, timestamp and known-empty
+content. It may refresh account/calendar context using reads and use Proton crypto
+and Keystore protection. After that await, the owner rechecks admission, selection,
+checkpoint, declared/response format, scope and marker/content before committing.
+No Provider content or flags are written. A failure preserves the original intention.
+
+Journal v2 adds a nullable protected preparation with its own adapter format/version.
+The additive v1 migration preserves every reservation and captured payload without
+inventing preparations. The first preparation is immutable and must match the
+exact committed intention. Incomplete preparation triplets are refused. It remains
+permanently paused and never enters the experimental dispatch journal.
+
+A cached preparation still requires current admission and marker/content checks,
+but never calls the preparer or regenerates its encrypted payload. It can therefore
+be reused offline with a locally retained session. A changed/deleted event, ambiguous
+marker or incompatible format leaves the historical payload retained and unqualified.
+This is a point-in-time qualification, without atomicity across the Provider,
+import state and journal or a guarantee about a later edit.
+
+The dedicated `proton-calendar-local-create-preparation` format seals
+`knownEmptyDetails=true` and an `EXPLICIT_EMPTY_REQUIRED` personal-notification
+obligation. Shared iCalendar text without `VALARM` does not disable Proton's
+calendar-default notifications. This obligation records future work; it does not
+claim that remote reminders were suppressed. The envelope contains no submission
+request. Submission v1 refuses this format before opening it, and its preparation
+entry point still refuses any non-null details before session/network/crypto work.
+Legacy unknown-profile preparation remains unchanged. Explicit notification
+override support and live readback qualification are required before any future
+dispatch of captured known-empty content.

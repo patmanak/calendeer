@@ -59,6 +59,7 @@ internal class SerializedAuthenticationPort(
     private val dispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) : AuthenticationFlowPort, CalendarCatalogPort, CalendarDeltaRemote, RollingCalendarRemote, ContentMappingRemote, CalendarCreatePreparationPort, CalendarCreateSubmissionPort {
     override val contentMapping = EVENT_CONTENT_MAPPING
+    override val localCreateFormat = LOCAL_CREATE_PREPARATION_FORMAT
     constructor(context: Context, verification: HumanVerificationHost) : this(
         { ProtonAuthenticationRuntime.build(context, verification.delegate.hooks) },
         verification::cancel,

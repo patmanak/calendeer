@@ -72,7 +72,7 @@ session-key generation, `encryptData` and public-key `encryptSessionKey`; the
 inspected upstream client uses Core 36.2.0, so version compatibility is tested
 rather than assumed.
 
-Local changes restrict preparation to CREATE with no recurrence, explicit
+Local changes restrict preparation to CREATE with no recurrence, non-empty
 details/reminders/participants or color override. UID and timestamp are supplied
 by the caller; no identity or clock is generated inside serialization. UTF-8 is
 strict, LF/CRLF logical text is normalized, precision is bounded to seconds and
@@ -90,6 +90,20 @@ diagnostics; it is not a persistable, scoped intent or server acknowledgement.
 fabricated service read shape to qualify signing/decryption and altered-signature
 rejection. It does not demonstrate live CREATE acceptance, UID idempotency,
 conditional writes or unknown-field preservation during UPDATE.
+
+### Captured local CREATE preparation
+
+The local known-empty-details extension reuses the same pinned partition mapping,
+Biweekly serialization and Core cryptographic/Keystore primitives. It adds no
+upstream source copy or dependency. Shared content without VALARM does not establish
+empty personal notifications: missing notification data can inherit calendar
+defaults. The separate `proton-calendar-local-create-preparation` format therefore
+seals `knownEmptyDetails=true` and `EXPLICIT_EMPTY_REQUIRED` as an unresolved
+obligation. It contains no submission request and cannot be opened or dispatched
+by the existing submission codec. Submission preparation rejects every non-null
+details profile before session or context reads; its legacy format is unchanged.
+JVM partition and format tests establish these local restrictions, not a service
+implementation of explicit-empty notifications or native crypto compatibility.
 
 ## Authenticated CREATE context and response preparation
 

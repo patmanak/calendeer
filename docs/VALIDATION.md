@@ -718,6 +718,40 @@ Lost uncommitted content, sacrificed unstamped reservations, physical power loss
 automatic discovery, editable mode and outgoing reconciliation remain separate
 limits or work. See [local creation capture](LOCAL_CREATE_CAPTURE.md).
 
+## Protected preparation of captured local CREATE
+
+`LocalCreateIntentTest` also checks that a retained preparation binds the exact
+captured intention, rejects an empty payload and redacts diagnostics. The JVM
+serializer test requires known-empty details to preserve the simple shared parts
+without inventing personal notifications. Adapter tests require a dedicated
+format with a sealed explicit-empty notification obligation and no submission
+request. Submission rejects non-null details before session/context/crypto reads,
+and both submission decoding and dispatch reject the new format before opening
+the payload or admitting an attempt. These tests use controlled crypto/context
+ports; they do not qualify native encryption or service reminder behavior.
+
+`LocalCreatePreparationStoreDeviceTest` uses isolated SQLite to check exact
+binding, immutable replay/reopen, competing helpers, schema-1 additive migration,
+grouped column constraints, corrupt-row refusal and transactional rollback.
+`LocalCreatePreparationCoordinatorDeviceTest` checks frozen draft construction,
+cache reuse without another preparation, incompatible or undeclared formats,
+current Provider content, account/access/selection/checkpoint changes across the
+preparation wait, unsupported/network failure and cancellation.
+
+With `-e providerFixture true`, `LocalCreatePreparationIntegrationDeviceTest`
+joins the production owner, real Provider and both journals with a controlled
+read-only preparer. It requires retained preparation without Provider flag/content
+changes, cache reuse after reopening, refusal of changed/missing/duplicate markers
+and retry after an injected SQLite failure. Its principal case must fail against
+the unwired preparation owner and pass after wiring. Existing capture/recovery
+fixtures remain regression coverage. Compilation alone does not establish these
+device results; physical qualification remains separate.
+
+The preparation is historical and paused. Cached replay does not requalify server
+keys or rights. Provider inspection and journal commit remain separate, and the
+explicit-empty personal-notification obligation remains unresolved. No test here
+qualifies editable mode, automatic observation or upload of a captured creation.
+
 ## Anonymous transport probe
 
 `ProtonConnectivityDeviceTest` is skipped unless instrumentation receives
