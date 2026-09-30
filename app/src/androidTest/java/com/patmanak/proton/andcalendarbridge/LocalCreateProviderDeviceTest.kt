@@ -211,7 +211,11 @@ class LocalCreateProviderDeviceTest {
         }
         suspend fun seed() {
             calendar = projection.ensureCalendar(target, CalendarSummary(target.calendar, "Calendeer local create provider fixture"))
-            row = ContentUris.parseId(context.contentResolver.insert(if (ordinary) Events.CONTENT_URI else uri, candidateValues())!!)
+            val candidate = candidateValues().apply {
+                // Ordinary clients cannot supply sync-only flags; the Provider sets them itself.
+                if (ordinary) { remove(Events.DIRTY); remove(Events.DELETED) }
+            }
+            row = ContentUris.parseId(context.contentResolver.insert(if (ordinary) Events.CONTENT_URI else uri, candidate)!!)
         }
         fun mutate(values: ContentValues) {
             assertEquals(1, context.contentResolver.update(uri, values, "${Events._ID}=?", arrayOf(row.toString())))

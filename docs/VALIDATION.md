@@ -230,7 +230,9 @@ It does not create/edit/delete a remote event or establish reset/retention seman
 
 `CoverageStoreDeviceTest` uses isolated SQLite databases for schema 4-to-5 migration,
 reopen, atomic rollback, receipt metadata and ledger quota accounting, scoped counts
-and refresh epochs. Older migrations are exercised by the existing store suites.
+and refresh epochs. Inbox receipts share the retained-byte budget but do not count
+as deferred event records; deferred counts remain scoped to their owning calendar.
+Older migrations are exercised by the existing store suites.
 `CoverageCoordinatorDeviceTest` requires `providerFixture=true`: with an isolated
 store/scheduler/account and synthetic remote it receives a page before keys are
 available, resumes local processing without a fetch, blocks then drains projection,
@@ -705,7 +707,8 @@ isolated journals and controlled ports for admission gates, first-commit replay,
 orphan reservations, marker recovery without row fallback and cancellation.
 The principal owner case must fail before wiring and pass afterward. These checks
 send no Proton mutation and establish neither Samsung creation UI behavior nor
-remote CREATE acceptance. Physical qualification remains required separately.
+remote CREATE acceptance. These suites have passed on an authorized physical
+target, including ordinary all-day Provider insertion without sync-adapter flags.
 `LocalCreateCaptureIntegrationDeviceTest` joins the real owner, Provider and both
 SQLite journals for timed/all-day capture, a failed content commit after stamping,
 marker-only recovery, replacement rows and duplicate tombstones. The competing
@@ -747,8 +750,10 @@ read-only preparer. It requires retained preparation without Provider flag/conte
 changes, cache reuse after reopening, refusal of changed/missing/duplicate markers
 and retry after an injected SQLite failure. Its principal case must fail against
 the unwired preparation owner and pass after wiring. Existing capture/recovery
-fixtures remain regression coverage. Compilation alone does not establish these
-device results; physical qualification remains separate.
+fixtures remain regression coverage. The journal migration, owner and integration
+suites have passed on an authorized physical target. A lease closed by an owner
+call must be explicitly readmitted only for a fixture's deliberate SQL setup;
+subsequent owner calls still install their production admission gates.
 
 `ProtonEventPreparationCryptoDeviceTest` has a separate known-empty fixture through
 the production preparer, resolver, Core cryptography, Keystore protector and real
@@ -756,8 +761,14 @@ decoder. Its context and response shapes are synthetic, with non-empty timed and
 all-day defaults. It copies the outgoing notification field into the fabricated
 response and checks its exact raw empty array before decoding. Absent/null overrides
 inherit defaults; an EMAIL-only override can map to empty Android reminders without
-being an empty personal list. No network or service mutation is used. This fixture
-requires separate physical execution; it does not establish server acceptance.
+being an empty personal list. No network or service mutation is used. Both native
+preparation fixtures have passed on an authorized physical target; they do not
+establish server acceptance.
+
+Historical failure reproductions need application and instrumentation APKs with
+matching source-level constructor/ABI contracts. Keep the original frozen artifacts
+and build corrected fixtures against their corresponding application revision.
+An ABI crash or an inactive test hook is not evidence of a production regression.
 
 The preparation is historical and paused. Cached replay does not requalify server
 keys or rights. Provider inspection and journal commit remain separate. Old v1

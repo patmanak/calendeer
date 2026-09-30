@@ -176,8 +176,9 @@ newer remote evidence remains pending. Missing or ambiguous proof blocks unsafe
 recovery, including different content reusing the old opaque revision. Migration
 does not invent receipts for legacy rows. Complex projections and deletions retain
 their previous conservative recovery limits; the two stores remain separate.
-Nonce-backed recovery has source review and JVM checks. Its physical interruption,
-schema 9 migration and Provider regression qualification remains pending.
+Nonce-backed recovery has passed source review, JVM checks and controlled physical
+SQLite/Provider fixtures, including lost private acknowledgement, reused opaque
+revision and schema migration. These fixtures do not qualify arbitrary power loss.
 An explicit internal simple DELETE capture now requires a present, owned, dirty
 Android tombstone. It retains the projected base and observable supported content,
 including edits made before deletion, without consuming the Android flags.
@@ -185,9 +186,10 @@ Schema 10 adds an UPDATE/DELETE kind to the same unique local journal; existing
 UPDATE payloads, states and receipts are preserved. Both kinds suppress projection
 and conflict permanently with divergent or deferred remote evidence. A remote
 tombstone does not acknowledge a local deletion, and captures cannot coalesce
-different kinds or replace retained work. Source review and JVM checks have passed;
-physical Provider/SQLite, ordinary Android deletion and migration qualification
-remain pending. The app exposes no outgoing DELETE path.
+different kinds or replace retained work. Source review, JVM checks and physical
+Provider/SQLite fixtures have passed, including ordinary Android deletion and
+migration. This qualifies the installed Provider, not a calendar client's editing
+UI. The app exposes no outgoing DELETE path.
 An explicit internal simple CREATE capture now reserves a scoped local UUID in a
 separate journal before its one permitted Provider identity stamp. Reopening without
 a captured intention inspects that marker only; missing or ambiguous evidence never
@@ -195,8 +197,10 @@ falls back to a row ID. The first committed supported content and timestamp rema
 immutable and paused. This does not connect to the experimental remote CREATE path
 or qualify a system calendar creation UI. The import database remains at schema 10.
 Interrupted claims can sacrifice availability or lose an uncommitted snapshot;
-they cannot automatically rebind an identity after row purge. Source review and
-JVM checks have passed; physical qualification remains pending.
+they cannot automatically rebind an identity after row purge. Source review,
+JVM checks and physical SQLite/Provider/owner fixtures have passed, including
+ordinary all-day insertion, marker recovery and a deterministic competing-helper
+regression. This does not qualify simultaneous processes or a calendar client's UI.
 See [local creation capture](LOCAL_CREATE_CAPTURE.md).
 Captured simple CREATE intentions can now be explicitly prepared through the
 read-only Proton boundary. Local journal v2 retains the first protected payload
@@ -211,8 +215,11 @@ cannot be reused or replaced automatically. Both versions are refused by submiss
 v1 before opening/admission and never enter the experimental dispatch journal.
 JVM tests check placement and refusal of unexpected personal data. A separate
 synthetic native fixture exercises Core/Keystore and defaults through the production
-preparer with controlled context/read shapes; compilation does not qualify it.
-Native crypto, schema migration and live service notification checks remain pending.
+preparer with controlled context/read shapes. Physical journal migration, owner
+gates and Provider preparation/cache fixtures have passed. The native fixture also
+passed timed/all-day round-trips, reopened protected storage, signed UID/content
+checks, altered-signature refusal and explicit-empty versus inherited defaults.
+No request was submitted; live service notification checks remain unqualified.
 The application still exposes no writable mirror or event editor. General outgoing
 queue/resolution, automatic Provider capture and conditional Proton UPDATE/DELETE
 guarantees remain unqualified. See

@@ -147,8 +147,10 @@ class CoverageStoreDeviceTest {
         assertEquals(CoverageLedger(), store.staged { coverage }); assertNull(store.staged { checkpoint })
         // The single payload byte fits exactly, proving metadata was what exceeded the budget.
         store.staged { received = receipt.copy(protectedPayload = "x", coverage = null) }
-        assertNotNull(store.staged { received })
-        assertEquals(9, store.deferredCount(other))
+        assertEquals(receipt.copy(protectedPayload = "x", coverage = null), store.staged { received })
+        // Inbox receipts consume the shared byte budget, but are not deferred event records.
+        assertEquals(8, store.deferredCount(other))
+        assertEquals(0, store.deferredCount(scope))
     }
 
     @Test fun oversizedCoveragePayloadRollsBackWithoutReplacingPriorObservation() = fixture { store, _ ->

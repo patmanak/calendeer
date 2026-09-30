@@ -130,10 +130,12 @@ class LocalCreateCaptureCoordinatorDeviceTest {
         val foreign = LocalCreateIntent(reservation.copy(id = MutationId("competing-create")),
             content.copy(title = "Create fixture competing helper snapshot"))
         permissionHook = {
-            // The two lease checks bracket the real SQLite readReservation operation. Inject after
-            // its absent result has been read, before the owner starts its separate readIntent.
+            // readReservation is the owner's first journal operation. Its two lease checks bracket
+            // the real SQLite read; inject after the absent result, before the separate readIntent.
+            // D8 can rename the guardedRead lambda, so identify the journal rather than that lambda.
+            val journalClass = LocalCreateStore::class.java.name
             val insideJournalRead = Thread.currentThread().stackTrace.any {
-                it.className.contains("LocalCreateStore") && it.className.contains("guardedRead")
+                it.className == journalClass || it.className.startsWith(journalClass + "$")
             }
             if (!injected && insideJournalRead && ++guardedReadChecks == 2) {
                 injected = true

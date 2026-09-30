@@ -103,6 +103,8 @@ class LocalCreatePreparationCoordinatorDeviceTest {
         assertEquals(LocalCreatePreparationResult.UNQUALIFIED, prepare(MutationId("foreign-mutation")))
         assertEquals(LocalCreatePreparationResult.UNQUALIFIED,
             coordinator.prepareLocalCreate(target, LocalEventId(UUID.randomUUID().toString()), id, port))
+        // The owner closes its lease on return. Admit only this fixture's deliberate state change.
+        store.admitTransaction = { it == target }
         store.transaction(target) { checkpoint = PageCheckpoint(target, AdapterFormat("foreign-format", 1)) }
         assertEquals(LocalCreatePreparationResult.UNQUALIFIED, prepare())
         assertEquals(0, calls); assertEquals(0, inspections); assertNull(retainedPreparation())
