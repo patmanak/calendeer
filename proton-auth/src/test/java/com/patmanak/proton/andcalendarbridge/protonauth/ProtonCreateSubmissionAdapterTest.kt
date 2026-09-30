@@ -16,13 +16,15 @@ import org.junit.Test
 /** Synthetic ports test admission/reconciliation policy, not server or cryptographic compatibility. */
 class ProtonCreateSubmissionAdapterTest {
     @Test fun localPreparationCannotSubmitOrInspectBeforeAdmissionAndNetwork() = runTest {
-        val f = CreateSubmissionFixture()
-        val local = f.record.copy(format = LOCAL_CREATE_PREPARATION_FORMAT)
-        f.journal.stored = local
-        assertEquals(CreateSubmissionObservation.Unknown, f.adapter.submit(local, f.journal))
-        f.journal.stored = local.copy(state = CreateAttemptState.OUTCOME_UNKNOWN)
-        assertEquals(CreateSubmissionObservation.Unknown, f.adapter.inspect(f.journal.stored!!))
-        assertTrue(f.steps.isEmpty()); assertEquals(0, f.sends); assertEquals(0, f.prepares)
+        for (format in listOf(LOCAL_CREATE_PREPARATION_FORMAT.copy(version = 1), LOCAL_CREATE_PREPARATION_FORMAT)) {
+            val f = CreateSubmissionFixture()
+            val local = f.record.copy(format = format)
+            f.journal.stored = local
+            assertEquals(CreateSubmissionObservation.Unknown, f.adapter.submit(local, f.journal))
+            f.journal.stored = local.copy(state = CreateAttemptState.OUTCOME_UNKNOWN)
+            assertEquals(CreateSubmissionObservation.Unknown, f.adapter.inspect(f.journal.stored!!))
+            assertTrue(f.steps.isEmpty()); assertEquals(0, f.sends); assertEquals(0, f.prepares)
+        }
     }
     @Test fun utcAliasesInReadbackPreserveTimedSemantics() = runTest {
         val original = EventContent("Synthetic", EventTime.Timed(Instant.parse("2026-10-01T10:00:00Z"),

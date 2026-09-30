@@ -22,6 +22,7 @@ class ProtonCreatePreparationAdapterTest {
     private var sealed: JsonObject? = null
     private var sessionReads = 0
     private var sessionFailureAt = -1
+    private var preparedEvent = buildJsonObject { put("fixture", "synthetic") }
     private fun adapter(submission: Boolean = false) = ProtonCreatePreparationAdapter({
         sessionReads++
         if (sessionReads == sessionFailureAt) throw java.io.IOException("private session storage detail")
@@ -34,7 +35,7 @@ class ProtonCreatePreparationAdapterTest {
                 steps += "bootstrap"; after("bootstrap"); return buildJsonObject {}
             }
         }, LocalEventAddresses { steps += "addresses"; after("addresses"); emptyList() },
-        CreateContextPreparation { _, _, _, _, _, _ -> steps += "prepare"; after("prepare"); ProtonPreparedCreateEvent(buildJsonObject { put("fixture", "synthetic") }) },
+        CreateContextPreparation { _, _, _, _, _, _ -> steps += "prepare"; after("prepare"); ProtonPreparedCreateEvent(preparedEvent) },
         object : EventPayloadProtector {
             override fun seal(plain: String): String { steps += "seal"; sealed = Json.parseToJsonElement(plain) as JsonObject; after("seal"); return "synthetic-sealed" }
             override fun open(protected: String): String = error("Preparation must not reopen")
@@ -99,19 +100,50 @@ class ProtonCreatePreparationAdapterTest {
             refused(CreatePreparationFailure.STORAGE) { adapter().prepareCreate(draft) }
         }
     }
-    @Test fun capturedKnownEmptyProfileHasADedicatedSealedNotificationObligation() = runTest {
+    @Test fun capturedKnownEmptyProfileHasAnExplicitPersonalOverrideInsideTheEvent() = runTest {
         val timed = EventTime.Timed(Instant.parse("2030-10-01T10:00:00Z"), Instant.parse("2030-10-01T11:00:00Z"), java.time.ZoneId.of("UTC"))
         for (time in listOf(draft.content.time, timed)) {
             val captured = draft.copy(content = draft.content.copy(time = time, details = EventDetails()))
             val receipt = adapter().prepareCreate(captured)
+            assertEquals(JsonArray(emptyList()), sealed!!.obj("event")["Notifications"])
             assertEquals(LOCAL_CREATE_PREPARATION_FORMAT, receipt.format)
+            assertEquals(2, receipt.format.version)
             assertTrue(sealed!!["knownEmptyDetails"]!!.jsonPrimitive.boolean)
-            assertEquals("EXPLICIT_EMPTY_REQUIRED", sealed!!.string("notificationPolicy"))
+            assertEquals("EXPLICIT_EMPTY", sealed!!.string("notificationPolicy"))
             assertEquals(captured.timestamp.toString(), sealed!!.string("timestamp"))
             assertTrue(sealed!!.containsKey("event"))
             assertFalse(sealed!!.containsKey("request")); assertFalse(sealed!!.containsKey("context"))
             assertFalse(sealed!!.containsKey("Notifications"))
         }
+    }
+    @Test fun unknownProfileKeepsTheOriginalFragmentWithoutAnInventedPersonalOverride() = runTest {
+        val receipt = adapter().prepareCreate(draft)
+        assertEquals(CREATE_PREPARATION_FORMAT, receipt.format)
+        assertEquals(preparedEvent, sealed!!.obj("event"))
+        assertFalse(sealed!!.containsKey("notificationPolicy"))
+        assertFalse(sealed!!.containsKey("knownEmptyDetails"))
+        assertFalse(sealed!!.obj("event").containsKey("Notifications"))
+    }
+    @Test fun formatDeclarationIsLocalAndAdvertisesOnlyTheCurrentReadOnlyFormat() {
+        assertEquals(AdapterFormat("proton-calendar-local-create-preparation", 2), adapter().localCreateFormat)
+        assertNull(adapter(submission = true).localCreateFormat)
+        assertEquals(0, sessionReads); assertTrue(steps.isEmpty()); assertNull(sealed)
+    }
+    @Test fun existingConflictingPersonalDataCannotBeSilentlyReplacedOrSealed() = runTest {
+        val captured = draft.copy(content = draft.content.copy(details = EventDetails()))
+        for (value in listOf(JsonNull, JsonPrimitive("unknown"),
+            Json.parseToJsonElement("""[{"Type":1,"Trigger":"-PT15M"}]"""),
+            Json.parseToJsonElement("""[{"Type":0,"Trigger":"-PT15M"}]"""))) {
+            preparedEvent = buildJsonObject { put("fixture", "synthetic"); put("Notifications", value) }
+            sealed = null; steps.clear()
+            refused(CreatePreparationFailure.CONTEXT) { adapter().prepareCreate(captured) }
+            assertNull(sealed); assertFalse(steps.contains("seal"))
+        }
+    }
+    @Test fun anAlreadyExplicitlyEmptyOverridePreservesAllOtherPreparedFields() = runTest {
+        preparedEvent = buildJsonObject { put("fixture", "synthetic"); put("Notifications", JsonArray(emptyList())) }
+        adapter().prepareCreate(draft.copy(content = draft.content.copy(details = EventDetails())))
+        assertEquals(preparedEvent, sealed!!.obj("event"))
     }
     @Test fun submissionCannotAcceptKnownEmptyOrNonemptyDetailsBeforeAnyReads() = runTest {
         for (details in listOf(EventDetails(), EventDetails(reminders = listOf(EventReminder(10))))) {

@@ -204,12 +204,15 @@ against the exact intention; migration preserves v1 claims and captured content.
 Current marker/content, account/access and both import/preparation formats are
 qualified, including after fresh context reads. A compatible retained preparation
 is reused without network or fresh crypto; changed or missing Android evidence
-leaves it unqualified. Proton's dedicated known-empty format records the obligation
-to suppress personal default notifications explicitly, without claiming that shared
-iCalendar text does so. It is refused by submission v1 before opening/admission,
-and does not enter the experimental dispatch journal. Source/JVM qualification
-does not establish native crypto, schema migration or service notification behavior;
-those physical checks remain pending.
+leaves it unqualified. Proton's dedicated known-empty preparation v2 seals an
+explicit `Notifications: []` personal override alongside the unchanged shared
+cryptographic parts. Historical v1 blobs retain their unresolved obligation and
+cannot be reused or replaced automatically. Both versions are refused by submission
+v1 before opening/admission and never enter the experimental dispatch journal.
+JVM tests check placement and refusal of unexpected personal data. A separate
+synthetic native fixture exercises Core/Keystore and defaults through the production
+preparer with controlled context/read shapes; compilation does not qualify it.
+Native crypto, schema migration and live service notification checks remain pending.
 The application still exposes no writable mirror or event editor. General outgoing
 queue/resolution, automatic Provider capture and conditional Proton UPDATE/DELETE
 guarantees remain unqualified. See

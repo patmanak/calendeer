@@ -724,10 +724,13 @@ limits or work. See [local creation capture](LOCAL_CREATE_CAPTURE.md).
 captured intention, rejects an empty payload and redacts diagnostics. The JVM
 serializer test requires known-empty details to preserve the simple shared parts
 without inventing personal notifications. Adapter tests require a dedicated
-format with a sealed explicit-empty notification obligation and no submission
-request. Submission rejects non-null details before session/context/crypto reads,
-and both submission decoding and dispatch reject the new format before opening
-the payload or admitting an attempt. These tests use controlled crypto/context
+v2 format with a sealed explicit-empty notification policy, `Notifications: []`
+inside the event and no submission request. They refuse unexpected null, malformed,
+DISPLAY or EMAIL overrides from the preparer instead of silently replacing data.
+Unknown-profile preparation retains its original format. Submission rejects
+non-null details before session/context/crypto reads, and both decoding and
+dispatch reject local preparation v1 and v2 before opening the payload or admitting
+an attempt. These tests use controlled crypto/context
 ports; they do not qualify native encryption or service reminder behavior.
 
 `LocalCreatePreparationStoreDeviceTest` uses isolated SQLite to check exact
@@ -747,10 +750,21 @@ the unwired preparation owner and pass after wiring. Existing capture/recovery
 fixtures remain regression coverage. Compilation alone does not establish these
 device results; physical qualification remains separate.
 
+`ProtonEventPreparationCryptoDeviceTest` has a separate known-empty fixture through
+the production preparer, resolver, Core cryptography, Keystore protector and real
+decoder. Its context and response shapes are synthetic, with non-empty timed and
+all-day defaults. It copies the outgoing notification field into the fabricated
+response and checks its exact raw empty array before decoding. Absent/null overrides
+inherit defaults; an EMAIL-only override can map to empty Android reminders without
+being an empty personal list. No network or service mutation is used. This fixture
+requires separate physical execution; it does not establish server acceptance.
+
 The preparation is historical and paused. Cached replay does not requalify server
-keys or rights. Provider inspection and journal commit remain separate, and the
-explicit-empty personal-notification obligation remains unresolved. No test here
-qualifies editable mode, automatic observation or upload of a captured creation.
+keys or rights. Provider inspection and journal commit remain separate. Old v1
+blobs keep their unresolved obligation and are refused by a v2 adapter without
+replacement. A future service journey must qualify an authenticated raw empty
+notification array, signatures, UID and content. No test here qualifies editable
+mode, automatic observation or upload of a captured creation.
 
 ## Anonymous transport probe
 

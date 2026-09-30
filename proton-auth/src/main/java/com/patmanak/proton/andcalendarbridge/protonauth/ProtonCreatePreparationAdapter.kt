@@ -13,8 +13,8 @@ import retrofit2.http.Path
 import retrofit2.http.Streaming
 
 internal val CREATE_PREPARATION_FORMAT = AdapterFormat("proton-calendar-create-preparation", 1)
-/** Personal notification policy is unresolved; this format is never a submission request. */
-internal val LOCAL_CREATE_PREPARATION_FORMAT = AdapterFormat("proton-calendar-local-create-preparation", 1)
+/** v2 carries an explicit empty personal override; historical v1 remains incompatible and paused. */
+internal val LOCAL_CREATE_PREPARATION_FORMAT = AdapterFormat("proton-calendar-local-create-preparation", 2)
 internal fun interface CreateContextPreparation {
     fun prepare(scope: CalendarScope, metadata: JsonObject, bootstrap: JsonObject, addresses: List<me.proton.core.user.domain.entity.UserAddress>,
         uid: String, draft: CalendarCreateDraft): ProtonPreparedCreateEvent
@@ -45,6 +45,14 @@ internal class ProtonCreatePreparationAdapter(private val sessions: CatalogSessi
         checkSession(initial)
         val selection = if (submission) ProtonCreateContextPolicy.select(draft.scope, calendar, bootstrap, local) else null
         val knownEmpty = draft.content.details == EventDetails()
+        // Notifications are a personal JSON sibling, never part of shared signed/encrypted text.
+        // Refuse an unexpected profile from the preparer rather than silently dropping its data.
+        val event = if (knownEmpty) {
+            val existing = prepared.event["Notifications"]
+            if (existing != null && (existing !is JsonArray || existing.isNotEmpty()))
+                createUnavailable(CreatePreparationFailure.CONTEXT)
+            JsonObject(prepared.event + ("Notifications" to JsonArray(emptyList())))
+        } else prepared.event
         val format = if (submission) CREATE_SUBMISSION_FORMAT else if (knownEmpty) LOCAL_CREATE_PREPARATION_FORMAT else CREATE_PREPARATION_FORMAT
         val envelope = buildJsonObject {
             put("version", format.version); put("account", draft.scope.account.value)
@@ -52,11 +60,11 @@ internal class ProtonCreatePreparationAdapter(private val sessions: CatalogSessi
             put("correlation", draft.correlation.value); put("uid", uid); put("timestamp", draft.timestamp.toString())
             if (knownEmpty) {
                 put("knownEmptyDetails", true)
-                put("notificationPolicy", "EXPLICIT_EMPTY_REQUIRED")
+                put("notificationPolicy", "EXPLICIT_EMPTY")
             }
-            if (selection == null) put("event", prepared.event) else {
+            if (selection == null) put("event", event) else {
                 put("context", ProtonCreateSubmissionCodec.context(selection))
-                put("request", ProtonCreateSubmissionCodec.request(selection.member.string("ID"), prepared.event))
+                put("request", ProtonCreateSubmissionCodec.request(selection.member.string("ID"), event))
                 put("expected", ProtonCreateSubmissionCodec.expected(draft.content))
             }
         }

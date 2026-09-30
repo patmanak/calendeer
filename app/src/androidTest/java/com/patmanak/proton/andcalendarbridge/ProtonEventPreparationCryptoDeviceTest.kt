@@ -13,4 +13,7 @@ class ProtonEventPreparationCryptoDeviceTest {
     @Test fun simpleCreatePreparationRoundTripsAndRejectsBothTamperedSignatures() = runBlocking {
         assertEquals("RESULT=SUCCESS", ProtonEventPreparationCryptoProbe.run())
     }
+    @Test fun knownEmptyPreparationUsesExplicitNotificationsThroughAdapterKeystoreAndNativeDecoder() = runBlocking {
+        assertEquals("RESULT=SUCCESS", ProtonEventPreparationCryptoProbe.runKnownEmpty())
+    }
 }

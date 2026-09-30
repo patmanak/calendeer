@@ -108,13 +108,26 @@ marker or incompatible format leaves the historical payload retained and unquali
 This is a point-in-time qualification, without atomicity across the Provider,
 import state and journal or a guarantee about a later edit.
 
-The dedicated `proton-calendar-local-create-preparation` format seals
-`knownEmptyDetails=true` and an `EXPLICIT_EMPTY_REQUIRED` personal-notification
-obligation. Shared iCalendar text without `VALARM` does not disable Proton's
-calendar-default notifications. This obligation records future work; it does not
-claim that remote reminders were suppressed. The envelope contains no submission
-request. Submission v1 refuses this format before opening it, and its preparation
-entry point still refuses any non-null details before session/network/crypto work.
-Legacy unknown-profile preparation remains unchanged. Explicit notification
-override support and live readback qualification are required before any future
-dispatch of captured known-empty content.
+The dedicated `proton-calendar-local-create-preparation` v2 format seals
+`knownEmptyDetails=true`, the policy `EXPLICIT_EMPTY`, and `Notifications: []`
+inside its event fragment. Personal notifications are a JSON sibling of the
+shared parts; they do not require a new signed/encrypted iCalendar part. The
+shared partition and cryptography remain unchanged. Unexpected non-empty, null
+or malformed personal data from the preparer is refused before sealing rather
+than silently replaced. An already explicitly empty list is compatible.
+
+Historical preparation v1 retains its `EXPLICIT_EMPTY_REQUIRED` obligation and
+original protected payload. A v2 adapter cannot reuse or replace it automatically;
+it remains retained and unqualified. The journal schema is still v2. This format
+change is distinct from a database migration and requires future explicit resolution.
+
+Shared iCalendar text without `VALARM` does not disable calendar-default reminders.
+The new fragment prepares the override but does not claim that a server accepted
+it. The envelope contains no submission request. Submission v1 refuses both local
+preparation versions before opening them, and its preparation entry point still
+refuses any non-null details before session/network/crypto work. Legacy unknown-
+profile preparation remains unchanged. Before future dispatch qualification,
+authenticated readback must have `Notifications` present, non-null and a genuinely
+empty JSON array in addition to signature, UID and content checks. Empty mapped
+Android reminders alone are insufficient: defaults may be empty and personal
+EMAIL notifications are intentionally absent from that Android model.

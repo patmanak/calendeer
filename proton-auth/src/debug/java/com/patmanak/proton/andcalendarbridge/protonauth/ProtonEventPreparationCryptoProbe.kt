@@ -139,6 +139,166 @@ object ProtonEventPreparationCryptoProbe {
         } catch (cancelled: CancellationException) { throw cancelled }
           catch (_: Exception) { "RESULT=FAILURE STAGE=$stage" }
     }
+    /** Real preparation adapter and protection, with controlled context reads and fabricated server shape.
+     * Explicit raw notification emptiness is checked independently of the decoded display model.
+     */
+    suspend fun runKnownEmpty(): String = withContext(Dispatchers.IO) {
+        var stage = "GENERATE"
+        try {
+            val crypto = AndroidCryptoContext()
+            val pgp = crypto.pgpCrypto
+            val addressSecret = pgp.generateNewToken()
+            var calendarSecret = ByteArray(0)
+            try {
+                calendarSecret = pgp.generateNewToken()
+                val addressArmored = pgp.generateNewPrivateKey("synthetic", "example.invalid", addressSecret)
+                val calendarArmored = pgp.generateNewPrivateKey("calendar", "example.invalid", calendarSecret)
+                val addressKey = PrivateKey(addressArmored, true,
+                    passphrase = PlainByteArray(addressSecret).encrypt(crypto.keyStoreCrypto))
+                val user = UserId("synthetic-known-empty-user")
+                val addressId = AddressId("synthetic-known-empty-address")
+                val email = "synthetic-known-empty@example.invalid"
+                val address = UserAddress(user, addressId, email, canSend = true, canReceive = true, enabled = true,
+                    order = 0, keys = listOf(UserAddressKey(addressId, 1, 3, active = true,
+                        keyId = KeyId("synthetic-known-empty-key"), privateKey = addressKey)), signedKeyList = null)
+                val passphraseText = String(calendarSecret, Charsets.UTF_8)
+                val memberPacket = address.useKeys(crypto) { buildJsonObject {
+                    put("MemberID", "synthetic-known-empty-member"); put("Passphrase", encryptText(passphraseText))
+                    put("Signature", signText(passphraseText))
+                } }
+                val calendar = "synthetic-known-empty-calendar"
+                val bootstrap = buildJsonObject {
+                    putJsonObject("Passphrase") {
+                        put("ID", "synthetic-known-empty-passphrase"); put("CalendarID", calendar); put("Flags", 1)
+                        put("MemberPassphrases", JsonArray(listOf(memberPacket)))
+                    }
+                    putJsonArray("Members") { add(buildJsonObject {
+                        put("ID", "synthetic-known-empty-member"); put("CalendarID", calendar)
+                        put("AddressID", addressId.id); put("Email", email); put("Flags", 1); put("Permissions", 16)
+                    }) }
+                    putJsonArray("Keys") { add(buildJsonObject {
+                        put("ID", "synthetic-known-empty-calendar-key"); put("CalendarID", calendar)
+                        put("Flags", 3); put("PassphraseID", "synthetic-known-empty-passphrase"); put("PrivateKey", calendarArmored)
+                    }) }
+                    putJsonObject("CalendarSettings") {
+                        put("CalendarID", calendar)
+                        putJsonArray("DefaultPartDayNotifications") { add(buildJsonObject {
+                            put("Type", 1); put("Trigger", "-PT15M")
+                        }) }
+                        putJsonArray("DefaultFullDayNotifications") { add(buildJsonObject {
+                            put("Type", 1); put("Trigger", "-P1D")
+                        }) }
+                    }
+                }
+                val scope = CalendarScope(AccountId(user.id), CalendarId(calendar), 1)
+                val session = CatalogSession(user, SessionId("synthetic-known-empty-session"))
+                val expectedSession = session
+                val metadata = buildJsonObject { put("ID", calendar); put("Type", 0) }
+                val resolver = ProtonCreateContextResolver(crypto)
+                val protector = ProtonEventPayloadProtector(crypto.keyStoreCrypto)
+                var refreshes = 0
+                var calendarReads = 0
+                var bootstrapReads = 0
+                var addressReads = 0
+                var pageReads = 0
+                val adapter = ProtonCreatePreparationAdapter(
+                    sessions = { session },
+                    context = EventContextRefresher { check(it == session); refreshes++ },
+                    metadata = CreateCalendarMetadataRemote { actualSession, actualCalendar ->
+                        check(actualSession == session && actualCalendar == calendar); calendarReads++; metadata
+                    },
+                    events = object : EventImportRemote {
+                        override suspend fun bootstrap(session: CatalogSession, calendar: String): JsonObject {
+                            check(session == expectedSession)
+                            check(calendar == scope.calendar.value); bootstrapReads++; return bootstrap
+                        }
+                        override suspend fun page(session: CatalogSession, calendar: String, window: EventWindow): EncryptedEventPage {
+                            pageReads++; error("Synthetic preparation must not fetch event pages")
+                        }
+                    },
+                    addresses = LocalEventAddresses { check(it == user); addressReads++; listOf(address) },
+                    prepare = CreateContextPreparation { actualScope, actualMetadata, actualBootstrap, local, uid, draft ->
+                        resolver.prepare(actualScope, actualMetadata, actualBootstrap, local, uid, draft)
+                    },
+                    protector = protector)
+                val expectedFormat = AdapterFormat("proton-calendar-local-create-preparation", 2)
+                check(adapter.localCreateFormat == expectedFormat)
+                val decoder = ProtonEventDecryptor(crypto) { listOf(address) }
+                val stamp = Instant.parse("2026-09-29T10:00:00Z")
+                val times = listOf<EventTime>(EventTime.Timed(Instant.parse("2027-03-28T00:30:00Z"),
+                    Instant.parse("2027-03-28T01:30:00Z"), ZoneId.of("Europe/Paris")),
+                    EventTime.AllDay(LocalDate.parse("2027-03-28"), LocalDate.parse("2027-03-30")))
+                for ((index, time) in times.withIndex()) {
+                    val content = EventContent("Known-empty creation; café, \\" + "é".repeat(100), time,
+                        "Description\nLigne suivante", "Lieu de test", details = EventDetails())
+                    val draft = CalendarCreateDraft(scope, MutationId("synthetic-known-empty-$index"), stamp, content)
+                    stage = "PREPARE"
+                    val prepared = adapter.prepareCreate(draft)
+                    check(prepared.scope == scope && prepared.format == expectedFormat)
+                    check(!prepared.protectedPayload.contains(content.title))
+                    stage = "KEYSTORE_REOPEN"
+                    val reopened = ProtonEventPayloadProtector(AndroidCryptoContext().keyStoreCrypto)
+                    val envelope = Json.parseToJsonElement(reopened.open(prepared.protectedPayload)) as JsonObject
+                    check(envelope.number("version") == 2L && envelope.getValue("knownEmptyDetails").jsonPrimitive.boolean)
+                    check(envelope.string("notificationPolicy") == "EXPLICIT_EMPTY")
+                    check(listOf("request", "context", "expected").none { it in envelope })
+                    check(envelope.string("account") == scope.account.value && envelope.string("calendar") == calendar)
+                    check(envelope.number("generation") == scope.generation && envelope.string("correlation") == draft.correlation.value)
+                    val uid = envelope.string("uid")
+                    check(uid == adapter.correlationUid(draft) && envelope.string("timestamp") == stamp.toString())
+                    val event = envelope.obj("event")
+                    stage = "EXPLICIT_NOTIFICATION_OVERRIDE"
+                    val notifications = event.getValue("Notifications")
+                    check(notifications is JsonArray && notifications.isEmpty())
+                    val shared = event.array("SharedEventContent").map { it as JsonObject }
+                    check(shared.map { it.number("Type") } == listOf(2L, 3L))
+                    check(shared.all { it.string("Author").isEmpty() })
+                    // Author and response field normalization are synthetic. Notifications are copied
+                    // from the reopened protected preparation, never manufactured for the decoder.
+                    val row = buildJsonObject {
+                        put("ID", "synthetic-known-empty-event-$index"); put("CalendarID", calendar); put("ModifyTime", 1)
+                        put("UID", uid); put("SharedKeyPacket", event.getValue("SharedKeyPacket"))
+                        put("SharedEvents", JsonArray(shared.map { JsonObject(it + ("Author" to JsonPrimitive(email))) }))
+                        put("CalendarEvents", JsonArray(emptyList())); put("AttendeesEvents", JsonArray(emptyList()))
+                        put("Notifications", notifications)
+                    }
+                    check(row["Notifications"] is JsonArray && (row.getValue("Notifications") as JsonArray).isEmpty())
+                    stage = "KNOWN_EMPTY_ROUND_TRIP"
+                    val actual = decoder.decrypt(user, calendar, bootstrap, listOf(row)).single().content
+                    check(actual.copy(description = actual.description.replace("\r\n", "\n")) == content)
+                    stage = "DEFAULT_NOTIFICATION_COUNTERPROOF"
+                    val inherited = EventDetails(listOf(EventReminder(if (time is EventTime.AllDay) 1440 else 15)))
+                    for (variant in listOf(JsonObject(row - "Notifications"), JsonObject(row + ("Notifications" to JsonNull)))) {
+                        check(decoder.decrypt(user, calendar, bootstrap, listOf(variant)).single().content.details == inherited)
+                    }
+                    // EMAIL notifications are filtered from the Android display model. Decoded empty
+                    // details alone therefore cannot prove an explicitly empty raw notification array.
+                    val emailOnly = JsonArray(listOf(buildJsonObject { put("Type", 0); put("Trigger", "-PT15M") }))
+                    val emailRow = JsonObject(row + ("Notifications" to emailOnly))
+                    check((emailRow.getValue("Notifications") as JsonArray).isNotEmpty())
+                    check(decoder.decrypt(user, calendar, bootstrap, listOf(emailRow)).single().content.details == EventDetails())
+                    stage = "SIGNED_UID_BINDING"
+                    check(decoder.decodeCreated(session, calendar, bootstrap, row, uid) != null)
+                    val foreign = "foreign-known-empty@calendeer.invalid"
+                    check(decoder.decodeCreated(session, calendar, bootstrap,
+                        JsonObject(row + ("UID" to JsonPrimitive(foreign))), foreign) == null)
+                    for (partIndex in shared.indices) {
+                        stage = if (partIndex == 0) "CLEAR_SIGNATURE" else "ENCRYPTED_SIGNATURE"
+                        val parts = row.array("SharedEvents").map { it as JsonObject }.toMutableList()
+                        parts[partIndex] = JsonObject(parts[partIndex] +
+                            ("Signature" to JsonPrimitive(addressKey.signText(crypto, "different"))))
+                        val tampered = decoder.decodePage(user, calendar, bootstrap,
+                            listOf(JsonObject(row + ("SharedEvents" to JsonArray(parts)))))
+                        check(tampered.changes.isEmpty() && tampered.deferred.single().reason == DeferredEventReason.UNVERIFIED_CONTENT)
+                    }
+                }
+                stage = "READ_ONLY_CONTEXT"
+                check(refreshes == 2 && calendarReads == 2 && bootstrapReads == 2 && addressReads == 2 && pageReads == 0)
+                "RESULT=SUCCESS"
+            } finally { addressSecret.fill(0); calendarSecret.fill(0) }
+        } catch (cancelled: CancellationException) { throw cancelled }
+          catch (_: Exception) { "RESULT=FAILURE STAGE=$stage" }
+    }
     private fun refused(action: () -> Any) {
         try { action(); error("Invalid crypto context accepted") }
         catch (failure: CreatePreparationException) { check(failure.reason == CreatePreparationFailure.LOCAL_KEYS); check(failure.cause == null) }

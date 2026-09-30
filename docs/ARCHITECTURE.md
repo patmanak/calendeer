@@ -143,8 +143,9 @@ snapshot stays paused and cannot authorize the experimental submission journal.
 Journal v2 can separately retain a protected read-only preparation against that
 exact snapshot. The owner checks current marker/content before and after preparation,
 and requires a declared adapter format for cache compatibility. Proton's dedicated
-known-empty preparation retains an unresolved personal-notification obligation;
-neither its format nor its journal grants submission admission.
+known-empty preparation v2 carries an explicit empty personal-notification JSON
+override; older v1 preparations retain their unresolved obligation without automatic
+replacement. Neither format nor the journal grants submission admission.
 Android row IDs are transient selectors for the first claim only and never durable
 domain identities. See [local creation capture](LOCAL_CREATE_CAPTURE.md) for the
 protocol and interrupted-claim availability limits.

@@ -97,13 +97,27 @@ The local known-empty-details extension reuses the same pinned partition mapping
 Biweekly serialization and Core cryptographic/Keystore primitives. It adds no
 upstream source copy or dependency. Shared content without VALARM does not establish
 empty personal notifications: missing notification data can inherit calendar
-defaults. The separate `proton-calendar-local-create-preparation` format therefore
-seals `knownEmptyDetails=true` and `EXPLICIT_EMPTY_REQUIRED` as an unresolved
-obligation. It contains no submission request and cannot be opened or dispatched
-by the existing submission codec. Submission preparation rejects every non-null
-details profile before session or context reads; its legacy format is unchanged.
-JVM partition and format tests establish these local restrictions, not a service
-implementation of explicit-empty notifications or native crypto compatibility.
+defaults. The explicit override follows these same pinned sources:
+
+- [Android CREATE construction](https://github.com/ProtonMail/android-calendar/blob/83bbd6a15b0aaa135e424fb5ac195c0a52929b4f/app/src/main/java/me/proton/android/calendar/domain/usecase/EditCreateEventUseCase.kt#L376)
+  sets nullable notifications directly in the `SyncEvent` inside the CREATE container.
+- [Android SyncEvent DTO](https://github.com/ProtonMail/android-calendar/blob/83bbd6a15b0aaa135e424fb5ac195c0a52929b4f/app/src/main/java/me/proton/android/calendar/data/api/CalendarsApiImpl.kt#L696)
+  places `Notifications` alongside the shared parts; its comment identifies migration
+  from historical `PersonalEventContent`.
+- [Web blob interface](https://github.com/ProtonMail/WebClients/blob/914d7520eff52aafed9a1adfe19859143bdf1dc9/packages/shared/lib/interfaces/calendar/Api.ts#L117)
+  independently places nullable `Notifications` on the create/update event blob.
+
+The separate local preparation v2 seals `knownEmptyDetails=true`, policy
+`EXPLICIT_EMPTY` and an empty `Notifications` array on its event fragment. No new
+crypto part or extra personal-update request is introduced. Unexpected preexisting
+personal data is refused. Historical v1 blobs retain `EXPLICIT_EMPTY_REQUIRED`;
+they are not migrated or overwritten. Neither format contains a submission request
+or can be opened/dispatched by the existing submission codec. Submission preparation
+still rejects every non-null details profile before session/context reads.
+JVM format tests establish these restrictions. Synthetic Core/Keystore fixture
+code is separate from physical execution and live acceptance. Future readback
+must qualify the raw empty array: mapped Android reminders omit EMAIL notifications
+and cannot alone prove a personal override.
 
 ## Authenticated CREATE context and response preparation
 
