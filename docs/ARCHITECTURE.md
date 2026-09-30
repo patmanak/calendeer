@@ -145,7 +145,13 @@ Provider reader qualifies a supported dirty snapshot without acknowledging it.
 The retained intent blocks both direct projection and replay/requeue paths; changed
 or deferred remote evidence makes conflict persistent. The generic outgoing port
 remains closed. See [local capture](LOCAL_EDIT_CAPTURE.md) for supported fields,
-legacy-profile treatment and the Provider/private-ACK recovery gap.
+legacy-profile treatment and recovery limits. Supported simple upserts persist
+an immutable preparation before writing a nonce with the event in an atomic
+Provider batch. Inspection of that exact scoped marker can recover a lost private
+ACK without overwriting a later local edit. Baseline comparison, exact pending
+payload consumption and receipt removal share one private transaction; newer
+remote evidence remains separate. Legacy and complex projections have no such
+proof, and Provider and private storage still do not share a transaction.
 
 ## Delivery slices and acceptance
 

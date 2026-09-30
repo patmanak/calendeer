@@ -153,6 +153,14 @@ class ImportRecoveryDeviceTest {
                     throw CalendarProjectionException(CalendarProjectionFailure.PROVIDER_UNAVAILABLE)
                 }
             }
+            override suspend fun applyTracked(receipt: ProjectionReceipt): AppliedProjectionWitness {
+                val witness = native.applyTracked(receipt)
+                if (failAfterWrite) {
+                    failAfterWrite = false
+                    throw CalendarProjectionException(CalendarProjectionFailure.PROVIDER_UNAVAILABLE)
+                }
+                return witness
+            }
         }
         private val remote = object : ReadOnlyCalendarRemote {
             override val format = this@Fixture.format

@@ -322,7 +322,12 @@ class ImportCoordinator(
                 if (retained.id != id || retained.format != format) return@withLock LocalEditCaptureResult.UNQUALIFIED
                 return@withLock if (retained.state == LocalEditState.CONFLICT) LocalEditCaptureResult.CONFLICT else LocalEditCaptureResult.RETAINED
             }
+            val receipt = store.projectionReceipt(target, eventId)
+            val recovered = receipt?.let { recoverProjection(expected, it) } ?: false
             val base = store.projectedBaseline(target, eventId) ?: return@withLock LocalEditCaptureResult.UNQUALIFIED
+            // An opaque revision alone cannot choose between different prepared contents.
+            if (receipt != null && !recovered && receipt.change != base && receipt.change.revision == base.revision)
+                return@withLock LocalEditCaptureResult.UNQUALIFIED
             val snapshot = projection.captureOwnedSimpleEdit(target, base) ?: return@withLock LocalEditCaptureResult.UNQUALIFIED
             if (!isCurrent(expected, target.account) || !active()) return@withLock LocalEditCaptureResult.INACTIVE
             val captured = store.captureLocalEdit(LocalEditIntent(id, target, format, base, snapshot.content))
@@ -333,6 +338,39 @@ class ImportCoordinator(
               store.admitTransaction = { false }
               projection.admitOperation = { false }
           }
+    }
+
+    /** A marker proves the historical write, not that the current Provider content is unchanged. */
+    private suspend fun recoverProjection(expected: Long, receipt: ProjectionReceipt): Boolean {
+        if (receipt.format != remote.format || receipt.protocol != projection.projectionReceiptProtocol) return false
+        val witness = projection.inspectProjectionReceipt(receipt) ?: return false
+        check(witness.receipt == receipt) { "Projection witness differs" }
+        if (!isCurrent(expected, receipt.scope.account)) throw CancellationException("Inactive projection recovery")
+        return store.restoreProjection(witness)
+    }
+
+    /** Kept out of the larger import coroutine; preparation precedes every tracked Provider write. */
+    private suspend fun projectPending(intent: ProjectionIntent, expected: Long) {
+        val outstanding = store.projectionReceipt(intent.scope, intent.change.eventId)
+        if (outstanding != null) {
+            val recovered = recoverProjection(expected, outstanding)
+            if (recovered && outstanding.change == intent.change) return
+            if (!recovered && (outstanding.change != intent.change || outstanding.format != remote.format ||
+                outstanding.protocol != projection.projectionReceiptProtocol)) {
+                throw CalendarProjectionException(CalendarProjectionFailure.PROVIDER_REJECTED)
+            }
+        }
+        if (projection.projectionReceiptProtocol == 1 && ProjectionReceipt.supports(intent.change)) {
+            val prepared = store.prepareProjection(intent, remote.format)
+            val witness = projection.applyTracked(prepared)
+            check(witness.receipt == prepared) { "Projection witness differs" }
+            if (!isCurrent(expected, intent.scope.account)) throw CancellationException("Inactive projection acknowledgement")
+            check(store.restoreProjection(witness)) { "Projection acknowledgement remains unresolved" }
+        } else {
+            projection.apply(intent, if (intent.change is RemoteChange.Deleted)
+                store.deletedSeriesUid(intent.scope, intent.change.eventId) else null)
+            store.acknowledge(intent)
+        }
     }
 
     fun permissionsChanged() {
@@ -502,9 +540,7 @@ class ImportCoordinator(
                     suspend fun drain(): Boolean {
                         for (intent in store.pending(calendarScope)) {
                             if (!isCurrent(expected, account)) throw CancellationException()
-                            projection.apply(intent, if (intent.change is RemoteChange.Deleted)
-                                store.deletedSeriesUid(calendarScope, intent.change.eventId) else null)
-                            store.acknowledge(intent)
+                            projectPending(intent, expected)
                         }
                         return store.pending(calendarScope, 1).isNotEmpty()
                     }

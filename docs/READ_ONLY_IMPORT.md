@@ -162,11 +162,16 @@ while that migration remains pending. Legacy sealed single-event receipts retain
 their original acknowledgement contract before the new mapping is fetched.
 Projection acknowledgements
 match the expected record, so an old acknowledgement cannot consume a newer edit.
-Provider identities and atomic assertion/write batches make replay idempotent
-after interruption between the provider write and acknowledgement. Rebuilding a
-missing mirror requeues cached records. A fresh traversal also reprojects known
-supported records to repair unsupported local modifications; a newer deferred
-version prevents an older queued version from being reprojected.
+Provider identities and atomic assertion/write batches make clean replay idempotent
+after interruption between the provider write and acknowledgement. Simple upserts
+also retain a preparation and write its nonce with the event; exact marker inspection
+can restore the projected base after a lost ACK while preserving subsequent dirty
+or deleted flags. Newer pending remote evidence is not consumed by an older receipt.
+See [local capture](LOCAL_EDIT_CAPTURE.md) for the subset and refusal rules.
+Rebuilding a missing mirror requeues cached records. A fresh traversal reprojects
+known supported clean records; dirty/deleted local rows remain protected and can
+block the import. A newer deferred version prevents an older queued version from
+being reprojected.
 
 Explicit refresh arms a durable local retry of retained events before scheduling
 network work. Batches of four retries resume independently of connectivity, and

@@ -148,7 +148,7 @@ class CoverageStoreDeviceTest {
         // The single payload byte fits exactly, proving metadata was what exceeded the budget.
         store.staged { received = receipt.copy(protectedPayload = "x", coverage = null) }
         assertNotNull(store.staged { received })
-        assertEquals(8, store.deferredCount(other))
+        assertEquals(9, store.deferredCount(other))
     }
 
     @Test fun oversizedCoveragePayloadRollsBackWithoutReplacingPriorObservation() = fixture { store, _ ->
@@ -189,7 +189,7 @@ class CoverageStoreDeviceTest {
                 db.version = 4
             }
             ImportStore(context, name).use { store ->
-                assertEquals(8, store.readableDatabase.version)
+                assertEquals(9, store.readableDatabase.version)
                 assertEquals(CoverageLedger(), store.staged { coverage })
                 val selection = store.selections(scope.account).single()
                 assertNull(selection.coverage); assertEquals(300L, selection.completedAt)

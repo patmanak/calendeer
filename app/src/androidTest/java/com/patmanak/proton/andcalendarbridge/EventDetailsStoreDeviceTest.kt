@@ -159,13 +159,14 @@ class EventDetailsStoreDeviceTest {
         val context = ApplicationProvider.getApplicationContext<Context>()
         SQLiteDatabase.openDatabase(context.getDatabasePath(name).path, null, SQLiteDatabase.OPEN_READWRITE).use { db ->
             db.execSQL("DROP TABLE IF EXISTS mapping_profiles")
+            db.execSQL("DROP TABLE IF EXISTS projection_receipts")
             db.execSQL("DROP TABLE IF EXISTS projection_bases")
             db.execSQL("DROP TABLE IF EXISTS local_edits")
             db.execSQL("INSERT INTO records(scope,event,payload,pending) VALUES(?,?,?,1)", arrayOf(key, "legacy", legacy))
             db.version = 6
         }
         ImportStore(context, name).use { reopened ->
-            assertEquals(8, reopened.readableDatabase.version); assertEquals(0, profileCount(reopened))
+            assertEquals(9, reopened.readableDatabase.version); assertEquals(0, profileCount(reopened))
             assertEquals(receipt, reopened.delta { received }); assertEquals(ledger, reopened.delta { coverage })
             assertEquals("legacy-series", reopened.deletedSeriesUid(scope, master.eventId))
             assertEquals(legacy, reopened.readableDatabase.rawQuery("SELECT payload FROM records WHERE event='legacy'", null).use {

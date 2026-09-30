@@ -8,6 +8,8 @@ import com.patmanak.proton.andcalendarbridge.sync.EventId
 import com.patmanak.proton.andcalendarbridge.sync.Revision
 import com.patmanak.proton.andcalendarbridge.sync.RemoteChange
 import com.patmanak.proton.andcalendarbridge.sync.EventContent
+import com.patmanak.proton.andcalendarbridge.sync.ProjectionReceipt
+import com.patmanak.proton.andcalendarbridge.sync.AppliedProjectionWitness
 import com.patmanak.proton.andcalendarbridge.sync.catalog.CalendarSummary
 
 /** Android-layer boundary. A failed apply leaves its durable intent unacknowledged for replay. */
@@ -17,6 +19,16 @@ interface CalendarProjection {
     fun accountFor(accountId: AccountId): Account
     suspend fun ensureCalendarState(scope: CalendarScope, summary: CalendarSummary): EnsuredCalendar
     suspend fun apply(intent: ProjectionIntent, seriesUid: String? = null)
+    /** Null ports use ordinary projection; they cannot qualify recovery of a retained receipt. */
+    val projectionReceiptProtocol: Int? get() = null
+    /** Write the exact receipt marker and event atomically. Failure leaves preparation unresolved,
+     * even when the write might have committed; callers must inspect before acknowledging it.
+     */
+    suspend fun applyTracked(receipt: ProjectionReceipt): AppliedProjectionWitness = error("Tracked projection unavailable")
+    /** Historical atomic write proof, qualified with assertion-only ownership/identity/nonce checks.
+     * Null means no proof. Dirty/deleted flags are never consumed by this inspection.
+     */
+    suspend fun inspectProjectionReceipt(receipt: ProjectionReceipt): AppliedProjectionWitness? = null
     /** Current owned-row witness only. Missing/duplicate/foreign/dirty rows cannot establish association. */
     suspend fun inspectOwnedEvent(scope: CalendarScope, eventId: EventId, revision: Revision): OwnedEventWitness? = null
     /** Snapshot only; no acknowledgement or upload. Unsupported/changed rows are left untouched. */

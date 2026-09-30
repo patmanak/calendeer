@@ -153,7 +153,7 @@ owned Android projection without readmitting CREATE. These results do not qualif
 real server rights revocation or a user-facing logout journey.
 An explicit internal simple UPDATE capture now retains the last acknowledged
 projection base and the Android edit independently of the latest imported remote
-record. Import schema 8 preserves immutable paused/conflicted intents, suppresses
+record. Import schema 9 preserves immutable paused/conflicted intents, suppresses
 their projection and never automatically resets a conflict. A newer import before
 capture can therefore coexist with the original projected base. The Provider reader
 qualifies ownership, revision, supported fields and an assertion-only snapshot;
@@ -167,6 +167,17 @@ regressions also passed on an authorized physical target. These fixtures use
 controlled remote ports and establish no live Proton UPDATE guarantee.
 The retained live CREATE association also remains usable after the import upgrade,
 without submitting another mutation.
+Supported simple upserts now retain an immutable projection preparation and write
+its nonce with the event in one Provider transaction. After a lost private ACK,
+exact scoped marker inspection can restore the actually projected base without
+overwriting a subsequent dirty edit or clearing deletion flags. Baseline comparison,
+exact pending consumption and receipt removal share one private transaction;
+newer remote evidence remains pending. Missing or ambiguous proof blocks unsafe
+recovery, including different content reusing the old opaque revision. Migration
+does not invent receipts for legacy rows. Complex projections and deletions retain
+their previous conservative recovery limits; the two stores remain separate.
+Nonce-backed recovery has source review and JVM checks. Its physical interruption,
+schema 9 migration and Provider regression qualification remains pending.
 The application still exposes no writable mirror or event editor. General outgoing
 queue/resolution, automatic Provider capture and conditional Proton UPDATE/DELETE
 guarantees remain unqualified. See

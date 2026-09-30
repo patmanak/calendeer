@@ -25,6 +25,8 @@ import com.patmanak.proton.andcalendarbridge.sync.Revision
 import com.patmanak.proton.andcalendarbridge.sync.CalendarScope
 import com.patmanak.proton.andcalendarbridge.sync.EventTime
 import com.patmanak.proton.andcalendarbridge.sync.ProjectionIntent
+import com.patmanak.proton.andcalendarbridge.sync.ProjectionReceipt
+import com.patmanak.proton.andcalendarbridge.sync.AppliedProjectionWitness
 import com.patmanak.proton.andcalendarbridge.sync.RecurrencePoint
 import com.patmanak.proton.andcalendarbridge.sync.RemoteChange
 import com.patmanak.proton.andcalendarbridge.sync.EventContent
@@ -126,7 +128,19 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
         EnsuredCalendar(id, created = existing == null)
     }
 
+    override val projectionReceiptProtocol: Int = 1
+
     override suspend fun apply(intent: ProjectionIntent, seriesUid: String?) = operation {
+        applyInternal(intent, seriesUid, null)
+    }
+
+    override suspend fun applyTracked(receipt: ProjectionReceipt): AppliedProjectionWitness = operation {
+        applyInternal(ProjectionIntent(receipt.scope, receipt.change), null, receipt)
+        requirePermissions()
+        AppliedProjectionWitness(receipt)
+    }
+
+    private fun applyInternal(intent: ProjectionIntent, seriesUid: String?, receipt: ProjectionReceipt?) {
         val account = accountFor(intent.scope.account)
         val calendar = calendarRow(intent.scope, account) ?: fail(CalendarProjectionFailure.CALENDAR_MISSING)
         val uri = syncUri(Events.CONTENT_URI, account)
@@ -181,6 +195,7 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
                     put(Events.SYNC_DATA1, OWNER_MARKER)
                     put(Events.SYNC_DATA2, digest("revision-v1", change.revision.value))
                     put(Events.SYNC_DATA4, remoteId)
+                    if (receipt != null) put(Events.SYNC_DATA3, receiptMarker(receipt))
                     if (parent != null) {
                         put(Events.ORIGINAL_ID, parent)
                         put(Events.ORIGINAL_SYNC_ID, seriesId)
@@ -205,6 +220,37 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
         resolver.applyBatch(CalendarContract.AUTHORITY, operations)
         Unit
     }
+
+    override suspend fun inspectProjectionReceipt(receipt: ProjectionReceipt): AppliedProjectionWitness? = operation {
+        val scope = receipt.scope
+        val account = accountFor(scope.account)
+        val calendar = calendarRow(scope, account) ?: return@operation null
+        val remoteId = digest("event-v1", calendarSyncId(scope), receipt.change.eventId.value)
+        val uri = syncUri(Events.CONTENT_URI, account)
+        val identity = Selection("${Events.CALENDAR_ID}=? AND (${Events.SYNC_DATA4}=? OR " +
+            "(${Events.SYNC_DATA4} IS NULL AND ${Events._SYNC_ID}=?))", arrayOf(calendar.toString(), remoteId, remoteId))
+        val row = ownedRow(uri, identity, Events.SYNC_DATA1) ?: return@operation null
+        val metadata = resolver.query(uri, arrayOf(Events._ID, Events.CALENDAR_ID, Events._SYNC_ID,
+            Events.SYNC_DATA1, Events.SYNC_DATA2, Events.SYNC_DATA3, Events.SYNC_DATA4),
+            identity.sql, identity.args, null)?.use {
+            if (it.count != 1 || !it.moveToFirst()) return@operation null
+            ContentValues().apply { DatabaseUtils.cursorRowToContentValues(it, this) }
+        } ?: fail(CalendarProjectionFailure.PROVIDER_UNAVAILABLE)
+        if (metadata.getAsLong(Events._ID) != row || metadata.getAsString(Events._SYNC_ID) != remoteId ||
+            metadata.getAsString(Events.SYNC_DATA1) != OWNER_MARKER || metadata.getAsString(Events.SYNC_DATA4) != remoteId ||
+            metadata.getAsString(Events.SYNC_DATA2) != digest("revision-v1", receipt.change.revision.value) ||
+            metadata.getAsString(Events.SYNC_DATA3) != receiptMarker(receipt)) return@operation null
+        requirePermissions()
+        resolver.applyBatch(CalendarContract.AUTHORITY, arrayListOf(
+            assertion(syncUri(Calendars.CONTENT_URI, account), calendarSelection(scope, account), calendar),
+            ContentProviderOperation.newAssertQuery(uri).withSelection(identity.sql, identity.args)
+                .withValues(metadata).withExpectedCount(1).build(),
+        ))
+        requirePermissions()
+        AppliedProjectionWitness(receipt)
+    }
+
+    private fun receiptMarker(receipt: ProjectionReceipt) = "calendeer-projection-receipt-v${receipt.protocol}:${receipt.nonce}"
 
     override suspend fun inspectOwnedEvent(scope: CalendarScope, eventId: EventId, revision: Revision): OwnedEventWitness? = operation {
         val account = accountFor(scope.account)
@@ -445,6 +491,8 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
         if (color == null) putNull(Events.EVENT_COLOR) else put(Events.EVENT_COLOR, color or 0xFF000000.toInt())
         put(Events.DIRTY, 0)
         put(Events.DELETED, 0)
+        // A later untracked write must not leave an old receipt as proof of new content.
+        putNull(Events.SYNC_DATA3)
         put(Events.STATUS, Events.STATUS_CONFIRMED)
         val details = change.content.details
         put(Events.HAS_ATTENDEE_DATA, if (details?.organizer != null || !details?.attendees.isNullOrEmpty()) 1 else 0)

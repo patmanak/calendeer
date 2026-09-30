@@ -11,6 +11,7 @@ import com.patmanak.proton.andcalendarbridge.sync.catalog.CalendarSummary
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
+import java.util.UUID
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
@@ -22,7 +23,7 @@ import org.json.JSONArray
 
 /** App-private, backup-excluded durable import queue. Every page and checkpoint commits together. */
 class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
-    SQLiteOpenHelper(context, name, null, 8), SyncStore {
+    SQLiteOpenHelper(context, name, null, 9), SyncStore {
     private val lock = Mutex()
     /** Check the run lease both before its transaction and before durable commit. */
     @Volatile var admitTransaction: (CalendarScope) -> Boolean = { true }
@@ -36,26 +37,33 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
         createSeries(db)
         createMappingProfiles(db)
         createLocalEdits(db)
+        createProjectionReceipts(db)
     }
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        check(oldVersion in 1..7 && newVersion == 8) { "Explicit import schema migration required" }
+        check(oldVersion in 1..8 && newVersion == 9) { "Explicit import schema migration required" }
         if (oldVersion < 2) createStaging(db)
         if (oldVersion < 3) createDelta(db)
         if (oldVersion < 4) createReconciliation(db)
         if (oldVersion < 5) createCoverage(db)
         if (oldVersion < 6) createSeries(db)
         if (oldVersion < 7) createMappingProfiles(db)
-        createLocalEdits(db)
-        // Legacy clean cache is only a baseline candidate; capture still qualifies the live owner row.
-        db.rawQuery("SELECT r.scope,r.event,r.payload FROM records r WHERE r.pending=0 AND NOT EXISTS " +
-            "(SELECT 1 FROM deferred_events d WHERE d.scope=r.scope AND d.event=r.event)", null).use { cursor ->
-            while (cursor.moveToNext()) {
-                if (decodeChange(cursor.getString(2)) is RemoteChange.Upsert) db.insertOrThrow("projection_bases", null,
-                    ContentValues().apply {
-                        put("scope", cursor.getString(0)); put("event", cursor.getString(1)); put("payload", cursor.getString(2))
-                    })
+        if (oldVersion < 8) {
+            createLocalEdits(db)
+            // Legacy clean cache is only a baseline candidate; capture still qualifies the live owner row.
+            db.rawQuery("SELECT r.scope,r.event,r.payload FROM records r WHERE r.pending=0 AND NOT EXISTS " +
+                "(SELECT 1 FROM deferred_events d WHERE d.scope=r.scope AND d.event=r.event)", null).use { cursor ->
+                while (cursor.moveToNext()) {
+                    if (decodeChange(cursor.getString(2)) is RemoteChange.Upsert) db.insertOrThrow("projection_bases", null,
+                        ContentValues().apply {
+                            put("scope", cursor.getString(0)); put("event", cursor.getString(1)); put("payload", cursor.getString(2))
+                        })
+                }
             }
         }
+        createProjectionReceipts(db)
+    }
+    private fun createProjectionReceipts(db: SQLiteDatabase) {
+        db.execSQL("CREATE TABLE projection_receipts (scope TEXT NOT NULL, event TEXT NOT NULL, nonce TEXT NOT NULL UNIQUE, payload TEXT NOT NULL, adapter TEXT NOT NULL, version INTEGER NOT NULL, previous_base TEXT, protocol INTEGER NOT NULL CHECK(protocol=1), PRIMARY KEY(scope,event))")
     }
     private fun createLocalEdits(db: SQLiteDatabase) {
         db.execSQL("CREATE TABLE projection_bases (scope TEXT NOT NULL, event TEXT NOT NULL, payload TEXT NOT NULL, PRIMARY KEY(scope,event))")
@@ -347,6 +355,78 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
         val baseline = readBaseline(db, scope, eventId)
         check(admitTransaction(scope)) { "Inactive import lease" }
         baseline
+    }
+    /** Persist before Provider apply. Preparation alone is never evidence that the row was written. */
+    suspend fun prepareProjection(intent: ProjectionIntent, format: AdapterFormat): ProjectionReceipt =
+        stagingMutation(intent.scope) { db ->
+            check(activeProjectionScope(db, intent.scope)) { "Inactive projection scope" }
+            require(ProjectionReceipt.supports(intent.change)) { "Unsupported projection receipt content" }
+            require(projectionFormatMatches(db, intent.scope, format)) { "Incompatible projection format" }
+            val change = intent.change as RemoteChange.Upsert
+            val pending = db.rawQuery("SELECT 1 FROM records r WHERE r.scope=? AND r.event=? AND r.payload=? AND r.pending=1 " +
+                "AND NOT EXISTS (SELECT 1 FROM local_edits l WHERE l.scope=r.scope AND l.event=r.event) " +
+                "AND NOT EXISTS (SELECT 1 FROM deferred_events d WHERE d.scope=r.scope AND d.event=r.event)",
+                arrayOf(key(intent.scope), change.eventId.value, encodeChange(change))).use { it.moveToFirst() }
+            require(pending) { "Stale or blocked projection intent" }
+            val existing = readProjectionReceipt(db, intent.scope, change.eventId)
+            if (existing != null) {
+                require(existing.change == change && existing.format == format) { "Unresolved projection receipt" }
+                return@stagingMutation existing
+            }
+            val receipt = ProjectionReceipt(intent.scope, format, change, UUID.randomUUID().toString(),
+                readBaseline(db, intent.scope, change.eventId))
+            db.insertOrThrow("projection_receipts", null, ContentValues().apply {
+                put("scope", key(receipt.scope)); put("event", receipt.change.eventId.value); put("nonce", receipt.nonce)
+                put("payload", encodeChange(receipt.change)); put("adapter", receipt.format.id); put("version", receipt.format.version)
+                receipt.previousBase?.let { put("previous_base", encodeChange(it)) } ?: putNull("previous_base")
+                put("protocol", receipt.protocol)
+            })
+            receipt
+        }
+
+    suspend fun projectionReceipt(scope: CalendarScope, eventId: EventId): ProjectionReceipt? = access { db ->
+        check(admitTransaction(scope)) { "Inactive import lease" }; requireKnown(db, scope)
+        val receipt = readProjectionReceipt(db, scope, eventId)
+        check(admitTransaction(scope)) { "Inactive import lease" }
+        receipt
+    }
+
+    /** A qualified atomic Provider write can restore its baseline after a lost local acknowledgement.
+     * Newer import evidence is retained. Neither this method nor preparation touches Provider flags.
+     */
+    suspend fun restoreProjection(witness: AppliedProjectionWitness): Boolean = stagingMutation(witness.receipt.scope) { db ->
+        val receipt = witness.receipt
+        if (readProjectionReceipt(db, receipt.scope, receipt.change.eventId) != receipt) return@stagingMutation false
+        if (!activeProjectionScope(db, receipt.scope) || !projectionFormatMatches(db, receipt.scope, receipt.format) ||
+            readLocalEdit(db, receipt.scope, receipt.change.eventId) != null) return@stagingMutation false
+        val baseline = readBaseline(db, receipt.scope, receipt.change.eventId)
+        if (baseline != receipt.previousBase && baseline != receipt.change) return@stagingMutation false
+        db.insertWithOnConflict("projection_bases", null, ContentValues().apply {
+            put("scope", key(receipt.scope)); put("event", receipt.change.eventId.value); put("payload", encodeChange(receipt.change))
+        }, SQLiteDatabase.CONFLICT_REPLACE).also { check(it != -1L) }
+        db.update("records", ContentValues().apply { put("pending", 0) },
+            "scope=? AND event=? AND payload=? AND pending=1",
+            arrayOf(key(receipt.scope), receipt.change.eventId.value, encodeChange(receipt.change)))
+        check(db.delete("projection_receipts", "scope=? AND event=? AND nonce=? AND payload=? AND adapter=? AND version=? AND previous_base IS ? AND protocol=?",
+            arrayOf(key(receipt.scope), receipt.change.eventId.value, receipt.nonce, encodeChange(receipt.change),
+                receipt.format.id, receipt.format.version.toString(), receipt.previousBase?.let(::encodeChange), receipt.protocol.toString())) == 1)
+        true
+    }
+    private fun activeProjectionScope(db: SQLiteDatabase, scope: CalendarScope): Boolean = db.rawQuery(
+        "SELECT 1 FROM calendars WHERE scope=? AND enabled=1 AND available=1", arrayOf(key(scope)),
+    ).use { it.moveToFirst() }
+    private fun projectionFormatMatches(db: SQLiteDatabase, scope: CalendarScope, format: AdapterFormat): Boolean = db.rawQuery(
+        "SELECT checkpoint FROM calendars WHERE scope=?", arrayOf(key(scope)),
+    ).use { it.moveToFirst() && (it.isNull(0) || decodeCheckpoint(scope, it.getString(0)).format == format) }
+    private fun readProjectionReceipt(db: SQLiteDatabase, scope: CalendarScope, eventId: EventId): ProjectionReceipt? = db.rawQuery(
+        "SELECT nonce,payload,adapter,version,previous_base,protocol FROM projection_receipts WHERE scope=? AND event=?",
+        arrayOf(key(scope), eventId.value),
+    ).use {
+        if (!it.moveToFirst()) null else ProjectionReceipt(scope, AdapterFormat(it.getString(2), it.getInt(3)),
+            decodeChange(it.getString(1)) as RemoteChange.Upsert, it.getString(0),
+            if (it.isNull(4)) null else decodeChange(it.getString(4)) as RemoteChange.Upsert, it.getInt(5)).also { receipt ->
+            check(receipt.change.eventId == eventId) { "Projection receipt identity mismatch" }
+        }
     }
     suspend fun localEdit(scope: CalendarScope, eventId: EventId): LocalEditIntent? = access { db ->
         check(admitTransaction(scope)) { "Inactive import lease" }; requireKnown(db, scope)

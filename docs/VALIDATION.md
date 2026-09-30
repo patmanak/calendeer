@@ -625,6 +625,29 @@ These layers do not qualify automatic observation, an editable Samsung calendar,
 live conditional UPDATE/DELETE, power-loss recovery or atomicity between Provider
 snapshot and private database commit. See [local capture](LOCAL_EDIT_CAPTURE.md).
 
+## Interrupted simple projection
+
+`ProjectionReceiptTest` checks the supported simple subset, protocol/nonce
+validation, baseline identity and redacted diagnostics on the JVM.
+`ProjectionReceiptStoreDeviceTest` uses isolated real SQLite for immutable
+preparation/reopen, exact restoration, newer remote/tombstone preservation,
+baseline comparison, incompatible formats, local-intent blocking and transaction
+rollback on lease loss, cancellation or injected failure. Its independent schema
+8 fixture must migrate without inventing receipts or losing retained work.
+
+With `-e providerFixture true`, `ProjectionRecoveryDeviceTest` joins the production
+owner, real Provider and real SQLite with a controlled read-only remote. It aborts
+private acknowledgement after a successful event write, changes the Android row
+and reopens storage. Recovery must use the actually projected base, retain dirty
+content and avoid a second row. Cases cover pre-apply interruption, newer remote
+content, local deletion, nonce absence/substitution, reused opaque revisions,
+duplicate identity, mirror recreation and nonce invalidation immediately before
+the proof assertions. Missing proof must leave the baseline, receipt and row intact.
+The lost-ACK and reused-revision regressions must fail before their respective fixes.
+
+These controlled fixtures establish neither a live Proton UPDATE nor arbitrary
+power-loss or cross-store atomicity. They clean up only isolated local fixture data.
+
 ## Anonymous transport probe
 
 `ProtonConnectivityDeviceTest` is skipped unless instrumentation receives

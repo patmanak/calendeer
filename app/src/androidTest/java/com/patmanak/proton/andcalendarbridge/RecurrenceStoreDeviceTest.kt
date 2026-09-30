@@ -217,13 +217,14 @@ class RecurrenceStoreDeviceTest {
         SQLiteDatabase.openDatabase(context.getDatabasePath(name).path, null, SQLiteDatabase.OPEN_READWRITE).use { db ->
             db.execSQL("DROP TABLE series_members")
             db.execSQL("DROP TABLE mapping_profiles")
+            db.execSQL("DROP TABLE projection_receipts")
             db.execSQL("DROP TABLE projection_bases")
             db.execSQL("DROP TABLE local_edits")
             db.execSQL("INSERT INTO records(scope,event,payload,pending) VALUES(?,?,?,1)", arrayOf(key, "legacy", legacy))
             db.version = 5
         }
         ImportStore(context, name).use { reopened ->
-            assertEquals(8, reopened.readableDatabase.version)
+            assertEquals(9, reopened.readableDatabase.version)
             assertEquals(legacy, reopened.readableDatabase.rawQuery("SELECT payload FROM records WHERE event='legacy'", null).use {
                 assertTrue(it.moveToFirst()); it.getString(0)
             })

@@ -27,12 +27,14 @@ concurrently changed rows remain untouched.
 
 ## Durable state and imports
 
-Import schema 8 separates three facts:
+Import schema 9 separates four facts:
 
 - `records`: latest supported remote content or authoritative tombstone;
 - `projection_bases`: last upsert successfully acknowledged after projection;
 - `local_edits`: immutable scoped ID, adapter format/version, original base and
   captured supported content, with state `PAUSED` or `CONFLICT`.
+- `projection_receipts`: an immutable preparation for a supported simple upsert,
+  with the exact payload, adapter format, previous base and a random protocol nonce.
 
 Acknowledgement compares the exact still-pending payload and absence of a local
 intent in one transaction before advancing the base. A stale acknowledgement
@@ -62,6 +64,29 @@ conservatively preserves even an uncaptured or unsupported local edit. Its pendi
 import remains blocked rather than discarding data; user-facing resolution is future
 work, including the final policy for unexpected edits in a read-only mirror.
 
+## Interrupted simple projection
+
+Before writing a supported simple upsert, the owner persists a receipt. The
+Provider writes its versioned nonce in `SYNC_DATA3` in the same atomic batch as
+the event. Preparation alone does not prove that the write happened. Untracked
+projections clear this marker; migration creates no receipts for old rows.
+
+After an interrupted acknowledgement, an assertion-only Provider inspection
+requires unique scoped ownership, the exact event identity, revision and nonce.
+It qualifies a historical write even if the row is now dirty or locally deleted;
+it never changes content or clears either flag. In one private transaction, the
+qualified receipt restores its projected base only if the previous base still
+matches, consumes only the exact pending payload, and removes the receipt. Newer
+remote content or a tombstone stays pending and separate from that recovered base.
+Explicit capture attempts this recovery before reading the Android edit.
+
+A missing, changed or ambiguous marker cannot qualify recovery. A preparation
+that was never applied can still permit capture against a distinct older revision.
+If different prepared content reuses that revision, capture refuses to guess its
+base. An unresolved receipt for different pending content blocks projection
+instead of being replaced or replayed as stale data. Adapter, generation, lease
+and permission gates apply to preparation and recovery as well as normal import.
+
 ## Recovery limits
 
 Provider snapshot and private database commit are not one atomic transaction.
@@ -70,10 +95,11 @@ it does not silently replace the immutable first capture. Automatic observation,
 additional local edits, local CREATE/DELETE capture, conflict controls and conditional
 Proton UPDATE/DELETE remain separate work.
 
-A crash after successful Provider projection but before private acknowledgement
-can leave a newer Android marker without its matching durable baseline. Capture
-refuses that mismatch and preserves the local row. Recovery of this gap needs
-separate qualification; neither cache presence nor a numeric row ID invents an ACK.
+Nonce-backed recovery covers simple upserts only. Recurrences, nonempty event
+details, deletions and legacy rows without receipts retain their conservative
+recovery limits. Neither cache presence, a revision alone nor a numeric row ID
+invents an ACK. The two stores still do not share a transaction, and controlled
+reopening tests do not establish recovery from physical power loss.
 
 See [validation](VALIDATION.md) for the distinct domain, SQLite, controlled-owner
 and real Provider fixtures. They do not establish Samsung editing UI behavior or
