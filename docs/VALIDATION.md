@@ -648,6 +648,43 @@ The lost-ACK and reused-revision regressions must fail before their respective f
 These controlled fixtures establish neither a live Proton UPDATE nor arbitrary
 power-loss or cross-store atomicity. They clean up only isolated local fixture data.
 
+## Internal local DELETE capture
+
+`LocalDeleteIntentTest` checks unchanged or edited-before-deletion content, exact
+known-empty/unknown profiles, unsupported recurrence/details/colors, second
+precision and redacted diagnostics on the JVM. Deletion is a separate intention;
+it cannot become a supported-field UPDATE or authorize a remote request.
+
+`LocalDeleteStoreDeviceTest` uses isolated real SQLite for immutable replay/reopen,
+kind and ID uniqueness, conflicts before/after capture, remote tombstones and
+deferred evidence, generic projection/requeue/count/ACK barriers, receipt refusal,
+and rollback on lease loss, cancellation or injected failure. Its independent
+schema 9 database must preserve UPDATE state, payloads, IDs, formats and receipts
+when adding the kind. Existing schema 7/8 fixtures must also reach the current
+schema without adding the same column twice.
+
+With `-e providerFixture true`, `LocalDeleteProviderDeviceTest` checks timed and
+all-day tombstones, unchanged or modified content, strict dirty/deleted flags,
+missing/foreign/duplicate identities, unsupported fields/children and an assertion
+race. A distinct test deletes an imported event through ordinary `Events.CONTENT_URI`
+and requires a retained tombstone without manually setting its flags. This tests
+the installed Provider, not Samsung's editing UI. Only still-observable fields can
+be captured after deletion; removed child rows do not establish their former absence.
+
+`LocalDeleteCaptureCoordinatorDeviceTest` uses real isolated SQLite and controlled
+ports for account/format/permission/catalog gates, import during qualification,
+replay without another snapshot, UPDATE/DELETE collisions and cancellation.
+`LocalDeleteCaptureIntegrationDeviceTest` joins the production owner, real SQLite
+and Provider with a controlled remote. It checks offline capture/reopening without
+ACK, edit-then-delete content, persistent conflict, lost projection ACK recovery
+on a tombstone and refusal of an ambiguous reused revision without its nonce.
+Its principal capture case must fail against the unwired owner and pass after
+composition. These fixtures submit no service deletion and remove only isolated
+local accounts, calendars and databases.
+
+Live conditional DELETE, editable-calendar UI, automatic observation, undo of
+unobservable data, power-loss recovery and cross-store atomicity remain unqualified.
+
 ## Anonymous transport probe
 
 `ProtonConnectivityDeviceTest` is skipped unless instrumentation receives

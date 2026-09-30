@@ -33,6 +33,8 @@ interface CalendarProjection {
     suspend fun inspectOwnedEvent(scope: CalendarScope, eventId: EventId, revision: Revision): OwnedEventWitness? = null
     /** Snapshot only; no acknowledgement or upload. Unsupported/changed rows are left untouched. */
     suspend fun captureOwnedSimpleEdit(scope: CalendarScope, base: RemoteChange.Upsert): OwnedLocalEditSnapshot? = null
+    /** Present, dirty local tombstone only; absence never establishes deletion intent. No ACK. */
+    suspend fun captureOwnedSimpleDelete(scope: CalendarScope, base: RemoteChange.Upsert): OwnedLocalEditSnapshot? = null
 }
 
 /** Android locator is diagnostic context only and never enters the durable domain intent. */

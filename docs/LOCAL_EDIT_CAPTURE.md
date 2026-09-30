@@ -1,9 +1,11 @@
-# Internal local UPDATE capture
+# Internal local UPDATE and DELETE capture
 
 The internal `ImportCoordinator.captureLocalEdit` entry point retains one local
 change to an already imported simple event. It does not enable editable calendars,
 observe Provider changes automatically, send a mutation, or acknowledge an Android
-edit. The production mirror remains read-only.
+edit. The production mirror remains read-only. `captureLocalDelete` separately
+retains an explicit local deletion of an already imported simple event; it does
+not submit or acknowledge that deletion.
 
 ## Supported snapshot
 
@@ -18,7 +20,7 @@ Legacy null details stay unknown; capture never upgrades them to known empty or
 claims that unknown remote fields can safely be rewritten. A future write adapter
 must preserve and qualify the full remote event separately.
 
-The Android reader requires one bridge-owned calendar and one event with the
+The UPDATE reader requires one bridge-owned calendar and one event with the
 exact scoped remote identity and base revision marker, `DIRTY=1` and `DELETED=0`.
 An assertion-only Provider batch checks the complete observed row, ownership and
 absence of reminder, attendee and extended-property rows. The reader neither
@@ -27,12 +29,13 @@ concurrently changed rows remain untouched.
 
 ## Durable state and imports
 
-Import schema 9 separates four facts:
+Import schema 10 separates four facts:
 
 - `records`: latest supported remote content or authoritative tombstone;
 - `projection_bases`: last upsert successfully acknowledged after projection;
 - `local_edits`: immutable scoped ID, adapter format/version, original base and
-  captured supported content, with state `PAUSED` or `CONFLICT`.
+  captured supported content, with kind `UPDATE` or `DELETE` and state `PAUSED`
+  or `CONFLICT`;
 - `projection_receipts`: an immutable preparation for a supported simple upsert,
   with the exact payload, adapter format, previous base and a random protocol nonce.
 
@@ -57,6 +60,34 @@ event is refused; there is no coalescing, automatic conflict resolution or reope
 Both states block upload. Generic outgoing mutation storage remains unavailable.
 Lease loss, cancellation and database failures before commit roll back the entire
 capture or import/conflict transaction.
+
+## Local deletion snapshots
+
+DELETE capture requires a present, uniquely owned tombstone with `DIRTY=1` and
+`DELETED=1`. It uses the same supported-field and assertion-only snapshot checks
+as UPDATE. Physically missing rows, unsupported child data, foreign identities
+and changed revisions do not become inferred deletion requests. Content can be
+unchanged; edits made before deletion are preserved as a separate `EventContent`
+snapshot against the original projected base.
+Only fields still observable in the tombstone are captured. The ordinary
+[AOSP deletion path](https://android.googlesource.com/platform/packages/providers/CalendarProvider/+/master/src/com/android/providers/calendar/CalendarProvider2.java)
+can remove reminder and extended-property rows while retaining the event. Their
+absence afterwards does not prove they were absent before deletion, and this
+snapshot is not a complete undo image. Provider behavior still needs device
+qualification.
+
+The shared journal's unique event and mutation IDs prevent UPDATE and DELETE
+from replacing one another. Capture refuses a different kind rather than silently
+coalescing it. Replaying the same retained ID returns the first immutable intention;
+it does not prove the Provider is still in that state. The DELETE kind is separate
+from an imported `RemoteChange.Deleted`: a remote tombstone causes a persistent
+conflict and never automatically acknowledges the local deletion.
+
+Every import, receipt restoration, acknowledgement, count and requeue barrier
+checks all local kinds. A retained DELETE keeps its projected base and suppresses
+incoming projection while newer remote or deferred evidence is retained. Schema
+10 migration tags existing intentions as UPDATE without changing their payloads,
+states, IDs or receipts; it does not invent prior local deletions.
 
 Incoming Provider writes also assert clean, non-deleted event rows before replacing
 or deleting them, including recurrence children removed with a master. This
@@ -92,11 +123,11 @@ and permission gates apply to preparation and recovery as well as normal import.
 Provider snapshot and private database commit are not one atomic transaction.
 An edit made after snapshot qualification remains dirty and protected in Android;
 it does not silently replace the immutable first capture. Automatic observation,
-additional local edits, local CREATE/DELETE capture, conflict controls and conditional
+additional local edits, local CREATE capture, conflict controls and conditional
 Proton UPDATE/DELETE remain separate work.
 
 Nonce-backed recovery covers simple upserts only. Recurrences, nonempty event
-details, deletions and legacy rows without receipts retain their conservative
+details, Provider DELETE projections and legacy rows without receipts retain their conservative
 recovery limits. Neither cache presence, a revision alone nor a numeric row ID
 invents an ACK. The two stores still do not share a transaction, and controlled
 reopening tests do not establish recovery from physical power loss.

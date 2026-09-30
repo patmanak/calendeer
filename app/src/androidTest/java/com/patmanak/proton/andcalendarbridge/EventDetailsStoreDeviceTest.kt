@@ -166,7 +166,7 @@ class EventDetailsStoreDeviceTest {
             db.version = 6
         }
         ImportStore(context, name).use { reopened ->
-            assertEquals(9, reopened.readableDatabase.version); assertEquals(0, profileCount(reopened))
+            assertEquals(10, reopened.readableDatabase.version); assertEquals(0, profileCount(reopened))
             assertEquals(receipt, reopened.delta { received }); assertEquals(ledger, reopened.delta { coverage })
             assertEquals("legacy-series", reopened.deletedSeriesUid(scope, master.eventId))
             assertEquals(legacy, reopened.readableDatabase.rawQuery("SELECT payload FROM records WHERE event='legacy'", null).use {

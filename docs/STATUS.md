@@ -25,7 +25,7 @@ sessions and imported calendars. See [identity and interface](DESIGN.md).
 | Module | Implemented | Not established by this slice |
 | --- | --- | --- |
 | `app` | Configuration, login, discovery and per-calendar read-only import controls; eight languages; durable import queue, Calendar Provider projection, permissions and background scheduling. | Broad Android/OEM qualification, editable mode or complete event feature coverage. |
-| `sync` | Pure scoped models, bounded transactional pagination, access gates, immutable simple local UPDATE intents, conflict checks, uncertain-outcome write states and a separate metadata catalog controller. | General outgoing queue, automatic capture or bidirectional reconciliation. |
+| `sync` | Pure scoped models, bounded transactional pagination, access gates, immutable simple local UPDATE/DELETE intents, conflict checks, uncertain-outcome write states and a separate metadata catalog controller. | General outgoing queue, automatic capture or bidirectional reconciliation. |
 | `auth` | Contako-derived secret contract and state controller, cancellation/cleanup gates, retry policy and focused tests. | Calendar bootstrap or per-calendar capability checks. |
 | `proton-auth` | Proton Core login/session integration, discovery, Calendar key bootstrap, paginated decryption, sealed change polling, bounded recurrence mapping and experimental single simple-event CREATE with verified readback. | All challenge variants, external-author trust resolution, complete recurrence/history coverage or general event editing. |
 
@@ -153,7 +153,7 @@ owned Android projection without readmitting CREATE. These results do not qualif
 real server rights revocation or a user-facing logout journey.
 An explicit internal simple UPDATE capture now retains the last acknowledged
 projection base and the Android edit independently of the latest imported remote
-record. Import schema 9 preserves immutable paused/conflicted intents, suppresses
+record. Import schema 10 preserves immutable paused/conflicted intents, suppresses
 their projection and never automatically resets a conflict. A newer import before
 capture can therefore coexist with the original projected base. The Provider reader
 qualifies ownership, revision, supported fields and an assertion-only snapshot;
@@ -178,6 +178,16 @@ does not invent receipts for legacy rows. Complex projections and deletions reta
 their previous conservative recovery limits; the two stores remain separate.
 Nonce-backed recovery has source review and JVM checks. Its physical interruption,
 schema 9 migration and Provider regression qualification remains pending.
+An explicit internal simple DELETE capture now requires a present, owned, dirty
+Android tombstone. It retains the projected base and observable supported content,
+including edits made before deletion, without consuming the Android flags.
+Schema 10 adds an UPDATE/DELETE kind to the same unique local journal; existing
+UPDATE payloads, states and receipts are preserved. Both kinds suppress projection
+and conflict permanently with divergent or deferred remote evidence. A remote
+tombstone does not acknowledge a local deletion, and captures cannot coalesce
+different kinds or replace retained work. Source review and JVM checks have passed;
+physical Provider/SQLite, ordinary Android deletion and migration qualification
+remain pending. The app exposes no outgoing DELETE path.
 The application still exposes no writable mirror or event editor. General outgoing
 queue/resolution, automatic Provider capture and conditional Proton UPDATE/DELETE
 guarantees remain unqualified. See

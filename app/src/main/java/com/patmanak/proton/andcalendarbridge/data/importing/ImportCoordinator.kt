@@ -317,17 +317,13 @@ class ImportCoordinator(
             if (selected?.enabled != true || !selected.available) return@withLock LocalEditCaptureResult.INACTIVE
             val format = store.transaction(target) { checkpoint?.format }
             if (format != remote.format) return@withLock LocalEditCaptureResult.UNQUALIFIED
+            if (store.localDelete(target, eventId) != null) return@withLock LocalEditCaptureResult.UNQUALIFIED
             val retained = store.localEdit(target, eventId)
             if (retained != null) {
                 if (retained.id != id || retained.format != format) return@withLock LocalEditCaptureResult.UNQUALIFIED
                 return@withLock if (retained.state == LocalEditState.CONFLICT) LocalEditCaptureResult.CONFLICT else LocalEditCaptureResult.RETAINED
             }
-            val receipt = store.projectionReceipt(target, eventId)
-            val recovered = receipt?.let { recoverProjection(expected, it) } ?: false
-            val base = store.projectedBaseline(target, eventId) ?: return@withLock LocalEditCaptureResult.UNQUALIFIED
-            // An opaque revision alone cannot choose between different prepared contents.
-            if (receipt != null && !recovered && receipt.change != base && receipt.change.revision == base.revision)
-                return@withLock LocalEditCaptureResult.UNQUALIFIED
+            val base = captureBaseline(expected, target, eventId) ?: return@withLock LocalEditCaptureResult.UNQUALIFIED
             val snapshot = projection.captureOwnedSimpleEdit(target, base) ?: return@withLock LocalEditCaptureResult.UNQUALIFIED
             if (!isCurrent(expected, target.account) || !active()) return@withLock LocalEditCaptureResult.INACTIVE
             val captured = store.captureLocalEdit(LocalEditIntent(id, target, format, base, snapshot.content))
@@ -338,6 +334,48 @@ class ImportCoordinator(
               store.admitTransaction = { false }
               projection.admitOperation = { false }
           }
+    }
+
+    /** Explicit internal DELETE snapshot. No observation, upload, or Android acknowledgement. */
+    suspend fun captureLocalDelete(target: CalendarScope, eventId: EventId, id: MutationId): LocalEditCaptureResult = mutex.withLock {
+        val expected = generation
+        val policy = createPolicyRevision.get()
+        if (!isCurrent(expected, target.account) || !hasCalendarPermissions())
+            return@withLock LocalEditCaptureResult.INACTIVE
+        val active = { authenticated && generation == expected && createPolicyRevision.get() == policy && hasCalendarPermissions() }
+        store.admitTransaction = { it == target && active() }
+        projection.admitOperation = active
+        try {
+            val selected = store.selections(target.account).singleOrNull { it.scope == target }
+            if (selected?.enabled != true || !selected.available) return@withLock LocalEditCaptureResult.INACTIVE
+            val format = store.transaction(target) { checkpoint?.format }
+            if (format != remote.format) return@withLock LocalEditCaptureResult.UNQUALIFIED
+            if (store.localEdit(target, eventId) != null) return@withLock LocalEditCaptureResult.UNQUALIFIED
+            val retained = store.localDelete(target, eventId)
+            if (retained != null) {
+                if (retained.id != id || retained.format != format) return@withLock LocalEditCaptureResult.UNQUALIFIED
+                return@withLock if (retained.state == LocalEditState.CONFLICT) LocalEditCaptureResult.CONFLICT else LocalEditCaptureResult.RETAINED
+            }
+            val base = captureBaseline(expected, target, eventId) ?: return@withLock LocalEditCaptureResult.UNQUALIFIED
+            val snapshot = projection.captureOwnedSimpleDelete(target, base) ?: return@withLock LocalEditCaptureResult.UNQUALIFIED
+            if (!isCurrent(expected, target.account) || !active()) return@withLock LocalEditCaptureResult.INACTIVE
+            val captured = store.captureLocalDelete(LocalDeleteIntent(id, target, format, base, snapshot.content))
+            if (captured.state == LocalEditState.CONFLICT) LocalEditCaptureResult.CONFLICT else LocalEditCaptureResult.RETAINED
+        } catch (cancelled: CancellationException) { throw cancelled }
+          catch (_: Exception) { LocalEditCaptureResult.UNAVAILABLE }
+          finally {
+              store.admitTransaction = { false }
+              projection.admitOperation = { false }
+          }
+    }
+
+    private suspend fun captureBaseline(expected: Long, target: CalendarScope, eventId: EventId): RemoteChange.Upsert? {
+        val receipt = store.projectionReceipt(target, eventId)
+        val recovered = receipt?.let { recoverProjection(expected, it) } ?: false
+        val base = store.projectedBaseline(target, eventId) ?: return null
+        // An opaque revision alone cannot choose between different prepared contents.
+        if (receipt != null && !recovered && receipt.change != base && receipt.change.revision == base.revision) return null
+        return base
     }
 
     /** A marker proves the historical write, not that the current Provider content is unchanged. */

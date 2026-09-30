@@ -270,15 +270,23 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
     }
 
     override suspend fun captureOwnedSimpleEdit(scope: CalendarScope, base: RemoteChange.Upsert): OwnedLocalEditSnapshot? = operation {
+        captureSimpleSnapshot(scope, base, deleted = false)
+    }
+
+    override suspend fun captureOwnedSimpleDelete(scope: CalendarScope, base: RemoteChange.Upsert): OwnedLocalEditSnapshot? = operation {
+        captureSimpleSnapshot(scope, base, deleted = true)
+    }
+
+    private fun captureSimpleSnapshot(scope: CalendarScope, base: RemoteChange.Upsert, deleted: Boolean): OwnedLocalEditSnapshot? {
         if (base.content.recurrence != null ||
-            (base.content.details != null && base.content.details != EventDetails())) return@operation null
+            (base.content.details != null && base.content.details != EventDetails())) return null
         val account = accountFor(scope.account)
-        val calendar = calendarRow(scope, account) ?: return@operation null
+        val calendar = calendarRow(scope, account) ?: return null
         val remoteId = digest("event-v1", calendarSyncId(scope), base.eventId.value)
         val uri = syncUri(Events.CONTENT_URI, account)
         val identity = Selection("${Events.CALENDAR_ID}=? AND (${Events.SYNC_DATA4}=? OR " +
             "(${Events.SYNC_DATA4} IS NULL AND ${Events._SYNC_ID}=?))", arrayOf(calendar.toString(), remoteId, remoteId))
-        val row = ownedRow(uri, identity, Events.SYNC_DATA1) ?: return@operation null
+        val row = ownedRow(uri, identity, Events.SYNC_DATA1) ?: return null
         val columns = arrayOf(Events._ID, Events.CALENDAR_ID, Events._SYNC_ID, Events.SYNC_DATA1, Events.SYNC_DATA2,
             Events.SYNC_DATA4, Events.DIRTY, Events.DELETED, Events.TITLE, Events.DESCRIPTION, Events.EVENT_LOCATION,
             Events.DTSTART, Events.DTEND, Events.ALL_DAY, Events.EVENT_TIMEZONE, Events.EVENT_END_TIMEZONE,
@@ -289,31 +297,31 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
             Events.HAS_ALARM, Events.SELF_ATTENDEE_STATUS, Events.AVAILABILITY, Events.ACCESS_LEVEL,
             Events.CUSTOM_APP_PACKAGE, Events.CUSTOM_APP_URI)
         val values = resolver.query(uri, columns, identity.sql, identity.args, null)?.use {
-            if (it.count != 1 || !it.moveToFirst()) return@operation null
+            if (it.count != 1 || !it.moveToFirst()) return null
             ContentValues().apply { DatabaseUtils.cursorRowToContentValues(it, this) }
         } ?: fail(CalendarProjectionFailure.PROVIDER_UNAVAILABLE)
         if (values.getAsLong(Events._ID) != row || values.getAsString(Events._SYNC_ID) != remoteId ||
             values.getAsString(Events.SYNC_DATA1) != OWNER_MARKER ||
             values.getAsString(Events.SYNC_DATA2) != digest("revision-v1", base.revision.value) ||
-            values.getAsInteger(Events.DIRTY) != 1 || values.getAsInteger(Events.DELETED) != 0)
-            return@operation null
+            values.getAsInteger(Events.DIRTY) != 1 || values.getAsInteger(Events.DELETED) != (if (deleted) 1 else 0))
+            return null
         val unsupported = arrayOf(Events.RRULE, Events.RDATE, Events.EXRULE, Events.EXDATE, Events.DURATION,
             Events.ORIGINAL_ID, Events.ORIGINAL_SYNC_ID, Events.ORIGINAL_INSTANCE_TIME, Events.ORIGINAL_ALL_DAY,
             Events.ORGANIZER, Events.EVENT_COLOR_KEY, Events.CUSTOM_APP_PACKAGE, Events.CUSTOM_APP_URI)
-        if (unsupported.any { values[it] != null }) return@operation null
+        if (unsupported.any { values[it] != null }) return null
         val emptyFlags = arrayOf(Events.HAS_ATTENDEE_DATA, Events.IS_ORGANIZER, Events.GUESTS_CAN_MODIFY,
             Events.GUESTS_CAN_INVITE_OTHERS, Events.GUESTS_CAN_SEE_GUESTS, Events.HAS_ALARM,
             Events.SELF_ATTENDEE_STATUS, Events.ACCESS_LEVEL)
         if (emptyFlags.any { values.getAsInteger(it) != 0 } ||
             values.getAsInteger(Events.STATUS) != Events.STATUS_CONFIRMED ||
-            values.getAsInteger(Events.AVAILABILITY) != Events.AVAILABILITY_BUSY) return@operation null
+            values.getAsInteger(Events.AVAILABILITY) != Events.AVAILABILITY_BUSY) return null
         val expectedColor = base.content.colorRgb?.or(0xFF000000.toInt())
-        if (values.getAsInteger(Events.EVENT_COLOR) != expectedColor) return@operation null
-        val time = readSimpleTime(values) ?: return@operation null
+        if (values.getAsInteger(Events.EVENT_COLOR) != expectedColor) return null
+        val time = readSimpleTime(values) ?: return null
         val content = EventContent(values.getAsString(Events.TITLE) ?: "", time,
             values.getAsString(Events.DESCRIPTION) ?: "", values.getAsString(Events.EVENT_LOCATION) ?: "",
             base.content.colorRgb, details = base.content.details)
-        if (content == base.content) return@operation null
+        if (!deleted && content == base.content) return null
         // Assertion-only batch: qualify the complete snapshot and absent child data together.
         // It does not make the later SQLite capture atomic with the Provider or clear DIRTY.
         val checks = arrayListOf(assertion(syncUri(Calendars.CONTENT_URI, account), calendarSelection(scope, account), calendar),
@@ -325,14 +333,14 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
             val childrenAbsent = resolver.query(syncUri(child, account), arrayOf("_id"),
                 "$column=?", arrayOf(row.toString()), null)?.use { it.count == 0 }
                 ?: fail(CalendarProjectionFailure.PROVIDER_UNAVAILABLE)
-            if (!childrenAbsent) return@operation null
+            if (!childrenAbsent) return null
             checks += ContentProviderOperation.newAssertQuery(syncUri(child, account))
                 .withSelection("$column=?", arrayOf(row.toString())).withExpectedCount(0).build()
         }
         requirePermissions()
         resolver.applyBatch(CalendarContract.AUTHORITY, checks)
         requirePermissions()
-        OwnedLocalEditSnapshot(calendar, row, content)
+        return OwnedLocalEditSnapshot(calendar, row, content)
     }
 
     private fun readSimpleTime(values: ContentValues): EventTime? {

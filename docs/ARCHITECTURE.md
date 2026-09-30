@@ -144,7 +144,11 @@ permissions, enabled availability and compatible checkpoint format. An assertion
 Provider reader qualifies a supported dirty snapshot without acknowledging it.
 The retained intent blocks both direct projection and replay/requeue paths; changed
 or deferred remote evidence makes conflict persistent. The generic outgoing port
-remains closed. See [local capture](LOCAL_EDIT_CAPTURE.md) for supported fields,
+remains closed. UPDATE and DELETE share unique event/mutation admission in the
+private journal but retain separate typed intentions. DELETE requires an observed
+dirty tombstone, preserves its supported content and projected base, and never
+interprets a missing row or remote deletion notice as local acknowledgement.
+See [local capture](LOCAL_EDIT_CAPTURE.md) for supported fields,
 legacy-profile treatment and recovery limits. Supported simple upserts persist
 an immutable preparation before writing a nonce with the event in an atomic
 Provider batch. Inspection of that exact scoped marker can recover a lost private
