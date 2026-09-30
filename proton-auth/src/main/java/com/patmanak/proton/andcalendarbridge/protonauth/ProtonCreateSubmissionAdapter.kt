@@ -22,12 +22,19 @@ internal class ProtonCreateSubmissionAdapter(private val preparations: CalendarC
     private val readback = ProtonCreatedEventReadback(sessions, remote, events, verifier)
     override suspend fun prepareSubmission(draft: CalendarCreateDraft) = preparations.prepareCreate(draft)
 
-    override suspend fun submit(record: CreateAttemptRecord, journal: CreateAttemptJournal): CreateSubmissionObservation = guarded {
+    override suspend fun submit(record: CreateAttemptRecord, journal: CreateAttemptJournal): CreateSubmissionObservation =
+        submitWithExpectation(record, journal, null)
+    override suspend fun submitCaptured(record: CreateAttemptRecord, expected: CalendarCreateDraft,
+        journal: CreateAttemptJournal): CreateSubmissionObservation = submitWithExpectation(record, journal, expected)
+
+    private suspend fun submitWithExpectation(record: CreateAttemptRecord, journal: CreateAttemptJournal,
+        expected: CalendarCreateDraft?): CreateSubmissionObservation = guarded {
         val stored = journal.read(record.scope, record.id) ?: createUnavailable(CreatePreparationFailure.CONTEXT)
         if (stored.format != record.format || stored.protectedPayload != record.protectedPayload)
             createUnavailable(CreatePreparationFailure.CONTEXT)
-        if (stored.state == CreateAttemptState.OUTCOME_UNKNOWN) return@guarded inspect(stored)
+        if (stored.state == CreateAttemptState.OUTCOME_UNKNOWN) return@guarded inspectWithExpectation(stored, expected)
         val submission = ProtonCreateSubmissionCodec.open(stored, protector)
+        qualifyCaptured(stored, submission, expected)
         val session = session(record.scope)
         // Requalify keys, rights and scope using authenticated reads immediately before admission.
         val freshReceipt = preparations.prepareCreate(submission.draft)
@@ -51,14 +58,19 @@ internal class ProtonCreateSubmissionAdapter(private val preparations: CalendarC
             }
             journal.retainEvidence(unknown, protector.seal(evidence.toString()))
         }
-        if (!admitted) return@guarded inspect(journal.read(record.scope, record.id) ?: return@guarded CreateSubmissionObservation.Unknown)
+        if (!admitted) return@guarded inspectWithExpectation(journal.read(record.scope, record.id) ?: return@guarded CreateSubmissionObservation.Unknown, expected)
         checkSession(session)
-        inspect(journal.read(record.scope, record.id) ?: return@guarded CreateSubmissionObservation.Unknown)
+        inspectWithExpectation(journal.read(record.scope, record.id) ?: return@guarded CreateSubmissionObservation.Unknown, expected)
     }
 
-    override suspend fun inspect(record: CreateAttemptRecord): CreateSubmissionObservation = guarded {
+    override suspend fun inspect(record: CreateAttemptRecord): CreateSubmissionObservation = inspectWithExpectation(record, null)
+    override suspend fun inspectCaptured(record: CreateAttemptRecord, expected: CalendarCreateDraft): CreateSubmissionObservation =
+        inspectWithExpectation(record, expected)
+
+    private suspend fun inspectWithExpectation(record: CreateAttemptRecord, expected: CalendarCreateDraft?): CreateSubmissionObservation = guarded {
         if (record.state != CreateAttemptState.OUTCOME_UNKNOWN) return@guarded CreateSubmissionObservation.Unknown
         val submission = ProtonCreateSubmissionCodec.open(record, protector)
+        qualifyCaptured(record, submission, expected)
         val session = session(record.scope)
         var candidateId: String? = null
         record.protectedEvidence?.let { sealed ->
@@ -71,7 +83,15 @@ internal class ProtonCreateSubmissionAdapter(private val preparations: CalendarC
         }
         val actual = readback.inspect(session, record.scope, submission.uid, submission.draft.content,
             submission.policy, candidateId) ?: return@guarded CreateSubmissionObservation.Unknown
-        CreateSubmissionObservation.Verified(CreateAttemptIdentity.of(record), actual)
+        // Readback already qualified the adapter's canonical text/UTC semantics and signatures.
+        // Captured callers receive their exact domain expectation, with the observed ID/revision.
+        val canonical = if (expected != null) actual.copy(content = expected.content) else actual
+        CreateSubmissionObservation.Verified(CreateAttemptIdentity.of(record), canonical)
+    }
+    private fun qualifyCaptured(record: CreateAttemptRecord, submission: ProtonCreateSubmission, expected: CalendarCreateDraft?) {
+        if (expected != null && (record.format != KNOWN_EMPTY_SUBMISSION_FORMAT ||
+                submission.policy != CreatedEventReadbackPolicy.KNOWN_EMPTY_V2 || expected.content.details != EventDetails() ||
+                submission.draft != expected)) createUnavailable(CreatePreparationFailure.CONTEXT)
     }
     private suspend fun session(scope: CalendarScope) = sessions.current()?.takeIf { it.userId.id == scope.account.value }
         ?: createUnavailable(CreatePreparationFailure.AUTHENTICATION)

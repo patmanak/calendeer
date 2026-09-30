@@ -482,7 +482,8 @@ format matching, reopening, competing helpers, rollback and failure/cancellation
 after durable admission. A separate connection checks UNKNOWN is committed
 before the callback. These fixtures do not qualify simultaneous processes,
 physical power loss or disk exhaustion. The journal has no automatic reset or
-remote acknowledgement API and is not wired to Provider capture or logout.
+remote acknowledgement API. These isolated fixtures do not invoke Provider
+capture or account lifecycle; owner integration is covered separately below.
 The schema-v2 fixtures additionally verify first-evidence immutability, exact
 work matching, reopening without readmission, anomalous prepared rows with evidence,
 and additive v1 migration preserving both prepared and unknown work.
@@ -888,9 +889,10 @@ reminder child and an interrupted payload commit cannot qualify work or regenera
 an attempt. Isolated databases, calendars and accounts are removed after each fixture;
 retained live Proton examples are separate and are not mutated by this suite.
 
-The scope is read-only preparation and same-process helper concurrency. Multiple
-Android processes, physical power loss, transfer to the dispatch journal, live
-captured upload and reconciliation with the original local row remain unqualified.
+The staging suite covers read-only preparation and same-process helper concurrency.
+It does not establish dispatch; the separate qualification follows below. Multiple
+Android processes, physical power loss, live captured upload and reconciliation
+with the original local row remain unqualified.
 The 42 staging store/owner/Provider cases and 80 related capture/preparation
 regressions passed on an authorized physical target. The cancelled ticket-delivery
 case retained the already committed reservation without returning a reusable
@@ -898,6 +900,63 @@ preparation right. The Provider reminder case uses an actual reminder child;
 setting the derived `HAS_ALARM` flag alone was insufficient to construct that fixture.
 Host sync, Proton adapter and app tests and Android lint also passed. No new
 native crypto or live Proton creation is claimed by this staging qualification.
+
+## Captured CREATE dispatch admission
+
+`CapturedCreateDispatchIdentityTest` checks the independent fingerprint golden,
+UTF-8 byte boundaries, exact text/time/zone identities, malformed-Unicode refusal
+and redacted diagnostics. `ProtonCapturedSubmissionTest` requires the exact sealed
+known-empty draft before fresh preparation or inspection. It covers foreign
+content/correlation/scope/details, legacy-format refusal, late claim failure,
+context drift, cancellation after UNKNOWN and inspection without another send.
+The verified readback preserves observed remote identity/revision while returning
+the expected domain representation only after the existing authenticated content
+check, which normalizes CRLF/LF and UTC aliases. These are controlled adapter
+fixtures, not service acceptance.
+
+`CapturedCreateAttemptStoreDeviceTest` opts in with `providerFixture=true` and
+uses isolated synthetic SQLite work. It checks additive v4-to-v5 migration,
+preserved evidence/pauses/associations, atomic captured-link retention, full
+identity qualification, corrupt/orphan-link refusal, generic-path exclusion,
+competing helpers, cancellation, transaction rollback, foreign keys and FULL
+synchronous admission. Existing migration fixtures retain older upgrade paths.
+
+`CapturedCreateDispatchCoordinatorDeviceTest` uses real journals and controlled
+Provider/adapter ports. Fresh staging can admit once; cached staging, owner
+reopening, observed account/permission loss, disable/restore or a consumed failed
+claim cannot rearm that right. Current checkpoint or marker/content mismatch
+refuses admission; it does not permanently consume an otherwise valid lease. A synthetic
+non-reentrant authentication guard rejects current-account reads from the final
+claim. Cancellation after admission retains UNKNOWN. A changed/missing original
+row permits inspection only, and wrong verified identities/content are refused.
+Generic submission and association cannot adopt captured work.
+
+`CapturedCreateDispatchIntegrationDeviceTest` runs with the real Calendar Provider,
+isolated journals and a controlled transport. Admission preserves the original
+dirty unacknowledged row and its local marker. A Provider title change or actual
+new reminder child during fresh context work prevents admission. Reopening a
+completed stage cannot rearm it; an admitted attempt remains inspect-only after
+the original row disappears. Temporary synthetic calendars/accounts/databases
+are removed; retained live examples are separate.
+
+The native captured-inspection case uses production Core crypto, preparation,
+Keystore reopening and decoder with synthetic context/readback. Wrong expected
+content is refused before UID reads; exact timed/all-day inspection succeeds
+without a usable preparation, admission or send path. It does not submit to Proton.
+
+These checks do not establish cross-store atomicity, simultaneous Android
+processes, power-loss durability, real rights revocation or live captured upload.
+No original-row acknowledgement, remote binding or projection reconciliation is
+implemented by this path. A captured live creation must wait for association
+that avoids a duplicate ordinary import. Writable UI and automatic outgoing
+processing remain unavailable.
+
+The 34 captured journal/owner/Provider cases, six native crypto cases, 53 existing
+journal/lifecycle cases and 42 staging regressions passed on an authorized physical
+target. Read-only inspection of the retained legacy live event also passed with
+the current build, without another creation. Host sync, Proton adapter and app
+tests and Android lint passed. No live captured submission was run; controlled
+admission and native inspection must not be presented as its service qualification.
 
 ## Anonymous transport probe
 

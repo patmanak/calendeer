@@ -22,4 +22,7 @@ class ProtonEventPreparationCryptoDeviceTest {
     @Test fun textSignedFoldedWhitespaceRetainsExactContentAndRejectsAlteredSignatures() = runBlocking {
         assertEquals("RESULT=SUCCESS", ProtonEventPreparationCryptoProbe.runKnownEmptySubmissionWithFoldedWhitespace())
     }
+    @Test fun capturedSubmissionRequiresItsFrozenExpectationBeforeNativeReadback() = runBlocking {
+        assertEquals("RESULT=SUCCESS", ProtonEventPreparationCryptoProbe.runCapturedSubmissionReadback())
+    }
 }

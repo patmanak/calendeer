@@ -100,8 +100,8 @@ tests reproduce the original HTTP 503 follow-up and exercise published Core's
 401 token-refresh re-entry while observing only one PUT. Rebound or unmarked
 CREATE requests are refused; ordinary reads continue. A separate scoped SQLite
 dispatch journal commits `OUTCOME_UNKNOWN` before admitting an attempt and has
-no automatic requeue. It is not connected to Provider capture or background
-outgoing work, and does not replace the future capture/conflict transaction.
+no automatic requeue. A separate explicit captured path is described below;
+there is no background outgoing work or general capture/conflict transaction.
 Physical SQLite fixtures verify reopening, immutable work, competing helpers,
 rollback and cancellation after admission. Real sealed preparations also survive
 reopening and refuse readmission after the unknown transition. These are controlled
@@ -265,9 +265,19 @@ invocation can retain the separately protected payload. Reopened gaps are unreso
 and never prepare again; completed work requires current account, selection,
 checkpoint, format and unique Provider marker/content qualification before reuse.
 Historical local preparations remain unchanged and are never converted. This path
-does not admit dispatch or acknowledge the original Android row. SQLite migration,
-owner gates and Provider qualification passed isolated physical-device fixtures; final
-captured dispatch admission and duplicate-free association remain separate work.
+does not itself admit dispatch or acknowledge the original Android row. SQLite
+migration, owner gates and Provider qualification passed isolated physical-device
+fixtures.
+A separate internal captured-dispatch entry point now atomically links the frozen
+capture and immutable submission to dispatch journal v5. Only newly staged work
+in the same owner can hold its one-use volatile lease; cached/reopened or
+access-invalidated work cannot rearm it. Final local Provider, selection, format
+and permission checks follow fresh adapter context reads before UNKNOWN admission.
+Captured submissions require the exact sealed known-empty draft. Generic dispatch
+and association refuse captured links. UNKNOWN work only permits explicit readback;
+it never sends again or acknowledges the original local row. Duplicate-free
+association, subsequent-edit conflicts and live captured upload remain separate
+work. The controlled qualification is described in [validation](VALIDATION.md).
 The application still exposes no writable mirror or event editor. General outgoing
 queue/resolution, automatic Provider capture and conditional Proton UPDATE/DELETE
 guarantees remain unqualified. See

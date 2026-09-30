@@ -18,6 +18,11 @@ import com.patmanak.proton.andcalendarbridge.sync.Revision
 import com.patmanak.proton.andcalendarbridge.sync.CreateAttemptRecord
 import com.patmanak.proton.andcalendarbridge.sync.CreateAttemptState
 import com.patmanak.proton.andcalendarbridge.sync.MutationId
+import com.patmanak.proton.andcalendarbridge.sync.CapturedCreateDispatchIdentity
+import com.patmanak.proton.andcalendarbridge.sync.LocalCreateSubmission
+import com.patmanak.proton.andcalendarbridge.sync.LocalEventId
+import java.time.Instant
+import java.time.DateTimeException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
@@ -36,7 +41,7 @@ enum class CreatePauseReason {
  * This does not capture Provider edits, send requests, or acknowledge remote creation.
  */
 class CreateAttemptStore(context: Context, name: String = "calendar-create-attempt-v1.db") :
-    SQLiteOpenHelper(context, name, null, 4), CreateAssociationJournal {
+    SQLiteOpenHelper(context, name, null, 5), CreateAssociationJournal {
     private val lock = Mutex()
     @Volatile var admitAssociation: (CalendarScope) -> Boolean = { true }
     @Volatile var admitDispatch: (CalendarScope) -> Boolean = { true }
@@ -44,6 +49,7 @@ class CreateAttemptStore(context: Context, name: String = "calendar-create-attem
     override fun onConfigure(db: SQLiteDatabase) {
         // Admission must return only after SQLite has durably recorded uncertainty.
         db.execSQL("PRAGMA synchronous=FULL")
+        db.setForeignKeyConstraintsEnabled(true)
     }
 
     override fun onCreate(db: SQLiteDatabase) {
@@ -63,13 +69,35 @@ class CreateAttemptStore(context: Context, name: String = "calendar-create-attem
         """.trimIndent())
         createBindings(db)
         createPauses(db)
+        createCapturedLinks(db)
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        check(oldVersion in 1..3 && newVersion == 4) { "Explicit create journal schema migration required" }
+        check(oldVersion in 1..4 && newVersion == 5) { "Explicit create journal schema migration required" }
         if (oldVersion == 1) db.execSQL("ALTER TABLE create_attempts ADD COLUMN evidence TEXT")
         if (oldVersion < 3) createBindings(db)
-        createPauses(db)
+        if (oldVersion < 4) createPauses(db)
+        createCapturedLinks(db)
+    }
+
+    private fun createCapturedLinks(db: SQLiteDatabase) {
+        db.execSQL("""
+            CREATE TABLE captured_create_links (
+                account TEXT NOT NULL, calendar TEXT NOT NULL,
+                generation INTEGER NOT NULL CHECK(generation >= 0), mutation TEXT NOT NULL,
+                adapter TEXT NOT NULL, version INTEGER NOT NULL CHECK(version > 0),
+                payload_fingerprint TEXT NOT NULL,
+                local_id TEXT NOT NULL, capture_id TEXT NOT NULL,
+                capture_adapter TEXT NOT NULL, capture_version INTEGER NOT NULL CHECK(capture_version > 0),
+                timestamp INTEGER NOT NULL, content_fingerprint TEXT NOT NULL,
+                fingerprint_version INTEGER NOT NULL CHECK(fingerprint_version = 1),
+                PRIMARY KEY(account, calendar, generation, mutation),
+                UNIQUE(account, calendar, generation, local_id),
+                UNIQUE(account, calendar, generation, capture_id),
+                FOREIGN KEY(account, calendar, generation, mutation)
+                    REFERENCES create_attempts(account, calendar, generation, mutation)
+            )
+        """.trimIndent())
     }
 
     private fun createPauses(db: SQLiteDatabase) {
@@ -141,6 +169,7 @@ class CreateAttemptStore(context: Context, name: String = "calendar-create-attem
         val wanted = CreatedEventBinding(attempt, observation.event.eventId, observation.event.revision)
         return access { db ->
             associationTransaction(db, attempt.scope) {
+                check(!hasCapturedLink(db, attempt.scope, attempt.id)) { "Captured association requires its own reconciliation" }
                 check(read(db, attempt.scope, attempt.id) == expectedUnknown) { "Binding requires identical unknown work" }
                 val existing = readBinding(db, attempt)
                 if (existing != null) {
@@ -202,6 +231,7 @@ class CreateAttemptStore(context: Context, name: String = "calendar-create-attem
     }
 
     private fun readBinding(db: SQLiteDatabase, attempt: CreateAttemptIdentity): CreatedEventBinding? {
+        if (hasCapturedLink(db, attempt.scope, attempt.id)) return null
         val parent = read(db, attempt.scope, attempt.id) ?: return null
         if (parent.state != CreateAttemptState.OUTCOME_UNKNOWN || CreateAttemptIdentity.of(parent) != attempt) return null
         return db.query("create_bindings", arrayOf("adapter", "version", "fingerprint", "event", "verified_revision"),
@@ -228,6 +258,7 @@ class CreateAttemptStore(context: Context, name: String = "calendar-create-attem
         }
         access { db ->
             dispatchTransaction(db, record.scope, { error("Create dispatch lease is not current") }) {
+                check(!hasCapturedLink(db, record.scope, record.id)) { "Captured work requires its exact local link" }
                 val existing = read(db, record.scope, record.id)
                 if (existing != null) {
                     check((existing.state == CreateAttemptState.OUTCOME_UNKNOWN || existing.protectedEvidence == null) &&
@@ -257,18 +288,106 @@ class CreateAttemptStore(context: Context, name: String = "calendar-create-attem
         if (expected.state != CreateAttemptState.PREPARED || expected.protectedEvidence != null) return false
         return access { db ->
             dispatchTransaction(db, expected.scope, { false }) {
-                db.update("create_attempts", ContentValues().apply {
-                    put("state", CreateAttemptState.OUTCOME_UNKNOWN.name)
-                }, "$IDENTITY AND adapter=? AND version=? AND payload=? AND state=? AND evidence IS NULL" +
-                    " AND NOT EXISTS (SELECT 1 FROM create_pauses p WHERE p.account=create_attempts.account" +
-                    " AND p.calendar=create_attempts.calendar AND p.generation=create_attempts.generation" +
-                    " AND p.mutation=create_attempts.mutation)",
-                    identity(expected.scope, expected.id) + arrayOf(expected.format.id,
-                        expected.format.version.toString(), expected.protectedPayload,
-                        CreateAttemptState.PREPARED.name)) == 1
+                if (hasCapturedLink(db, expected.scope, expected.id)) false else claimPrepared(db, expected)
             }
         }
     }
+
+    /** Link and PREPARED parent share one commit. Existing generic work is never adopted. */
+    suspend fun rememberCaptured(submission: LocalCreateSubmission): CapturedCreateDispatchIdentity {
+        val link = CapturedCreateDispatchIdentity.of(submission)
+        val record = CreateAttemptRecord(link.attempt.id, link.attempt.scope, link.attempt.format,
+            submission.protectedPayload)
+        return access { db ->
+            dispatchTransaction(db, record.scope, { error("Create dispatch lease is not current") }) {
+                val parent = read(db, record.scope, record.id)
+                if (hasCapturedLink(db, record.scope, record.id)) {
+                    check(parent != null &&
+                        (parent.state == CreateAttemptState.OUTCOME_UNKNOWN || parent.protectedEvidence == null) &&
+                        parent.copy(state = CreateAttemptState.PREPARED, protectedEvidence = null) == record &&
+                        readCapturedIdentity(db, record.scope, record.id, parent) == link) { "Captured work is immutable" }
+                } else {
+                    check(parent == null) { "Existing generic work cannot be adopted" }
+                    db.insertOrThrow("create_attempts", null, ContentValues().apply {
+                        put("account", record.scope.account.value); put("calendar", record.scope.calendar.value)
+                        put("generation", record.scope.generation); put("mutation", record.id.value)
+                        put("adapter", record.format.id); put("version", record.format.version)
+                        put("payload", record.protectedPayload); put("state", record.state.name)
+                    })
+                    db.insertOrThrow("captured_create_links", null, ContentValues().apply {
+                        put("account", record.scope.account.value); put("calendar", record.scope.calendar.value)
+                        put("generation", record.scope.generation); put("mutation", record.id.value)
+                        put("adapter", link.attempt.format.id); put("version", link.attempt.format.version)
+                        put("payload_fingerprint", link.attempt.payloadFingerprint)
+                        put("local_id", link.localId.value); put("capture_id", link.captureId.value)
+                        put("capture_adapter", link.captureFormat.id); put("capture_version", link.captureFormat.version)
+                        put("timestamp", link.timestamp.epochSecond); put("content_fingerprint", link.contentFingerprint)
+                        put("fingerprint_version", link.fingerprintVersion)
+                    })
+                }
+                link
+            }
+        }
+    }
+
+    suspend fun capturedIdentity(scope: CalendarScope, id: MutationId): CapturedCreateDispatchIdentity? =
+        access { db ->
+            try { readCapturedIdentity(db, scope, id, read(db, scope, id)) }
+            catch (_: IllegalArgumentException) { null }
+            catch (_: DateTimeException) { null }
+        }
+
+    /** Raw presence blocks generic paths even when the captured identity cannot be decoded. */
+    suspend fun isCaptured(scope: CalendarScope, id: MutationId): Boolean =
+        access { db -> hasCapturedLink(db, scope, id) }
+
+    /** Full immutable record/link comparison and pause check precede durable UNKNOWN admission. */
+    suspend fun claimCaptured(expected: CreateAttemptRecord, link: CapturedCreateDispatchIdentity): Boolean {
+        if (expected.state != CreateAttemptState.PREPARED || expected.protectedEvidence != null ||
+            CreateAttemptIdentity.of(expected) != link.attempt) return false
+        return access { db ->
+            dispatchTransaction(db, expected.scope, { false }) {
+                val parent = try { read(db, expected.scope, expected.id) }
+                    catch (_: IllegalArgumentException) { null }
+                if (parent != expected || readCapturedIdentity(db, expected.scope, expected.id, parent) != link) false
+                else claimPrepared(db, expected)
+            }
+        }
+    }
+
+    private fun hasCapturedLink(db: SQLiteDatabase, scope: CalendarScope, id: MutationId): Boolean =
+        db.query("captured_create_links", arrayOf("mutation"), IDENTITY, identity(scope, id), null, null, null)
+            .use { it.moveToFirst() }
+
+    private fun readCapturedIdentity(db: SQLiteDatabase, scope: CalendarScope, id: MutationId,
+        knownParent: CreateAttemptRecord?): CapturedCreateDispatchIdentity? {
+        if (knownParent == null || knownParent.state == CreateAttemptState.PREPARED &&
+            knownParent.protectedEvidence != null) return null
+        val attempt = CreateAttemptIdentity.of(knownParent)
+        return db.query("captured_create_links", arrayOf("adapter", "version", "payload_fingerprint",
+            "local_id", "capture_id", "capture_adapter", "capture_version", "timestamp",
+            "content_fingerprint", "fingerprint_version"), IDENTITY, identity(scope, id), null, null, null).use { row ->
+            if (!row.moveToFirst() || row.getString(0) != attempt.format.id || row.getInt(1) != attempt.format.version ||
+                row.getString(2) != attempt.payloadFingerprint) null
+            else try {
+                CapturedCreateDispatchIdentity(attempt, LocalEventId(row.getString(3)), MutationId(row.getString(4)),
+                    AdapterFormat(row.getString(5), row.getInt(6)), Instant.ofEpochSecond(row.getLong(7)),
+                    row.getString(8), row.getInt(9))
+            } catch (_: IllegalArgumentException) { null }
+            catch (_: DateTimeException) { null }
+        }
+    }
+
+    private fun claimPrepared(db: SQLiteDatabase, expected: CreateAttemptRecord): Boolean =
+        db.update("create_attempts", ContentValues().apply {
+            put("state", CreateAttemptState.OUTCOME_UNKNOWN.name)
+        }, "$IDENTITY AND adapter=? AND version=? AND payload=? AND state=? AND evidence IS NULL" +
+            " AND NOT EXISTS (SELECT 1 FROM create_pauses p WHERE p.account=create_attempts.account" +
+            " AND p.calendar=create_attempts.calendar AND p.generation=create_attempts.generation" +
+            " AND p.mutation=create_attempts.mutation)",
+            identity(expected.scope, expected.id) + arrayOf(expected.format.id,
+                expected.format.version.toString(), expected.protectedPayload,
+                CreateAttemptState.PREPARED.name)) == 1
 
     override suspend fun retainEvidence(expectedUnknown: CreateAttemptRecord, protectedEvidence: String) {
         require(expectedUnknown.state == CreateAttemptState.OUTCOME_UNKNOWN) {

@@ -54,6 +54,9 @@ class ImportCoordinator(
     private val createAccount = AtomicReference<AccountId?>()
     private val pendingCreatePauses = ConcurrentHashMap<CalendarScope, CreatePauseReason>()
     private val pendingAccountPauses = ConcurrentHashMap.newKeySet<AccountId>()
+    private data class CapturedSubmissionLease(val identity: CapturedCreateDispatchIdentity, val generation: Long, val policy: Long)
+    // Only a newly retained preparation in this owner can populate this map. Cache reads never rearm it.
+    private val freshCapturedSubmissions = ConcurrentHashMap<Pair<CalendarScope, MutationId>, CapturedSubmissionLease>()
     @Volatile private var pendingPermissionPause = false
     private val providerIds = context.getSharedPreferences("calendar-provider-mappings", Context.MODE_PRIVATE)
 
@@ -150,6 +153,7 @@ class ImportCoordinator(
         val policy = createPolicyRevision.get()
         try {
             qualifyCreate(draft.scope, expected, policy)
+            check(!journal.isCaptured(draft.scope, draft.correlation)) { "Captured CREATE requires its qualified dispatch path" }
             check(journal.pauseReason(draft.scope, draft.correlation) == null) { "CREATE work is paused" }
             val prepared = port.prepareSubmission(draft)
             qualifyCreate(draft.scope, expected, policy)
@@ -172,6 +176,7 @@ class ImportCoordinator(
             qualifyCreate(record.scope, expected, policy)
             val actual = checkNotNull(journal.read(record.scope, record.id)) { "CREATE work is unavailable" }
             check(CreateAttemptIdentity.of(actual) == CreateAttemptIdentity.of(record)) { "CREATE work differs" }
+            check(!journal.isCaptured(record.scope, record.id)) { "Captured CREATE requires its qualified dispatch path" }
             if (actual.state == CreateAttemptState.OUTCOME_UNKNOWN) {
                 val observation = port.inspect(actual)
                 qualifyCreate(actual.scope, expected, policy)
@@ -210,6 +215,7 @@ class ImportCoordinator(
         if (authenticated == value) return
         authenticated = value
         generation++
+        freshCapturedSubmissions.clear()
         creates?.admitDispatch = { false }
         scope.launch {
             try { initializeCreates() }
@@ -274,6 +280,7 @@ class ImportCoordinator(
             val selection = store.selections(target.account).singleOrNull { it.scope == target }
             if (selection?.enabled != true || !selection.available) return@withLock CreateAssociationResult.INACTIVE
             val unknown = journal.read(target, record.id) ?: return@withLock CreateAssociationResult.UNRESOLVED
+            if (journal.isCaptured(target, record.id)) return@withLock CreateAssociationResult.UNRESOLVED
             val identity = CreateAttemptIdentity.of(record)
             if (unknown.state != CreateAttemptState.OUTCOME_UNKNOWN || CreateAttemptIdentity.of(unknown) != identity)
                 return@withLock CreateAssociationResult.UNRESOLVED
@@ -489,6 +496,7 @@ class ImportCoordinator(
     suspend fun stageLocalCreateSubmission(target: CalendarScope, localId: LocalEventId, id: MutationId,
         attempt: MutationId, port: CalendarCreateSubmissionPort): LocalCreateSubmissionResult = mutex.withLock {
         val journal = localCreates ?: return@withLock LocalCreateSubmissionResult.UNAVAILABLE
+        ensureCreateLifecycle()
         val expected = generation
         val policy = createPolicyRevision.get()
         if (!isCurrent(expected, target.account) || !hasCalendarPermissions()) return@withLock LocalCreateSubmissionResult.INACTIVE
@@ -547,7 +555,11 @@ class ImportCoordinator(
             if (prepared.scope != target || prepared.format != submissionFormat || prepared.protectedPayload.isBlank())
                 return@withLock LocalCreateSubmissionResult.UNQUALIFIED
             qualify()?.let { return@withLock it }
-            journal.retainSubmission(permit, LocalCreateSubmission(reservation, prepared.protectedPayload))
+            val retained = journal.retainSubmission(permit, LocalCreateSubmission(reservation, prepared.protectedPayload))
+            qualify()?.let { return@withLock it }
+            currentCoroutineContext().ensureActive()
+            if (creates != null) freshCapturedSubmissions[target to attempt] =
+                CapturedSubmissionLease(CapturedCreateDispatchIdentity.of(retained), expected, policy)
             LocalCreateSubmissionResult.RETAINED
         } catch (cancelled: CancellationException) { throw cancelled }
           catch (failure: CreatePreparationException) {
@@ -561,6 +573,92 @@ class ImportCoordinator(
               store.admitTransaction = { false }
               projection.admitOperation = { false }
               journal.admitCapture = { false }
+          }
+    }
+
+    /** Explicit internal dispatch; original Provider acknowledgement and association remain separate. */
+    suspend fun submitLocalCreate(target: CalendarScope, localId: LocalEventId, id: MutationId,
+        attempt: MutationId, port: CalendarCreateSubmissionPort): CreateSubmissionObservation = mutex.withLock {
+        val captures = localCreates ?: return@withLock CreateSubmissionObservation.Unknown
+        val journal = creates ?: return@withLock CreateSubmissionObservation.Unknown
+        ensureCreateLifecycle()
+        val expected = generation
+        val policy = createPolicyRevision.get()
+        val active = { authenticated && generation == expected && createPolicyRevision.get() == policy && hasCalendarPermissions() }
+        try {
+            qualifyCreate(target, expected, policy)
+            captures.admitCapture = { it == target && active() }
+            store.admitTransaction = { it == target && active() }
+            projection.admitOperation = active
+            val submission = captures.readSubmission(target, localId) ?: return@withLock CreateSubmissionObservation.Unknown
+            val reserved = submission.reservation
+            val captured = reserved.intent.reservation
+            if (captured.scope != target || captured.localId != localId || captured.id != id || reserved.attempt != attempt ||
+                port.knownEmptySubmissionFormat != reserved.format) return@withLock CreateSubmissionObservation.Unknown
+            val wanted = CapturedCreateDispatchIdentity.of(submission)
+            val draft = reserved.draft
+            val prepared = CreateAttemptRecord(attempt, target, reserved.format, submission.protectedPayload)
+            val existing = journal.read(target, attempt)
+            if (existing != null && journal.capturedIdentity(target, attempt) != wanted) return@withLock CreateSubmissionObservation.Unknown
+
+            fun qualifiedObservation(observed: CreateSubmissionObservation): CreateSubmissionObservation {
+                return if (observed is CreateSubmissionObservation.Verified &&
+                    (observed.attempt != wanted.attempt || observed.event.content != draft.content)) CreateSubmissionObservation.Unknown
+                else observed
+            }
+            if (existing?.state == CreateAttemptState.OUTCOME_UNKNOWN) {
+                val observed = port.inspectCaptured(existing, draft)
+                qualifyCreate(target, expected, policy)
+                if (captures.readSubmission(target, localId) != submission || journal.capturedIdentity(target, attempt) != wanted)
+                    return@withLock CreateSubmissionObservation.Unknown
+                return@withLock qualifiedObservation(observed)
+            }
+            val key = target to attempt
+            val lease = freshCapturedSubmissions[key] ?: return@withLock CreateSubmissionObservation.Unknown
+            fun hasLease() = active() && lease.identity == wanted && lease.generation == expected && lease.policy == policy &&
+                freshCapturedSubmissions[key] == lease
+            // Called from inside Proton's authentication mutex at final claim. Never call
+            // currentAccount/isCurrent/qualifyCreate here; the adapter owns fresh session checks.
+            suspend fun qualifyLocal(): Boolean {
+                if (!hasLease() || port.knownEmptySubmissionFormat != reserved.format || remote.format != captured.format) return false
+                suspend fun localStateMatches(): Boolean {
+                    val selected = store.selections(target.account).singleOrNull { it.scope == target }
+                    return selected?.enabled == true && selected.available &&
+                        store.transaction(target) { checkpoint?.format } == captured.format &&
+                        captures.readSubmission(target, localId) == submission
+                }
+                if (!localStateMatches()) return false
+                val row = projection.inspectStampedSimpleCreate(target, localId)
+                return row?.content == draft.content && localStateMatches() && hasLease() &&
+                    port.knownEmptySubmissionFormat == reserved.format && remote.format == captured.format
+            }
+            if (!qualifyLocal() || journal.pauseReason(target, attempt) != null) return@withLock CreateSubmissionObservation.Unknown
+            journal.admitDispatch = { it == target && hasLease() }
+            check(journal.rememberCaptured(submission) == wanted) { "Captured dispatch link differs" }
+            val actual = checkNotNull(journal.read(target, attempt))
+            if (actual != prepared || !qualifyLocal()) return@withLock CreateSubmissionObservation.Unknown
+            val guarded = object : CreateAttemptJournal by journal {
+                override suspend fun claim(expectedWork: CreateAttemptRecord): Boolean {
+                    if (expectedWork != actual || journal.capturedIdentity(target, attempt) != wanted || !qualifyLocal()) return false
+                    // Consume after the last qualification but before the independent SQLite commit.
+                    // A failed/cancelled claim cannot recover this right from a cache or a new owner.
+                    if (!freshCapturedSubmissions.remove(key, lease)) return false
+                    journal.admitDispatch = { it == target && active() }
+                    return journal.claimCaptured(expectedWork, wanted)
+                }
+            }
+            val observed = port.submitCaptured(actual, draft, guarded)
+            qualifyCreate(target, expected, policy)
+            if (journal.read(target, attempt)?.state != CreateAttemptState.OUTCOME_UNKNOWN ||
+                journal.capturedIdentity(target, attempt) != wanted) return@withLock CreateSubmissionObservation.Unknown
+            qualifiedObservation(observed)
+        } catch (cancelled: CancellationException) { throw cancelled }
+          catch (_: Exception) { CreateSubmissionObservation.Unknown }
+          finally {
+              captures.admitCapture = { false }
+              journal.admitDispatch = { false }
+              store.admitTransaction = { false }
+              projection.admitOperation = { false }
           }
     }
 

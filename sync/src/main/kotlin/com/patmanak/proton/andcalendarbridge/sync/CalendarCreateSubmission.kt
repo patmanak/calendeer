@@ -25,4 +25,16 @@ interface CalendarCreateSubmissionPort {
     suspend fun prepareSubmission(draft: CalendarCreateDraft): PreparedCalendarCreate
     suspend fun submit(record: CreateAttemptRecord, journal: CreateAttemptJournal): CreateSubmissionObservation
     suspend fun inspect(record: CreateAttemptRecord): CreateSubmissionObservation
+
+    /** Fail-closed captured path. The sealed submission MUST be known-empty and match the entire
+     * immutable captured draft before fresh preparation or inspection. Final local qualification
+     * belongs to journal.claim, after the adapter's last fresh rights/key/session reads.
+     * UNKNOWN is read-only even when the original Provider row has changed or disappeared.
+     * A Verified result uses the exact expected domain content after qualifying the adapter's
+     * canonical representation; preserve the authenticated observed remote ID and revision.
+     */
+    suspend fun submitCaptured(record: CreateAttemptRecord, expected: CalendarCreateDraft,
+        journal: CreateAttemptJournal): CreateSubmissionObservation = CreateSubmissionObservation.Unknown
+    suspend fun inspectCaptured(record: CreateAttemptRecord,
+        expected: CalendarCreateDraft): CreateSubmissionObservation = CreateSubmissionObservation.Unknown
 }

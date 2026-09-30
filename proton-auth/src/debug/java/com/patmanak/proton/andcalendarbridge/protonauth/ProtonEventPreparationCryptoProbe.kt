@@ -145,7 +145,8 @@ object ProtonEventPreparationCryptoProbe {
     suspend fun runKnownEmpty(): String = runKnownEmpty(submission = false)
     suspend fun runKnownEmptySubmission(): String = runKnownEmpty(submission = true)
     suspend fun runKnownEmptySubmissionWithFoldedWhitespace(): String = runKnownEmpty(submission = true, foldedWhitespace = true)
-    private suspend fun runKnownEmpty(submission: Boolean, foldedWhitespace: Boolean = false): String = withContext(Dispatchers.IO) {
+    suspend fun runCapturedSubmissionReadback(): String = runKnownEmpty(submission = true, captured = true)
+    private suspend fun runKnownEmpty(submission: Boolean, foldedWhitespace: Boolean = false, captured: Boolean = false): String = withContext(Dispatchers.IO) {
         var stage = "GENERATE"
         try {
             val crypto = AndroidCryptoContext()
@@ -341,7 +342,13 @@ object ProtonEventPreparationCryptoProbe {
                             reopened, CatalogSessionSource { session }, readRemote, readEvents, decoder::decodeCreated)
                         val unknown = CreateAttemptRecord(draft.correlation, scope, prepared.format, prepared.protectedPayload,
                             state = CreateAttemptState.OUTCOME_UNKNOWN)
-                        check(submissions.inspect(unknown) is CreateSubmissionObservation.Verified)
+                        if (captured) {
+                            val foreign = draft.copy(content = content.copy(title = "Foreign captured expectation"))
+                            val before = uidReads
+                            check(submissions.inspectCaptured(unknown, foreign) == CreateSubmissionObservation.Unknown)
+                            check(uidReads == before)
+                            check(submissions.inspectCaptured(unknown, draft) is CreateSubmissionObservation.Verified)
+                        } else check(submissions.inspect(unknown) is CreateSubmissionObservation.Verified)
                         readRow = JsonObject(row - "Notifications")
                         check(submissions.inspect(unknown) == CreateSubmissionObservation.Unknown)
                         readRow = row

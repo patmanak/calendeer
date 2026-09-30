@@ -2,8 +2,9 @@
 
 `ImportCoordinator.captureLocalCreate` explicitly retains a simple new Android
 event offline. The application owns its capture journal, separate from the import
-database and experimental remote CREATE admission journal. No observer, editable
-calendar mode, dispatch or remote acknowledgement is enabled. A separate explicit
+database and experimental remote CREATE admission journal. Capture performs no
+dispatch or remote acknowledgement; no observer or editable calendar mode is enabled.
+A separate explicit
 read-only preparation entry point can retain a protected, non-dispatchable payload.
 
 ## Identity and supported content
@@ -172,7 +173,60 @@ owner serializes this operation with import and account lifecycle operations.
 Provider observation, import state and the local journal are separate operations;
 this does not establish atomicity against another process or an external editor.
 
-This staging path does not insert anything into the dispatch journal or qualify
-an existing admission. Final dispatch gates, durable pause policy, transfer to
-one-shot UNKNOWN admission and reconciliation with the original local row must
-be implemented before captured creations can upload or writable mode is enabled.
+The staging operation does not insert anything into the dispatch journal or
+qualify an existing admission. Freshly completed staging can retain a volatile
+dispatch lease in the same owner, as described below. Cached payloads and
+interrupted reservations never grant that lease.
+
+## Explicit captured dispatch
+
+`ImportCoordinator.submitLocalCreate` is a separate internal entry point. It
+requires the exact captured intention and separately sealed submission, with a
+fresh lease from successful staging in this owner. The lease binds the full
+captured dispatch identity to the current session generation and access-policy
+revision. Account changes, observed permission loss or calendar disabling
+invalidate it, even if access returns. Reopening an owner cannot recover it from
+the cache. Failed or cancelled durable admission consumes it permanently.
+This conservative policy sacrifices automatic availability; explicit resolution
+of interrupted or invalidated work remains future work.
+
+Dispatch journal schema v5 atomically retains the immutable PREPARED attempt
+and its captured link. The link includes capture/local identities, capture and
+submission formats, frozen timestamp, ciphertext identity and a versioned
+content fingerprint. The fingerprint uses length-prefixed strict UTF-8 fields
+and exact time/zone representations, without text normalization. It is a private
+equality witness, not encryption. Additive migrations preserve older attempts,
+evidence, associations and pauses without inventing captured links. Existing
+generic work is never adopted, even if its payload matches. Generic staging,
+dispatch and association refuse linked work, including a corrupt link.
+
+Before admission, the owner rechecks current local permissions, enabled available
+selection, import format, immutable capture/submission and a unique owned Provider
+marker with exactly matching supported content. The guarded journal repeats these
+checks after the adapter's fresh account, rights and key reads. This last guard
+does not call authentication APIs while the adapter holds its authentication mutex.
+The lease is consumed before the independent SQLite claim; that claim commits
+OUTCOME_UNKNOWN before one request can be admitted. Linked PREPARED work inherits
+the existing permanent restart/session/access pause policy.
+
+The captured port fails closed unless its sealed request is known-empty and its
+entire draft equals the expected frozen draft. Proton submission v2 then uses
+the existing one-shot transport and authenticated readback. After signatures,
+UID, raw empty notifications and supported content have qualified, the adapter
+returns the expected domain representation while retaining the observed remote
+ID and revision. Only readback has the existing CRLF/LF and UTC-alias normalization;
+sealed-draft comparison and the captured fingerprint remain exact. Historical
+local preparation envelopes and legacy unknown-details submissions are refused.
+
+Existing UNKNOWN work permits explicit captured inspection only. It never
+prepares, claims or sends again, even if the original row changed or disappeared.
+Current access and the complete immutable journal link are still required. A
+verified observation does not acknowledge the Android row, clear dirty/deleted
+flags, bind a remote identity or inject a projection. No observer, worker or UI
+invokes this path; writable mirrors remain disabled.
+
+Provider observation, import state and dispatch admission are separate operations.
+An external editor can change a row after its last observation; this is not a
+cross-store transaction or a guarantee of the latest content at send time.
+Duplicate-free association with the original row and conflict handling after
+admission must precede a live captured-upload journey or editable-mode rollout.

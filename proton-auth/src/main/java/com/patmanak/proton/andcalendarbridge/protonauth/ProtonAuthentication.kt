@@ -89,6 +89,10 @@ internal class SerializedAuthenticationPort(
     override suspend fun submit(record: CreateAttemptRecord, journal: CreateAttemptJournal): CreateSubmissionObservation =
         submissionOperation { it.submit(record, journal) }
     override suspend fun inspect(record: CreateAttemptRecord): CreateSubmissionObservation = submissionOperation { it.inspect(record) }
+    override suspend fun submitCaptured(record: CreateAttemptRecord, expected: CalendarCreateDraft,
+        journal: CreateAttemptJournal): CreateSubmissionObservation = submissionOperation { it.submitCaptured(record, expected, journal) }
+    override suspend fun inspectCaptured(record: CreateAttemptRecord, expected: CalendarCreateDraft): CreateSubmissionObservation =
+        submissionOperation { it.inspectCaptured(record, expected) }
     private suspend fun <T> submissionOperation(block: suspend (CalendarCreateSubmissionPort) -> T): T = withContext(dispatcher) {
         lock.withLock {
             if (!authenticated) createUnavailable(CreatePreparationFailure.AUTHENTICATION)
