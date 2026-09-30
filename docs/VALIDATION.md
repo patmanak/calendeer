@@ -587,6 +587,44 @@ failure fixture also guards an observed native runtime crash: access refresh is
 isolated from the larger import coroutine while preserving its mutex, failure
 propagation and cleanup. Runtime behavior on other devices remains unqualified.
 
+## Internal local UPDATE capture
+
+`LocalEditIntentTest` checks immutable supported-field intent, exact empty/unknown
+details preservation, unsupported changes and redacted diagnostics on the JVM.
+`LocalEditStoreDeviceTest` uses isolated real SQLite with controlled remote ports.
+It checks acknowledged baselines, stale ACK refusal, immutable replay/reopen,
+sticky conflicts, remote deletion/deferred evidence, all projection suppression
+paths, schema 7 migration, and lease/cancellation/injected-failure rollback. Plain
+and staged import engines retain their checkpoint while protecting local work.
+
+`LocalEditCaptureCoordinatorDeviceTest` uses real isolated SQLite and controlled
+Provider/remote ports. It checks capture against an older projected base after a
+newer import, import during qualification, idempotent retained work, incompatible
+format, inactive account/permissions and disabling/session loss during capture.
+No port can submit an upload or silently overwrite the local variant.
+
+`LocalEditCaptureIntegrationDeviceTest`, also with `-e providerFixture true`, joins
+the production owner, real SQLite and real Provider with a controlled read-only
+remote. It imports and acknowledges a simple known-empty-details baseline, makes
+a synthetic Android edit, then imports a newer remote version before capture.
+Capture must preserve the old base, actual local text and latest remote record as
+separate facts in conflict, including after database reopening and requeue. The
+single Android row remains dirty and unchanged; no service mutation is possible.
+
+`LocalEditProviderDeviceTest` requires deliberate `-e providerFixture true` and
+already-granted calendar permissions. Its scoped real Provider fixtures check
+timed/DST and exclusive all-day snapshots, current empty-details preservation,
+unsupported child data/flags/precision/colors/recurrence, unique identity, and a
+change injected immediately before assertion-only qualification. Dirty/deleted
+incoming-write and dirty recurrence-child cases must leave local data intact.
+The dirty-overwrite regression must fail against the original unguarded projection
+and pass with its atomic clean-row assertions. Fixtures remove only their isolated
+local calendars/accounts and never modify retained Proton events.
+
+These layers do not qualify automatic observation, an editable Samsung calendar,
+live conditional UPDATE/DELETE, power-loss recovery or atomicity between Provider
+snapshot and private database commit. See [local capture](LOCAL_EDIT_CAPTURE.md).
+
 ## Anonymous transport probe
 
 `ProtonConnectivityDeviceTest` is skipped unless instrumentation receives

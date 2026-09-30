@@ -7,6 +7,7 @@ import android.content.ContentProviderOperation
 import android.content.ContentUris
 import android.content.ContentValues
 import android.content.Context
+import android.database.DatabaseUtils
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.RemoteException
@@ -16,6 +17,7 @@ import android.provider.CalendarContract.Calendars
 import android.provider.CalendarContract.Events
 import android.provider.CalendarContract.Attendees
 import android.provider.CalendarContract.Reminders
+import android.provider.CalendarContract.ExtendedProperties
 import androidx.core.content.ContextCompat
 import com.patmanak.proton.andcalendarbridge.sync.AccountId
 import com.patmanak.proton.andcalendarbridge.sync.EventId
@@ -26,6 +28,7 @@ import com.patmanak.proton.andcalendarbridge.sync.ProjectionIntent
 import com.patmanak.proton.andcalendarbridge.sync.RecurrencePoint
 import com.patmanak.proton.andcalendarbridge.sync.RemoteChange
 import com.patmanak.proton.andcalendarbridge.sync.EventContent
+import com.patmanak.proton.andcalendarbridge.sync.EventDetails
 import com.patmanak.proton.andcalendarbridge.sync.EventPerson
 import com.patmanak.proton.andcalendarbridge.sync.AttendanceRole
 import com.patmanak.proton.andcalendarbridge.sync.AttendanceStatus
@@ -33,6 +36,8 @@ import com.patmanak.proton.andcalendarbridge.sync.catalog.CalendarSummary
 import java.nio.ByteBuffer
 import java.security.MessageDigest
 import java.time.ZoneOffset
+import java.time.ZoneId
+import java.time.Instant
 import java.time.Duration
 import java.time.temporal.ChronoUnit
 import java.time.format.DateTimeFormatter
@@ -134,6 +139,9 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
         // Recheck calendar ownership inside the same provider transaction as the event mutation.
         operations += assertion(syncUri(Calendars.CONTENT_URI, account), calendarSelection(intent.scope, account), calendar)
         operations += assertion(uri, identity, existing)
+        if (existing != null) operations += ContentProviderOperation.newAssertQuery(uri)
+            .withSelection(identity.sql, identity.args).withExpectedCount(1)
+            .withValue(Events.DIRTY, 0).withValue(Events.DELETED, 0).build()
         when (val change = intent.change) {
             is RemoteChange.Upsert -> {
                 val recurrence = change.content.recurrence
@@ -215,6 +223,92 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
         if (matching && calendarRow(scope, account) == calendar) OwnedEventWitness(calendar, row, revision) else null
     }
 
+    override suspend fun captureOwnedSimpleEdit(scope: CalendarScope, base: RemoteChange.Upsert): OwnedLocalEditSnapshot? = operation {
+        if (base.content.recurrence != null ||
+            (base.content.details != null && base.content.details != EventDetails())) return@operation null
+        val account = accountFor(scope.account)
+        val calendar = calendarRow(scope, account) ?: return@operation null
+        val remoteId = digest("event-v1", calendarSyncId(scope), base.eventId.value)
+        val uri = syncUri(Events.CONTENT_URI, account)
+        val identity = Selection("${Events.CALENDAR_ID}=? AND (${Events.SYNC_DATA4}=? OR " +
+            "(${Events.SYNC_DATA4} IS NULL AND ${Events._SYNC_ID}=?))", arrayOf(calendar.toString(), remoteId, remoteId))
+        val row = ownedRow(uri, identity, Events.SYNC_DATA1) ?: return@operation null
+        val columns = arrayOf(Events._ID, Events.CALENDAR_ID, Events._SYNC_ID, Events.SYNC_DATA1, Events.SYNC_DATA2,
+            Events.SYNC_DATA4, Events.DIRTY, Events.DELETED, Events.TITLE, Events.DESCRIPTION, Events.EVENT_LOCATION,
+            Events.DTSTART, Events.DTEND, Events.ALL_DAY, Events.EVENT_TIMEZONE, Events.EVENT_END_TIMEZONE,
+            Events.EVENT_COLOR, Events.EVENT_COLOR_KEY, Events.RRULE, Events.RDATE, Events.EXRULE, Events.EXDATE,
+            Events.DURATION, Events.ORIGINAL_ID, Events.ORIGINAL_SYNC_ID, Events.ORIGINAL_INSTANCE_TIME,
+            Events.ORIGINAL_ALL_DAY, Events.STATUS, Events.HAS_ATTENDEE_DATA, Events.ORGANIZER, Events.IS_ORGANIZER,
+            Events.GUESTS_CAN_MODIFY, Events.GUESTS_CAN_INVITE_OTHERS, Events.GUESTS_CAN_SEE_GUESTS,
+            Events.HAS_ALARM, Events.SELF_ATTENDEE_STATUS, Events.AVAILABILITY, Events.ACCESS_LEVEL,
+            Events.CUSTOM_APP_PACKAGE, Events.CUSTOM_APP_URI)
+        val values = resolver.query(uri, columns, identity.sql, identity.args, null)?.use {
+            if (it.count != 1 || !it.moveToFirst()) return@operation null
+            ContentValues().apply { DatabaseUtils.cursorRowToContentValues(it, this) }
+        } ?: fail(CalendarProjectionFailure.PROVIDER_UNAVAILABLE)
+        if (values.getAsLong(Events._ID) != row || values.getAsString(Events._SYNC_ID) != remoteId ||
+            values.getAsString(Events.SYNC_DATA1) != OWNER_MARKER ||
+            values.getAsString(Events.SYNC_DATA2) != digest("revision-v1", base.revision.value) ||
+            values.getAsInteger(Events.DIRTY) != 1 || values.getAsInteger(Events.DELETED) != 0)
+            return@operation null
+        val unsupported = arrayOf(Events.RRULE, Events.RDATE, Events.EXRULE, Events.EXDATE, Events.DURATION,
+            Events.ORIGINAL_ID, Events.ORIGINAL_SYNC_ID, Events.ORIGINAL_INSTANCE_TIME, Events.ORIGINAL_ALL_DAY,
+            Events.ORGANIZER, Events.EVENT_COLOR_KEY, Events.CUSTOM_APP_PACKAGE, Events.CUSTOM_APP_URI)
+        if (unsupported.any { values[it] != null }) return@operation null
+        val emptyFlags = arrayOf(Events.HAS_ATTENDEE_DATA, Events.IS_ORGANIZER, Events.GUESTS_CAN_MODIFY,
+            Events.GUESTS_CAN_INVITE_OTHERS, Events.GUESTS_CAN_SEE_GUESTS, Events.HAS_ALARM,
+            Events.SELF_ATTENDEE_STATUS, Events.ACCESS_LEVEL)
+        if (emptyFlags.any { values.getAsInteger(it) != 0 } ||
+            values.getAsInteger(Events.STATUS) != Events.STATUS_CONFIRMED ||
+            values.getAsInteger(Events.AVAILABILITY) != Events.AVAILABILITY_BUSY) return@operation null
+        val expectedColor = base.content.colorRgb?.or(0xFF000000.toInt())
+        if (values.getAsInteger(Events.EVENT_COLOR) != expectedColor) return@operation null
+        val time = readSimpleTime(values) ?: return@operation null
+        val content = EventContent(values.getAsString(Events.TITLE) ?: "", time,
+            values.getAsString(Events.DESCRIPTION) ?: "", values.getAsString(Events.EVENT_LOCATION) ?: "",
+            base.content.colorRgb, details = base.content.details)
+        if (content == base.content) return@operation null
+        // Assertion-only batch: qualify the complete snapshot and absent child data together.
+        // It does not make the later SQLite capture atomic with the Provider or clear DIRTY.
+        val checks = arrayListOf(assertion(syncUri(Calendars.CONTENT_URI, account), calendarSelection(scope, account), calendar),
+            assertion(uri, identity, row),
+            ContentProviderOperation.newAssertQuery(uri).withSelection(identity.sql, identity.args)
+                .withValues(values).withExpectedCount(1).build())
+        for ((child, column) in listOf(Reminders.CONTENT_URI to Reminders.EVENT_ID,
+            Attendees.CONTENT_URI to Attendees.EVENT_ID, ExtendedProperties.CONTENT_URI to ExtendedProperties.EVENT_ID)) {
+            val childrenAbsent = resolver.query(syncUri(child, account), arrayOf("_id"),
+                "$column=?", arrayOf(row.toString()), null)?.use { it.count == 0 }
+                ?: fail(CalendarProjectionFailure.PROVIDER_UNAVAILABLE)
+            if (!childrenAbsent) return@operation null
+            checks += ContentProviderOperation.newAssertQuery(syncUri(child, account))
+                .withSelection("$column=?", arrayOf(row.toString())).withExpectedCount(0).build()
+        }
+        requirePermissions()
+        resolver.applyBatch(CalendarContract.AUTHORITY, checks)
+        requirePermissions()
+        OwnedLocalEditSnapshot(calendar, row, content)
+    }
+
+    private fun readSimpleTime(values: ContentValues): EventTime? {
+        val start = values.getAsLong(Events.DTSTART) ?: return null
+        val end = values.getAsLong(Events.DTEND) ?: return null
+        if (end <= start || start % 1000L != 0L || end % 1000L != 0L) return null
+        val zone = values.getAsString(Events.EVENT_TIMEZONE) ?: return null
+        if (values.getAsString(Events.EVENT_END_TIMEZONE) != zone) return null
+        return try {
+            when (values.getAsInteger(Events.ALL_DAY)) {
+                0 -> EventTime.Timed(Instant.ofEpochMilli(start), Instant.ofEpochMilli(end), ZoneId.of(zone))
+                1 -> {
+                    if (zone != "UTC" || start % 86_400_000L != 0L || end % 86_400_000L != 0L) return null
+                    EventTime.AllDay(Instant.ofEpochMilli(start).atOffset(ZoneOffset.UTC).toLocalDate(),
+                        Instant.ofEpochMilli(end).atOffset(ZoneOffset.UTC).toLocalDate())
+                }
+                else -> null
+            }
+        } catch (_: IllegalArgumentException) { null }
+          catch (_: java.time.DateTimeException) { null }
+    }
+
     /** Child rows have no ownership marker; the parent assertions above guard this whole batch. */
     private fun replaceDetails(operations: ArrayList<ContentProviderOperation>, account: Account,
         eventId: Long?, eventOperation: Int, content: EventContent) {
@@ -283,7 +377,10 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
             it.count
         } ?: fail(CalendarProjectionFailure.PROVIDER_UNAVAILABLE)
         operations += ContentProviderOperation.newAssertQuery(uri).withSelection(children.sql, children.args)
-            .withExpectedCount(count).apply { if (count > 0) withValue(Events.SYNC_DATA1, OWNER_MARKER) }.build()
+            .withExpectedCount(count).apply { if (count > 0) {
+                withValue(Events.SYNC_DATA1, OWNER_MARKER)
+                withValue(Events.DIRTY, 0); withValue(Events.DELETED, 0)
+            } }.build()
         if (count > 0) operations += ContentProviderOperation.newDelete(uri).withSelection(children.sql, children.args)
             .withExpectedCount(count).build()
     }

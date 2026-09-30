@@ -111,8 +111,8 @@ requires one owned, clean, non-deleted matching row and rechecks calendar owners
 persisted numeric row IDs alone never qualify it. A locator is a momentary witness,
 not an atomic cross-database guarantee, and must be revalidated on later use.
 Missing imports schedule ordinary read-only recovery. A retained remote binding
-allows local reassociation without invoking the CREATE port. General outgoing
-queue/resolution, edit capture and conflict transactions remain separate delivery work.
+allows local reassociation without invoking the CREATE port. User-facing capture,
+general outgoing queue and complete conflict resolution remain separate delivery work.
 
 The application-owned journal also participates in experimental CREATE lifecycle.
 Startup closes its dispatch gate and permanently pauses old PREPARED work before
@@ -133,6 +133,19 @@ already UNKNOWN attempt is independent of the dispatch gate: a late response is
 retained even after app admission closes. Inspection with current access never
 readmits UNKNOWN work. These safeguards do not provide edit capture, cross-store
 atomicity, general outgoing resolution or a new user-facing logout policy.
+
+## Internal simple local capture
+
+The import database retains the latest remote record, last acknowledged Provider
+upsert and immutable local UPDATE intent separately. Capture and import conflict
+changes commit with projection suppression under the same SQLite transaction.
+The shared import owner admits explicit capture only with current account/scope,
+permissions, enabled availability and compatible checkpoint format. An assertion-only
+Provider reader qualifies a supported dirty snapshot without acknowledging it.
+The retained intent blocks both direct projection and replay/requeue paths; changed
+or deferred remote evidence makes conflict persistent. The generic outgoing port
+remains closed. See [local capture](LOCAL_EDIT_CAPTURE.md) for supported fields,
+legacy-profile treatment and the Provider/private-ACK recovery gap.
 
 ## Delivery slices and acceptance
 

@@ -12,6 +12,8 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -20,7 +22,7 @@ import org.json.JSONArray
 
 /** App-private, backup-excluded durable import queue. Every page and checkpoint commits together. */
 class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
-    SQLiteOpenHelper(context, name, null, 7), SyncStore {
+    SQLiteOpenHelper(context, name, null, 8), SyncStore {
     private val lock = Mutex()
     /** Check the run lease both before its transaction and before durable commit. */
     @Volatile var admitTransaction: (CalendarScope) -> Boolean = { true }
@@ -33,15 +35,31 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
         createCoverage(db)
         createSeries(db)
         createMappingProfiles(db)
+        createLocalEdits(db)
     }
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        check(oldVersion in 1..6 && newVersion == 7) { "Explicit import schema migration required" }
+        check(oldVersion in 1..7 && newVersion == 8) { "Explicit import schema migration required" }
         if (oldVersion < 2) createStaging(db)
         if (oldVersion < 3) createDelta(db)
         if (oldVersion < 4) createReconciliation(db)
         if (oldVersion < 5) createCoverage(db)
         if (oldVersion < 6) createSeries(db)
-        createMappingProfiles(db)
+        if (oldVersion < 7) createMappingProfiles(db)
+        createLocalEdits(db)
+        // Legacy clean cache is only a baseline candidate; capture still qualifies the live owner row.
+        db.rawQuery("SELECT r.scope,r.event,r.payload FROM records r WHERE r.pending=0 AND NOT EXISTS " +
+            "(SELECT 1 FROM deferred_events d WHERE d.scope=r.scope AND d.event=r.event)", null).use { cursor ->
+            while (cursor.moveToNext()) {
+                if (decodeChange(cursor.getString(2)) is RemoteChange.Upsert) db.insertOrThrow("projection_bases", null,
+                    ContentValues().apply {
+                        put("scope", cursor.getString(0)); put("event", cursor.getString(1)); put("payload", cursor.getString(2))
+                    })
+            }
+        }
+    }
+    private fun createLocalEdits(db: SQLiteDatabase) {
+        db.execSQL("CREATE TABLE projection_bases (scope TEXT NOT NULL, event TEXT NOT NULL, payload TEXT NOT NULL, PRIMARY KEY(scope,event))")
+        db.execSQL("CREATE TABLE local_edits (scope TEXT NOT NULL, mutation TEXT NOT NULL, event TEXT NOT NULL, adapter TEXT NOT NULL, version INTEGER NOT NULL, base TEXT NOT NULL, local TEXT NOT NULL, state TEXT NOT NULL CHECK(state IN ('PAUSED','CONFLICT')), PRIMARY KEY(scope,mutation), UNIQUE(scope,event))")
     }
     private fun createMappingProfiles(db: SQLiteDatabase) {
         db.execSQL("CREATE TABLE mapping_profiles (scope TEXT PRIMARY KEY, adapter TEXT NOT NULL, version INTEGER NOT NULL, rescan_pending INTEGER NOT NULL DEFAULT 1)")
@@ -249,7 +267,8 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
     private fun requeueSupported(db: SQLiteDatabase, scope: CalendarScope) {
         db.update("records",
         ContentValues().apply { put("pending", 1) },
-        "scope=? AND NOT EXISTS (SELECT 1 FROM deferred_events d WHERE d.scope=records.scope AND d.event=records.event)", arrayOf(key(scope)))
+        "scope=? AND NOT EXISTS (SELECT 1 FROM deferred_events d WHERE d.scope=records.scope AND d.event=records.event) " +
+            "AND NOT EXISTS (SELECT 1 FROM local_edits l WHERE l.scope=records.scope AND l.event=records.event)", arrayOf(key(scope)))
         suppressInactiveChildren(db, scope)
     }
     suspend fun complete(scope: CalendarScope) = access { db ->
@@ -260,7 +279,7 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
     suspend fun pending(scope: CalendarScope, limit: Int = 100): List<ProjectionIntent> = access { db ->
         require(limit in 1..100); requireKnown(db, scope)
         val masters = masterStates(db, scope)
-        db.rawQuery("SELECT r.payload FROM records r LEFT JOIN series_members s ON s.scope=r.scope AND s.event=r.event WHERE r.scope=? AND r.pending=1 ORDER BY CASE WHEN s.role='master' THEN 0 ELSE 1 END,r.rowid", arrayOf(key(scope))).use { cursor ->
+        db.rawQuery("SELECT r.payload FROM records r LEFT JOIN series_members s ON s.scope=r.scope AND s.event=r.event WHERE r.scope=? AND r.pending=1 AND NOT EXISTS (SELECT 1 FROM local_edits l WHERE l.scope=r.scope AND l.event=r.event) ORDER BY CASE WHEN s.role='master' THEN 0 ELSE 1 END,r.rowid", arrayOf(key(scope))).use { cursor ->
             buildList {
                 while (size < limit && cursor.moveToNext()) {
                     val change = decodeChange(cursor.getString(0))
@@ -275,7 +294,7 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
     suspend fun blockedSeriesCount(scope: CalendarScope): Int = access { db ->
         requireKnown(db, scope)
         val masters = masterStates(db, scope)
-        db.rawQuery("SELECT r.payload FROM records r JOIN series_members s ON s.scope=r.scope AND s.event=r.event WHERE r.scope=? AND r.pending=1 AND s.role='exception'", arrayOf(key(scope))).use { cursor ->
+        db.rawQuery("SELECT r.payload FROM records r JOIN series_members s ON s.scope=r.scope AND s.event=r.event WHERE r.scope=? AND r.pending=1 AND s.role='exception' AND NOT EXISTS (SELECT 1 FROM local_edits l WHERE l.scope=r.scope AND l.event=r.event)", arrayOf(key(scope))).use { cursor ->
             var count = 0
             while (cursor.moveToNext()) {
                 val recurrence = (decodeChange(cursor.getString(0)) as? RemoteChange.Upsert)?.content?.recurrence
@@ -298,7 +317,8 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
         check(admitTransaction(scope)) { "Inactive import lease" }
         requireKnown(db, scope)
         db.rawQuery("SELECT r.payload FROM records r WHERE r.scope=? AND r.event=? AND r.pending=0 AND NOT EXISTS " +
-            "(SELECT 1 FROM deferred_events d WHERE d.scope=r.scope AND d.event=r.event)",
+            "(SELECT 1 FROM deferred_events d WHERE d.scope=r.scope AND d.event=r.event) AND NOT EXISTS " +
+            "(SELECT 1 FROM local_edits l WHERE l.scope=r.scope AND l.event=r.event)",
             arrayOf(key(scope), eventId.value)).use { cursor ->
             val snapshot = if (cursor.moveToFirst()) decodeChange(cursor.getString(0)) as? RemoteChange.Upsert else null
             check(admitTransaction(scope)) { "Inactive import lease" }
@@ -307,11 +327,67 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
     }
 
     /** CAS acknowledgement: a newer pending value cannot be consumed by an old provider write. */
-    suspend fun acknowledge(intent: ProjectionIntent) = access { db ->
-        db.update("records", ContentValues().apply { put("pending", 0) },
-            "scope=? AND event=? AND payload=? AND pending=1",
+    suspend fun acknowledge(intent: ProjectionIntent): Int = stagingMutation(intent.scope) { db ->
+        val consumed = db.update("records", ContentValues().apply { put("pending", 0) },
+            "scope=? AND event=? AND payload=? AND pending=1 AND NOT EXISTS " +
+                "(SELECT 1 FROM local_edits l WHERE l.scope=records.scope AND l.event=records.event)",
             arrayOf(key(intent.scope), intent.change.eventId.value, encodeChange(intent.change)))
+        if (consumed != 0) when (intent.change) {
+            is RemoteChange.Upsert -> db.insertWithOnConflict("projection_bases", null, ContentValues().apply {
+                put("scope", key(intent.scope)); put("event", intent.change.eventId.value); put("payload", encodeChange(intent.change))
+            }, SQLiteDatabase.CONFLICT_REPLACE).also { check(it != -1L) }
+            is RemoteChange.Deleted -> db.delete("projection_bases", "scope=? AND event=?", arrayOf(key(intent.scope), intent.change.eventId.value))
+        }
+        consumed
     }
+
+    /** Last successful projection acknowledgement, independent of newer imported remote evidence. */
+    suspend fun projectedBaseline(scope: CalendarScope, eventId: EventId): RemoteChange.Upsert? = access { db ->
+        check(admitTransaction(scope)) { "Inactive import lease" }; requireKnown(db, scope)
+        val baseline = readBaseline(db, scope, eventId)
+        check(admitTransaction(scope)) { "Inactive import lease" }
+        baseline
+    }
+    suspend fun localEdit(scope: CalendarScope, eventId: EventId): LocalEditIntent? = access { db ->
+        check(admitTransaction(scope)) { "Inactive import lease" }; requireKnown(db, scope)
+        val edit = readLocalEdit(db, scope, eventId)
+        check(admitTransaction(scope)) { "Inactive import lease" }
+        edit
+    }
+    /** Capture and projection suppression share one database transaction. No dispatch/reset exists. */
+    suspend fun captureLocalEdit(intent: LocalEditIntent): LocalEditIntent = stagingMutation(intent.scope) { db ->
+        require(intent.state == LocalEditState.PAUSED) { "Caller cannot declare conflict state" }
+        check(isAvailable(db, intent.scope) && db.rawQuery("SELECT enabled FROM calendars WHERE scope=?",
+            arrayOf(key(intent.scope))).use { it.moveToFirst() && it.getInt(0) != 0 }) { "Inactive local capture scope" }
+        val previous = readLocalEdit(db, intent.scope, intent.base.eventId)
+        if (previous != null) {
+            require(previous.copy(state = LocalEditState.PAUSED) == intent) { "Local edit is immutable" }
+            return@stagingMutation previous
+        }
+        require(readBaseline(db, intent.scope, intent.base.eventId) == intent.base) { "Stale projection baseline" }
+        val hasDeferred = db.rawQuery("SELECT 1 FROM deferred_events WHERE scope=? AND event=?",
+            arrayOf(key(intent.scope), intent.base.eventId.value)).use { it.moveToFirst() }
+        val remote = db.rawQuery("SELECT payload FROM records WHERE scope=? AND event=?",
+            arrayOf(key(intent.scope), intent.base.eventId.value)).use { if (it.moveToFirst()) decodeChange(it.getString(0)) else null }
+        val captured = intent.copy(state = if (hasDeferred || remote != intent.base) LocalEditState.CONFLICT else LocalEditState.PAUSED)
+        db.insertOrThrow("local_edits", null, ContentValues().apply {
+            put("scope", key(intent.scope)); put("mutation", intent.id.value); put("event", intent.base.eventId.value)
+            put("adapter", intent.format.id); put("version", intent.format.version); put("base", encodeChange(intent.base))
+            put("local", encodeChange(intent.base.copy(content = intent.content))); put("state", captured.state.name)
+        })
+        db.update("records", ContentValues().apply { put("pending", 0) }, "scope=? AND event=?",
+            arrayOf(key(intent.scope), intent.base.eventId.value))
+        captured
+    }
+    private fun readBaseline(db: SQLiteDatabase, scope: CalendarScope, eventId: EventId): RemoteChange.Upsert? =
+        db.rawQuery("SELECT payload FROM projection_bases WHERE scope=? AND event=?",
+            arrayOf(key(scope), eventId.value)).use { if (it.moveToFirst()) decodeChange(it.getString(0)) as? RemoteChange.Upsert else null }
+    private fun readLocalEdit(db: SQLiteDatabase, scope: CalendarScope, eventId: EventId): LocalEditIntent? =
+        db.rawQuery("SELECT mutation,adapter,version,base,local,state FROM local_edits WHERE scope=? AND event=?",
+            arrayOf(key(scope), eventId.value)).use { if (!it.moveToFirst()) null else LocalEditIntent(
+            MutationId(it.getString(0)), scope, AdapterFormat(it.getString(1), it.getInt(2)),
+            decodeChange(it.getString(3)) as RemoteChange.Upsert, (decodeChange(it.getString(4)) as RemoteChange.Upsert).content,
+            LocalEditState.valueOf(it.getString(5))) }
 
     /** Stable keyset pagination: retries may remove rows without skipping subsequent issues. */
     suspend fun deferred(scope: CalendarScope, limit: Int = 4, afterEventId: EventId? = null): List<DeferredCalendarEvent> = access { db ->
@@ -347,22 +423,27 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
             "scope=? AND event=? AND revision=? AND adapter=? AND version=? AND reason=? AND payload=? AND retry_pending=1",
             arrayOf(key(scope), event.eventId.value, event.revision.value, event.format.id, event.format.version.toString(), event.reason.name, event.protectedPayload))
     }
-    private suspend fun <T> stagingMutation(scope: CalendarScope, action: (SQLiteDatabase) -> T): T = access { db ->
-        check(admitTransaction(scope)) { "Inactive import lease" }
-        db.beginTransaction()
-        try {
-            requireKnown(db, scope)
-            val result = action(db)
+    private suspend fun <T> stagingMutation(scope: CalendarScope, action: (SQLiteDatabase) -> T): T {
+        val coroutine = currentCoroutineContext()
+        return access { db ->
+            coroutine.ensureActive()
             check(admitTransaction(scope)) { "Inactive import lease" }
-            db.setTransactionSuccessful()
-            result
-        } finally { db.endTransaction() }
+            db.beginTransaction()
+            try {
+                requireKnown(db, scope)
+                val result = action(db)
+                check(admitTransaction(scope)) { "Inactive import lease" }
+                coroutine.ensureActive()
+                db.setTransactionSuccessful()
+                result
+            } finally { db.endTransaction() }
+        }
     }
     private fun countDeferred(db: SQLiteDatabase, scope: CalendarScope): Int = db.rawQuery(
         "SELECT COUNT(*) FROM deferred_events WHERE scope=?", arrayOf(key(scope)),
     ).use { check(it.moveToFirst()); it.getInt(0) }
     private fun countPending(db: SQLiteDatabase, scope: CalendarScope): Int = db.rawQuery(
-        "SELECT COUNT(*) FROM records WHERE scope=? AND pending=1", arrayOf(key(scope)),
+        "SELECT COUNT(*) FROM records r WHERE scope=? AND pending=1 AND NOT EXISTS (SELECT 1 FROM local_edits l WHERE l.scope=r.scope AND l.event=r.event)", arrayOf(key(scope)),
     ).use { check(it.moveToFirst()); it.getInt(0) }
     private data class SeriesMember(val uid: String, val role: String)
     private enum class MasterState {
@@ -428,7 +509,7 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
     }
     private fun requeueSeriesChildren(db: SQLiteDatabase, scope: CalendarScope, uid: String) {
         val state = masterStates(db, scope)[uid] ?: return
-        db.rawQuery("SELECT r.event,r.payload FROM records r JOIN series_members s ON s.scope=r.scope AND s.event=r.event WHERE r.scope=? AND s.uid=? AND s.role='exception' AND NOT EXISTS (SELECT 1 FROM deferred_events d WHERE d.scope=r.scope AND d.event=r.event)", arrayOf(key(scope), uid)).use { cursor ->
+        db.rawQuery("SELECT r.event,r.payload FROM records r JOIN series_members s ON s.scope=r.scope AND s.event=r.event WHERE r.scope=? AND s.uid=? AND s.role='exception' AND NOT EXISTS (SELECT 1 FROM deferred_events d WHERE d.scope=r.scope AND d.event=r.event) AND NOT EXISTS (SELECT 1 FROM local_edits l WHERE l.scope=r.scope AND l.event=r.event)", arrayOf(key(scope), uid)).use { cursor ->
             while (cursor.moveToNext()) {
                 val recurrence = (decodeChange(cursor.getString(1)) as? RemoteChange.Upsert)?.content?.recurrence
                 if (recurrence != null && !recurrence.isMaster)
@@ -595,7 +676,10 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
         if (bytes > STAGING_BUDGET_BYTES) throw ImportCapacityException()
     }
 
-    override suspend fun <T> transaction(scope: CalendarScope, block: SyncStore.Transaction.() -> T): T = access { db ->
+    override suspend fun <T> transaction(scope: CalendarScope, block: SyncStore.Transaction.() -> T): T {
+        val coroutine = currentCoroutineContext()
+        return access { db ->
+        coroutine.ensureActive()
         check(admitTransaction(scope)) { "Inactive import lease" }
         db.beginTransaction()
         try {
@@ -709,6 +793,8 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
                         put("adapter", event.format.id); put("version", event.format.version); put("reason", event.reason.name)
                         put("payload", event.protectedPayload); put("retry_pending", 0)
                     }, SQLiteDatabase.CONFLICT_REPLACE).also { check(it != -1L) { "Could not retain deferred event" } }
+                    db.update("local_edits", ContentValues().apply { put("state", LocalEditState.CONFLICT.name) },
+                        "scope=? AND event=?", arrayOf(key(scope), event.eventId.value))
                 }
                 override fun clearDeferred(eventId: EventId) {
                     val removed = db.delete("deferred_events", "scope=? AND event=?", arrayOf(key(scope), eventId.value))
@@ -744,16 +830,21 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
                         put("scope", key(scope)); put("event", change.eventId.value)
                         put("payload", encodeChange(change)); put("pending", 0)
                     }, SQLiteDatabase.CONFLICT_REPLACE).also { check(it != -1L) }
+                    readLocalEdit(db, scope, change.eventId)?.let { edit ->
+                        if (change != edit.base) db.update("local_edits", ContentValues().apply {
+                            put("state", LocalEditState.CONFLICT.name)
+                        }, "scope=? AND event=?", arrayOf(key(scope), change.eventId.value))
+                    }
                     seriesMember(db, scope, change.eventId)?.takeIf { it.role == "master" }?.let {
                         requeueSeriesChildren(db, scope, it.uid)
                     }
                 }
-                override fun hasPendingMutation(eventId: EventId) = false
+                override fun hasPendingMutation(eventId: EventId) = readLocalEdit(db, scope, eventId) != null
                 override fun putProjection(intent: ProjectionIntent) {
                     require(intent.scope == scope && remote(intent.change.eventId) == intent.change)
                     val recurrence = (intent.change as? RemoteChange.Upsert)?.content?.recurrence
                     val inactiveParent = recurrence != null && !recurrence.isMaster && masterStates(db, scope)[recurrence.uid] == MasterState.INACTIVE
-                    db.update("records", ContentValues().apply { put("pending", if (inactiveParent) 0 else 1) },
+                    db.update("records", ContentValues().apply { put("pending", if (inactiveParent || hasPendingMutation(intent.change.eventId)) 0 else 1) },
                         "scope=? AND event=?", arrayOf(key(scope), intent.change.eventId.value))
                 }
                 override fun removeProjection(eventId: EventId) {
@@ -766,9 +857,11 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
             val result = block(transaction)
             checkStagingCapacity(db)
             check(admitTransaction(scope)) { "Inactive import lease" }
+            coroutine.ensureActive()
             db.setTransactionSuccessful()
             result
         } finally { db.endTransaction() }
+        }
     }
 
     private suspend fun <T> access(action: (SQLiteDatabase) -> T): T = withContext(Dispatchers.IO) {

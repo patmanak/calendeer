@@ -25,7 +25,7 @@ sessions and imported calendars. See [identity and interface](DESIGN.md).
 | Module | Implemented | Not established by this slice |
 | --- | --- | --- |
 | `app` | Configuration, login, discovery and per-calendar read-only import controls; eight languages; durable import queue, Calendar Provider projection, permissions and background scheduling. | Broad Android/OEM qualification, editable mode or complete event feature coverage. |
-| `sync` | Pure scoped models, bounded transactional pagination, access gates, conflict checks, uncertain-outcome write states and a separate metadata catalog controller. | Production outgoing mutation storage/capture or bidirectional reconciliation. |
+| `sync` | Pure scoped models, bounded transactional pagination, access gates, immutable simple local UPDATE intents, conflict checks, uncertain-outcome write states and a separate metadata catalog controller. | General outgoing queue, automatic capture or bidirectional reconciliation. |
 | `auth` | Contako-derived secret contract and state controller, cancellation/cleanup gates, retry policy and focused tests. | Calendar bootstrap or per-calendar capability checks. |
 | `proton-auth` | Proton Core login/session integration, discovery, Calendar key bootstrap, paginated decryption, sealed change polling, bounded recurrence mapping and experimental single simple-event CREATE with verified readback. | All challenge variants, external-author trust resolution, complete recurrence/history coverage or general event editing. |
 
@@ -151,9 +151,25 @@ Physical journal/owner fixtures, injected pause failures and read-only import
 recovery regressions passed. The retained live association still resolves one
 owned Android projection without readmitting CREATE. These results do not qualify
 real server rights revocation or a user-facing logout journey.
+An explicit internal simple UPDATE capture now retains the last acknowledged
+projection base and the Android edit independently of the latest imported remote
+record. Import schema 8 preserves immutable paused/conflicted intents, suppresses
+their projection and never automatically resets a conflict. A newer import before
+capture can therefore coexist with the original projected base. The Provider reader
+qualifies ownership, revision, supported fields and an assertion-only snapshot;
+incoming writes preserve dirty/deleted rows and recurrence children. No dirty flag
+is acknowledged and no mutation is sent. See [local capture](LOCAL_EDIT_CAPTURE.md)
+for the subset and crash/snapshot limits.
+Focused domain, SQLite, coordinator and real Provider fixtures have passed,
+including capture against a newer imported version through the production owner.
+Migration, clean projection, recurrence/details, association and read-only recovery
+regressions also passed on an authorized physical target. These fixtures use
+controlled remote ports and establish no live Proton UPDATE guarantee.
+The retained live CREATE association also remains usable after the import upgrade,
+without submitting another mutation.
 The application still exposes no writable mirror or event editor. General outgoing
-queue/resolution, Provider edit capture, atomic conflict/import handling and
-concurrent UPDATE/DELETE guarantees remain unqualified. See
+queue/resolution, automatic Provider capture and conditional Proton UPDATE/DELETE
+guarantees remain unqualified. See
 [source adaptation](../proton-auth/PROVENANCE.md).
 Explicit remote deletion notices
 now use a durable, scoped path to the Android mirror; historical deletion recovery

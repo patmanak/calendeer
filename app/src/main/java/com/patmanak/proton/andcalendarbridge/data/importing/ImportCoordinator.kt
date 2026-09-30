@@ -24,6 +24,7 @@ import kotlinx.coroutines.sync.withLock
 data class ImportUiState(val selections: List<ImportStore.Selection> = emptyList(),
     val hasPermission: Boolean = false, val authenticated: Boolean = false, val busy: Boolean = false)
 enum class CreateAssociationResult { INACTIVE, UNRESOLVED, WAITING_IMPORT, WAITING_PROVIDER, ASSOCIATED }
+enum class LocalEditCaptureResult { INACTIVE, UNQUALIFIED, RETAINED, CONFLICT, UNAVAILABLE }
 /** One process owner for foreground and durable worker triggers; no event content reaches UI. */
 class ImportCoordinator(
     private val context: Context,
@@ -298,6 +299,40 @@ class ImportCoordinator(
               CreateAssociationResult.WAITING_PROVIDER
           }
           catch (_: Exception) { CreateAssociationResult.UNRESOLVED }
+    }
+
+    /** Explicit internal UPDATE snapshot only. No observer, editable calendar, or upload is enabled.
+     * The Provider row remains dirty; retaining an intent does not acknowledge that edit.
+     */
+    suspend fun captureLocalEdit(target: CalendarScope, eventId: EventId, id: MutationId): LocalEditCaptureResult = mutex.withLock {
+        val expected = generation
+        val policy = createPolicyRevision.get()
+        if (!isCurrent(expected, target.account) || !hasCalendarPermissions())
+            return@withLock LocalEditCaptureResult.INACTIVE
+        val active = { authenticated && generation == expected && createPolicyRevision.get() == policy && hasCalendarPermissions() }
+        store.admitTransaction = { it == target && active() }
+        projection.admitOperation = active
+        try {
+            val selected = store.selections(target.account).singleOrNull { it.scope == target }
+            if (selected?.enabled != true || !selected.available) return@withLock LocalEditCaptureResult.INACTIVE
+            val format = store.transaction(target) { checkpoint?.format }
+            if (format != remote.format) return@withLock LocalEditCaptureResult.UNQUALIFIED
+            val retained = store.localEdit(target, eventId)
+            if (retained != null) {
+                if (retained.id != id || retained.format != format) return@withLock LocalEditCaptureResult.UNQUALIFIED
+                return@withLock if (retained.state == LocalEditState.CONFLICT) LocalEditCaptureResult.CONFLICT else LocalEditCaptureResult.RETAINED
+            }
+            val base = store.projectedBaseline(target, eventId) ?: return@withLock LocalEditCaptureResult.UNQUALIFIED
+            val snapshot = projection.captureOwnedSimpleEdit(target, base) ?: return@withLock LocalEditCaptureResult.UNQUALIFIED
+            if (!isCurrent(expected, target.account) || !active()) return@withLock LocalEditCaptureResult.INACTIVE
+            val captured = store.captureLocalEdit(LocalEditIntent(id, target, format, base, snapshot.content))
+            if (captured.state == LocalEditState.CONFLICT) LocalEditCaptureResult.CONFLICT else LocalEditCaptureResult.RETAINED
+        } catch (cancelled: CancellationException) { throw cancelled }
+          catch (_: Exception) { LocalEditCaptureResult.UNAVAILABLE }
+          finally {
+              store.admitTransaction = { false }
+              projection.admitOperation = { false }
+          }
     }
 
     fun permissionsChanged() {

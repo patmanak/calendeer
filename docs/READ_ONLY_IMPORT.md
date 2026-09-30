@@ -215,6 +215,14 @@ the store is unavailable; it is refreshed after a successful worker run.
 
 ## Access and privacy
 
+Incoming event replacement/deletion now asserts that existing rows are clean and
+non-deleted, including recurrence children removed with a master. An unexpected
+dirty or locally deleted row is preserved and its import remains blocked, rather
+than overwriting data. Explicit internal simple UPDATE capture can retain the
+local variant with its original projected base and latest remote evidence, but
+does not enable editing or send an upload. Unsupported edits and user-facing
+resolution remain future work; see [local capture](LOCAL_EDIT_CAPTURE.md).
+
 Enabling projection requires both Android calendar permissions. The UI explains
 why Android write access is necessary for a read-only Proton mirror, and offers
 an explicit request and application-settings shortcut. Permission checks run on
