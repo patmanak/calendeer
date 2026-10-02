@@ -24,6 +24,12 @@ data class CapturedCreateDispatchIdentity(
     }
     override fun toString() = "CapturedCreateDispatchIdentity(REDACTED)"
 
+    /** Equality qualification only; it does not authenticate a remote observation. */
+    fun matchesContent(content: EventContent): Boolean = try {
+        val original = LocalCreateIntent(LocalCreateReservation(captureId, localId, attempt.scope, captureFormat, timestamp), content)
+        contentFingerprint == Companion.contentFingerprint(original)
+    } catch (_: IllegalArgumentException) { false }
+
     companion object {
         fun of(submission: LocalCreateSubmission): CapturedCreateDispatchIdentity {
             val reserved = submission.reservation

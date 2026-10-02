@@ -291,9 +291,15 @@ durable receipt in dispatch journal v7 and assigns the remote identity to the
 unique original local marker. It preserves local edits, child rows and dirty
 flags, and recovers the same receipt after an uncertain Provider response without
 another server submission. Missing or ambiguous rows remain unresolved. This
-historical proof grants no baseline acknowledgement or import release; current
-local intentions and conflicts still need reconciliation. The controlled qualification
-is described in [validation](VALIDATION.md).
+historical proof alone grants no original-row acknowledgement or import release.
+A separate explicit offline step now retains the verified sent reference and full
+attachment provenance in import journal v11. It consumes only an identical
+incoming payload in the same transaction, never invents an absent cache record,
+and refuses adoption of generic, damaged or advanced baselines. Different remote
+evidence and later local intentions remain intact. The original Android row stays
+dirty and incoming projection holds remain active; current local intentions,
+conflicts and the final original-row acknowledgement still need reconciliation.
+The controlled qualification is described in [validation](VALIDATION.md).
 The application still exposes no writable mirror or event editor. General outgoing
 queue/resolution, automatic Provider capture and conditional Proton UPDATE/DELETE
 guarantees remain unqualified. See

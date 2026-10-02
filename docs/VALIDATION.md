@@ -1053,6 +1053,41 @@ and 23 existing Provider cases. Read-only inspection of the retained legacy live
 event passed without a new submission. Host checks passed with 118 sync,
 274 Proton adapter and 10 app tests, both debug APK builds and Android lint.
 
+## Captured verified sent baseline
+
+`CapturedCreateBaselineTest` checks exact event/revision and frozen content,
+known-empty personal data, malformed text refusal and redacted diagnostics. A
+matching private fingerprint establishes equality, not remote authentication.
+
+`CapturedCreateBaselineStoreDeviceTest` uses explicit `providerFixture=true`
+and isolated SQLite data. It checks import v11 provenance and baseline retention
+in the same transaction as a whole-payload pending comparison. Migration preserves
+existing work and does not invent capture provenance. Generic or corrupt baseline
+rows and unresolved ordinary receipts cannot be adopted. Reopening, drift,
+rollback, cancellation, admission loss and competing helpers must preserve the
+first reference; incoming differences and deferred/local work stay intact.
+
+`CapturedCreateBaselineIntegrationDeviceTest` uses the production owner, real
+journals and Calendar Provider with controlled transport. The unwired owner must
+fail the expected retention result. The wired path retains the sent reference
+without creating an absent remote cache row, cleans only an identical incoming
+payload and preserves updates, equal-revision content differences and deletions.
+Local titles, reminders and tombstones stay dirty. Missing or damaged original
+markers/receipts, duplicate rows and missing attachment plans cannot establish
+a reference. Access loss, controlled permission loss, format replacement and
+cancellation cannot authorize an unqualified commit. A failure in the pending
+comparison rolls back provenance and baseline together; an access loss after a
+durable commit can resume without changing the reference. Fixture data is isolated
+and removed. These cases do not qualify a live captured upload, original-row ACK,
+hold release, conflict resolution, writable UI or cross-process atomicity.
+
+The unwired-owner physical fixture failed the expected retention result. The
+wired build passed all 17 baseline SQL and 20 owner/Provider cases, 322 related
+regressions including migration fixtures, and one read-only inspection of the
+retained legacy live event. No new live submission was made. Host checks passed
+with 124 sync, 274 Proton adapter and 10 app tests, both debug APK builds and
+Android lint. These results retain the boundaries described above.
+
 ## Anonymous transport probe
 
 `ProtonConnectivityDeviceTest` is skipped unless instrumentation receives

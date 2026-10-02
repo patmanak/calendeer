@@ -313,3 +313,30 @@ UI automatically invokes it. Reconciling the verified remote baseline with the
 current local intention and acknowledging the exact received work remains the
 next prerequisite for release and an editable mirror. The mutex and Provider
 batch do not form a transaction across journals or simultaneous processes.
+
+## Verified sent baseline retention
+
+`retainLocalCreateBaseline` uses the frozen submission, retained binding and
+attachment receipt to retain the first verified sent content. It only inspects
+the historical Provider receipt: it does not prepare, attach, fetch or submit.
+Current access, selection, checkpoint, format and complete source identities are
+requalified around that inspection and the local commit.
+
+Import journal v11 retains immutable capture/attachment provenance together with
+the sent baseline. A single transaction creates both and acknowledges only an
+exact whole incoming cache payload. It never invents a remote cache row if none
+has arrived. A different revision or content, an incoming deletion, deferred work
+or a later local mutation cannot be consumed by that comparison. Opaque revisions
+provide no ordering, and equal revisions do not prove equal content.
+
+An initial generic baseline, unresolved projection receipt or local mutation
+blocks adoption, even if a generic baseline happens to match. Replay must retain
+the exact provenance and current baseline; it cannot replace a damaged proof or
+rewind a baseline that has advanced. A stored provenance read is historical data,
+not authentication or permission to release projection. The owner compares it
+against the authoritative captured journals and the qualified Provider receipt.
+
+The original dirty/deleted flags, current content and child rows remain untouched.
+The durable captured hold remains in force. Preserving and resolving the current
+local intention, then qualifying original-row acknowledgement and hold release,
+are still required before an editable mirror or live captured-upload rollout.

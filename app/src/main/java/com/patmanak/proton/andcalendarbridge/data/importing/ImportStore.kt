@@ -2,6 +2,7 @@ package com.patmanak.proton.andcalendarbridge.data.importing
 
 import android.content.ContentValues
 import android.content.Context
+import android.database.Cursor
 import android.database.CursorWindow
 import android.database.sqlite.SQLiteCursor
 import android.database.sqlite.SQLiteDatabase
@@ -11,6 +12,7 @@ import com.patmanak.proton.andcalendarbridge.sync.catalog.CalendarSummary
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
+import java.time.DateTimeException
 import java.util.UUID
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
@@ -20,13 +22,17 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import org.json.JSONArray
+import org.json.JSONException
 
 /** App-private, backup-excluded durable import queue. Every page and checkpoint commits together. */
 class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
-    SQLiteOpenHelper(context, name, null, 10), SyncStore {
+    SQLiteOpenHelper(context, name, null, 11), SyncStore {
     private val lock = Mutex()
     /** Check the run lease both before its transaction and before durable commit. */
     @Volatile var admitTransaction: (CalendarScope) -> Boolean = { true }
+    override fun onConfigure(db: SQLiteDatabase) {
+        db.execSQL("PRAGMA synchronous=FULL")
+    }
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL("CREATE TABLE calendars (scope TEXT PRIMARY KEY, account TEXT NOT NULL, calendar TEXT NOT NULL, generation INTEGER NOT NULL, title TEXT NOT NULL, color INTEGER, enabled INTEGER NOT NULL DEFAULT 0, checkpoint TEXT, status TEXT NOT NULL DEFAULT 'PAUSED', completed_at INTEGER, next_attempt INTEGER NOT NULL DEFAULT 0)")
         db.execSQL("CREATE TABLE records (scope TEXT NOT NULL, event TEXT NOT NULL, payload TEXT NOT NULL, pending INTEGER NOT NULL, PRIMARY KEY(scope,event))")
@@ -38,9 +44,10 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
         createMappingProfiles(db)
         createLocalEdits(db)
         createProjectionReceipts(db)
+        createCapturedBases(db)
     }
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        check(oldVersion in 1..9 && newVersion == 10) { "Explicit import schema migration required" }
+        check(oldVersion in 1..10 && newVersion == 11) { "Explicit import schema migration required" }
         if (oldVersion < 2) createStaging(db)
         if (oldVersion < 3) createDelta(db)
         if (oldVersion < 4) createReconciliation(db)
@@ -61,7 +68,22 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
             }
         }
         if (oldVersion < 9) createProjectionReceipts(db)
-        if (oldVersion >= 8) db.execSQL("ALTER TABLE local_edits ADD COLUMN kind TEXT NOT NULL DEFAULT 'UPDATE' CHECK(kind IN ('UPDATE','DELETE'))")
+        if (oldVersion in 8..9) db.execSQL("ALTER TABLE local_edits ADD COLUMN kind TEXT NOT NULL DEFAULT 'UPDATE' CHECK(kind IN ('UPDATE','DELETE'))")
+        createCapturedBases(db)
+    }
+    private fun createCapturedBases(db: SQLiteDatabase) {
+        db.execSQL("""CREATE TABLE captured_create_bases (
+            scope TEXT NOT NULL, event TEXT NOT NULL,
+            account TEXT NOT NULL, calendar TEXT NOT NULL, generation INTEGER NOT NULL CHECK(generation >= 0),
+            attempt TEXT NOT NULL, adapter TEXT NOT NULL, version INTEGER NOT NULL CHECK(version > 0),
+            payload_fingerprint TEXT NOT NULL, local_id TEXT NOT NULL, capture_id TEXT NOT NULL,
+            capture_adapter TEXT NOT NULL, capture_version INTEGER NOT NULL CHECK(capture_version > 0),
+            timestamp INTEGER NOT NULL, content_fingerprint TEXT NOT NULL,
+            fingerprint_version INTEGER NOT NULL CHECK(fingerprint_version = 1),
+            verified_revision TEXT NOT NULL, nonce TEXT NOT NULL UNIQUE,
+            protocol INTEGER NOT NULL CHECK(protocol = 1), payload TEXT NOT NULL,
+            PRIMARY KEY(scope,event), UNIQUE(scope,attempt), UNIQUE(scope,local_id), UNIQUE(scope,capture_id)
+        )""".trimIndent())
     }
     private fun createProjectionReceipts(db: SQLiteDatabase) {
         db.execSQL("CREATE TABLE projection_receipts (scope TEXT NOT NULL, event TEXT NOT NULL, nonce TEXT NOT NULL UNIQUE, payload TEXT NOT NULL, adapter TEXT NOT NULL, version INTEGER NOT NULL, previous_base TEXT, protocol INTEGER NOT NULL CHECK(protocol=1), PRIMARY KEY(scope,event))")
@@ -359,6 +381,114 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
         check(admitTransaction(scope)) { "Inactive import lease" }
         baseline
     }
+
+    /** Seed the first sent reference behind exact original-row metadata proof, never a Provider ACK.
+     * Existing generic bases cannot be adopted. Exact replay preserves later local intentions and
+     * all different/deferred incoming evidence; neither absent records nor new remote data are invented.
+     */
+    suspend fun retainCapturedBaseline(baseline: CapturedCreateBaseline,
+        witness: AppliedCapturedCreateAttachment): Boolean {
+        if (witness.receipt != baseline.receipt) return false
+        return stagingMutation(baseline.scope) { db ->
+            val event = baseline.change.eventId
+            if (!activeProjectionScope(db, baseline.scope) ||
+                !capturedFormatMatches(db, baseline.scope, baseline.format)) return@stagingMutation false
+            if (hasCapturedBase(db, baseline.scope, event)) {
+                if (readCapturedBase(db, baseline.scope, event) != baseline) return@stagingMutation false
+            } else {
+                if (hasRawEventRow(db, "projection_bases", baseline.scope, event) ||
+                    hasLocalMutation(db, baseline.scope, event) ||
+                    hasRawEventRow(db, "projection_receipts", baseline.scope, event)) return@stagingMutation false
+                val receipt = baseline.receipt
+                val link = receipt.binding.identity
+                if (db.rawQuery("SELECT 1 FROM captured_create_bases WHERE " +
+                    "(scope=? AND (attempt=? OR local_id=? OR capture_id=?)) OR nonce=? LIMIT 1",
+                    arrayOf(key(baseline.scope), link.attempt.id.value, link.localId.value, link.captureId.value,
+                        receipt.nonce)).use { it.moveToFirst() }) return@stagingMutation false
+                db.insertOrThrow("captured_create_bases", null, ContentValues().apply {
+                    put("scope", key(baseline.scope)); put("event", event.value)
+                    put("account", baseline.scope.account.value); put("calendar", baseline.scope.calendar.value)
+                    put("generation", baseline.scope.generation); put("attempt", link.attempt.id.value)
+                    put("adapter", link.attempt.format.id); put("version", link.attempt.format.version)
+                    put("payload_fingerprint", link.attempt.payloadFingerprint); put("local_id", link.localId.value)
+                    put("capture_id", link.captureId.value); put("capture_adapter", link.captureFormat.id)
+                    put("capture_version", link.captureFormat.version); put("timestamp", link.timestamp.epochSecond)
+                    put("content_fingerprint", link.contentFingerprint); put("fingerprint_version", link.fingerprintVersion)
+                    put("verified_revision", receipt.binding.verifiedRevision.value); put("nonce", receipt.nonce)
+                    put("protocol", receipt.protocol); put("payload", encodeChange(baseline.change))
+                })
+                db.insertOrThrow("projection_bases", null, ContentValues().apply {
+                    put("scope", key(baseline.scope)); put("event", event.value); put("payload", encodeChange(baseline.change))
+                })
+            }
+            // Full serialized content is compared; an opaque revision alone cannot consume work.
+            db.update("records", ContentValues().apply { put("pending", 0) },
+                "scope=? AND event=? AND payload=? AND pending=1 AND NOT EXISTS " +
+                    "(SELECT 1 FROM local_edits l WHERE l.scope=records.scope AND l.event=records.event) AND NOT EXISTS " +
+                    "(SELECT 1 FROM deferred_events d WHERE d.scope=records.scope AND d.event=records.event) AND NOT EXISTS " +
+                    "(SELECT 1 FROM projection_receipts p WHERE p.scope=records.scope AND p.event=records.event)",
+                arrayOf(key(baseline.scope), event.value, encodeChange(baseline.change)))
+            true
+        }
+    }
+
+    /** Historical provenance with a matching current base, never ACK/release permission.
+     * Callers must compare the full result with their current source journals and Provider witness;
+     * structurally valid storage is not authentication. An advanced base is never rewound here.
+     */
+    suspend fun capturedBaseline(scope: CalendarScope, event: EventId): CapturedCreateBaseline? = access { db ->
+        check(admitTransaction(scope)) { "Inactive import lease" }; requireKnown(db, scope)
+        val baseline = readCapturedBase(db, scope, event)
+        check(admitTransaction(scope)) { "Inactive import lease" }
+        baseline
+    }
+
+    private fun hasRawEventRow(db: SQLiteDatabase, table: String, scope: CalendarScope, event: EventId): Boolean =
+        db.rawQuery("SELECT 1 FROM $table WHERE scope=? AND event=?", arrayOf(key(scope), event.value)).use { it.moveToFirst() }
+    private fun hasCapturedBase(db: SQLiteDatabase, scope: CalendarScope, event: EventId) =
+        hasRawEventRow(db, "captured_create_bases", scope, event)
+
+    private fun capturedFormatMatches(db: SQLiteDatabase, scope: CalendarScope, format: AdapterFormat): Boolean =
+        db.rawQuery("SELECT checkpoint,account,calendar,generation FROM calendars WHERE scope=?", arrayOf(key(scope))).use {
+            try { it.moveToFirst() && !it.isNull(0) && it.getString(1) == scope.account.value &&
+                it.getString(2) == scope.calendar.value && it.getLong(3) == scope.generation &&
+                decodeCheckpoint(scope, it.getString(0)).format == format }
+            catch (_: IllegalArgumentException) { false }
+            catch (_: JSONException) { false }
+        }
+
+    private fun readCapturedBase(db: SQLiteDatabase, scope: CalendarScope, event: EventId): CapturedCreateBaseline? {
+        if (!activeProjectionScope(db, scope)) return null
+        return db.query("captured_create_bases", arrayOf("account", "calendar", "generation", "attempt", "adapter", "version",
+            "payload_fingerprint", "local_id", "capture_id", "capture_adapter", "capture_version", "timestamp",
+            "content_fingerprint", "fingerprint_version", "verified_revision", "nonce", "protocol", "payload"),
+            "scope=? AND event=?", arrayOf(key(scope), event.value), null, null, null).use { row ->
+            if (!row.moveToFirst()) null else {
+                val baseline = decodeCapturedBase(row, scope, event) ?: return@use null
+                if (!capturedFormatMatches(db, scope, baseline.format)) return@use null
+                db.rawQuery("SELECT payload FROM projection_bases WHERE scope=? AND event=?", arrayOf(key(scope), event.value)).use { base ->
+                    if (!base.moveToFirst() || base.getString(0) != encodeChange(baseline.change)) null else baseline
+                }
+            }
+        }
+    }
+
+    private fun decodeCapturedBase(row: Cursor, scope: CalendarScope, event: EventId): CapturedCreateBaseline? = try {
+        val storedScope = CalendarScope(AccountId(row.getString(0)), CalendarId(row.getString(1)), row.getLong(2))
+        if (storedScope != scope) null else {
+            val attempt = CreateAttemptIdentity(scope, MutationId(row.getString(3)),
+                AdapterFormat(row.getString(4), row.getInt(5)), row.getString(6))
+            val link = CapturedCreateDispatchIdentity(attempt, LocalEventId(row.getString(7)), MutationId(row.getString(8)),
+                AdapterFormat(row.getString(9), row.getInt(10)), Instant.ofEpochSecond(row.getLong(11)), row.getString(12), row.getInt(13))
+            val binding = CapturedCreateBinding(link, event, Revision(row.getString(14)))
+            val receipt = CapturedCreateAttachmentReceipt(binding, row.getString(15), row.getInt(16))
+            val change = decodeChange(row.getString(17)) as? RemoteChange.Upsert
+            if (change == null || change.eventId != event || row.getString(17) != encodeChange(change)) null
+            else CapturedCreateBaseline(receipt, change)
+        }
+    } catch (_: IllegalArgumentException) { null }
+    catch (_: DateTimeException) { null }
+    catch (_: JSONException) { null }
     /** Persist before Provider apply. Preparation alone is never evidence that the row was written. */
     suspend fun prepareProjection(intent: ProjectionIntent, format: AdapterFormat): ProjectionReceipt =
         stagingMutation(intent.scope) { db ->
