@@ -248,7 +248,7 @@ class CreatedEventBindingStoreDeviceTest {
         assertNull(store.binding(identity)); assertNull(store.projectionWitness(identity))
         assertFalse(store.claim(prepared))
         SQLiteDatabase.openDatabase(path.absolutePath, null, SQLiteDatabase.OPEN_READONLY).use { migrated ->
-            assertEquals(6, migrated.version)
+            assertEquals(7, migrated.version)
         }
         assertEquals(binding, store.bind(retained, observation))
         store.close()

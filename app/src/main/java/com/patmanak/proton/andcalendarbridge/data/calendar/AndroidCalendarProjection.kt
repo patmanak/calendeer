@@ -27,6 +27,8 @@ import com.patmanak.proton.andcalendarbridge.sync.EventTime
 import com.patmanak.proton.andcalendarbridge.sync.ProjectionIntent
 import com.patmanak.proton.andcalendarbridge.sync.ProjectionReceipt
 import com.patmanak.proton.andcalendarbridge.sync.AppliedProjectionWitness
+import com.patmanak.proton.andcalendarbridge.sync.CapturedCreateAttachmentReceipt
+import com.patmanak.proton.andcalendarbridge.sync.AppliedCapturedCreateAttachment
 import com.patmanak.proton.andcalendarbridge.sync.RecurrencePoint
 import com.patmanak.proton.andcalendarbridge.sync.RemoteChange
 import com.patmanak.proton.andcalendarbridge.sync.EventContent
@@ -37,6 +39,9 @@ import com.patmanak.proton.andcalendarbridge.sync.AttendanceRole
 import com.patmanak.proton.andcalendarbridge.sync.AttendanceStatus
 import com.patmanak.proton.andcalendarbridge.sync.catalog.CalendarSummary
 import java.nio.ByteBuffer
+import java.nio.CharBuffer
+import java.nio.charset.CharacterCodingException
+import java.nio.charset.CodingErrorAction
 import java.security.MessageDigest
 import java.time.ZoneOffset
 import java.time.ZoneId
@@ -413,6 +418,108 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
         return OwnedLocalEditSnapshot(calendar, row, content)
     }
 
+    override val capturedAttachmentProtocol: Int get() = 1
+
+    override suspend fun attachCapturedCreate(receipt: CapturedCreateAttachmentReceipt): AppliedCapturedCreateAttachment? = operation {
+        val metadata = capturedAttachmentValues(receipt) // Refuse malformed identity text before Provider IO.
+        inspectCapturedAttachmentInternal(receipt)?.let { return@operation it }
+        val binding = receipt.binding
+        val scope = binding.identity.attempt.scope
+        val account = accountFor(scope.account)
+        val calendar = calendarRow(scope, account) ?: return@operation null
+        val uri = syncUri(Events.CONTENT_URI, account)
+        val local = capturedLocalSelection(receipt, calendar)
+        val values = attachmentMetadata(uri, local) ?: return@operation null
+        if (values.getAsInteger(Events.DIRTY) != 1 || values.getAsInteger(Events.DELETED) != 0 ||
+            ATTACHMENT_SYNC_COLUMNS.any { it != Events.SYNC_DATA5 && values[it] != null }) return@operation null
+        val remote = capturedRemoteSelection(receipt, calendar)
+        val count = resolver.query(uri, arrayOf(Events._ID), remote.sql, remote.args, null)
+            ?.use { it.count } ?: fail(CalendarProjectionFailure.PROVIDER_UNAVAILABLE)
+        if (count != 0) return@operation null
+        // User content and child rows are deliberately absent from the update. A concurrent edit
+        // is retained; a concurrent deletion or identity change aborts this atomic batch.
+        requirePermissions()
+        resolver.applyBatch(CalendarContract.AUTHORITY, arrayListOf(
+            assertion(syncUri(Calendars.CONTENT_URI, account), calendarSelection(scope, account), calendar),
+            ContentProviderOperation.newAssertQuery(uri).withSelection(local.sql, local.args)
+                .withValues(values).withExpectedCount(1).build(),
+            ContentProviderOperation.newAssertQuery(uri).withSelection(remote.sql, remote.args).withExpectedCount(0).build(),
+            ContentProviderOperation.newUpdate(uri).withSelection(local.sql, local.args)
+                .withValues(metadata).withExpectedCount(1).build(),
+        ))
+        requirePermissions()
+        AppliedCapturedCreateAttachment(receipt)
+    }
+
+    override suspend fun inspectCapturedAttachment(receipt: CapturedCreateAttachmentReceipt): AppliedCapturedCreateAttachment? = operation {
+        inspectCapturedAttachmentInternal(receipt)
+    }
+
+    private fun inspectCapturedAttachmentInternal(receipt: CapturedCreateAttachmentReceipt): AppliedCapturedCreateAttachment? {
+        val expected = capturedAttachmentValues(receipt)
+        val scope = receipt.binding.identity.attempt.scope
+        val account = accountFor(scope.account)
+        val calendar = calendarRow(scope, account) ?: return null
+        val uri = syncUri(Events.CONTENT_URI, account)
+        val local = capturedLocalSelection(receipt, calendar)
+        val values = attachmentMetadata(uri, local) ?: return null
+        if (expected.keySet().any { values.getAsString(it) != expected.getAsString(it) } ||
+            values.getAsString(Events.SYNC_DATA5) != local.args[1]) return null
+        val remote = capturedRemoteSelection(receipt, calendar)
+        val remoteValues = resolver.query(uri, arrayOf(Events._ID), remote.sql, remote.args, null)?.use {
+            it.count == 1 && it.moveToFirst() && it.getLong(0) == values.getAsLong(Events._ID)
+        } ?: fail(CalendarProjectionFailure.PROVIDER_UNAVAILABLE)
+        if (!remoteValues) return null
+        val checks = ContentValues(values).apply { remove(Events.DIRTY); remove(Events.DELETED) }
+        requirePermissions()
+        resolver.applyBatch(CalendarContract.AUTHORITY, arrayListOf(
+            assertion(syncUri(Calendars.CONTENT_URI, account), calendarSelection(scope, account), calendar),
+            ContentProviderOperation.newAssertQuery(uri).withSelection(local.sql, local.args)
+                .withValues(checks).withExpectedCount(1).build(),
+            ContentProviderOperation.newAssertQuery(uri).withSelection(remote.sql, remote.args)
+                .withValue(Events._ID, values.getAsLong(Events._ID)).withExpectedCount(1).build(),
+        ))
+        requirePermissions()
+        return AppliedCapturedCreateAttachment(receipt)
+    }
+
+    private fun attachmentMetadata(uri: Uri, selection: Selection): ContentValues? {
+        val cursor = resolver.query(uri, arrayOf(Events._ID, Events.CALENDAR_ID, Events.DIRTY, Events.DELETED) + ATTACHMENT_SYNC_COLUMNS,
+            selection.sql, selection.args, null) ?: fail(CalendarProjectionFailure.PROVIDER_UNAVAILABLE)
+        return cursor.use {
+            if (it.count != 1 || !it.moveToFirst()) null
+            else ContentValues().apply { DatabaseUtils.cursorRowToContentValues(it, this) }
+        }
+    }
+
+    private fun capturedLocalSelection(receipt: CapturedCreateAttachmentReceipt, calendar: Long): Selection {
+        val identity = receipt.binding.identity
+        return Selection("${Events.CALENDAR_ID}=? AND ${Events.SYNC_DATA5}=?", arrayOf(calendar.toString(),
+            digest("local-create-v1", calendarSyncId(identity.attempt.scope), identity.localId.value)))
+    }
+
+    private fun capturedRemoteSelection(receipt: CapturedCreateAttachmentReceipt, calendar: Long): Selection {
+        val remote = digest("event-v1", calendarSyncId(receipt.binding.identity.attempt.scope), receipt.binding.eventId.value)
+        return Selection("${Events.CALENDAR_ID}=? AND (${Events._SYNC_ID}=? OR ${Events.SYNC_DATA4}=?)",
+            arrayOf(calendar.toString(), remote, remote))
+    }
+
+    private fun capturedAttachmentValues(receipt: CapturedCreateAttachmentReceipt) = ContentValues().apply {
+        val identity = receipt.binding.identity
+        val attempt = identity.attempt
+        val remote = digest("event-v1", calendarSyncId(attempt.scope), receipt.binding.eventId.value)
+        put(Events._SYNC_ID, remote); put(Events.SYNC_DATA1, OWNER_MARKER)
+        put(Events.SYNC_DATA2, digest("revision-v1", receipt.binding.verifiedRevision.value)); put(Events.SYNC_DATA4, remote)
+        // Bind the full immutable receipt, not just a nonce or historical row locator.
+        put(Events.SYNC_DATA6, "calendeer-captured-attachment-v1:" + strictAttachmentDigest("captured-attachment-v1",
+            attempt.scope.account.value, attempt.scope.calendar.value, attempt.scope.generation.toString(),
+            attempt.id.value, attempt.format.id, attempt.format.version.toString(),
+            attempt.payloadFingerprint, identity.localId.value, identity.captureId.value, identity.captureFormat.id,
+            identity.captureFormat.version.toString(), identity.timestamp.toString(), identity.contentFingerprint,
+            identity.fingerprintVersion.toString(), receipt.binding.eventId.value, receipt.binding.verifiedRevision.value,
+            receipt.protocol.toString(), receipt.nonce))
+    }
+
     private fun readSimpleTime(values: ContentValues): EventTime? {
         val start = values.getAsLong(Events.DTSTART) ?: return null
         val end = values.getAsLong(Events.DTEND) ?: return null
@@ -681,6 +788,21 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
         const val ACCOUNT_TYPE = "com.patmanak.proton.andcalendarbridge.account"
         private const val OWNER_MARKER = "calendar-bridge-projection-v1"
         private val projectionLock = Mutex()
+        private val ATTACHMENT_SYNC_COLUMNS = arrayOf(Events._SYNC_ID, Events.SYNC_DATA1, Events.SYNC_DATA2,
+            Events.SYNC_DATA3, Events.SYNC_DATA4, Events.SYNC_DATA5, Events.SYNC_DATA6, Events.SYNC_DATA7,
+            Events.SYNC_DATA8, Events.SYNC_DATA9, Events.SYNC_DATA10)
+        private fun strictAttachmentDigest(vararg parts: String): String {
+            val hash = MessageDigest.getInstance("SHA-256")
+            for (part in parts) {
+                val bytes = try {
+                    val encoded = Charsets.UTF_8.newEncoder().onMalformedInput(CodingErrorAction.REPORT)
+                        .onUnmappableCharacter(CodingErrorAction.REPORT).encode(CharBuffer.wrap(part))
+                    ByteArray(encoded.remaining()).also { encoded.get(it) }
+                } catch (_: CharacterCodingException) { throw IllegalArgumentException("Invalid attachment identity text") }
+                hash.update(ByteBuffer.allocate(4).putInt(bytes.size).array()); hash.update(bytes)
+            }
+            return hash.digest().joinToString("") { "%02x".format(it.toInt() and 0xFF) }
+        }
         private fun fail(category: CalendarProjectionFailure): Nothing = throw CalendarProjectionException(category)
         private fun digest(vararg parts: String): String {
             val digest = MessageDigest.getInstance("SHA-256")

@@ -393,7 +393,7 @@ class CapturedCreateAttemptStoreDeviceTest {
                 legacy.version = 4
             }
             assertEquals(prepared, store.read(scope, prepared.id)); assertEquals(unknown, store.read(scope, unknown.id))
-            assertEquals(6, store.writableDatabase.version)
+            assertEquals(7, store.writableDatabase.version)
             assertNull(store.capturedIdentity(scope, prepared.id)); assertNull(store.capturedIdentity(scope, unknown.id))
             val oldIdentity = CreateAttemptIdentity.of(unknown)
             assertEquals(CreatedEventBinding(oldIdentity, EventId("legacy-event"), Revision("legacy-verified")),

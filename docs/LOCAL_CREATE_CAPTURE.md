@@ -275,5 +275,41 @@ used for local-edit capture, and before preparation/application/acknowledgement.
 These checks share its process mutex with explicit captured writes. There is no
 transaction across the import journal, dispatch journal and Provider, and external
 process races remain unqualified. The hold currently has no automatic release.
-Original-row metadata attachment, durable write receipts, baseline acknowledgement
-and conflict resolution form the next step before a live captured upload.
+Baseline acknowledgement and conflict resolution are still required before a
+live captured upload or release of held projections.
+
+## Original-row metadata attachment
+
+`attachLocalCreateBinding` is an explicit internal operation using a retained
+qualified binding and the exact frozen submission. It prepares a durable receipt
+before calling the Android Provider, checks current account/session, selection,
+permissions, checkpoint and adapter format, and rechecks them after the call.
+It uses no submission port, network request or crypto preparation.
+
+Dispatch journal v7 adds the first immutable attachment nonce and a complete
+snapshot of the binding. Replay reuses that nonce. Additive migration preserves
+earlier work and does not invent attachment receipts. Damaged or orphaned receipt
+rows keep the scope held and remain excluded from generic paths.
+
+The Provider finds the original through its unique scoped local marker, never
+through a historical row locator. An atomic batch asserts calendar ownership,
+local-marker uniqueness and absence of a competing remote identity before
+assigning only the remote ID, owner/revision metadata and attachment receipt.
+It keeps the local marker, content, children, dirty and deleted flags. A later
+title change or reminder therefore stays intact. Initial tombstones, missing or
+ambiguous markers, foreign metadata and already projected remote identities are
+left unresolved; no row is inserted, merged or deleted to force association.
+
+Receipt inspection reasserts the exact local/remote identity, owner, revision and
+full binding/nonce marker. The marker uses strict UTF-8 encoding to refuse invalid
+identity text rather than collapsing distinct inputs. Inspection is a historical
+metadata-write proof: a later edit or tombstone can preserve it without proving
+current content or consuming the local change. An uncertain Provider response
+resumes by inspecting the same durable receipt before any repeated write.
+
+Successful attachment does not acknowledge the Android row, publish an imported
+baseline, consume pending work or release the event hold. No worker, observer or
+UI automatically invokes it. Reconciling the verified remote baseline with the
+current local intention and acknowledging the exact received work remains the
+next prerequisite for release and an editable mirror. The mutex and Provider
+batch do not form a transaction across journals or simultaneous processes.

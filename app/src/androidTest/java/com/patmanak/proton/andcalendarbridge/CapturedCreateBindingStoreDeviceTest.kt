@@ -408,7 +408,7 @@ class CapturedCreateBindingStoreDeviceTest {
                 legacy.version = 5
             }
             assertEquals(captured, store.read(scope, captured.id)); assertEquals(paused, store.read(scope, paused.id))
-            assertEquals(generic, store.read(scope, generic.id)); assertEquals(6, store.writableDatabase.version)
+            assertEquals(generic, store.read(scope, generic.id)); assertEquals(7, store.writableDatabase.version)
             assertEquals(link, store.capturedIdentity(scope, captured.id)); assertEquals(pausedLink, store.capturedIdentity(scope, paused.id))
             assertNull(store.capturedBinding(link)); assertNull(store.capturedBinding(pausedLink))
             assertEquals(CreatePauseReason.PROCESS_RESTART, store.pauseReason(scope, paused.id))

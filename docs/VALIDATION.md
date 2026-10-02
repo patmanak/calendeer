@@ -995,9 +995,9 @@ calendars/accounts/databases are removed; existing live examples are untouched.
 
 The production Proton captured-inspection contract remains the previously
 qualified adapter; these new fixtures do not prove a captured service upload or
-original-row acknowledgement. The hold has no release in this slice. Metadata
-attachment, receipt recovery, baseline/pending acknowledgement and conflicts must
-be qualified before a live captured-creation journey or writable-mode rollout.
+original-row acknowledgement. The hold has no release in this slice. Remote
+baseline/pending acknowledgement and conflicts must be qualified before a live
+captured-creation journey or writable-mode rollout.
 
 The unwired-owner physical reproduction failed its no-projection assertion; after
 wiring, all 35 binding/hold fixtures passed. The same build also passed 34 captured
@@ -1012,6 +1012,46 @@ passed with the owner wiring absent. Moving hold/status publication into a
 separate suspend helper made the exact reproduction pass, followed by the full
 physical regression groups above. The internal runtime cause remains unproven;
 this qualifies the refactor on the tested physical target, not other runtimes.
+
+## Captured original-row metadata attachment
+
+`CapturedCreateAttachmentReceiptTest` checks historical witness identity,
+protocol/nonce refusal and redacted diagnostics. This receipt does not grant
+dispatch, clean the original row or release import.
+
+`CapturedCreateAttachmentStoreDeviceTest` uses isolated SQL with
+`providerFixture=true`. Its independently constructed v6 fixture checks additive
+v7 migration, preservation of UNKNOWN/evidence/pauses/generic bindings and no
+invented attachment plans. It checks first-nonce immutability, full proof drift,
+reopening, revoked admission, cancellation, rollback, competing helpers and
+foreign keys. Damaged or orphaned plans block the scope and generic adoption.
+
+`CapturedCreateAttachmentIntegrationDeviceTest` uses real SQLite and Calendar
+Provider with controlled captured transport. An unwired-owner reproduction must
+return UNRESOLVED and fail the expected attachment result. The wired owner
+attaches metadata to one original row, keeps it dirty and keeps incoming data
+held after reopening. Later title/reminder changes remain intact. Lost-response
+recovery reuses the nonce without another write; a later tombstone retains the
+historical proof without consuming deletion. Initial tombstones, purged originals,
+replacement rows, duplicate/missing markers, foreign metadata or existing remote
+projections remain unresolved. Substituted nonce/full binding, malformed Unicode
+and damaged Provider receipts cannot qualify recovery. Current access loss,
+controlled permission loss, cancellation and import-format replacement cannot
+authorize a write or release the hold. The controlled permission case establishes
+owner gating, not real mid-batch Android revocation. Temporary fixtures are
+removed; retained server examples are separate.
+
+These checks do not establish baseline/pending acknowledgement, conflict
+resolution, live captured upload, writable UI, multiple simultaneous processes
+or physical power-loss durability. A historical receipt cannot replace those
+qualifications.
+
+The unwired-owner physical fixture failed the expected attachment result. On the
+wired build, all 13 attachment journal and 19 Provider/owner cases passed, along
+with 35 hold, 34 dispatch, 53 journal/lifecycle, 36 import/recovery, 12 association
+and 23 existing Provider cases. Read-only inspection of the retained legacy live
+event passed without a new submission. Host checks passed with 118 sync,
+274 Proton adapter and 10 app tests, both debug APK builds and Android lint.
 
 ## Anonymous transport probe
 

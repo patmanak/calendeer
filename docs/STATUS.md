@@ -286,8 +286,13 @@ offline and excludes generic association paths. Damaged or unreadable work remai
 blocked. Unrelated events can project after identity qualification, while received
 pages and local processing continue. Held rows remain pending without requesting
 automatic worker continuations; a local waiting state is available in all eight
-languages. This durable prerequisite still needs original-row attachment and
-conflict resolution before the hold can be released. The controlled qualification
+languages. A separate explicit metadata-only attachment now reserves its first
+durable receipt in dispatch journal v7 and assigns the remote identity to the
+unique original local marker. It preserves local edits, child rows and dirty
+flags, and recovers the same receipt after an uncertain Provider response without
+another server submission. Missing or ambiguous rows remain unresolved. This
+historical proof grants no baseline acknowledgement or import release; current
+local intentions and conflicts still need reconciliation. The controlled qualification
 is described in [validation](VALIDATION.md).
 The application still exposes no writable mirror or event editor. General outgoing
 queue/resolution, automatic Provider capture and conditional Proton UPDATE/DELETE

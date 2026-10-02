@@ -11,6 +11,8 @@ import com.patmanak.proton.andcalendarbridge.sync.EventContent
 import com.patmanak.proton.andcalendarbridge.sync.ProjectionReceipt
 import com.patmanak.proton.andcalendarbridge.sync.AppliedProjectionWitness
 import com.patmanak.proton.andcalendarbridge.sync.LocalEventId
+import com.patmanak.proton.andcalendarbridge.sync.CapturedCreateAttachmentReceipt
+import com.patmanak.proton.andcalendarbridge.sync.AppliedCapturedCreateAttachment
 import com.patmanak.proton.andcalendarbridge.sync.catalog.CalendarSummary
 
 /** Android-layer boundary. A failed apply leaves its durable intent unacknowledged for replay. */
@@ -40,6 +42,14 @@ interface CalendarProjection {
     suspend fun captureAndStampSimpleCreate(scope: CalendarScope, eventRow: Long, localId: LocalEventId): OwnedLocalEditSnapshot? = null
     /** Reopening is marker-only inspection. Missing markers never fall back to a row locator. */
     suspend fun inspectStampedSimpleCreate(scope: CalendarScope, localId: LocalEventId): OwnedLocalEditSnapshot? = null
+    val capturedAttachmentProtocol: Int? get() = null
+    /** Metadata-only attachment to the unique scoped local marker. Preserve content, children and
+     * dirty/deleted flags. No row-ID fallback, insertion, acknowledgement or import release.
+     * After an uncertain write callers must inspect the same durable receipt before retrying.
+     */
+    suspend fun attachCapturedCreate(receipt: CapturedCreateAttachmentReceipt): AppliedCapturedCreateAttachment? = null
+    /** Historical exact metadata proof only, even if the row was subsequently edited or deleted. */
+    suspend fun inspectCapturedAttachment(receipt: CapturedCreateAttachmentReceipt): AppliedCapturedCreateAttachment? = null
 }
 
 /** Android locator is diagnostic context only and never enters the durable domain intent. */

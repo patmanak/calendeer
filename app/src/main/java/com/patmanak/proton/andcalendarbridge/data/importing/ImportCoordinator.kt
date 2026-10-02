@@ -29,6 +29,7 @@ enum class LocalEditCaptureResult { INACTIVE, UNQUALIFIED, RETAINED, CONFLICT, U
 enum class LocalCreatePreparationResult { INACTIVE, UNQUALIFIED, RETAINED, UNSUPPORTED, UNAVAILABLE }
 enum class LocalCreateSubmissionResult { INACTIVE, UNQUALIFIED, RETAINED, UNRESOLVED, UNSUPPORTED, UNAVAILABLE }
 enum class CapturedCreateBindingResult { INACTIVE, UNRESOLVED, RETAINED }
+enum class CapturedCreateAttachmentResult { INACTIVE, UNRESOLVED, ATTACHED }
 /** One process owner for foreground and durable worker triggers; no event content reaches UI. */
 class ImportCoordinator(
     private val context: Context,
@@ -718,6 +719,65 @@ class ImportCoordinator(
               captures.admitCapture = { false }
               store.admitTransaction = { false }
           }
+    }
+
+    /** Original-row metadata only; the incoming hold is not released by this operation. */
+    suspend fun attachLocalCreateBinding(target: CalendarScope, localId: LocalEventId, id: MutationId,
+        attempt: MutationId): CapturedCreateAttachmentResult = mutex.withLock {
+        val captures = localCreates ?: return@withLock CapturedCreateAttachmentResult.UNRESOLVED
+        val journal = creates ?: return@withLock CapturedCreateAttachmentResult.UNRESOLVED
+        ensureCreateLifecycle()
+        val expected = generation
+        val policy = createPolicyRevision.get()
+        val active = { authenticated && generation == expected && createPolicyRevision.get() == policy && hasCalendarPermissions() }
+        suspend fun available(): Boolean {
+            if (!isCurrent(expected, target.account) || !active()) return false
+            val selected = store.selections(target.account).singleOrNull { it.scope == target }
+            return selected?.enabled == true && selected.available && active()
+        }
+        try {
+            if (!available()) return@withLock CapturedCreateAttachmentResult.INACTIVE
+            store.admitTransaction = { it == target && active() }
+            captures.admitCapture = { it == target && active() }
+            journal.admitAssociation = { it == target && active() }
+            projection.admitOperation = { active() }
+            val submission = captures.readSubmission(target, localId) ?: return@withLock CapturedCreateAttachmentResult.UNRESOLVED
+            val reserved = submission.reservation
+            val capture = reserved.intent.reservation
+            if (capture.scope != target || capture.localId != localId || capture.id != id || reserved.attempt != attempt ||
+                capture.format != remote.format || store.transaction(target) { checkpoint?.format } != capture.format ||
+                projection.capturedAttachmentProtocol != 1) return@withLock CapturedCreateAttachmentResult.UNRESOLVED
+            val identity = CapturedCreateDispatchIdentity.of(submission)
+            val binding = journal.capturedBinding(identity) ?: return@withLock CapturedCreateAttachmentResult.UNRESOLVED
+            // The durable nonce precedes any Provider change. No network or submission port is used.
+            val receipt = journal.prepareCapturedAttachment(binding)
+            suspend fun exact(): Boolean = captures.readSubmission(target, localId) == submission &&
+                remote.format == capture.format && projection.capturedAttachmentProtocol == receipt.protocol &&
+                store.transaction(target) { checkpoint?.format } == capture.format &&
+                journal.capturedBinding(identity) == binding && journal.capturedAttachment(binding) == receipt
+            if (!available()) return@withLock CapturedCreateAttachmentResult.INACTIVE
+            if (!exact()) return@withLock CapturedCreateAttachmentResult.UNRESOLVED
+            var witness = projection.inspectCapturedAttachment(receipt)
+            if (witness == null) {
+                if (!available()) return@withLock CapturedCreateAttachmentResult.INACTIVE
+                if (!exact()) return@withLock CapturedCreateAttachmentResult.UNRESOLVED
+                witness = projection.attachCapturedCreate(receipt)
+            }
+            if (!available()) return@withLock CapturedCreateAttachmentResult.INACTIVE
+            if (witness?.receipt != receipt || !exact()) return@withLock CapturedCreateAttachmentResult.UNRESOLVED
+            // Historical metadata proof is deliberately insufficient to ACK a later local edit.
+            CapturedCreateAttachmentResult.ATTACHED
+        } catch (cancelled: CancellationException) {
+            currentCoroutineContext().ensureActive()
+            if (!active()) CapturedCreateAttachmentResult.INACTIVE else throw cancelled
+        } catch (_: Exception) {
+            if (!active()) CapturedCreateAttachmentResult.INACTIVE else CapturedCreateAttachmentResult.UNRESOLVED
+        } finally {
+            journal.admitAssociation = { false }
+            captures.admitCapture = { false }
+            store.admitTransaction = { false }
+            projection.admitOperation = { false }
+        }
     }
 
     private class CapturedProjectionPending : IllegalStateException("Captured creation reconciliation pending")
