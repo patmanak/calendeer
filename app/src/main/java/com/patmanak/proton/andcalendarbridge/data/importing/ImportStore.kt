@@ -172,7 +172,7 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
         }, "scope=?", arrayOf(key(scope)))
     }
     suspend fun status(scope: CalendarScope, status: String, completedAt: Long? = null) = access { db ->
-        require(status in setOf("PAUSED", "PENDING", "RUNNING", "IMPORTED", "PARTIAL", "INCOMPLETE", "SERIES_PENDING", "HISTORY_GAP", "CAPACITY", "PERMISSION", "AUTH", "NETWORK", "UNSUPPORTED", "LOCAL_KEYS", "UNAVAILABLE", "ERROR"))
+        require(status in setOf("PAUSED", "PENDING", "CREATE_PENDING", "RUNNING", "IMPORTED", "PARTIAL", "INCOMPLETE", "SERIES_PENDING", "HISTORY_GAP", "CAPACITY", "PERMISSION", "AUTH", "NETWORK", "UNSUPPORTED", "LOCAL_KEYS", "UNAVAILABLE", "ERROR"))
         requireKnown(db, scope)
         db.update("calendars", ContentValues().apply {
             put("status", if (isAvailable(db, scope)) status else "UNAVAILABLE")
@@ -285,12 +285,14 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
             it.moveToFirst() && !it.isNull(0) && decodeCheckpoint(scope, it.getString(0)).traversalComplete
         }
     }
-    suspend fun pending(scope: CalendarScope, limit: Int = 100): List<ProjectionIntent> = access { db ->
+    /** Excluded identities remain pending. Filter before the batch limit to avoid starvation. */
+    suspend fun pending(scope: CalendarScope, limit: Int = 100, excludedEvents: Set<EventId> = emptySet()): List<ProjectionIntent> = access { db ->
         require(limit in 1..100); requireKnown(db, scope)
         val masters = masterStates(db, scope)
-        db.rawQuery("SELECT r.payload FROM records r LEFT JOIN series_members s ON s.scope=r.scope AND s.event=r.event WHERE r.scope=? AND r.pending=1 AND NOT EXISTS (SELECT 1 FROM local_edits l WHERE l.scope=r.scope AND l.event=r.event) ORDER BY CASE WHEN s.role='master' THEN 0 ELSE 1 END,r.rowid", arrayOf(key(scope))).use { cursor ->
+        db.rawQuery("SELECT r.payload,r.event FROM records r LEFT JOIN series_members s ON s.scope=r.scope AND s.event=r.event WHERE r.scope=? AND r.pending=1 AND NOT EXISTS (SELECT 1 FROM local_edits l WHERE l.scope=r.scope AND l.event=r.event) ORDER BY CASE WHEN s.role='master' THEN 0 ELSE 1 END,r.rowid", arrayOf(key(scope))).use { cursor ->
             buildList {
                 while (size < limit && cursor.moveToNext()) {
+                    if (EventId(cursor.getString(1)) in excludedEvents) continue
                     val change = decodeChange(cursor.getString(0))
                     val recurrence = (change as? RemoteChange.Upsert)?.content?.recurrence
                     if (recurrence == null || recurrence.isMaster || masters[recurrence.uid]?.accepts(recurrence.original) == true)

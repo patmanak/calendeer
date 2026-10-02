@@ -221,8 +221,8 @@ local preparation envelopes and legacy unknown-details submissions are refused.
 Existing UNKNOWN work permits explicit captured inspection only. It never
 prepares, claims or sends again, even if the original row changed or disappeared.
 Current access and the complete immutable journal link are still required. A
-verified observation does not acknowledge the Android row, clear dirty/deleted
-flags, bind a remote identity or inject a projection. No observer, worker or UI
+verified observation from this dispatch path does not acknowledge the Android row,
+clear dirty/deleted flags, bind a remote identity or inject a projection. No observer, worker or UI
 invokes this path; writable mirrors remain disabled.
 
 Provider observation, import state and dispatch admission are separate operations.
@@ -230,3 +230,50 @@ An external editor can change a row after its last observation; this is not a
 cross-store transaction or a guarantee of the latest content at send time.
 Duplicate-free association with the original row and conflict handling after
 admission must precede a live captured-upload journey or editable-mode rollout.
+
+## Durable incoming projection hold
+
+An admitted captured attempt can have reached the server before its remote event
+ID is known. Matching content or an Android row ID cannot identify that result.
+The import owner therefore reads the durable dispatch journal before projection
+and recovery: captured UNKNOWN work without a qualified binding holds all event
+projections in that scope. A valid PREPARED attempt has never admitted a request
+and does not hold import. Detectable damaged parent/link/proof rows fail closed;
+an unreadable journal never grants projection permission.
+
+`bindLocalCreateObservation` explicitly inspects the exact UNKNOWN submission,
+qualifies the whole frozen draft and observation, and retains its first remote
+ID and verified revision. It rechecks current account/session, permissions,
+selection, import format and immutable capture/submission after the reads.
+It does not inspect or acknowledge the original Provider row. A changed, deleted
+or missing row still needs reconciliation; its absence cannot justify recreating
+it through ordinary import. An already retained exact binding can resume with
+no submission port and no network or crypto preparation.
+
+Dispatch journal v6 adds an immutable captured binding with a full snapshot of
+the capture/submission link. The proof must still match the current parent and
+link; valid-looking identity drift cannot silently rebind it. Scoped event
+uniqueness covers captured and generic associations in both directions. Additive
+migration preserves earlier work, evidence, pauses and associations without
+inventing bindings. Raw captured links or proofs, including orphaned proofs,
+remain excluded from the generic paths.
+
+Once every UNKNOWN capture in the scope has an exact remote binding with the
+current import format, only their remote event IDs remain held. A changed adapter
+format keeps the entire scope held until explicit reconciliation; opaque event
+IDs cannot be reused as if they belonged to a replacement adapter. Incoming updates
+and deletions for those IDs stay
+pending; the binding neither injects creation content into the import cache nor
+clears its queue, receipts or acknowledged baselines. Other events can project.
+Runnable work is filtered before the batch limit, so a held prefix cannot starve
+later events. Reads, page receipt and offline processing may continue. Held work
+alone does not request a WorkManager continuation or backoff loop. The local
+CREATE_PENDING state explains why Android updates are retained.
+
+The owner checks the hold before projection receipt recovery, including recovery
+used for local-edit capture, and before preparation/application/acknowledgement.
+These checks share its process mutex with explicit captured writes. There is no
+transaction across the import journal, dispatch journal and Provider, and external
+process races remain unqualified. The hold currently has no automatic release.
+Original-row metadata attachment, durable write receipts, baseline acknowledgement
+and conflict resolution form the next step before a live captured upload.

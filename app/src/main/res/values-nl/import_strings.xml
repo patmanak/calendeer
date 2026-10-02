@@ -36,4 +36,5 @@
     <string name="import_projection_pending">Updates die nog naar Android moeten worden gekopieerd: %1$d</string>
     <string name="import_status_series_pending">Sommige afspraken wachten op hun oorspronkelijke reeks voordat ze worden geïmporteerd. Vernieuw om opnieuw te proberen.</string>
     <string name="import_recurrence_limits">Gangbare herhalingsregels en wijzigingen aan één afspraak worden geïmporteerd. Niet-ondersteunde vormen blijven in behandeling.</string>
+    <string name="import_status_create_pending">Sommige kalenderwijzigingen worden uitgesteld om dubbele afspraken te voorkomen.</string>
 </resources>

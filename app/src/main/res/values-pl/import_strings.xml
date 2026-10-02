@@ -36,4 +36,5 @@
     <string name="import_projection_pending">Aktualizacje oczekujące na skopiowanie do Androida: %1$d</string>
     <string name="import_status_series_pending">Niektóre wystąpienia czekają na oryginalną serię przed importem. Odśwież, aby spróbować ponownie.</string>
     <string name="import_recurrence_limits">Importowane są typowe reguły cykliczne i zmiany pojedynczych wystąpień. Nieobsługiwane formy pozostają oczekujące.</string>
+    <string name="import_status_create_pending">Niektóre zmiany w kalendarzu są wstrzymane, aby uniknąć powielania wydarzeń.</string>
 </resources>

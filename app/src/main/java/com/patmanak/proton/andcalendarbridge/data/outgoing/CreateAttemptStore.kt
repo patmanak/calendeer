@@ -3,6 +3,7 @@ package com.patmanak.proton.andcalendarbridge.data.outgoing
 
 import android.content.ContentValues
 import android.content.Context
+import android.database.Cursor
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 import com.patmanak.proton.andcalendarbridge.sync.AdapterFormat
@@ -19,6 +20,8 @@ import com.patmanak.proton.andcalendarbridge.sync.CreateAttemptRecord
 import com.patmanak.proton.andcalendarbridge.sync.CreateAttemptState
 import com.patmanak.proton.andcalendarbridge.sync.MutationId
 import com.patmanak.proton.andcalendarbridge.sync.CapturedCreateDispatchIdentity
+import com.patmanak.proton.andcalendarbridge.sync.CapturedCreateBinding
+import com.patmanak.proton.andcalendarbridge.sync.CapturedProjectionHold
 import com.patmanak.proton.andcalendarbridge.sync.LocalCreateSubmission
 import com.patmanak.proton.andcalendarbridge.sync.LocalEventId
 import java.time.Instant
@@ -41,7 +44,7 @@ enum class CreatePauseReason {
  * This does not capture Provider edits, send requests, or acknowledge remote creation.
  */
 class CreateAttemptStore(context: Context, name: String = "calendar-create-attempt-v1.db") :
-    SQLiteOpenHelper(context, name, null, 5), CreateAssociationJournal {
+    SQLiteOpenHelper(context, name, null, 6), CreateAssociationJournal {
     private val lock = Mutex()
     @Volatile var admitAssociation: (CalendarScope) -> Boolean = { true }
     @Volatile var admitDispatch: (CalendarScope) -> Boolean = { true }
@@ -70,14 +73,36 @@ class CreateAttemptStore(context: Context, name: String = "calendar-create-attem
         createBindings(db)
         createPauses(db)
         createCapturedLinks(db)
+        createCapturedBindings(db)
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        check(oldVersion in 1..4 && newVersion == 5) { "Explicit create journal schema migration required" }
+        check(oldVersion in 1..5 && newVersion == 6) { "Explicit create journal schema migration required" }
         if (oldVersion == 1) db.execSQL("ALTER TABLE create_attempts ADD COLUMN evidence TEXT")
         if (oldVersion < 3) createBindings(db)
         if (oldVersion < 4) createPauses(db)
-        createCapturedLinks(db)
+        if (oldVersion < 5) createCapturedLinks(db)
+        createCapturedBindings(db)
+    }
+
+    private fun createCapturedBindings(db: SQLiteDatabase) {
+        db.execSQL("""
+            CREATE TABLE captured_create_bindings (
+                account TEXT NOT NULL, calendar TEXT NOT NULL,
+                generation INTEGER NOT NULL CHECK(generation >= 0), mutation TEXT NOT NULL,
+                adapter TEXT NOT NULL, version INTEGER NOT NULL CHECK(version > 0),
+                payload_fingerprint TEXT NOT NULL,
+                local_id TEXT NOT NULL, capture_id TEXT NOT NULL,
+                capture_adapter TEXT NOT NULL, capture_version INTEGER NOT NULL CHECK(capture_version > 0),
+                timestamp INTEGER NOT NULL, content_fingerprint TEXT NOT NULL,
+                fingerprint_version INTEGER NOT NULL CHECK(fingerprint_version = 1),
+                event TEXT NOT NULL, verified_revision TEXT NOT NULL,
+                PRIMARY KEY(account, calendar, generation, mutation),
+                UNIQUE(account, calendar, generation, event),
+                FOREIGN KEY(account, calendar, generation, mutation)
+                    REFERENCES captured_create_links(account, calendar, generation, mutation)
+            )
+        """.trimIndent())
     }
 
     private fun createCapturedLinks(db: SQLiteDatabase) {
@@ -169,8 +194,11 @@ class CreateAttemptStore(context: Context, name: String = "calendar-create-attem
         val wanted = CreatedEventBinding(attempt, observation.event.eventId, observation.event.revision)
         return access { db ->
             associationTransaction(db, attempt.scope) {
-                check(!hasCapturedLink(db, attempt.scope, attempt.id)) { "Captured association requires its own reconciliation" }
+                check(!hasCapturedWork(db, attempt.scope, attempt.id)) { "Captured association requires its own reconciliation" }
                 check(read(db, attempt.scope, attempt.id) == expectedUnknown) { "Binding requires identical unknown work" }
+                check(!hasEvent(db, "captured_create_bindings", attempt.scope, wanted.eventId)) {
+                    "Remote event already has a captured association"
+                }
                 val existing = readBinding(db, attempt)
                 if (existing != null) {
                     check(existing == wanted) { "Create binding is immutable" }
@@ -194,6 +222,109 @@ class CreateAttemptStore(context: Context, name: String = "calendar-create-attem
 
     override suspend fun binding(identity: CreateAttemptIdentity): CreatedEventBinding? =
         access { db -> readBinding(db, identity) }
+
+    /** Immutable authenticated proof only. No Provider acknowledgement or admission reset.
+     * The owner must compare the exact captured content after strict inspectCaptured verification.
+     * This store compares the attempt/link and remote identity/revision, not plaintext content.
+     */
+    suspend fun bindCaptured(expectedUnknown: CreateAttemptRecord, identity: CapturedCreateDispatchIdentity,
+        observation: CreateSubmissionObservation.Verified): CapturedCreateBinding {
+        require(expectedUnknown.state == CreateAttemptState.OUTCOME_UNKNOWN) { "Captured binding requires unknown work" }
+        require(CreateAttemptIdentity.of(expectedUnknown) == identity.attempt && observation.attempt == identity.attempt) {
+            "Captured observation requires identical work"
+        }
+        val wanted = CapturedCreateBinding(identity, observation.event.eventId, observation.event.revision)
+        return access { db ->
+            associationTransaction(db, identity.attempt.scope) {
+                val parent = read(db, identity.attempt.scope, identity.attempt.id)
+                check(parent == expectedUnknown &&
+                    readCapturedIdentity(db, identity.attempt.scope, identity.attempt.id, parent) == identity) {
+                    "Captured binding requires identical unknown work and local link"
+                }
+                check(!hasEvent(db, "create_bindings", identity.attempt.scope, wanted.eventId)) {
+                    "Remote event already has a generic association"
+                }
+                val existing = readCapturedBinding(db, identity, parent)
+                if (hasCapturedBinding(db, identity.attempt.scope, identity.attempt.id)) {
+                    check(existing == wanted) { "Captured binding is immutable" }
+                } else {
+                    db.insertOrThrow("captured_create_bindings", null, capturedValues(identity).apply {
+                        put("event", wanted.eventId.value); put("verified_revision", wanted.verifiedRevision.value)
+                    })
+                }
+                wanted
+            }
+        }
+    }
+
+    suspend fun capturedBinding(identity: CapturedCreateDispatchIdentity): CapturedCreateBinding? = access { db ->
+        try { readCapturedBinding(db, identity, read(db, identity.attempt.scope, identity.attempt.id)) }
+        catch (_: IllegalArgumentException) { null }
+        catch (_: DateTimeException) { null }
+    }
+
+    /** A consistent conservative view of admitted captured work, including damaged raw rows.
+     * UNKNOWN without exact proof blocks the whole scope; exact proof holds its remote event.
+     * Event IDs from a different import adapter format cannot narrow the scope hold.
+     * Valid PREPARED work cannot have sent a request and therefore does not impede import.
+     * Database failures propagate so callers cannot interpret unreadable storage as freedom.
+     */
+    suspend fun capturedProjectionHold(scope: CalendarScope,
+        currentImportFormat: AdapterFormat): CapturedProjectionHold = access { db ->
+        transaction(db) {
+            var blocked = false
+            val events = mutableSetOf<EventId>()
+            db.query("captured_create_links", arrayOf("mutation"), SCOPE, scopeIdentity(scope),
+                null, null, null).use { rows ->
+                while (rows.moveToNext()) {
+                    try {
+                        val id = MutationId(rows.getString(0))
+                        val parent = read(db, scope, id)
+                        val link = readCapturedIdentity(db, scope, id, parent)
+                        if (parent == null || link == null) blocked = true
+                        else when (parent.state) {
+                            CreateAttemptState.PREPARED -> if (hasCapturedBinding(db, scope, id)) blocked = true
+                            CreateAttemptState.OUTCOME_UNKNOWN -> {
+                                val proof = readCapturedBinding(db, link, parent)
+                                if (link.captureFormat != currentImportFormat || proof == null ||
+                                    hasEvent(db, "create_bindings", scope, proof.eventId)) blocked = true
+                                else events += proof.eventId
+                            }
+                        }
+                    } catch (_: IllegalArgumentException) { blocked = true }
+                    catch (_: DateTimeException) { blocked = true }
+                }
+            }
+            // Out-of-band corruption can leave a proof without its required capture link.
+            db.rawQuery("""SELECT 1 FROM captured_create_bindings b WHERE b.account=? AND b.calendar=?
+                AND b.generation=? AND NOT EXISTS (SELECT 1 FROM captured_create_links l
+                    WHERE l.account=b.account AND l.calendar=b.calendar AND l.generation=b.generation
+                        AND l.mutation=b.mutation) LIMIT 1""".trimIndent(), scopeIdentity(scope)).use {
+                if (it.moveToFirst()) blocked = true
+            }
+            CapturedProjectionHold(blocked, events.toSet())
+        }
+    }
+
+    private fun hasEvent(db: SQLiteDatabase, table: String, scope: CalendarScope, event: EventId): Boolean =
+        db.query(table, arrayOf("mutation"), "$SCOPE AND event=?", scopeIdentity(scope) + event.value,
+            null, null, null).use { it.moveToFirst() }
+
+    private fun hasCapturedBinding(db: SQLiteDatabase, scope: CalendarScope, id: MutationId): Boolean =
+        db.query("captured_create_bindings", arrayOf("mutation"), IDENTITY, identity(scope, id),
+            null, null, null).use { it.moveToFirst() }
+
+    private fun readCapturedBinding(db: SQLiteDatabase, identity: CapturedCreateDispatchIdentity,
+        knownParent: CreateAttemptRecord?): CapturedCreateBinding? {
+        if (knownParent == null || knownParent.state != CreateAttemptState.OUTCOME_UNKNOWN ||
+            readCapturedIdentity(db, identity.attempt.scope, identity.attempt.id, knownParent) != identity) return null
+        return db.query("captured_create_bindings", CAPTURE_COLUMNS + arrayOf("event", "verified_revision"),
+            IDENTITY, identity(identity.attempt.scope, identity.attempt.id), null, null, null).use { row ->
+            if (!row.moveToFirst() || decodeCapturedLink(row, identity.attempt) != identity) null
+            else try { CapturedCreateBinding(identity, EventId(row.getString(10)), Revision(row.getString(11))) }
+            catch (_: IllegalArgumentException) { null }
+        }
+    }
 
     /** Historical locator only: callers must inspect the current cache and owned Provider row again. */
     suspend fun retainProjection(binding: CreatedEventBinding, witness: OwnedEventWitness) {
@@ -231,7 +362,7 @@ class CreateAttemptStore(context: Context, name: String = "calendar-create-attem
     }
 
     private fun readBinding(db: SQLiteDatabase, attempt: CreateAttemptIdentity): CreatedEventBinding? {
-        if (hasCapturedLink(db, attempt.scope, attempt.id)) return null
+        if (hasCapturedWork(db, attempt.scope, attempt.id)) return null
         val parent = read(db, attempt.scope, attempt.id) ?: return null
         if (parent.state != CreateAttemptState.OUTCOME_UNKNOWN || CreateAttemptIdentity.of(parent) != attempt) return null
         return db.query("create_bindings", arrayOf("adapter", "version", "fingerprint", "event", "verified_revision"),
@@ -258,7 +389,7 @@ class CreateAttemptStore(context: Context, name: String = "calendar-create-attem
         }
         access { db ->
             dispatchTransaction(db, record.scope, { error("Create dispatch lease is not current") }) {
-                check(!hasCapturedLink(db, record.scope, record.id)) { "Captured work requires its exact local link" }
+                check(!hasCapturedWork(db, record.scope, record.id)) { "Captured work requires its exact local link" }
                 val existing = read(db, record.scope, record.id)
                 if (existing != null) {
                     check((existing.state == CreateAttemptState.OUTCOME_UNKNOWN || existing.protectedEvidence == null) &&
@@ -288,7 +419,7 @@ class CreateAttemptStore(context: Context, name: String = "calendar-create-attem
         if (expected.state != CreateAttemptState.PREPARED || expected.protectedEvidence != null) return false
         return access { db ->
             dispatchTransaction(db, expected.scope, { false }) {
-                if (hasCapturedLink(db, expected.scope, expected.id)) false else claimPrepared(db, expected)
+                if (hasCapturedWork(db, expected.scope, expected.id)) false else claimPrepared(db, expected)
             }
         }
     }
@@ -307,6 +438,7 @@ class CreateAttemptStore(context: Context, name: String = "calendar-create-attem
                         parent.copy(state = CreateAttemptState.PREPARED, protectedEvidence = null) == record &&
                         readCapturedIdentity(db, record.scope, record.id, parent) == link) { "Captured work is immutable" }
                 } else {
+                    check(!hasCapturedBinding(db, record.scope, record.id)) { "Orphaned captured proof cannot be adopted" }
                     check(parent == null) { "Existing generic work cannot be adopted" }
                     db.insertOrThrow("create_attempts", null, ContentValues().apply {
                         put("account", record.scope.account.value); put("calendar", record.scope.calendar.value)
@@ -314,16 +446,7 @@ class CreateAttemptStore(context: Context, name: String = "calendar-create-attem
                         put("adapter", record.format.id); put("version", record.format.version)
                         put("payload", record.protectedPayload); put("state", record.state.name)
                     })
-                    db.insertOrThrow("captured_create_links", null, ContentValues().apply {
-                        put("account", record.scope.account.value); put("calendar", record.scope.calendar.value)
-                        put("generation", record.scope.generation); put("mutation", record.id.value)
-                        put("adapter", link.attempt.format.id); put("version", link.attempt.format.version)
-                        put("payload_fingerprint", link.attempt.payloadFingerprint)
-                        put("local_id", link.localId.value); put("capture_id", link.captureId.value)
-                        put("capture_adapter", link.captureFormat.id); put("capture_version", link.captureFormat.version)
-                        put("timestamp", link.timestamp.epochSecond); put("content_fingerprint", link.contentFingerprint)
-                        put("fingerprint_version", link.fingerprintVersion)
-                    })
+                    db.insertOrThrow("captured_create_links", null, capturedValues(link))
                 }
                 link
             }
@@ -337,9 +460,9 @@ class CreateAttemptStore(context: Context, name: String = "calendar-create-attem
             catch (_: DateTimeException) { null }
         }
 
-    /** Raw presence blocks generic paths even when the captured identity cannot be decoded. */
+    /** Raw work/proof presence blocks generic paths even when its local link is missing or damaged. */
     suspend fun isCaptured(scope: CalendarScope, id: MutationId): Boolean =
-        access { db -> hasCapturedLink(db, scope, id) }
+        access { db -> hasCapturedWork(db, scope, id) }
 
     /** Full immutable record/link comparison and pause check precede durable UNKNOWN admission. */
     suspend fun claimCaptured(expected: CreateAttemptRecord, link: CapturedCreateDispatchIdentity): Boolean {
@@ -359,23 +482,40 @@ class CreateAttemptStore(context: Context, name: String = "calendar-create-attem
         db.query("captured_create_links", arrayOf("mutation"), IDENTITY, identity(scope, id), null, null, null)
             .use { it.moveToFirst() }
 
+    private fun hasCapturedWork(db: SQLiteDatabase, scope: CalendarScope, id: MutationId): Boolean =
+        hasCapturedLink(db, scope, id) || hasCapturedBinding(db, scope, id)
+
     private fun readCapturedIdentity(db: SQLiteDatabase, scope: CalendarScope, id: MutationId,
         knownParent: CreateAttemptRecord?): CapturedCreateDispatchIdentity? {
         if (knownParent == null || knownParent.state == CreateAttemptState.PREPARED &&
             knownParent.protectedEvidence != null) return null
         val attempt = CreateAttemptIdentity.of(knownParent)
-        return db.query("captured_create_links", arrayOf("adapter", "version", "payload_fingerprint",
-            "local_id", "capture_id", "capture_adapter", "capture_version", "timestamp",
-            "content_fingerprint", "fingerprint_version"), IDENTITY, identity(scope, id), null, null, null).use { row ->
-            if (!row.moveToFirst() || row.getString(0) != attempt.format.id || row.getInt(1) != attempt.format.version ||
-                row.getString(2) != attempt.payloadFingerprint) null
-            else try {
-                CapturedCreateDispatchIdentity(attempt, LocalEventId(row.getString(3)), MutationId(row.getString(4)),
-                    AdapterFormat(row.getString(5), row.getInt(6)), Instant.ofEpochSecond(row.getLong(7)),
-                    row.getString(8), row.getInt(9))
-            } catch (_: IllegalArgumentException) { null }
-            catch (_: DateTimeException) { null }
+        return db.query("captured_create_links", CAPTURE_COLUMNS, IDENTITY, identity(scope, id),
+            null, null, null).use { row ->
+            if (!row.moveToFirst()) null else decodeCapturedLink(row, attempt)
         }
+    }
+
+    private fun capturedValues(link: CapturedCreateDispatchIdentity) = ContentValues().apply {
+        put("account", link.attempt.scope.account.value); put("calendar", link.attempt.scope.calendar.value)
+        put("generation", link.attempt.scope.generation); put("mutation", link.attempt.id.value)
+        put("adapter", link.attempt.format.id); put("version", link.attempt.format.version)
+        put("payload_fingerprint", link.attempt.payloadFingerprint)
+        put("local_id", link.localId.value); put("capture_id", link.captureId.value)
+        put("capture_adapter", link.captureFormat.id); put("capture_version", link.captureFormat.version)
+        put("timestamp", link.timestamp.epochSecond); put("content_fingerprint", link.contentFingerprint)
+        put("fingerprint_version", link.fingerprintVersion)
+    }
+
+    private fun decodeCapturedLink(row: Cursor, attempt: CreateAttemptIdentity): CapturedCreateDispatchIdentity? {
+        if (row.getString(0) != attempt.format.id || row.getInt(1) != attempt.format.version ||
+            row.getString(2) != attempt.payloadFingerprint) return null
+        return try {
+            CapturedCreateDispatchIdentity(attempt, LocalEventId(row.getString(3)), MutationId(row.getString(4)),
+                AdapterFormat(row.getString(5), row.getInt(6)), Instant.ofEpochSecond(row.getLong(7)),
+                row.getString(8), row.getInt(9))
+        } catch (_: IllegalArgumentException) { null }
+        catch (_: DateTimeException) { null }
     }
 
     private fun claimPrepared(db: SQLiteDatabase, expected: CreateAttemptRecord): Boolean =
@@ -429,6 +569,9 @@ class CreateAttemptStore(context: Context, name: String = "calendar-create-attem
     private fun identity(scope: CalendarScope, id: MutationId) = arrayOf(scope.account.value,
         scope.calendar.value, scope.generation.toString(), id.value)
 
+    private fun scopeIdentity(scope: CalendarScope) = arrayOf(scope.account.value, scope.calendar.value,
+        scope.generation.toString())
+
     private suspend fun <T> access(action: suspend (SQLiteDatabase) -> T): T = withContext(Dispatchers.IO) {
         lock.withLock {
             currentCoroutineContext().ensureActive()
@@ -462,5 +605,8 @@ class CreateAttemptStore(context: Context, name: String = "calendar-create-attem
 
     private companion object {
         const val IDENTITY = "account=? AND calendar=? AND generation=? AND mutation=?"
+        const val SCOPE = "account=? AND calendar=? AND generation=?"
+        val CAPTURE_COLUMNS = arrayOf("adapter", "version", "payload_fingerprint", "local_id", "capture_id",
+            "capture_adapter", "capture_version", "timestamp", "content_fingerprint", "fingerprint_version")
     }
 }

@@ -28,6 +28,7 @@ enum class CreateAssociationResult { INACTIVE, UNRESOLVED, WAITING_IMPORT, WAITI
 enum class LocalEditCaptureResult { INACTIVE, UNQUALIFIED, RETAINED, CONFLICT, UNAVAILABLE }
 enum class LocalCreatePreparationResult { INACTIVE, UNQUALIFIED, RETAINED, UNSUPPORTED, UNAVAILABLE }
 enum class LocalCreateSubmissionResult { INACTIVE, UNQUALIFIED, RETAINED, UNRESOLVED, UNSUPPORTED, UNAVAILABLE }
+enum class CapturedCreateBindingResult { INACTIVE, UNRESOLVED, RETAINED }
 /** One process owner for foreground and durable worker triggers; no event content reaches UI. */
 class ImportCoordinator(
     private val context: Context,
@@ -662,7 +663,82 @@ class ImportCoordinator(
           }
     }
 
+    /** Retain only the first authenticated captured identity. No original-row ACK or projection. */
+    suspend fun bindLocalCreateObservation(target: CalendarScope, localId: LocalEventId, id: MutationId,
+        attempt: MutationId, port: CalendarCreateSubmissionPort? = null): CapturedCreateBindingResult = mutex.withLock {
+        val captures = localCreates ?: return@withLock CapturedCreateBindingResult.UNRESOLVED
+        val journal = creates ?: return@withLock CapturedCreateBindingResult.UNRESOLVED
+        ensureCreateLifecycle()
+        val expected = generation
+        val policy = createPolicyRevision.get()
+        val active = { authenticated && generation == expected && createPolicyRevision.get() == policy && hasCalendarPermissions() }
+        suspend fun available(): Boolean {
+            if (!isCurrent(expected, target.account) || !active()) return false
+            val selected = store.selections(target.account).singleOrNull { it.scope == target }
+            return selected?.enabled == true && selected.available && active()
+        }
+        try {
+            if (!available()) return@withLock CapturedCreateBindingResult.INACTIVE
+            store.admitTransaction = { it == target && active() }
+            captures.admitCapture = { it == target && active() }
+            journal.admitAssociation = { it == target && active() }
+            val submission = captures.readSubmission(target, localId) ?: return@withLock CapturedCreateBindingResult.UNRESOLVED
+            val reserved = submission.reservation
+            val captured = reserved.intent.reservation
+            if (captured.scope != target || captured.localId != localId || captured.id != id || reserved.attempt != attempt ||
+                captured.format != remote.format || store.transaction(target) { checkpoint?.format } != captured.format)
+                return@withLock CapturedCreateBindingResult.UNRESOLVED
+            val identity = CapturedCreateDispatchIdentity.of(submission)
+            val unknown = journal.read(target, attempt) ?: return@withLock CapturedCreateBindingResult.UNRESOLVED
+            if (unknown.state != CreateAttemptState.OUTCOME_UNKNOWN || journal.capturedIdentity(target, attempt) != identity)
+                return@withLock CapturedCreateBindingResult.UNRESOLVED
+            val cached = journal.capturedBinding(identity)
+            if (cached == null) {
+                val inspections = port ?: return@withLock CapturedCreateBindingResult.UNRESOLVED
+                if (inspections.knownEmptySubmissionFormat != reserved.format) return@withLock CapturedCreateBindingResult.UNRESOLVED
+                val observed = inspections.inspectCaptured(unknown, reserved.draft) as? CreateSubmissionObservation.Verified
+                    ?: return@withLock CapturedCreateBindingResult.UNRESOLVED
+                if (!available()) return@withLock CapturedCreateBindingResult.INACTIVE
+                if (observed.attempt != identity.attempt || observed.event.content != reserved.draft.content ||
+                    inspections.knownEmptySubmissionFormat != reserved.format || remote.format != captured.format ||
+                    store.transaction(target) { checkpoint?.format } != captured.format ||
+                    captures.readSubmission(target, localId) != submission || journal.capturedIdentity(target, attempt) != identity)
+                    return@withLock CapturedCreateBindingResult.UNRESOLVED
+                journal.bindCaptured(unknown, identity, observed)
+            }
+            if (!available()) return@withLock CapturedCreateBindingResult.INACTIVE
+            if (remote.format != captured.format || store.transaction(target) { checkpoint?.format } != captured.format ||
+                captures.readSubmission(target, localId) != submission || journal.capturedBinding(identity) == null)
+                return@withLock CapturedCreateBindingResult.UNRESOLVED
+            CapturedCreateBindingResult.RETAINED
+        } catch (cancelled: CancellationException) { throw cancelled }
+          catch (_: Exception) { CapturedCreateBindingResult.UNRESOLVED }
+          finally {
+              journal.admitAssociation = { false }
+              captures.admitCapture = { false }
+              store.admitTransaction = { false }
+          }
+    }
+
+    private class CapturedProjectionPending : IllegalStateException("Captured creation reconciliation pending")
+    private suspend fun capturedProjectionHold(target: CalendarScope) =
+        creates?.capturedProjectionHold(target, remote.format) ?: CapturedProjectionHold()
+
+    // Keep the hold read and status publication out of the larger import coroutine.
+    private suspend fun publishImportProgress(target: CalendarScope, status: String, completedAt: Long? = null) {
+        val held = capturedProjectionHold(target).blocksProjection
+        store.status(target, if (held) "CREATE_PENDING" else status, if (held) null else completedAt)
+    }
+    private suspend fun requireProjectionAvailable(target: CalendarScope, eventId: EventId) {
+        if (capturedProjectionHold(target).holds(eventId)) throw CapturedProjectionPending()
+    }
+    private suspend fun runnableProjections(target: CalendarScope, limit: Int = 100): List<ProjectionIntent> {
+        val hold = capturedProjectionHold(target)
+        return if (hold.scopeBlocked) emptyList() else store.pending(target, limit, hold.events)
+    }
+
     private suspend fun captureBaseline(expected: Long, target: CalendarScope, eventId: EventId): RemoteChange.Upsert? {
+        requireProjectionAvailable(target, eventId)
         val receipt = store.projectionReceipt(target, eventId)
         val recovered = receipt?.let { recoverProjection(expected, it) } ?: false
         val base = store.projectedBaseline(target, eventId) ?: return null
@@ -673,15 +749,18 @@ class ImportCoordinator(
 
     /** A marker proves the historical write, not that the current Provider content is unchanged. */
     private suspend fun recoverProjection(expected: Long, receipt: ProjectionReceipt): Boolean {
+        requireProjectionAvailable(receipt.scope, receipt.change.eventId)
         if (receipt.format != remote.format || receipt.protocol != projection.projectionReceiptProtocol) return false
         val witness = projection.inspectProjectionReceipt(receipt) ?: return false
         check(witness.receipt == receipt) { "Projection witness differs" }
         if (!isCurrent(expected, receipt.scope.account)) throw CancellationException("Inactive projection recovery")
+        requireProjectionAvailable(receipt.scope, receipt.change.eventId)
         return store.restoreProjection(witness)
     }
 
     /** Kept out of the larger import coroutine; preparation precedes every tracked Provider write. */
     private suspend fun projectPending(intent: ProjectionIntent, expected: Long) {
+        requireProjectionAvailable(intent.scope, intent.change.eventId)
         val outstanding = store.projectionReceipt(intent.scope, intent.change.eventId)
         if (outstanding != null) {
             val recovered = recoverProjection(expected, outstanding)
@@ -691,15 +770,18 @@ class ImportCoordinator(
                 throw CalendarProjectionException(CalendarProjectionFailure.PROVIDER_REJECTED)
             }
         }
+        requireProjectionAvailable(intent.scope, intent.change.eventId)
         if (projection.projectionReceiptProtocol == 1 && ProjectionReceipt.supports(intent.change)) {
             val prepared = store.prepareProjection(intent, remote.format)
             val witness = projection.applyTracked(prepared)
             check(witness.receipt == prepared) { "Projection witness differs" }
             if (!isCurrent(expected, intent.scope.account)) throw CancellationException("Inactive projection acknowledgement")
+            requireProjectionAvailable(intent.scope, intent.change.eventId)
             check(store.restoreProjection(witness)) { "Projection acknowledgement remains unresolved" }
         } else {
             projection.apply(intent, if (intent.change is RemoteChange.Deleted)
                 store.deletedSeriesUid(intent.scope, intent.change.eventId) else null)
+            requireProjectionAvailable(intent.scope, intent.change.eventId)
             store.acknowledge(intent)
         }
     }
@@ -869,11 +951,11 @@ class ImportCoordinator(
                         }
                     }
                     suspend fun drain(): Boolean {
-                        for (intent in store.pending(calendarScope)) {
+                        for (intent in runnableProjections(calendarScope)) {
                             if (!isCurrent(expected, account)) throw CancellationException()
                             projectPending(intent, expected)
                         }
-                        return store.pending(calendarScope, 1).isNotEmpty()
+                        return runnableProjections(calendarScope, 1).isNotEmpty()
                     }
                     var remaining = drain()
                     if (stagedEngine != null && !remaining) {
@@ -908,7 +990,7 @@ class ImportCoordinator(
                             else -> "IMPORTED"
                         }
                         if (!isCurrent(expected, account)) return ImportRunResult.COMPLETE
-                        store.status(calendarScope, status,
+                        publishImportProgress(calendarScope, status,
                             if (!blocked && progress.traversalComplete && !remaining && deltaProgress?.blocked != true &&
                                 deltaProgress?.workRemaining != true &&
                                 !historyGap && !missingSeries && !mappingRemaining &&
@@ -918,19 +1000,20 @@ class ImportCoordinator(
                         remaining = remaining || incompleteNetwork || (allowNetwork && mappingRemaining)
                     } else if (network && selection.nextAttempt > System.currentTimeMillis()) {
                         retry = true
-                        store.status(calendarScope, "PENDING")
+                        publishImportProgress(calendarScope, "PENDING")
                     } else if (network && !remaining) {
                         val progress = engine.importPages(calendarScope)
                         remaining = drain() || !progress.traversalComplete || store.mappingRescanPending(calendarScope)
                         val missingSeries = store.blockedSeriesCount(calendarScope) > 0
                         if (!isCurrent(expected, account)) return ImportRunResult.COMPLETE
-                        store.status(calendarScope, if (remaining) "PENDING" else if (missingSeries) "SERIES_PENDING"
+                        publishImportProgress(calendarScope, if (remaining) "PENDING" else if (missingSeries) "SERIES_PENDING"
                             else if (selection.historyGap) "HISTORY_GAP" else "IMPORTED",
-                            if (remaining || selection.historyGap || missingSeries) null else System.currentTimeMillis())
+                            if (remaining || selection.historyGap || missingSeries)
+                                null else System.currentTimeMillis())
                     } else {
                         // Local work must not overwrite the reason the last network run was blocked.
                         val blocked = selection.status in setOf("NETWORK", "UNSUPPORTED", "ERROR", "AUTH", "CAPACITY", "LOCAL_KEYS")
-                        store.status(calendarScope, if (blocked) selection.status else if (remaining || store.mappingRescanPending(calendarScope)) "PENDING" else
+                        publishImportProgress(calendarScope, if (blocked) selection.status else if (remaining || store.mappingRescanPending(calendarScope)) "PENDING" else
                             if (store.complete(calendarScope)) {
                                 if (store.blockedSeriesCount(calendarScope) > 0) "SERIES_PENDING"
                                 else if (store.deferredCount(calendarScope) > 0) "PARTIAL"
@@ -973,7 +1056,7 @@ class ImportCoordinator(
                     // Storage errors can also happen while publishing status or refreshing UI.
                     // Let the worker boundary back off without depending on another DB write.
                     if (retryableImportFailure(failure)) throw failure
-                    store.status(calendarScope, "ERROR")
+                    store.status(calendarScope, if (failure is CapturedProjectionPending) "CREATE_PENDING" else "ERROR")
                 }
             }
         } catch (failure: Exception) {

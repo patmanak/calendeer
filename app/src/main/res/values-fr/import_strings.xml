@@ -36,4 +36,5 @@
     <string name="import_projection_pending">Mises à jour en attente de copie vers Android : %1$d</string>
     <string name="import_status_series_pending">Certaines occurrences attendent leur série d’origine avant import. Actualisez pour réessayer.</string>
     <string name="import_recurrence_limits">Les récurrences courantes et les modifications d’une occurrence sont importées. Les formes non prises en charge restent en attente.</string>
+    <string name="import_status_create_pending">Certaines modifications du calendrier sont en attente pour éviter les doublons.</string>
 </resources>

@@ -36,4 +36,5 @@
     <string name="import_projection_pending">Updates waiting to be copied to Android: %1$d</string>
     <string name="import_status_series_pending">Waiting for the original series before importing some occurrences. Refresh to retry.</string>
     <string name="import_recurrence_limits">Common recurrence rules and single-occurrence changes are imported. Unsupported recurrence forms remain pending.</string>
+    <string name="import_status_create_pending">Some calendar changes are on hold to avoid duplicate events.</string>
 </resources>

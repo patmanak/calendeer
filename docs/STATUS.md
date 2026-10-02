@@ -277,7 +277,18 @@ Captured submissions require the exact sealed known-empty draft. Generic dispatc
 and association refuse captured links. UNKNOWN work only permits explicit readback;
 it never sends again or acknowledges the original local row. Duplicate-free
 association, subsequent-edit conflicts and live captured upload remain separate
-work. The controlled qualification is described in [validation](VALIDATION.md).
+work.
+The import owner now retains incoming event projections while captured UNKNOWN
+work has no qualified remote identity. An explicit readback can retain a distinct
+immutable binding in dispatch journal v6; it narrows the hold to that remote event
+without acknowledging or rewriting the original Android row. The proof can resume
+offline and excludes generic association paths. Damaged or unreadable work remains
+blocked. Unrelated events can project after identity qualification, while received
+pages and local processing continue. Held rows remain pending without requesting
+automatic worker continuations; a local waiting state is available in all eight
+languages. This durable prerequisite still needs original-row attachment and
+conflict resolution before the hold can be released. The controlled qualification
+is described in [validation](VALIDATION.md).
 The application still exposes no writable mirror or event editor. General outgoing
 queue/resolution, automatic Provider capture and conditional Proton UPDATE/DELETE
 guarantees remain unqualified. See

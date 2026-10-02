@@ -947,7 +947,7 @@ without a usable preparation, admission or send path. It does not submit to Prot
 These checks do not establish cross-store atomicity, simultaneous Android
 processes, power-loss durability, real rights revocation or live captured upload.
 No original-row acknowledgement, remote binding or projection reconciliation is
-implemented by this path. A captured live creation must wait for association
+implemented by the dispatch path itself. A captured live creation must wait for association
 that avoids a duplicate ordinary import. Writable UI and automatic outgoing
 processing remain unavailable.
 
@@ -957,6 +957,61 @@ target. Read-only inspection of the retained legacy live event also passed with
 the current build, without another creation. Host sync, Proton adapter and app
 tests and Android lint passed. No live captured submission was run; controlled
 admission and native inspection must not be presented as its service qualification.
+
+## Captured identity binding and incoming projection hold
+
+`CapturedCreateBindingTest` separates a scope-wide hold from exact held event
+identities and checks immutable proof identity and redacted diagnostics.
+`CapturedCreateBindingStoreDeviceTest` uses isolated SQLite work with explicit
+`providerFixture=true`. It verifies independently constructed v5 migration,
+preserved attempts/evidence/pauses/associations, no invented bindings, full-link
+proof equality, first-proof immutability, scope isolation and uniqueness across
+captured and generic bindings. An incompatible current import format keeps the
+scope held even with a retained binding. Malformed or orphaned parent/link/proof work keeps
+the scope held; a missing table propagates failure. Transaction rollback, revoked
+admission, cancellation and competing helpers cannot free unresolved work.
+These helpers establish same-process concurrency, not physical power loss or
+simultaneous Android processes.
+
+`CapturedCreateImportHoldCoordinatorDeviceTest` checks the production owner with
+real journals and controlled remote/Provider ports. An unwired-owner reproduction
+must project the received captured event and fail the no-projection assertion.
+After wiring, UNKNOWN holds survive reopening, keep incoming work pending, refuse
+receipt recovery and local-baseline recovery, and never acknowledge the held event.
+Wrong observations and loss of current access cannot create a binding. A retained
+binding resumes with no submission port. The held event's newer content or deletion
+does not replace the first proof; unrelated events can project. Filtering occurs
+before the limit: runnable work behind more than 100 held rows still advances.
+Held work alone does not request continuation. Legacy downloads and a retained
+staged receipt still advance while projection is held; the latter processes offline
+without calling receive. Journal failure does not fall back to ordinary projection.
+
+`CapturedCreateImportHoldIntegrationDeviceTest` uses the real Calendar Provider,
+isolated journals and fake captured transport. UNKNOWN followed by incoming data
+cannot produce a second row before or after reopening. Readback binding preserves
+a later local edit and its dirty marker while allowing an unrelated event to import.
+A purged original is not recreated by the held incoming event. Synthetic local
+calendars/accounts/databases are removed; existing live examples are untouched.
+
+The production Proton captured-inspection contract remains the previously
+qualified adapter; these new fixtures do not prove a captured service upload or
+original-row acknowledgement. The hold has no release in this slice. Metadata
+attachment, receipt recovery, baseline/pending acknowledgement and conflicts must
+be qualified before a live captured-creation journey or writable-mode rollout.
+
+The unwired-owner physical reproduction failed its no-projection assertion; after
+wiring, all 35 binding/hold fixtures passed. The same build also passed 34 captured
+dispatch regressions, 53 journal/lifecycle cases, 36 import/recovery cases and
+12 association cases. Read-only inspection of the retained legacy live event
+passed without a new submission. Host checks passed with 114 sync, 274 Proton
+adapter and 10 app tests, plus Android lint and both debug APK builds.
+
+Adding hold reads to the larger import coroutine reproduced a native runtime
+crash in the existing SQLite pause-intent lifecycle fixture. The same fixture
+passed with the owner wiring absent. Moving hold/status publication into a
+separate suspend helper made the exact reproduction pass, followed by the full
+physical regression groups above. The internal runtime cause remains unproven;
+this qualifies the refactor on the tested physical target, not other runtimes.
 
 ## Anonymous transport probe
 

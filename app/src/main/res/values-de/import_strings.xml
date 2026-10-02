@@ -36,4 +36,5 @@
     <string name="import_projection_pending">Ausstehende Aktualisierungen für Android: %1$d</string>
     <string name="import_status_series_pending">Einige Vorkommen warten vor dem Import auf ihre ursprüngliche Serie. Zum erneuten Versuch aktualisieren.</string>
     <string name="import_recurrence_limits">Gängige Wiederholungsregeln und Änderungen einzelner Vorkommen werden importiert. Nicht unterstützte Formen bleiben ausstehend.</string>
+    <string name="import_status_create_pending">Einige Kalenderänderungen werden zurückgehalten, um doppelte Termine zu vermeiden.</string>
 </resources>

@@ -263,7 +263,7 @@ class CreateAttemptPauseStoreDeviceTest {
         assertEquals(retained, store.read(scope, prepared.id)); assertEquals(binding, store.binding(identity))
         assertFalse(store.claim(prepared)); assertFalse(store.claim(pending))
         SQLiteDatabase.openDatabase(path.absolutePath, null, SQLiteDatabase.OPEN_READONLY).use { migrated ->
-            assertEquals(5, migrated.version)
+            assertEquals(6, migrated.version)
         }
         store.close()
         CreateAttemptStore(context, name).use { reopened ->
