@@ -126,6 +126,24 @@ unsigned row/settings metadata remains observation equality. This does not certi
 arbitrary opaque fields, current access or server concurrency, and does not change
 either protected format or reinterpret historical journal records.
 
+## Authenticated local-title preparation reads
+
+`ProtonLocalTitlePreparationAdapter` is original integration code around the
+existing Core session/context refresh, calendar metadata and bootstrap readers.
+The original-event read delegates to the existing `ProtonChangeFeedRemote.event`
+GET and its pinned Calendar protocol adaptation; no submission transport is used.
+WRITE selection reuses `ProtonCreateContextPolicy`. A shared factory supplies the
+existing decryptor/title preparer with the single refreshed local address read
+and existing Core Keystore protector. No library, upstream source or cryptographic
+primitive was added. The public preparation contract remains project-owned.
+
+The shared authentication facade freezes requests before dispatcher/mutex waiting
+and serializes preparation with logout. Explicit session checks and fresh reads
+qualify the supplied supported observation; they do not establish a server snapshot,
+concurrent-write precondition or later UPDATE eligibility. Controlled remote/session
+fixtures and real native crypto exercise this path separately from live service
+qualification. Historical sealed records and the offline opener are unchanged.
+
 ## Experimental single CREATE submission and inspection
 
 `ProtonCreateSubmissionAdapter.kt` and `ProtonCreateSubmissionCodec.kt` adapt

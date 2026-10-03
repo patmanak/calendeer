@@ -264,6 +264,30 @@ fixtures and fourteen shared-title/create/import regressions. App/test APK build
 lint (zero errors) and independent source review passed. The final application
 was installed and launched without service or Provider fixture writes.
 
+A separate `CalendarLocalEditPreparationPort` now connects title preparation to
+the shared authenticated runtime. It refreshes account/address context, reads
+calendar metadata, bootstrap and the original event, then qualifies the observed
+WRITE member and exact imported base before native crypto and protected sealing.
+The UID comes from the original GET. A changed revision is a conflict requiring
+reconciliation; missing events remain unresolved reads, not deletion evidence.
+Intent/profile/time validation precedes suspension and network work. Each received
+JSON is frozen immediately; signing reuses one protected local address DAO read.
+Session identity is rechecked after each stage and after preparation. The shared
+logout mutex serializes cleanup with in-progress work; it does not instantly cancel
+a preparation when logout is requested. Subsequent calls after cleanup are refused.
+
+This is an explicit preparation port, with no application caller, automatic
+capture, journal admission, worker or remote write. Calendar mode, scope generation
+and current intent ownership still belong to the application. Fresh reads are
+successive observations, not an atomic server snapshot or concurrency guarantee.
+The local sealed format is unchanged; old records are not upgraded by opening.
+Controlled read/session fixtures and native Core crypto test this integration;
+live service qualification of this new port remains pending. UPDATE/DELETE stay
+disabled. All thirteen new adapter cases and both new shared-facade cases passed,
+with the complete 363 Proton-adapter and 160 sync JVM suites. Twenty selected
+native crypto cases, app/test APK builds, lint (zero errors) and independent source
+review passed. The final application was installed and launched after testing.
+
 An internal offline CREATE preparer now reuses Proton's simple-event partition:
 signed clear date metadata and signed encrypted display text. It uses Biweekly
 and Proton Core primitives, with caller-supplied UID/timestamp and selected keys.

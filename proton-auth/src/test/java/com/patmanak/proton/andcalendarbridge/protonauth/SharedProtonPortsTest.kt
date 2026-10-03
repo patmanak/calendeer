@@ -19,6 +19,51 @@ import org.junit.Test
 
 @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class SharedProtonPortsTest {
+    private fun titleIntent(details: EventDetails = EventDetails()): LocalEditIntent {
+        val base = RemoteChange.Upsert(EventId("synthetic-event"), Revision("synthetic-revision"),
+            EventContent("Original", EventTime.AllDay(java.time.LocalDate.of(2026, 10, 4), java.time.LocalDate.of(2026, 10, 5)), details = details))
+        return LocalEditIntent(MutationId("synthetic-title"), CalendarScope(AccountId("a"), CalendarId("c"), 0),
+            EVENT_FORMAT, base, base.content.copy(title = "Replacement"))
+    }
+    @Test fun localTitlePreparationSharesLogoutMutexAndClosesAfterCleanup() = runTest {
+        val auth = FakeAuth(); val entered = CompletableDeferred<Unit>(); val release = CompletableDeferred<Unit>()
+        val intent = titleIntent(); val timestamp = java.time.Instant.parse("2026-10-03T12:00:00Z")
+        val port = SerializedAuthenticationPort({
+            ProtonAuthenticationGraph(auth, NoEvents, localEdits = CalendarLocalEditPreparationPort { frozen, time ->
+                entered.complete(Unit); release.await()
+                LocalEditPreparation(frozen, time, LOCAL_TITLE_PREPARATION_FORMAT, "synthetic-protected")
+            }) { CalendarCatalogResult.Success(AccountId("a"), emptyList()) }
+        }, {}, StandardTestDispatcher(testScheduler))
+        suspend fun denied() {
+            try { port.prepareLocalTitle(intent, timestamp); fail("Authentication is required") }
+            catch (failure: LocalEditPreparationException) { assertEquals(LocalEditPreparationFailure.AUTHENTICATION, failure.reason) }
+        }
+        denied(); port.restore()
+        val work = async { port.prepareLocalTitle(intent, timestamp) }; entered.await()
+        val logout = async { port.cancel() }; runCurrent()
+        assertEquals(0, auth.cancellations)
+        release.complete(Unit); assertEquals(intent, work.await().intent); logout.await()
+        assertEquals(1, auth.cancellations); denied()
+    }
+    @Test fun localTitleIntentIsFrozenBeforeWaitingForTheSharedMutex() = runTest {
+        val entered = CompletableDeferred<Unit>(); val release = CompletableDeferred<Unit>(); var calls = 0
+        val timestamp = java.time.Instant.parse("2026-10-03T12:00:00Z")
+        val port = SerializedAuthenticationPort({
+            ProtonAuthenticationGraph(FakeAuth(), NoEvents, localEdits = CalendarLocalEditPreparationPort { frozen, time ->
+                if (++calls == 1) { entered.complete(Unit); release.await() }
+                assertEquals(EventDetails(), frozen.base.content.details); assertEquals(EventDetails(), frozen.content.details)
+                LocalEditPreparation(frozen, time, LOCAL_TITLE_PREPARATION_FORMAT, "synthetic-protected")
+            }) { CalendarCatalogResult.Success(AccountId("a"), emptyList()) }
+        }, {}, StandardTestDispatcher(testScheduler))
+        port.restore()
+        val first = async { port.prepareLocalTitle(titleIntent(), timestamp) }; entered.await()
+        val reminders = mutableListOf<EventReminder>()
+        val second = async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+            port.prepareLocalTitle(titleIntent(EventDetails(reminders = reminders)), timestamp)
+        }
+        reminders.add(EventReminder(10)); release.complete(Unit)
+        first.await(); assertEquals(titleIntent(), second.await().intent); assertEquals(2, calls)
+    }
     @Test fun createSubmissionSharesLogoutMutexAndEveryEntryRequiresAuthentication() = runTest {
         val auth = FakeAuth()
         val entered = CompletableDeferred<Unit>()

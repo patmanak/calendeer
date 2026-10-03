@@ -7,6 +7,8 @@ import com.patmanak.proton.andcalendarbridge.auth.AuthenticationFlowPort
 import com.patmanak.proton.andcalendarbridge.sync.CalendarDeltaRemote
 import com.patmanak.proton.andcalendarbridge.sync.CalendarCreatePreparationPort
 import com.patmanak.proton.andcalendarbridge.sync.CalendarCreateSubmissionPort
+import com.patmanak.proton.andcalendarbridge.sync.CalendarLocalEditPreparationPort
+import com.patmanak.proton.andcalendarbridge.sync.LocalEditPreparationFailure
 import com.patmanak.proton.andcalendarbridge.sync.AccountId
 import kotlinx.coroutines.flow.first
 import com.patmanak.proton.andcalendarbridge.sync.CreatePreparationFailure
@@ -79,6 +81,7 @@ internal data class ProtonAuthenticationGraph(
     val preparations: CalendarCreatePreparationPort = CalendarCreatePreparationPort { createUnavailable(CreatePreparationFailure.UNSUPPORTED) },
     val submissions: CalendarCreateSubmissionPort? = null,
     val matchesIdentityHash: suspend (AccountId, String) -> Boolean = { _, _ -> false },
+    val localEdits: CalendarLocalEditPreparationPort = CalendarLocalEditPreparationPort { _, _ -> localEditUnavailable(LocalEditPreparationFailure.UNSUPPORTED) },
     val catalog: CalendarCatalogPort,
 )
 
@@ -197,6 +200,11 @@ internal object ProtonAuthenticationRuntime {
             preparations = ProtonCreatePreparationAdapter(readSession, contextRefresher,
                 ProtonCreateCalendarMetadataRemote(network.apiProvider), eventRemote, localAddresses,
                 ProtonCreateContextResolver(cryptoContext)::prepare, eventProtector),
+            localEdits = ProtonLocalTitlePreparationAdapter(readSession, contextRefresher,
+                ProtonCreateCalendarMetadataRemote(network.apiProvider), eventRemote,
+                LocalTitleEventRemote { session, scope, id ->
+                    ProtonChangeFeedRemote(network.apiProvider).event(session, scope.feedScope(), id.value).obj("Event")
+                }, localAddresses, localTitleCryptoPreparation(cryptoContext, eventProtector)),
             submissions = ProtonCreateSubmissionAdapter(ProtonCreatePreparationAdapter(readSession, contextRefresher,
                 ProtonCreateCalendarMetadataRemote(network.apiProvider), eventRemote, localAddresses,
                 ProtonCreateContextResolver(cryptoContext)::prepare, eventProtector, submission = true),

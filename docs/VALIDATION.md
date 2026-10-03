@@ -1705,3 +1705,41 @@ eight shared-title regressions, five create/preparation regressions and one impo
 crypto regression. App/test APK builds and lint passed (zero errors, twenty
 existing warnings), as did independent source review. The final application was
 installed and launched after testing.
+
+## Authenticated local-title preparation boundary
+
+`ProtonLocalTitlePreparationAdapterTest` uses controlled session/read/crypto ports
+to check ordering, scope and UID origin, fresh WRITE permission, local keys, changed
+revisions, missing/foreign identifiers, format/profile/time preflight, and freezing
+of caller-owned intent/metadata/bootstrap/event/address lists across suspensions.
+It refuses incompatible returned records and checks sanitized authentication,
+storage, network, missing-read, retry and unsupported failures. Cancellation remains
+cancellation at every suspending stage. The first success case failed on the initial
+unsupported stub before implementation; this is new-feature RED evidence.
+
+Two `SharedProtonPortsTest` cases exercise the actual shared facade: logout cleanup
+waits for a held preparation, later preparations are refused, and empty details are
+frozen before dispatcher switching and waiting for the mutex. A logout request
+does not imply immediate cancellation of preceding work.
+
+`ProtonAuthenticatedTitlePreparationDeviceTest` combines controlled read responses
+with real Core crypto using the same `localTitleCryptoPreparation` factory as the
+runtime. Binary and text signature fixtures refuse read-only membership, a changed
+revision and mismatched decoded content with zero seals. The positive path performs
+one local address read and one seal, then exercises fresh Keystore opening,
+original-key decryption, renewed-signature verification and complete native import.
+No account/service or Calendar Provider writes are used by these fixtures.
+
+These tests qualify controlled protocol/session behavior and native crypto wiring.
+Live service qualification of this port, killed-process orchestration, automatic
+capture/retention, scope generation/mode admission and concurrent-write protection
+remain separate work. Successive authenticated GETs are observations, not an atomic
+server snapshot. Existing sealed records receive no migration or retroactive
+qualification; UPDATE/DELETE remain disabled.
+
+All thirteen new adapter cases and both shared-facade cases passed, with all 363
+Proton-adapter and 160 sync JVM cases. Twenty selected native cases passed: the
+two new context/crypto fixtures plus eighteen base/journal/shared-title/create/
+import regressions. App/test APK builds, lint (zero errors, twenty existing
+warnings) and independent source review passed. The final application was
+installed and launched after testing.

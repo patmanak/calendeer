@@ -27,6 +27,7 @@ object ProtonAuthentication {
     fun events(context: Context): CalendarDeltaRemote = shared(context)
     fun createPreparations(context: Context): CalendarCreatePreparationPort = shared(context)
     fun createSubmissions(context: Context): CalendarCreateSubmissionPort = shared(context)
+    fun localEditPreparations(context: Context): CalendarLocalEditPreparationPort = shared(context)
     internal suspend fun matchesIdentityHash(context: Context, account: AccountId, expectedHash: String): Boolean =
         shared(context).matchesIdentityHash(account, expectedHash)
 
@@ -57,10 +58,11 @@ internal class SerializedAuthenticationPort(
     private val createGraph: () -> ProtonAuthenticationGraph,
     private val cancelVerification: () -> Unit,
     private val dispatcher: CoroutineDispatcher = Dispatchers.IO,
-) : AuthenticationFlowPort, CalendarCatalogPort, CalendarDeltaRemote, RollingCalendarRemote, ContentMappingRemote, CalendarCreatePreparationPort, CalendarCreateSubmissionPort {
+) : AuthenticationFlowPort, CalendarCatalogPort, CalendarDeltaRemote, RollingCalendarRemote, ContentMappingRemote, CalendarCreatePreparationPort, CalendarCreateSubmissionPort, CalendarLocalEditPreparationPort {
     override val contentMapping = EVENT_CONTENT_MAPPING
     override val localCreateFormat = LOCAL_CREATE_PREPARATION_FORMAT
     override val knownEmptySubmissionFormat = KNOWN_EMPTY_SUBMISSION_FORMAT
+    override val localTitleFormat = LOCAL_TITLE_PREPARATION_FORMAT
     constructor(context: Context, verification: HumanVerificationHost) : this(
         { ProtonAuthenticationRuntime.build(context, verification.delegate.hooks) },
         verification::cancel,
@@ -80,6 +82,16 @@ internal class SerializedAuthenticationPort(
         lock.withLock {
             if (!authenticated) createUnavailable(CreatePreparationFailure.AUTHENTICATION)
             checkNotNull(graph).preparations.prepareCreate(draft)
+        }
+    }
+    override suspend fun prepareLocalTitle(intent: LocalEditIntent, timestamp: java.time.Instant): LocalEditPreparation {
+        // Freeze before dispatcher switching or waiting for the logout mutex.
+        val frozen = freezeLocalTitleRequest(intent, timestamp)
+        return withContext(dispatcher) {
+            lock.withLock {
+                if (!authenticated) localEditUnavailable(LocalEditPreparationFailure.AUTHENTICATION)
+                checkNotNull(graph).localEdits.prepareLocalTitle(frozen, timestamp)
+            }
         }
     }
     override suspend fun prepareSubmission(draft: CalendarCreateDraft): PreparedCalendarCreate = submissionOperation { it.prepareSubmission(draft) }
