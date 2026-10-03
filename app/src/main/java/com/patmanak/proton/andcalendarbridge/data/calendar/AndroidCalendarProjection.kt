@@ -155,10 +155,13 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
         applyInternal(intent, seriesUid, null)
     }
 
-    override suspend fun applyTracked(receipt: ProjectionReceipt): AppliedProjectionWitness = operation {
-        applyInternal(ProjectionIntent(receipt.scope, receipt.change), null, receipt)
-        requirePermissions()
-        AppliedProjectionWitness(receipt)
+    override suspend fun applyTracked(receipt: ProjectionReceipt): AppliedProjectionWitness {
+        val frozen = snapshotReceipt(receipt)
+        return operation {
+            applyInternal(ProjectionIntent(frozen.scope, frozen.change), null, frozen)
+            requirePermissions()
+            AppliedProjectionWitness(frozen)
+        }
     }
 
     private fun applyInternal(intent: ProjectionIntent, seriesUid: String?, receipt: ProjectionReceipt?) {
@@ -246,34 +249,41 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
         Unit
     }
 
-    override suspend fun inspectProjectionReceipt(receipt: ProjectionReceipt): AppliedProjectionWitness? = operation {
-        val scope = receipt.scope
-        val account = accountFor(scope.account)
-        val calendar = calendarRow(scope, account) ?: return@operation null
-        val remoteId = digest("event-v1", calendarSyncId(scope), receipt.change.eventId.value)
-        val uri = syncUri(Events.CONTENT_URI, account)
-        val identity = Selection("${Events.CALENDAR_ID}=? AND (${Events.SYNC_DATA4}=? OR " +
-            "(${Events.SYNC_DATA4} IS NULL AND ${Events._SYNC_ID}=?))", arrayOf(calendar.toString(), remoteId, remoteId))
-        val row = ownedRow(uri, identity, Events.SYNC_DATA1) ?: return@operation null
-        val metadata = resolver.query(uri, arrayOf(Events._ID, Events.CALENDAR_ID, Events._SYNC_ID,
-            Events.SYNC_DATA1, Events.SYNC_DATA2, Events.SYNC_DATA3, Events.SYNC_DATA4),
-            identity.sql, identity.args, null)?.use {
-            if (it.count != 1 || !it.moveToFirst()) return@operation null
-            ContentValues().apply { DatabaseUtils.cursorRowToContentValues(it, this) }
-        } ?: fail(CalendarProjectionFailure.PROVIDER_UNAVAILABLE)
-        if (metadata.getAsLong(Events._ID) != row || metadata.getAsString(Events._SYNC_ID) != remoteId ||
-            metadata.getAsString(Events.SYNC_DATA1) != OWNER_MARKER || metadata.getAsString(Events.SYNC_DATA4) != remoteId ||
-            metadata.getAsString(Events.SYNC_DATA2) != digest("revision-v1", receipt.change.revision.value) ||
-            metadata.getAsString(Events.SYNC_DATA3) != receiptMarker(receipt)) return@operation null
-        requirePermissions()
-        capturedBatch(arrayListOf(
-            assertion(syncUri(Calendars.CONTENT_URI, account), calendarSelection(scope, account), calendar),
-            ContentProviderOperation.newAssertQuery(uri).withSelection(identity.sql, identity.args)
-                .withValues(metadata).withExpectedCount(1).build(),
-        ), intArrayOf(1, 1))
-        requirePermissions()
-        AppliedProjectionWitness(receipt)
+    override suspend fun inspectProjectionReceipt(receipt: ProjectionReceipt): AppliedProjectionWitness? {
+        val frozen = snapshotReceipt(receipt)
+        return operation {
+            val scope = frozen.scope
+            val account = accountFor(scope.account)
+            val calendar = calendarRow(scope, account) ?: return@operation null
+            val remoteId = digest("event-v1", calendarSyncId(scope), frozen.change.eventId.value)
+            val uri = syncUri(Events.CONTENT_URI, account)
+            val identity = Selection("${Events.CALENDAR_ID}=? AND (${Events.SYNC_DATA4}=? OR " +
+                "(${Events.SYNC_DATA4} IS NULL AND ${Events._SYNC_ID}=?))", arrayOf(calendar.toString(), remoteId, remoteId))
+            val row = ownedRow(uri, identity, Events.SYNC_DATA1) ?: return@operation null
+            val metadata = resolver.query(uri, arrayOf(Events._ID, Events.CALENDAR_ID, Events._SYNC_ID,
+                Events.SYNC_DATA1, Events.SYNC_DATA2, Events.SYNC_DATA3, Events.SYNC_DATA4),
+                identity.sql, identity.args, null)?.use {
+                if (it.count != 1 || !it.moveToFirst()) return@operation null
+                ContentValues().apply { DatabaseUtils.cursorRowToContentValues(it, this) }
+            } ?: fail(CalendarProjectionFailure.PROVIDER_UNAVAILABLE)
+            if (metadata.getAsLong(Events._ID) != row || metadata.getAsString(Events._SYNC_ID) != remoteId ||
+                metadata.getAsString(Events.SYNC_DATA1) != OWNER_MARKER || metadata.getAsString(Events.SYNC_DATA4) != remoteId ||
+                metadata.getAsString(Events.SYNC_DATA2) != digest("revision-v1", frozen.change.revision.value) ||
+                metadata.getAsString(Events.SYNC_DATA3) != receiptMarker(frozen)) return@operation null
+            requirePermissions()
+            capturedBatch(arrayListOf(
+                assertion(syncUri(Calendars.CONTENT_URI, account), calendarSelection(scope, account), calendar),
+                ContentProviderOperation.newAssertQuery(uri).withSelection(identity.sql, identity.args)
+                    .withValues(metadata).withExpectedCount(1).build(),
+            ), intArrayOf(1, 1))
+            requirePermissions()
+            AppliedProjectionWitness(frozen)
+        }
     }
+
+    private fun snapshotReceipt(receipt: ProjectionReceipt): ProjectionReceipt = try { receipt.snapshot() }
+        catch (cancelled: CancellationException) { throw cancelled }
+        catch (_: Exception) { fail(CalendarProjectionFailure.PROVIDER_REJECTED) }
 
     private fun receiptMarker(receipt: ProjectionReceipt) = "calendeer-projection-receipt-v${receipt.protocol}:${receipt.nonce}"
 

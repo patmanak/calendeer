@@ -685,11 +685,18 @@ snapshot and private database commit. See [local capture](LOCAL_EDIT_CAPTURE.md)
 
 `ProjectionReceiptTest` checks the supported simple subset, protocol/nonce
 validation, baseline identity and redacted diagnostics on the JVM.
+Reminder-only timed/all-day imports are supported; organizer, attendee and
+recurrence profiles remain refused. Deep snapshots own applied and previous-base
+lists, and revalidate aliases mutated after model construction. The reminder-only
+acceptance assertion fails against the original implementation.
 `ProjectionReceiptStoreDeviceTest` uses isolated real SQLite for immutable
 preparation/reopen, exact restoration, newer remote/tombstone preservation,
 baseline comparison, incompatible formats, local-intent blocking and transaction
 rollback on lease loss, cancellation or injected failure. Its independent schema
 8 fixture must migrate without inventing receipts or losing retained work.
+Reminder preparations and restoration witnesses are frozen before the first SQL
+lease callback; alias mutations there must not change the durable snapshot.
+Reopening and newer pending reminder contents remain independently covered.
 
 With `-e providerFixture true`, `ProjectionRecoveryDeviceTest` joins the production
 owner, real Provider and real SQLite with a controlled read-only remote. It aborts
@@ -700,9 +707,25 @@ content, local deletion, nonce absence/substitution, reused opaque revisions,
 duplicate identity, mirror recreation and nonce invalidation immediately before
 the proof assertions. Missing proof must leave the baseline, receipt and row intact.
 The lost-ACK and reused-revision regressions must fail before their respective fixes.
+Reminder-only cases additionally compare the exact event and reminder row IDs and
+count tracked applies after timed/all-day lost-ACK reopening. Later dirty reminder
+changes are preserved and remain outside local-edit capture. Older applied evidence
+must not consume a newer reminder import. Missing/foreign nonces and DIRTY refusal
+leave the receipt unacknowledged. An injected failing assertion at the end of a
+real Provider batch must roll back the event, nonce and reminder replacements
+together. Alias mutations at Provider admission exercise both tracked application
+and historical inspection snapshot ownership.
+
+All 185 sync and ten app JVM cases passed. Both selected physical suites passed:
+nineteen recovery and sixteen SQLite cases, including eight new Provider/owner
+cases and two new SQLite cases. APK builds and lint passed (zero errors, twenty
+existing warnings), followed by independent source/evidence review. These cases
+use isolated fixtures and a controlled remote; no Proton event was changed.
 
 These controlled fixtures establish neither a live Proton UPDATE nor arbitrary
-power-loss or cross-store atomicity. They clean up only isolated local fixture data.
+power-loss, Samsung editing/alert delivery or cross-store atomicity. They clean up
+only isolated local fixture data. Reminder editing/upload and downgrade of a new
+reminder-bearing receipt to an older binary are not qualified.
 
 ## Internal local DELETE capture
 

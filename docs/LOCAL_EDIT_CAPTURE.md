@@ -99,7 +99,11 @@ work, including the final policy for unexpected edits in a read-only mirror.
 
 Before writing a supported simple upsert, the owner persists a receipt. The
 Provider writes its versioned nonce in `SYNC_DATA3` in the same atomic batch as
-the event. Preparation alone does not prove that the write happened. Untracked
+the event and its reminder replacements. Supported simple imports include
+reminder-only details (up to five distinct offsets), but exclude organizers,
+attendees and recurrence. Receipt contents and previous-base collection data are
+snapshotted before crossing SQL or Provider suspension boundaries.
+Preparation alone does not prove that the write happened. Untracked
 projections clear this marker; migration creates no receipts for old rows.
 
 After an interrupted acknowledgement, an assertion-only Provider inspection
@@ -110,6 +114,11 @@ qualified receipt restores its projected base only if the previous base still
 matches, consumes only the exact pending payload, and removes the receipt. Newer
 remote content or a tombstone stays pending and separate from that recovered base.
 Explicit capture attempts this recovery before reading the Android edit.
+Changed Android reminders are preserved by historical inspection and restoration;
+this does not qualify reminder editing or upload. Those edits remain outside the
+simple local-edit capture profile. Existing null/empty-detail receipts retain
+protocol 1 semantics. Downgrading a reminder-bearing receipt to an older binary
+is not qualified; the older profile refuses it conservatively.
 
 A missing, changed or ambiguous marker cannot qualify recovery. A preparation
 that was never applied can still permit capture against a distinct older revision.
@@ -182,8 +191,9 @@ Proton UPDATE/DELETE remain separate work.
 Explicit internal [local CREATE capture](LOCAL_CREATE_CAPTURE.md) has its own
 one-shot identity reservation and permanently paused journal, without dispatch.
 
-Nonce-backed recovery covers simple upserts only. Recurrences, nonempty event
-details, Provider DELETE projections and legacy rows without receipts retain their conservative
+Nonce-backed recovery covers simple upserts with absent, empty or reminder-only
+details. Recurrences, organizers/attendees, Provider DELETE projections and
+legacy rows without receipts retain their conservative
 recovery limits. Neither cache presence, a revision alone nor a numeric row ID
 invents an ACK. The two stores still do not share a transaction, and controlled
 reopening tests do not establish recovery from physical power loss.

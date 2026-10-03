@@ -160,7 +160,8 @@ class ProjectionReceiptStoreDeviceTest {
             Revision("unmapped"), format, DeferredEventReason.UNSUPPORTED_CONTENT, "sealed-fixture")) }
         refused { store.prepareProjection(ProjectionIntent(scope, applied), format) }
         store.transaction(scope) { (this as StagedSyncTransaction).clearDeferred(applied.eventId) }
-        val detailed = applied.copy(content = applied.content.copy(details = EventDetails(listOf(EventReminder(15)))))
+        val detailed = applied.copy(content = applied.content.copy(details = EventDetails(
+            organizer = EventPerson("organizer@example.test"))))
         store.queue(detailed); refused { store.prepareProjection(ProjectionIntent(scope, detailed), format) }
         val gone = RemoteChange.Deleted(applied.eventId, Revision("gone"))
         store.queue(gone); refused { store.prepareProjection(ProjectionIntent(scope, gone), format) }
@@ -184,6 +185,45 @@ class ProjectionReceiptStoreDeviceTest {
         assertEquals(receipt, store.projectionReceipt(scope, applied.eventId))
         assertEquals(original, store.projectedBaseline(scope, applied.eventId))
         assertEquals(applied, store.pending(scope).single().change)
+    }
+
+    @Test fun reminderPreparationOwnsItsInputBeforeTheFirstStorageLeaseCheck() = fixture { store, name ->
+        store.baseline()
+        val reminders = mutableListOf(EventReminder(5), EventReminder(15))
+        val candidate = applied.copy(content = applied.content.copy(details = EventDetails(reminders)))
+        val expected = candidate.copy(content = candidate.content.copy(details = EventDetails(reminders.toList())))
+        store.queue(candidate)
+        store.admitTransaction = { reminders.clear(); true }
+        val receipt = store.prepareProjection(ProjectionIntent(scope, candidate), format)
+        store.admitTransaction = { true }
+        assertEquals(expected, receipt.change)
+        assertEquals(expected, store.pending(scope).single().change)
+        assertEquals(original, store.projectedBaseline(scope, applied.eventId))
+        store.close()
+        ImportStore(ApplicationProvider.getApplicationContext(), name).use { reopened ->
+            assertEquals(receipt, reopened.projectionReceipt(scope, applied.eventId))
+            assertTrue(reopened.restoreProjection(AppliedProjectionWitness(receipt)))
+            assertEquals(expected, reopened.projectedBaseline(scope, applied.eventId))
+            assertTrue(reopened.pending(scope).isEmpty())
+        }
+    }
+
+    @Test fun reminderRestorationOwnsItsWitnessBeforeStorageAndPreservesNewerPendingReminders() = fixture { store, _ ->
+        store.baseline()
+        val reminders = mutableListOf(EventReminder(5), EventReminder(15))
+        val candidate = applied.copy(content = applied.content.copy(details = EventDetails(reminders)))
+        store.queue(candidate)
+        val receipt = store.prepareProjection(ProjectionIntent(scope, candidate), format)
+        val newer = candidate.copy(revision = Revision("newer"), content = candidate.content.copy(
+            details = EventDetails(listOf(EventReminder(60)))))
+        store.queue(newer)
+        val aliased = receipt.copy(change = candidate)
+        store.admitTransaction = { reminders.clear(); true }
+        assertTrue(store.restoreProjection(AppliedProjectionWitness(aliased)))
+        store.admitTransaction = { true }
+        assertEquals(receipt.change, store.projectedBaseline(scope, applied.eventId))
+        assertEquals(newer, store.pending(scope).single().change)
+        assertNull(store.projectionReceipt(scope, applied.eventId))
     }
     @Test fun cancellationBeforeCommitRollsBackBaselinePendingAndReceiptConsumption() = fixture { store, _ ->
         store.baseline(); val receipt = store.receipt()
