@@ -1086,6 +1086,41 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
                 retained?.let { RetainedLocalTitleInfo(it.format, it.timestamp) })
         }
 
+    /** Exact DELETE history only. A remote tombstone never consumes the local intention. */
+    suspend fun inspectLocalDelete(scope: CalendarScope, eventId: EventId, mutationId: MutationId): LocalDeleteReview? =
+        stagingMutation(scope) { db ->
+            val exact = db.rawQuery("SELECT 1 FROM local_edits WHERE scope=? AND event=? AND mutation=? AND kind='DELETE'",
+                arrayOf(key(scope), eventId.value, mutationId.value)).use { it.moveToFirst() }
+            if (!exact) return@stagingMutation null
+            check(!hasRawEventRow(db, "local_edit_preparations", scope, eventId)) { "Deletion has incompatible preparation" }
+            val owner = readInspectionDeleteOwner(db, scope, eventId) ?: return@stagingMutation null
+            check(owner.id == mutationId)
+            val imported = stagedQuery(db, "SELECT payload FROM records WHERE scope=? AND event=?",
+                arrayOf(key(scope), eventId.value)).use { if (it.moveToFirst()) decodeChange(it.getString(0)) else null }
+            val format = db.rawQuery("SELECT checkpoint FROM calendars WHERE scope=?", arrayOf(key(scope))).use {
+                if (!it.moveToFirst() || it.isNull(0)) null else decodeCheckpoint(scope, it.getString(0)).format
+            }
+            LocalDeleteReview(owner, readBaseline(db, scope, eventId), imported, format,
+                hasRawEventRow(db, "deferred_events", scope, eventId))
+        }
+
+    private fun readInspectionDeleteOwner(db: SQLiteDatabase, scope: CalendarScope, eventId: EventId): LocalDeleteIntent? =
+        try {
+            stagedQuery(db, "SELECT mutation,adapter,version,base,local,state,kind FROM local_edits WHERE scope=? AND event=?",
+                arrayOf(key(scope), eventId.value)).use { row ->
+                if (!row.moveToFirst()) null else {
+                    require(row.getString(6) == "DELETE")
+                    val base = decodeChange(row.getString(3).also(::requirePreparationSnapshotBudget)) as RemoteChange.Upsert
+                    val local = decodeChange(row.getString(4).also(::requirePreparationSnapshotBudget)) as RemoteChange.Upsert
+                    require(base.eventId == eventId && local.eventId == eventId && local.revision == base.revision)
+                    LocalDeleteIntent(MutationId(row.getString(0)), scope, AdapterFormat(row.getString(1), preparationVersion(row, 2)),
+                        base, local.content, LocalEditState.valueOf(row.getString(5)))
+                }
+            }
+        } catch (failure: CancellationException) { throw failure }
+        catch (failure: SQLiteException) { throw failure }
+        catch (_: Exception) { throw IllegalStateException("Invalid local deletion owner") }
+
     /** Freeze an exact captured owner and sealed fragments together, without dispatch admission.
      * Existing evidence is immutable even after its current owner becomes conflicted or paused.
      */

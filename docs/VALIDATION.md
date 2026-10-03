@@ -2069,3 +2069,40 @@ only; no event viewer/editor, capture callback, conflict resolver or dispatch is
 added. Counts describe existing journal entries, not every current Android edit
 or present service conflict. CREATE experiment journals are excluded. Schema 14
 and UPDATE/DELETE dispatch restrictions are unchanged.
+
+## Read-only inspection of captured DELETE history
+
+`LocalDeleteReviewTest` adds seven pure-domain cases. The initial unchanged-import
+case failed with UNOBSERVED instead of UNCHANGED before implementation. UPDATE and
+DELETE now share the same format/deferred/absence/change/tombstone policy, with
+the eight existing UPDATE comparison cases retained as regression checks. DELETE
+tests preserve unchanged deletion content, edits observed before deletion, both
+captured versions and monotone recorded conflict. Foreign identities are refused
+and diagnostic strings omit contents and identifiers.
+
+`LocalDeleteInspectionDeviceTest` has eighteen isolated real-SQL cases with
+controlled session/permission ports that refuse Provider contents and service
+requests. They cover exact owners, unchanged and edited deletion snapshots,
+remote tombstones versus absence, retained conflict after an imported return to
+base, deferred/format uncertainty, paused/unavailable scopes, scope/mutation
+isolation, initial/final permission/account loss, reconnect/policy invalidation,
+cancellation, generic failures, corrupt identities/revisions, non-integer/out-of-
+range versions, incompatible preparation presence, UPDATE-kind refusal and helper
+reopening. Applicable reads compare every SQL table before/after, scheduler counts
+and closed leases. Reconnect/policy fixtures suspend the next asynchronous owner's
+session read so its lease cannot mask the inspected owner's closure.
+
+All 175 sync and ten app JVM cases passed via `:sync:test` and
+`:app:testDebugUnitTest`. Physical execution selected
+`LocalDeleteInspectionDeviceTest`, `LocalEditInspectionDeviceTest` and
+`LocalEditStoreDeviceTest`: all fifty-four cases passed without failures or skips.
+App/test APK builds, `:app:lintDebug` (zero errors, twenty existing warnings) and
+independent source review passed. Isolated databases were cleaned and the final
+app was installed and launched.
+
+Only the private SQL snapshot is atomic. Separate account/permission observations
+do not establish current remote/Provider contents or concurrency protection.
+Remote deletion evidence never acknowledges the local deletion, and retained
+content is not a complete undo image. No UI/worker caller, preparation payload,
+schema migration, service/Provider fixture write or dispatch is added. Live DELETE
+and conflict resolution remain NOT RUN; UPDATE/DELETE submission stays disabled.

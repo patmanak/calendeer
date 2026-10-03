@@ -187,6 +187,12 @@ distinct even if the imported record returns to the captured base. Retained titl
 metadata conveys no protected payload, current qualification or upload authority.
 There is no UI/worker caller or automatic resolution.
 
+Separate `inspectLocalDelete` applies the same imported-history policy to an exact
+DELETE owner with strict snapshot/version validation. It refuses incompatible
+UPDATE preparation presence without loading its payload. Neither a remote tombstone
+nor an imported return to the base consumes the intention, clears conflict or
+supplies a complete undo image. The same local transaction and session gates apply.
+
 ## Delivery slices and acceptance
 
 1. Buildable configuration app: eight languages/system mode and three persistent

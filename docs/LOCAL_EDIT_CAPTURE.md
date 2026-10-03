@@ -118,6 +118,28 @@ base. An unresolved receipt for different pending content blocks projection
 instead of being replaced or replayed as stale data. Adapter, generation, lease
 and permission gates apply to preparation and recovery as well as normal import.
 
+## Historical DELETE inspection
+
+Explicit internal `ImportCoordinator.inspectLocalDelete` reads the exact retained
+scope/event/mutation with kind DELETE. One private SQL transaction observes its
+strictly validated owner, projected reference, imported record, checkpoint format
+and deferred marker, without changing any table. An incompatible retained UPDATE
+preparation causes refusal based on row presence; its protected payload is not read.
+Known paused/unavailable calendars remain inspectable with the current account and
+calendar permissions. Generation and selection policy are frozen, and session/
+permission checks repeat before returning. Cancellation propagates and leases close.
+
+UPDATE and DELETE share the same imported-history comparison: unknown/incompatible
+formats precede deferred evidence, then absence, equality, change and an explicit
+remote tombstone. Absence never implies deletion. A remote tombstone does not
+acknowledge the local DELETE or remove its projected base; recorded conflict stays
+separate even if import returns to that base. Supported edits observed before the
+local deletion remain part of the original immutable content snapshot.
+
+The result is historical SQL evidence, not current Provider/server state or a
+complete undo image. It contains no preparation payload or dispatch authority.
+There is no UI/worker caller, resolution, import release or service request.
+
 ## Recovery limits
 
 Provider snapshot and private database commit are not one atomic transaction.

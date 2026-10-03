@@ -35,6 +35,14 @@ sealed interface LocalEditInspection {
     data object Unavailable : LocalEditInspection
 }
 enum class LocalTitlePreparationResult { INACTIVE, UNQUALIFIED, RETAINED, HISTORICAL, CONFLICT, UNSUPPORTED, UNAVAILABLE }
+sealed interface LocalDeleteInspection {
+    data class Available(val review: LocalDeleteReview) : LocalDeleteInspection {
+        override fun toString() = "LocalDeleteInspection.Available(REDACTED)"
+    }
+    data object Inactive : LocalDeleteInspection
+    data object Unqualified : LocalDeleteInspection
+    data object Unavailable : LocalDeleteInspection
+}
 enum class LocalCreatePreparationResult { INACTIVE, UNQUALIFIED, RETAINED, UNSUPPORTED, UNAVAILABLE }
 enum class LocalCreateSubmissionResult { INACTIVE, UNQUALIFIED, RETAINED, UNRESOLVED, UNSUPPORTED, UNAVAILABLE }
 enum class CapturedCreateBindingResult { INACTIVE, UNRESOLVED, RETAINED }
@@ -412,6 +420,27 @@ class ImportCoordinator(
             LocalEditInspection.Available(review)
         } catch (cancelled: CancellationException) { throw cancelled }
           catch (_: Exception) { LocalEditInspection.Unavailable }
+          finally {
+              store.admitTransaction = { false }
+              projection.admitOperation = { false }
+          }
+    }
+
+    /** Explicit DELETE history only; never acknowledges a deletion or supplies an undo image. */
+    suspend fun inspectLocalDelete(target: CalendarScope, eventId: EventId, id: MutationId): LocalDeleteInspection = mutex.withLock {
+        val expected = generation
+        val policy = createPolicyRevision.get()
+        val active = { authenticated && generation == expected && createPolicyRevision.get() == policy && hasCalendarPermissions() }
+        try {
+            if (!isCurrent(expected, target.account) || !active()) return@withLock LocalDeleteInspection.Inactive
+            store.admitTransaction = { it == target && active() }
+            if (store.selections(target.account).none { it.scope == target }) return@withLock LocalDeleteInspection.Unqualified
+            val review = store.inspectLocalDelete(target, eventId, id) ?: return@withLock LocalDeleteInspection.Unqualified
+            currentCoroutineContext().ensureActive()
+            if (!isCurrent(expected, target.account) || !active()) return@withLock LocalDeleteInspection.Inactive
+            LocalDeleteInspection.Available(review)
+        } catch (cancelled: CancellationException) { throw cancelled }
+          catch (_: Exception) { LocalDeleteInspection.Unavailable }
           finally {
               store.admitTransaction = { false }
               projection.admitOperation = { false }

@@ -434,6 +434,19 @@ cases and forty-two title-owner/journal regressions passed, along with app/test
 APK builds, lint (zero errors, twenty existing warnings) and independent source
 review. The final app was installed and launched. UPDATE/DELETE remain disabled.
 
+The same internal historical inspection is now available for captured DELETE
+intentions. It validates the exact owner and observes the import/base/format/
+deferred state without acknowledgement, resolution, projection release or upload.
+An imported tombstone never consumes the local deletion; conflict remains distinct
+after an imported return to the original base. Incompatible UPDATE preparation
+presence is refused without reading its protected payload. The result is local
+history, not current Provider/server state or a complete undo image. Seven new
+domain cases and all 175 sync/ten app JVM cases passed. Eighteen new physical
+DELETE inspection cases and thirty-six UPDATE-inspection/local-journal regressions
+passed, along with APK builds, lint (zero errors, twenty existing warnings) and
+independent review. The final app was installed and launched. No UI/worker caller
+or outgoing DELETE is enabled.
+
 The calendar controls now show counts of retained Android UPDATE/DELETE changes
 and recorded conflicts, with an explicit non-upload/held-update explanation in
 all eight languages. Both counts come from one scoped metadata-only SQL statement;
