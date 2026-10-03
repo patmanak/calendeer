@@ -285,16 +285,16 @@ class CapturedCreateAcknowledgementStoreDeviceTest {
         assertEquals(1, rawPending(store))
     }
 
-    @Test fun provenHistoryPermitsGenericUpdateAndTombstonePaths() = fixture { context, name, store ->
+    @Test fun provenHistoryCannotAuthorizeGenericUpdateAndTombstoneSnapshots() = fixture { _, _, store ->
         val proven = prove(store)
-        assertEquals(edit(), store.captureLocalEdit(edit()))
-        assertEquals(edit(), store.captureLocalEdit(edit()))
+        reject { store.captureLocalEdit(edit()) }
+        reject { store.captureLocalEdit(edit()) }
         assertEquals(proven, store.capturedAcknowledgement(scope, first.change.eventId))
-        raw(context, name) { it.execSQL("DELETE FROM local_edits") }
-        assertEquals(deletion(), store.captureLocalDelete(deletion()))
-        assertEquals(deletion(), store.captureLocalDelete(deletion()))
+        reject { store.captureLocalDelete(deletion()) }
+        reject { store.captureLocalDelete(deletion()) }
         assertEquals(proven, store.capturedAcknowledgement(scope, first.change.eventId))
         assertEquals(1, rawRows(store, "captured_create_acknowledgements").size)
+        assertTrue(rawRows(store, "local_edits").isEmpty())
     }
 
     @Test fun capturedTombstonePreservesProvenHistoryAcrossReopen() = fixture { context, name, store ->

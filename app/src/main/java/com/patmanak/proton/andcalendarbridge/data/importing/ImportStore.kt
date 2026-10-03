@@ -483,6 +483,16 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
         record
     }
 
+    /** Point-in-time SQL source qualification only; never current Provider cleanliness or hold release.
+     * Full sent reference and PROVEN receipt must agree, with no raw outstanding local work.
+     */
+    suspend fun capturedCleanSource(receipt: CapturedCreateAcknowledgementReceipt): Boolean =
+        stagingMutation(receipt.baseline.scope) { db ->
+            requireCapturedAcknowledgementSource(db, receipt.baseline)
+            val record = readCapturedAcknowledgement(db, receipt.baseline.scope, receipt.baseline.change.eventId)
+            record != null && record.receipt == receipt && record.state == CapturedCreateAcknowledgementState.PROVEN
+        }
+
     /** Retain the exact historical Provider batch proof without consuming any import or local work. */
     suspend fun retainCapturedAcknowledgement(witness: AppliedCapturedCreateAcknowledgement): CapturedCreateAcknowledgementRecord =
         stagingMutation(witness.receipt.baseline.scope) { db ->
@@ -540,6 +550,16 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
             "Captured acknowledgement outcome is unresolved"
         }
         return record
+    }
+
+    /** Generic snapshots carry no captured provenance and cannot adopt captured work, even on replay.
+     * Raw presence fences malformed/orphaned rows and historical PROVEN acknowledgements alike.
+     */
+    private fun requireOrdinaryLocalCapture(db: SQLiteDatabase, scope: CalendarScope, event: EventId) {
+        check(!hasRawEventRow(db, "captured_create_bases", scope, event) &&
+            !hasRawEventRow(db, "captured_create_acknowledgements", scope, event)) {
+            "Captured work requires its exact specialized local snapshot"
+        }
     }
 
     /** Retain the first supported local edit/tombstone behind its exact captured sent reference.
@@ -734,7 +754,7 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
         require(intent.state == LocalEditState.PAUSED) { "Caller cannot declare conflict state" }
         check(isAvailable(db, intent.scope) && db.rawQuery("SELECT enabled FROM calendars WHERE scope=?",
             arrayOf(key(intent.scope))).use { it.moveToFirst() && it.getInt(0) != 0 }) { "Inactive local capture scope" }
-        requireCapturedAcknowledgementResolved(db, intent.scope, intent.base.eventId)
+        requireOrdinaryLocalCapture(db, intent.scope, intent.base.eventId)
         val previous = readLocalEdit(db, intent.scope, intent.base.eventId)
         if (previous != null) {
             require(previous.copy(state = LocalEditState.PAUSED) == intent) { "Local edit is immutable" }
@@ -761,7 +781,7 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
     suspend fun captureLocalDelete(intent: LocalDeleteIntent): LocalDeleteIntent = stagingMutation(intent.scope) { db ->
         require(intent.state == LocalEditState.PAUSED) { "Caller cannot declare conflict state" }
         check(activeProjectionScope(db, intent.scope)) { "Inactive local capture scope" }
-        requireCapturedAcknowledgementResolved(db, intent.scope, intent.base.eventId)
+        requireOrdinaryLocalCapture(db, intent.scope, intent.base.eventId)
         val previous = readLocalDelete(db, intent.scope, intent.base.eventId)
         if (previous != null) {
             require(previous.copy(state = LocalEditState.PAUSED) == intent) { "Local deletion is immutable" }

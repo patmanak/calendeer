@@ -1158,7 +1158,8 @@ corrupt evidence fences all three capture paths before replay. Existing local
 intentions, ordinary receipts, source drift, nonce collisions, rollback,
 lease loss and cancellation cannot authorize a new reservation or promotion.
 Records, raw pending flags, deferred evidence, baselines and receipts remain
-intact. Proven evidence permits later local capture, without resetting a conflict.
+intact. Proven evidence permits later specialized local capture, without resetting
+a conflict; generic snapshots cannot adopt captured provenance.
 
 `CapturedCreateAcknowledgementProviderDeviceTest` uses isolated real Provider
 rows. It requires six assertions and one update limited to DIRTY and the exact
@@ -1198,6 +1199,52 @@ migrations and earlier capture recovery, and one read-only inspection of the
 retained legacy live event: 488 distinct physical cases. No new live submission
 was made. Host checks passed with 139 sync, 274 Proton adapter and 10 app tests,
 both debug APK builds and Android lint. These results retain the boundaries above.
+
+## Current clean original qualification
+
+`CapturedCreateCleanProviderDeviceTest` uses isolated real Provider rows and
+requires six assertions with no mutation for a clean-original witness. Exact
+timed and all-day originals qualify; content drift even with a clean flag, dirty
+rows, tombstones, unsupported fields, reminders, extended properties, damaged
+markers and duplicate identities remain unqualified and intact. Concurrent
+content, flag, child or marker changes abort the actual atomic assertion batch.
+Controlled permission/lease loss cannot return a witness. Generic apply, tracked
+apply, delete and local capture refuse each captured marker, including concurrent
+attachment. Recurrence parent attachment and descendant deletion obey the same
+barrier; ordinary projection remains functional.
+
+`CapturedCreateGenericFenceStoreDeviceTest` verifies raw local-capture barriers
+before replay for absent, unknown, proven, malformed or orphaned ACK sources.
+UPDATE/DELETE intentions, incoming pending flags and all source tables survive
+refusal. Unrelated ordinary events and scopes still work. The point-in-time SQL
+source check requires an exact PROVEN ACK and matching original base with no raw
+local intention or ordinary projection receipt. It preserves different incoming
+and deferred data; schema v12 is unchanged.
+
+The additional `CapturedCreateAcknowledgementIntegrationDeviceTest` cases exercise
+the production qualification owner with real journals and Provider, and controlled
+transport. They verify exact capture/attempt/source provenance, clean qualification
+without another ACK or submission, reopen, absent/UNKNOWN proofs, later edits and
+tombstones, disappearance, reminders, marker drift, local-intention retention after
+Android reversion, incoming-data preservation, foreign witnesses and closure after
+interruption, pause, sign-out, permission or format changes. An observation cannot
+prevent the next local edit or release the captured hold. The unwired owner fixture
+failed with expected CLEAN and actual UNRESOLVED before connection.
+
+The wired build passed 36 new Provider cases, 18 SQL cases and 22 additional owner
+cases. Related regressions and the retained legacy read-only live inspection also
+passed: 591 distinct physical cases in total. One older baseline regression still
+prepared a captured intention through the newly forbidden generic capture path.
+Using the specialized full-source capture corrected that precondition while keeping
+its replay, intention, pending and receipt assertions. The corrected case and remaining
+checks passed with the production APK unchanged. Host checks passed with 139 sync,
+274 Proton adapter and 10 app tests, both debug APK builds and Android lint.
+
+These checks qualify the assertion and admission boundaries on the tested physical
+device. Permission failures use controlled gates, not real revocation during a batch.
+They do not qualify live captured submission, hold transfer, writable UI, simultaneous
+processes or real power loss. Isolated fixtures are removed; retained live examples
+are preserved.
 
 ## Anonymous transport probe
 

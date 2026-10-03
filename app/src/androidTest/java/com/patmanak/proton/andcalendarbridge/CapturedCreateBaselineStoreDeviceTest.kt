@@ -166,7 +166,8 @@ class CapturedCreateBaselineStoreDeviceTest {
         store.queue(first.change); assertTrue(store.retainCapturedBaseline(first, witness()))
         val local = LocalEditIntent(MutationId("later-local-edit"), scope, format, first.change,
             content.copy(title = "Later Android edit"))
-        store.captureLocalEdit(local)
+        assertEquals(LocalEditState.PAUSED, store.retainCapturedLocalChange(
+            CapturedCreateCurrent(first, local.content, deleted = false), local.id))
         raw(context, name) { it.execSQL("UPDATE records SET pending=1") }
         assertTrue(store.retainCapturedBaseline(first, witness()))
         assertEquals(local, store.localEdit(scope, first.change.eventId)); assertEquals(1, rawPending(store))

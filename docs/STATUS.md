@@ -325,6 +325,17 @@ explicit resolution. Different incoming data and captured projection holds stay
 intact. Historical acknowledgement is not current clean content, hold release or
 a current remote version. Hold release remains a separate prerequisite for
 bidirectional operation.
+An explicit offline qualification now distinguishes a currently clean original
+from its historical ACK. It requires the exact proven source, unchanged supported
+Android content, clean/non-deleted flags, unique identities and absent children
+in an assertion-only batch. Local work and ordinary projection receipts prevent
+qualification. The result is a point-in-time observation and releases no hold.
+Generic local captures reject all raw captured provenance before replay, even when
+ACK is proven. Generic Provider writes and captures assert absent captured markers,
+including recurrence parents and descendants, preserving concurrent attachments.
+Physical SQL, Provider and coordinator fixtures passed these boundaries and their
+related regressions. Transport is controlled for captured-creation cases; live
+captured submission and durable hold transfer remain separate qualification work.
 The application still exposes no writable mirror or event editor. General outgoing
 queue/resolution, automatic Provider capture and conditional Proton UPDATE/DELETE
 guarantees remain unqualified. See

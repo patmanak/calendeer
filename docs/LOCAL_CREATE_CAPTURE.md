@@ -413,3 +413,30 @@ state. An interruption after reservation but before the Provider batch can leave
 is allowed. Explicit resolution remains future work. The private transaction and
 Provider batch are separate; real power loss and simultaneous processes are not
 qualified. Incoming hold release and writable UI remain separate stages.
+
+## Current clean original qualification
+
+`qualifyAcknowledgedLocalCreate` is an explicit offline, assertion-only operation.
+It reconstructs the complete submission, dispatch binding, attachment and original
+sent reference, and requires the exact durable `PROVEN` acknowledgement. The SQL
+source check rejects raw local intentions or ordinary projection receipts, including
+malformed records. Account, enabled selection, permissions, adapter formats and
+full source identities are checked around the Provider observation. Nothing is
+acknowledged, submitted, advanced or durably released by this operation.
+
+`inspectAcknowledgedCreateClean` asserts the exact original content, clean and
+non-deleted flags, full scoped markers, unique local/remote identities and absence
+of unsupported fields or child rows in one Provider batch containing only assertions.
+Even content changed while `DIRTY` remains zero is unqualified. Historical ACK
+inspection remains independent and can still establish history after later edits.
+`CLEAN` and its witness describe one observation; a subsequent edit is allowed and
+the next check must refuse it. This result never grants a future projection lease.
+
+Generic local UPDATE/DELETE captures reject any raw captured baseline or ACK before
+replay, including proven, orphaned or damaged provenance. Only the specialized
+snapshot can retain a captured local intention. Generic Provider projections and
+local captures similarly refuse local, attachment or ACK markers; null-marker
+assertions in their batches protect concurrent attachment. Recurrence parents and
+descendants obey the same barrier. The owner's captured hold continues to exclude
+ordinary import preparation, receipt recovery and acknowledgement. Transferring
+that hold requires a separate durable reference and specialized projection path.

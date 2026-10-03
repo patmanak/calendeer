@@ -33,6 +33,7 @@ enum class CapturedCreateAttachmentResult { INACTIVE, UNRESOLVED, ATTACHED }
 enum class CapturedCreateBaselineResult { INACTIVE, UNRESOLVED, RETAINED }
 enum class CapturedCreateReconciliationResult { INACTIVE, UNRESOLVED, UNSUPPORTED, UNCHANGED, RETAINED, CONFLICT }
 enum class CapturedCreateAcknowledgementResult { INACTIVE, UNRESOLVED, UNSUPPORTED, ACKNOWLEDGED }
+enum class CapturedCreateCleanResult { INACTIVE, UNRESOLVED, CLEAN }
 /** One process owner for foreground and durable worker triggers; no event content reaches UI. */
 class ImportCoordinator(
     private val context: Context,
@@ -919,6 +920,69 @@ class ImportCoordinator(
             if (!active()) CapturedCreateAcknowledgementResult.INACTIVE else throw cancelled
         } catch (_: Exception) {
             if (!active()) CapturedCreateAcknowledgementResult.INACTIVE else CapturedCreateAcknowledgementResult.UNRESOLVED
+        } finally {
+            captures.admitCapture = { false }
+            store.admitTransaction = { false }
+            projection.admitOperation = { false }
+        }
+    }
+
+    /** Explicit offline point-in-time qualification; no ACK, durable clean state or hold release. */
+    suspend fun qualifyAcknowledgedLocalCreate(target: CalendarScope, localId: LocalEventId, id: MutationId,
+        attempt: MutationId): CapturedCreateCleanResult = mutex.withLock {
+        val captures = localCreates ?: return@withLock CapturedCreateCleanResult.UNRESOLVED
+        val journal = creates ?: return@withLock CapturedCreateCleanResult.UNRESOLVED
+        ensureCreateLifecycle()
+        val expected = generation
+        val policy = createPolicyRevision.get()
+        val active = { authenticated && generation == expected && createPolicyRevision.get() == policy && hasCalendarPermissions() }
+        suspend fun available(): Boolean {
+            if (!isCurrent(expected, target.account) || !active()) return false
+            val selected = store.selections(target.account).singleOrNull { it.scope == target }
+            return selected?.enabled == true && selected.available && active()
+        }
+        try {
+            if (!available()) return@withLock CapturedCreateCleanResult.INACTIVE
+            store.admitTransaction = { it == target && active() }
+            captures.admitCapture = { it == target && active() }
+            projection.admitOperation = { active() }
+            val submission = captures.readSubmission(target, localId) ?: return@withLock CapturedCreateCleanResult.UNRESOLVED
+            val reserved = submission.reservation
+            val capture = reserved.intent.reservation
+            if (capture.scope != target || capture.localId != localId || capture.id != id || reserved.attempt != attempt ||
+                capture.format != remote.format || store.transaction(target) { checkpoint?.format } != capture.format ||
+                projection.capturedAttachmentProtocol != 1 || projection.capturedAcknowledgementProtocol != 1)
+                return@withLock CapturedCreateCleanResult.UNRESOLVED
+            val identity = CapturedCreateDispatchIdentity.of(submission)
+            val binding = journal.capturedBinding(identity) ?: return@withLock CapturedCreateCleanResult.UNRESOLVED
+            val attachment = journal.capturedAttachment(binding) ?: return@withLock CapturedCreateCleanResult.UNRESOLVED
+            val baseline = CapturedCreateBaseline(attachment,
+                RemoteChange.Upsert(binding.eventId, binding.verifiedRevision, reserved.intent.content))
+            val record = store.capturedAcknowledgement(target, binding.eventId)
+                ?: return@withLock CapturedCreateCleanResult.UNRESOLVED
+            if (record.state != CapturedCreateAcknowledgementState.PROVEN || record.receipt.baseline != baseline)
+                return@withLock CapturedCreateCleanResult.UNRESOLVED
+            suspend fun exactSource(): Boolean = captures.readSubmission(target, localId) == submission &&
+                remote.format == capture.format && projection.capturedAttachmentProtocol == attachment.protocol &&
+                projection.capturedAcknowledgementProtocol == record.receipt.protocol &&
+                store.transaction(target) { checkpoint?.format } == capture.format &&
+                journal.capturedBinding(identity) == binding && journal.capturedAttachment(binding) == attachment &&
+                store.capturedBaseline(target, binding.eventId) == baseline &&
+                store.capturedCleanSource(record.receipt)
+            if (!available()) return@withLock CapturedCreateCleanResult.INACTIVE
+            if (!exactSource()) return@withLock CapturedCreateCleanResult.UNRESOLVED
+            val proof = projection.inspectAcknowledgedCreateClean(record.receipt)
+            if (!available()) return@withLock CapturedCreateCleanResult.INACTIVE
+            if (proof?.receipt != record.receipt || !exactSource()) return@withLock CapturedCreateCleanResult.UNRESOLVED
+            if (!available()) return@withLock CapturedCreateCleanResult.INACTIVE
+            // The Provider observation and SQL checks are separate. No state is promoted,
+            // queued work consumed or lease handed to a future projection on this result.
+            CapturedCreateCleanResult.CLEAN
+        } catch (cancelled: CancellationException) {
+            currentCoroutineContext().ensureActive()
+            if (!active()) CapturedCreateCleanResult.INACTIVE else throw cancelled
+        } catch (_: Exception) {
+            if (!active()) CapturedCreateCleanResult.INACTIVE else CapturedCreateCleanResult.UNRESOLVED
         } finally {
             captures.admitCapture = { false }
             store.admitTransaction = { false }

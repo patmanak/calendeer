@@ -33,6 +33,110 @@ import org.junit.runner.RunWith
 /** Real original Provider row and durable journals; fake remote transport only. */
 @RunWith(AndroidJUnit4::class)
 class CapturedCreateAcknowledgementIntegrationDeviceTest {
+    @Test fun cleanQualificationChecksTheOriginalWithoutWritingOrReleasingPendingWork() = fixture {
+        ready(); incoming(verifiedEvent); assertEquals(CapturedCreateAcknowledgementResult.ACKNOWLEDGED, acknowledge())
+        val before = providerSnapshot(); val saved = ackRecord()
+        assertEquals(CapturedCreateCleanResult.CLEAN, qualify())
+        assertEquals(1, cleanInspections); assertEquals(1, ackAttempts); assertEquals(1, sends)
+        assertEquals(saved, ackRecord()); assertEquals(before, providerSnapshot()); assertEquals(1, rawPending()); assertHold()
+    }
+    @Test fun cleanQualificationAfterReopenRechecksTheProviderAndDoesNotWriteAnAck() = fixture {
+        ready(); assertEquals(CapturedCreateAcknowledgementResult.ACKNOWLEDGED, acknowledge()); reopen()
+        assertEquals(CapturedCreateCleanResult.CLEAN, qualify()); assertEquals(CapturedCreateCleanResult.CLEAN, qualify())
+        assertEquals(2, cleanInspections); assertEquals(1, ackAttempts); assertHold()
+    }
+    @Test fun cleanQualificationCannotInventAnAcknowledgement() = fixture {
+        ready(); assertEquals(CapturedCreateCleanResult.UNRESOLVED, qualify()); assertNull(ackRecord())
+        assertEquals(0, cleanInspections); assertEquals(0, ackAttempts); assertEquals("1", field(Events.DIRTY))
+    }
+    @Test fun cleanQualificationDoesNotPromoteUnknownEvenWithACommittedMarker() = fixture {
+        ready(); afterAck = { throw IllegalStateException("Controlled lost response") }; acknowledge(); afterAck = {}
+        assertEquals("0", field(Events.DIRTY)); assertEquals(CapturedCreateCleanResult.UNRESOLVED, qualify())
+        assertEquals(CapturedCreateAcknowledgementState.UNKNOWN, ackRecord()!!.state); assertEquals(0, cleanInspections)
+    }
+    @Test fun cleanQualificationRefusesNewLocalEditWithoutCleaningIt() = fixture {
+        ready(); acknowledge(); mutate(ContentValues().apply { put(Events.DIRTY, 1); put(Events.TITLE, "Later clean qualification edit") })
+        val before = providerSnapshot(); assertEquals(CapturedCreateCleanResult.UNRESOLVED, qualify())
+        assertEquals(before, providerSnapshot()); assertEquals(1, ackAttempts); assertHold()
+    }
+    @Test fun cleanQualificationRefusesContentDriftEvenWithCleanFlags() = fixture {
+        ready(); acknowledge(); mutate(ContentValues().apply { put(Events.TITLE, "Untracked clean content drift") })
+        val before = providerSnapshot(); assertEquals(CapturedCreateCleanResult.UNRESOLVED, qualify()); assertEquals(before, providerSnapshot())
+    }
+    @Test fun cleanQualificationRefusesLocalTombstoneAndLeavesItPresent() = fixture {
+        ready(); acknowledge(); mutate(ContentValues().apply { put(Events.DIRTY, 1); put(Events.DELETED, 1) })
+        val before = providerSnapshot(); assertEquals(CapturedCreateCleanResult.UNRESOLVED, qualify()); assertEquals(before, providerSnapshot())
+    }
+    @Test fun cleanQualificationDoesNotInferDeletionOrInsertAMissingOriginal() = fixture {
+        ready(); acknowledge(); context.contentResolver.delete(uri, "${Events._ID}=?", arrayOf(row.toString()))
+        assertEquals(CapturedCreateCleanResult.UNRESOLVED, qualify()); assertEquals(0, rows()); assertEquals(1, sends)
+    }
+    @Test fun cleanQualificationRefusesNewReminderWithoutRemovingIt() = fixture {
+        ready(); acknowledge(); addReminder(); val before = providerSnapshot()
+        assertEquals(CapturedCreateCleanResult.UNRESOLVED, qualify()); assertEquals(before, providerSnapshot()); assertHold()
+    }
+    @Test fun cleanQualificationRefusesDamagedHistoricalMarker() = fixture {
+        ready(); acknowledge(); mutate(ContentValues().apply { put(Events.SYNC_DATA7, "foreign") })
+        assertEquals(CapturedCreateCleanResult.UNRESOLVED, qualify()); assertEquals("foreign", field(Events.SYNC_DATA7))
+    }
+    @Test fun cleanQualificationCannotConsumeARetainedLocalIntentionAfterAndroidRevert() = fixture {
+        ready(); incoming(verifiedEvent); acknowledge(); mutate(ContentValues().apply { put(Events.DIRTY, 1); put(Events.TITLE, "Retained before clean qualification") })
+        assertEquals(CapturedCreateReconciliationResult.RETAINED, reconcile()); val saved = edit()
+        mutate(ContentValues().apply { put(Events.DIRTY, 0); put(Events.TITLE, content.title) })
+        assertEquals(CapturedCreateCleanResult.UNRESOLVED, qualify()); assertEquals(saved, edit()); assertEquals(0, cleanInspections)
+    }
+    @Test fun cleanQualificationPreservesDifferentIncomingDataAndTheHold() = fixture {
+        ready(); acknowledge(); val newer = verifiedEvent.copy(revision = Revision("qualification-later"), content = content.copy(title = "Different incoming qualification")); incoming(newer)
+        assertEquals(CapturedCreateCleanResult.CLEAN, qualify()); assertEquals(newer, remoteRecord()); assertEquals(1, rawPending()); assertHold()
+    }
+    @Test fun cleanQualificationClosesAdmissionWhenPermissionIsUnavailable() = fixture {
+        ready(); acknowledge(); permitted = false
+        assertEquals(CapturedCreateCleanResult.INACTIVE, qualify()); assertEquals(0, cleanInspections)
+    }
+    @Test fun cleanQualificationClosesAdmissionAfterPermissionLossFollowingInspection() = fixture {
+        ready(); acknowledge(); afterClean = { permitted = false }
+        assertEquals(CapturedCreateCleanResult.INACTIVE, qualify()); assertEquals(1, cleanInspections); assertEquals("0", field(Events.DIRTY))
+    }
+    @Test fun cleanQualificationRefusesAdapterFormatDriftBeforeProviderInspection() = fixture {
+        ready(); acknowledge(); currentFormat = AdapterFormat(format.id, format.version + 1)
+        assertEquals(CapturedCreateCleanResult.UNRESOLVED, qualify()); assertEquals(0, cleanInspections)
+    }
+    @Test fun cleanQualificationRefusesSourceDriftFollowingProviderInspection() = fixture {
+        ready(); acknowledge(); afterClean = { currentFormat = AdapterFormat(format.id, format.version + 1) }
+        assertEquals(CapturedCreateCleanResult.UNRESOLVED, qualify()); assertEquals(1, cleanInspections); assertHold()
+    }
+    @Test fun cleanQualificationClosesAllLeasesAfterAnInterruptedInspection() = fixture {
+        ready(); acknowledge(); beforeClean = { throw IllegalStateException("Controlled clean qualification interruption") }
+        assertEquals(CapturedCreateCleanResult.UNRESOLVED, qualify())
+        assertFalse(store.admitTransaction(target)); assertFalse(journal.admitCapture(target)); assertFalse(attachmentProjection.admitOperation())
+        beforeClean = {}; assertEquals(CapturedCreateCleanResult.CLEAN, qualify()); assertEquals(1, ackAttempts)
+    }
+    @Test fun cleanQualificationIsOnlyAnObservationAndCannotPreventTheNextLocalEdit() = fixture {
+        ready(); acknowledge(); assertEquals(CapturedCreateCleanResult.CLEAN, qualify())
+        mutate(ContentValues().apply { put(Events.DIRTY, 1); put(Events.TITLE, "Edit after clean observation") })
+        assertEquals(CapturedCreateCleanResult.UNRESOLVED, qualify()); assertEquals("Edit after clean observation", field(Events.TITLE)); assertEquals("1", field(Events.DIRTY)); assertHold()
+    }
+    @Test fun cleanQualificationRejectsDifferentCaptureAndAttemptBeforeProviderRead() = fixture {
+        ready(); acknowledge()
+        assertEquals(CapturedCreateCleanResult.UNRESOLVED, coordinator.qualifyAcknowledgedLocalCreate(target, localId, MutationId("other-capture"), attempt))
+        assertEquals(CapturedCreateCleanResult.UNRESOLVED, coordinator.qualifyAcknowledgedLocalCreate(target, localId, id, MutationId("other-attempt")))
+        assertEquals(0, cleanInspections)
+    }
+    @Test fun cleanQualificationRejectsAnUnrelatedProviderWitness() = fixture {
+        ready(); acknowledge(); transformClean = { it?.let { proof -> proof.copy(receipt = proof.receipt.copy(nonce = UUID.randomUUID().toString())) } }
+        assertEquals(CapturedCreateCleanResult.UNRESOLVED, qualify()); assertEquals(1, cleanInspections); assertHold()
+    }
+    @Test fun cleanQualificationRefusesAPersistentlyPausedCalendar() = fixture {
+        ready(); acknowledge(); val selected = coordinator.state.value.selections.single { it.scope == target }
+        coordinator.setEnabled(selected, false)
+        withTimeout(5_000) { while (store.selections(target.account).single { it.scope == target }.enabled) delay(10) }
+        assertEquals(CapturedCreateCleanResult.INACTIVE, qualify()); assertEquals(0, cleanInspections)
+    }
+    @Test fun cleanQualificationClosesAdmissionOnSignOutFollowingInspection() = fixture {
+        ready(); acknowledge(); afterClean = { coordinator.authenticationChanged(false) }
+        assertEquals(CapturedCreateCleanResult.INACTIVE, qualify()); assertEquals(1, cleanInspections)
+        assertFalse(store.admitTransaction(target)); assertFalse(journal.admitCapture(target)); assertFalse(attachmentProjection.admitOperation())
+    }
     @Test fun unchangedOriginalIsAcknowledgedOnceWithoutConsumingIncomingEvidenceOrHold() = fixture {
         ready(); incoming(verifiedEvent); val before = providerSnapshot()
         assertEquals(CapturedCreateAcknowledgementResult.ACKNOWLEDGED, acknowledge())
@@ -186,6 +290,10 @@ class CapturedCreateAcknowledgementIntegrationDeviceTest {
         var attachmentWrites = 0
         var ackAttempts = 0
         var ackInspections = 0
+        var cleanInspections = 0
+        var beforeClean: suspend () -> Unit = {}
+        var afterClean: suspend () -> Unit = {}
+        var transformClean: (CapturedCreateCleanWitness?) -> CapturedCreateCleanWitness? = { it }
         var beforeAck: suspend () -> Unit = {}
         var afterAck: suspend () -> Unit = {}
         var beforeAckInspection: suspend () -> Unit = {}
@@ -199,6 +307,11 @@ class CapturedCreateAcknowledgementIntegrationDeviceTest {
         var beforeAttachment: suspend () -> Unit = {}
         var afterAttachment: suspend () -> Unit = {}
         val attachmentProjection = object : CalendarProjection by projection {
+            override suspend fun inspectAcknowledgedCreateClean(receipt: CapturedCreateAcknowledgementReceipt): CapturedCreateCleanWitness? {
+                cleanInspections++; beforeClean()
+                val proof = projection.inspectAcknowledgedCreateClean(receipt)
+                afterClean(); return transformClean(proof)
+            }
             override suspend fun acknowledgeCapturedCreate(receipt: CapturedCreateAcknowledgementReceipt): AppliedCapturedCreateAcknowledgement? {
                 ackAttempts++; beforeAck()
                 val proof = projection.acknowledgeCapturedCreate(receipt)
@@ -310,6 +423,7 @@ class CapturedCreateAcknowledgementIntegrationDeviceTest {
         }
         val mutation = MutationId("after-create-change")
         suspend fun acknowledge() = coordinator.acknowledgeLocalCreate(target, localId, id, attempt)
+        suspend fun qualify() = coordinator.qualifyAcknowledgedLocalCreate(target, localId, id, attempt)
         suspend fun ackRecord(): CapturedCreateAcknowledgementRecord? { allowStore(); return store.capturedAcknowledgement(target, verifiedEvent.eventId) }
         suspend fun assertHold() = assertTrue(creates.capturedProjectionHold(target, format).holds(verifiedEvent.eventId))
         fun failAckCommit(enabled: Boolean) {

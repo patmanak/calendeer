@@ -17,6 +17,7 @@ import com.patmanak.proton.andcalendarbridge.sync.CapturedCreateBaseline
 import com.patmanak.proton.andcalendarbridge.sync.CapturedCreateCurrentObservation
 import com.patmanak.proton.andcalendarbridge.sync.CapturedCreateAcknowledgementReceipt
 import com.patmanak.proton.andcalendarbridge.sync.AppliedCapturedCreateAcknowledgement
+import com.patmanak.proton.andcalendarbridge.sync.CapturedCreateCleanWitness
 import com.patmanak.proton.andcalendarbridge.sync.catalog.CalendarSummary
 
 /** Android-layer boundary. A failed apply leaves its durable intent unacknowledged for replay. */
@@ -68,6 +69,11 @@ interface CalendarProjection {
      * invalidate that history and are never consumed by inspection; this is not current-clean proof.
      */
     suspend fun inspectCapturedAcknowledgement(receipt: CapturedCreateAcknowledgementReceipt): AppliedCapturedCreateAcknowledgement? = null
+    /** Assertion-only current clean original: full acknowledgement provenance, unique identity,
+     * unchanged simple content, clean/non-deleted flags and absent children in one atomic batch.
+     * Historical ACK alone is insufficient. This observation is not a lease or import release.
+     */
+    suspend fun inspectAcknowledgedCreateClean(receipt: CapturedCreateAcknowledgementReceipt): CapturedCreateCleanWitness? = null
     /** Capture subsequent dirty content through the exact historical acknowledgement marker.
      * No new acknowledgement, incoming release, or deletion inference from an absent row.
      */
