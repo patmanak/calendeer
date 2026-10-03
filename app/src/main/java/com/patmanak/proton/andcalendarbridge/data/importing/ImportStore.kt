@@ -443,6 +443,59 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
         baseline
     }
 
+    /** Retain the first supported local edit/tombstone behind its exact captured sent reference.
+     * Only local_edits is changed. Incoming records, raw pending flags, bases and receipts survive.
+     * Null means unchanged with no retained local intent; it grants no future clean acknowledgement.
+     */
+    suspend fun retainCapturedLocalChange(snapshot: CapturedCreateCurrent, mutation: MutationId): LocalEditState? =
+        stagingMutation(snapshot.baseline.scope) { db ->
+            val baseline = snapshot.baseline
+            val link = baseline.receipt.binding.identity
+            val scope = baseline.scope
+            val event = baseline.change.eventId
+            require(mutation != link.captureId && mutation != link.attempt.id && mutation.value != link.localId.value) {
+                "Local change requires a separate mutation identity"
+            }
+            check(activeProjectionScope(db, scope) && capturedFormatMatches(db, scope, baseline.format) &&
+                readCapturedBase(db, scope, event) == baseline) { "Current local change requires identical captured baseline" }
+            check(!hasRawEventRow(db, "projection_receipts", scope, event)) { "Ordinary projection proof is unresolved" }
+            if (snapshot.deleted) LocalDeleteIntent(mutation, scope, baseline.format, baseline.change, snapshot.content)
+            else if (!snapshot.unchanged) LocalEditIntent(mutation, scope, baseline.format, baseline.change, snapshot.content)
+            val kind = if (snapshot.deleted) "DELETE" else "UPDATE"
+            val basePayload = encodeChange(baseline.change)
+            val localPayload = encodeChange(baseline.change.copy(content = snapshot.content))
+            val previous = db.rawQuery("SELECT mutation,adapter,version,base,local,state,kind FROM local_edits WHERE scope=? AND event=?",
+                arrayOf(key(scope), event.value)).use { row ->
+                if (!row.moveToFirst()) null else {
+                    check(!snapshot.unchanged && row.getString(0) == mutation.value && row.getString(1) == baseline.format.id &&
+                        row.getInt(2) == baseline.format.version && row.getString(3) == basePayload &&
+                        row.getString(4) == localPayload && row.getString(6) == kind) { "Captured local intention is immutable" }
+                    LocalEditState.valueOf(row.getString(5))
+                }
+            }
+            if (previous == null) {
+                check(!db.rawQuery("SELECT 1 FROM local_edits WHERE scope=? AND mutation=?", arrayOf(key(scope), mutation.value))
+                    .use { it.moveToFirst() }) { "Local mutation identity already belongs to other work" }
+                if (snapshot.unchanged) return@stagingMutation null
+            }
+            val hasDeferred = hasRawEventRow(db, "deferred_events", scope, event)
+            val exactRemote = db.rawQuery("SELECT payload FROM records WHERE scope=? AND event=?",
+                arrayOf(key(scope), event.value)).use { row -> row.moveToFirst() && row.getString(0) == basePayload }
+            val state = if (previous == LocalEditState.CONFLICT || hasDeferred || !exactRemote) LocalEditState.CONFLICT else LocalEditState.PAUSED
+            if (previous != null) {
+                if (previous != state) check(db.update("local_edits", ContentValues().apply { put("state", state.name) },
+                    "scope=? AND event=? AND mutation=? AND state=?", arrayOf(key(scope), event.value, mutation.value,
+                        previous.name)) == 1) { "Captured local conflict state was not retained" }
+            } else {
+                db.insertOrThrow("local_edits", null, ContentValues().apply {
+                    put("scope", key(scope)); put("mutation", mutation.value); put("event", event.value)
+                    put("adapter", baseline.format.id); put("version", baseline.format.version)
+                    put("base", basePayload); put("local", localPayload); put("state", state.name); put("kind", kind)
+                })
+            }
+            state
+        }
+
     private fun hasRawEventRow(db: SQLiteDatabase, table: String, scope: CalendarScope, event: EventId): Boolean =
         db.rawQuery("SELECT 1 FROM $table WHERE scope=? AND event=?", arrayOf(key(scope), event.value)).use { it.moveToFirst() }
     private fun hasCapturedBase(db: SQLiteDatabase, scope: CalendarScope, event: EventId) =

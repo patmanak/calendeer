@@ -13,6 +13,8 @@ import com.patmanak.proton.andcalendarbridge.sync.AppliedProjectionWitness
 import com.patmanak.proton.andcalendarbridge.sync.LocalEventId
 import com.patmanak.proton.andcalendarbridge.sync.CapturedCreateAttachmentReceipt
 import com.patmanak.proton.andcalendarbridge.sync.AppliedCapturedCreateAttachment
+import com.patmanak.proton.andcalendarbridge.sync.CapturedCreateBaseline
+import com.patmanak.proton.andcalendarbridge.sync.CapturedCreateCurrentObservation
 import com.patmanak.proton.andcalendarbridge.sync.catalog.CalendarSummary
 
 /** Android-layer boundary. A failed apply leaves its durable intent unacknowledged for replay. */
@@ -50,6 +52,11 @@ interface CalendarProjection {
     suspend fun attachCapturedCreate(receipt: CapturedCreateAttachmentReceipt): AppliedCapturedCreateAttachment? = null
     /** Historical exact metadata proof only, even if the row was subsequently edited or deleted. */
     suspend fun inspectCapturedAttachment(receipt: CapturedCreateAttachmentReceipt): AppliedCapturedCreateAttachment? = null
+    /** Exact attached dirty-row snapshot, including a present local tombstone. Assertion-only;
+     * never acknowledge Android, infer deletion from absence or release incoming projections.
+     */
+    suspend fun captureCapturedCreateCurrent(baseline: CapturedCreateBaseline): CapturedCreateCurrentObservation =
+        CapturedCreateCurrentObservation.Unresolved
 }
 
 /** Android locator is diagnostic context only and never enters the durable domain intent. */

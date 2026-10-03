@@ -340,3 +340,34 @@ The original dirty/deleted flags, current content and child rows remain untouche
 The durable captured hold remains in force. Preserving and resolving the current
 local intention, then qualifying original-row acknowledgement and hold release,
 are still required before an editable mirror or live captured-upload rollout.
+
+## Current local intention after attachment
+
+`reconcileLocalCreate` is a separate explicit offline operation. It reconstructs
+the sent reference from the frozen submission and retained binding/receipt, then
+requires identical import provenance. A dedicated Provider snapshot asserts the
+complete attachment metadata, unique local and remote identities, ownership,
+dirty/deleted flags, supported fields and absence of child data in one batch.
+It changes no Android data. A present supported tombstone preserves any edits
+made before deletion; a missing row never establishes deletion. Reminders,
+recurrence, custom colors and other unsupported fields remain intact and block
+this operation rather than becoming a partial edit.
+
+A supported change retains one immutable UPDATE or DELETE intention against the
+sent reference in the existing local journal. Its transaction preserves incoming
+records and raw pending flags, baselines and receipts. Different or missing
+cached remote evidence, or deferred work, conservatively marks the intention as
+conflicted. A conflict is never cleared by ordinary replay. Subsequent import
+can suppress projection through the existing local-intention guard while keeping
+the remote payload and conflict; suppression does not acknowledge Android or
+resolve the competing versions.
+
+Replay still inspects the current original row. A second edit, a change of kind,
+a reverted edit or a different mutation identity cannot replace or hide the first
+intention. A fresh snapshot after the local commit can detect a concurrent edit;
+the historical intention remains retained and the current row stays dirty.
+`UNCHANGED` describes local content observed at that instant, with no retained
+local intention. It creates no durable clean proof and cannot authorize a later
+acknowledgement. Access and full source identities are requalified around these
+operations. Incoming holds remain active; there is no observer, upload, writable
+UI, original-row acknowledgement or projection release.

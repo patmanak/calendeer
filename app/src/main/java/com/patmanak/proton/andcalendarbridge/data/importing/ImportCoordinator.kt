@@ -31,6 +31,7 @@ enum class LocalCreateSubmissionResult { INACTIVE, UNQUALIFIED, RETAINED, UNRESO
 enum class CapturedCreateBindingResult { INACTIVE, UNRESOLVED, RETAINED }
 enum class CapturedCreateAttachmentResult { INACTIVE, UNRESOLVED, ATTACHED }
 enum class CapturedCreateBaselineResult { INACTIVE, UNRESOLVED, RETAINED }
+enum class CapturedCreateReconciliationResult { INACTIVE, UNRESOLVED, UNSUPPORTED, UNCHANGED, RETAINED, CONFLICT }
 /** One process owner for foreground and durable worker triggers; no event content reaches UI. */
 class ImportCoordinator(
     private val context: Context,
@@ -831,6 +832,78 @@ class ImportCoordinator(
             if (!active()) CapturedCreateBaselineResult.INACTIVE else throw cancelled
         } catch (_: Exception) {
             if (!active()) CapturedCreateBaselineResult.INACTIVE else CapturedCreateBaselineResult.UNRESOLVED
+        } finally {
+            captures.admitCapture = { false }
+            store.admitTransaction = { false }
+            projection.admitOperation = { false }
+        }
+    }
+
+    /** Snapshot and retain the current local intention only; no Provider ACK or hold release. */
+    suspend fun reconcileLocalCreate(target: CalendarScope, localId: LocalEventId, id: MutationId,
+        attempt: MutationId, mutation: MutationId): CapturedCreateReconciliationResult = mutex.withLock {
+        val captures = localCreates ?: return@withLock CapturedCreateReconciliationResult.UNRESOLVED
+        val journal = creates ?: return@withLock CapturedCreateReconciliationResult.UNRESOLVED
+        ensureCreateLifecycle()
+        val expected = generation
+        val policy = createPolicyRevision.get()
+        val active = { authenticated && generation == expected && createPolicyRevision.get() == policy && hasCalendarPermissions() }
+        suspend fun available(): Boolean {
+            if (!isCurrent(expected, target.account) || !active()) return false
+            val selected = store.selections(target.account).singleOrNull { it.scope == target }
+            return selected?.enabled == true && selected.available && active()
+        }
+        try {
+            if (!available()) return@withLock CapturedCreateReconciliationResult.INACTIVE
+            store.admitTransaction = { it == target && active() }
+            captures.admitCapture = { it == target && active() }
+            projection.admitOperation = { active() }
+            val submission = captures.readSubmission(target, localId) ?: return@withLock CapturedCreateReconciliationResult.UNRESOLVED
+            val reserved = submission.reservation
+            val capture = reserved.intent.reservation
+            if (capture.scope != target || capture.localId != localId || capture.id != id || reserved.attempt != attempt ||
+                capture.format != remote.format || store.transaction(target) { checkpoint?.format } != capture.format ||
+                projection.capturedAttachmentProtocol != 1 || mutation == id || mutation == attempt || mutation.value == localId.value)
+                return@withLock CapturedCreateReconciliationResult.UNRESOLVED
+            val identity = CapturedCreateDispatchIdentity.of(submission)
+            val binding = journal.capturedBinding(identity) ?: return@withLock CapturedCreateReconciliationResult.UNRESOLVED
+            val receipt = journal.capturedAttachment(binding) ?: return@withLock CapturedCreateReconciliationResult.UNRESOLVED
+            val baseline = CapturedCreateBaseline(receipt,
+                RemoteChange.Upsert(binding.eventId, binding.verifiedRevision, reserved.intent.content))
+            suspend fun exact(): Boolean = captures.readSubmission(target, localId) == submission &&
+                remote.format == capture.format && projection.capturedAttachmentProtocol == receipt.protocol &&
+                store.transaction(target) { checkpoint?.format } == capture.format &&
+                journal.capturedBinding(identity) == binding && journal.capturedAttachment(binding) == receipt &&
+                store.capturedBaseline(target, binding.eventId) == baseline
+            if (!available()) return@withLock CapturedCreateReconciliationResult.INACTIVE
+            if (!exact()) return@withLock CapturedCreateReconciliationResult.UNRESOLVED
+            // Cached intentions cannot qualify the original row. Every replay takes a fresh,
+            // assertion-only snapshot of the complete attachment, content and child absence.
+            val observed = projection.captureCapturedCreateCurrent(baseline)
+            if (!available()) return@withLock CapturedCreateReconciliationResult.INACTIVE
+            if (!exact()) return@withLock CapturedCreateReconciliationResult.UNRESOLVED
+            if (observed == CapturedCreateCurrentObservation.Unsupported)
+                return@withLock CapturedCreateReconciliationResult.UNSUPPORTED
+            val snapshot = (observed as? CapturedCreateCurrentObservation.Supported)?.snapshot
+                ?: return@withLock CapturedCreateReconciliationResult.UNRESOLVED
+            if (snapshot.baseline != baseline) return@withLock CapturedCreateReconciliationResult.UNRESOLVED
+            val retained = store.retainCapturedLocalChange(snapshot, mutation)
+            if (!available()) return@withLock CapturedCreateReconciliationResult.INACTIVE
+            if (!exact()) return@withLock CapturedCreateReconciliationResult.UNRESOLVED
+            val current = projection.captureCapturedCreateCurrent(baseline) as? CapturedCreateCurrentObservation.Supported
+            if (!available()) return@withLock CapturedCreateReconciliationResult.INACTIVE
+            if (current?.snapshot != snapshot || !exact()) return@withLock CapturedCreateReconciliationResult.UNRESOLVED
+            // Even this second observation is point-in-time evidence, never a future ACK lease.
+            when (retained) {
+                null -> CapturedCreateReconciliationResult.UNCHANGED
+                LocalEditState.PAUSED -> CapturedCreateReconciliationResult.RETAINED
+                LocalEditState.CONFLICT -> CapturedCreateReconciliationResult.CONFLICT
+            }
+        } catch (cancelled: CancellationException) {
+            currentCoroutineContext().ensureActive()
+            if (!active()) CapturedCreateReconciliationResult.INACTIVE else throw cancelled
+        } catch (_: Exception) {
+            if (!active()) CapturedCreateReconciliationResult.INACTIVE else CapturedCreateReconciliationResult.UNRESOLVED
         } finally {
             captures.admitCapture = { false }
             store.admitTransaction = { false }

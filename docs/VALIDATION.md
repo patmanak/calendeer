@@ -1088,6 +1088,63 @@ retained legacy live event. No new live submission was made. Host checks passed
 with 124 sync, 274 Proton adapter and 10 app tests, both debug APK builds and
 Android lint. These results retain the boundaries described above.
 
+## Current local intention after captured attachment
+
+`CapturedCreateCurrentTest` checks unchanged versus later content and tombstones,
+known-empty supported data, precision, malformed text and redacted diagnostics.
+The domain snapshot is point-in-time data, never an Android clean lease.
+
+`CapturedCreateCurrentProviderDeviceTest` uses isolated production Provider rows
+with `providerFixture=true`. It checks timed/all-day dates, later text, present
+tombstones and preservation of unsupported flags, reminders, attendees, extended
+properties, recurrence and colors. Missing, duplicate, moved, clean or foreign
+rows and altered attachment metadata cannot qualify capture. Injected edits,
+duplicate identities, reminders or tombstones before the single assertion batch
+must abort a stale snapshot. Admission loss after the batch cannot return a
+qualified result. No Provider content or flags are changed by the snapshot.
+One fixture simulates an empty alarm flag only in the query cursor, with real
+reminder rows retained, to verify child inspection independently of that flag.
+It does not require writing the [alarm flag](https://developer.android.com/reference/android/provider/CalendarContract.EventsColumns#HAS_ALARM).
+Concurrent reminder creation must reach a real assertion batch and reject the
+stale snapshot; its alarm metadata can also cause that rejection. This case does
+not isolate the child assertion as the only failure source.
+
+`CapturedCreateLocalChangeStoreDeviceTest` uses isolated SQL and existing import
+schema v11. First supported UPDATE/DELETE work is immutable and preserves raw
+incoming pending flags, payloads, bases and receipts. Reopening and exact replay
+cannot clear a conflict or replace kind/content/identity. Different, malformed,
+absent or deferred remote evidence conflicts; raw corruption, ordinary receipts,
+advanced baselines, incompatible checkpoints and mutation collisions refuse
+adoption. Rollback, lease loss, cancellation and competing helpers must preserve
+the first intention. An unchanged result requires absence of any retained work.
+
+`CapturedCreateReconciliationIntegrationDeviceTest` uses the production owner,
+real journals/Provider and controlled captured transport. An unwired owner must
+fail the expected unchanged result. Source and receipt drift, inactive access,
+unsupported data, missing or ambiguous originals and format replacement cannot
+establish new work. Replays inspect the current row; a second edit, tombstone or
+reverted edit leaves the first intention intact and requires resolution. A local
+commit failure preserves retry, and access loss after commit preserves durable
+work. A new edit between snapshot and commit remains dirty and is detected by
+the post-commit snapshot. Remote differences before and after capture preserve
+both local intention and remote payload. Later import can suppress projection
+through the existing intention guard; that suppression is not an Android ACK.
+Fixture data is removed. No original-row acknowledgement, hold release, writable
+UI, live captured submission, conflict resolution or cross-process atomicity is
+established by these cases. Permission-loss fixtures control the gate rather
+than revoking Android grants during a batch.
+
+The unwired-owner physical fixture failed the expected unchanged result. The
+wired build passed 17 local-intention SQL and 32 owner/Provider cases. Two initial
+Provider fixtures failed because an alarm-only update was rejected; another
+race fixture could report rejection before attempting its intended batch.
+After correcting those fixtures, all 27 Provider cases passed, including explicit
+proof of attempted assertion batches. The same production build passed 300
+related regressions and one read-only inspection of the retained legacy live
+event, for 377 distinct physical cases. No new live submission was made. Host
+checks passed with 131 sync, 274 Proton adapter and 10 app tests, both debug APK
+builds and Android lint. These results retain the boundaries described above.
+
 ## Anonymous transport probe
 
 `ProtonConnectivityDeviceTest` is skipped unless instrumentation receives

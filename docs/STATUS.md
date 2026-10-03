@@ -195,7 +195,7 @@ separate journal before its one permitted Provider identity stamp. Reopening wit
 a captured intention inspects that marker only; missing or ambiguous evidence never
 falls back to a row ID. The first committed supported content and timestamp remain
 immutable and paused. This does not connect to the experimental remote CREATE path
-or qualify a system calendar creation UI. The import database remains at schema 10.
+or qualify a system calendar creation UI. This capture uses a separate journal.
 Interrupted claims can sacrifice availability or lose an uncommitted snapshot;
 they cannot automatically rebind an identity after row purge. Source review,
 JVM checks and physical SQLite/Provider/owner fixtures have passed, including
@@ -300,6 +300,20 @@ evidence and later local intentions remain intact. The original Android row stay
 dirty and incoming projection holds remain active; current local intentions,
 conflicts and the final original-row acknowledgement still need reconciliation.
 The controlled qualification is described in [validation](VALIDATION.md).
+A separate explicit offline reconciliation now inspects the current attached
+original row with an atomic, assertion-only Provider snapshot. Supported later
+edits or present tombstones retain an immutable UPDATE/DELETE intention against
+the sent reference without cleaning Android or consuming incoming records in
+that capture transaction. Different or absent cached remote evidence and deferred
+work conservatively produce a permanent conflict. Replay rechecks the original;
+a newer edit or changed kind cannot replace the first intention. Missing or
+ambiguous identity remains unresolved, and reminders, recurrence, colors or other
+unsupported data remain intact. An unchanged result is only a current local
+observation, never a durable clean proof. A second snapshot can detect edits
+after the local commit. The existing local-intention guard can suppress later
+incoming projections while preserving remote evidence and conflict; captured
+holds remain active. Original-row acknowledgement and hold release are still
+separate prerequisites for bidirectional operation.
 The application still exposes no writable mirror or event editor. General outgoing
 queue/resolution, automatic Provider capture and conditional Proton UPDATE/DELETE
 guarantees remain unqualified. See

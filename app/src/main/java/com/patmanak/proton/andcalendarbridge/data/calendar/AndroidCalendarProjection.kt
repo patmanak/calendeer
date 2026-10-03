@@ -29,6 +29,9 @@ import com.patmanak.proton.andcalendarbridge.sync.ProjectionReceipt
 import com.patmanak.proton.andcalendarbridge.sync.AppliedProjectionWitness
 import com.patmanak.proton.andcalendarbridge.sync.CapturedCreateAttachmentReceipt
 import com.patmanak.proton.andcalendarbridge.sync.AppliedCapturedCreateAttachment
+import com.patmanak.proton.andcalendarbridge.sync.CapturedCreateBaseline
+import com.patmanak.proton.andcalendarbridge.sync.CapturedCreateCurrent
+import com.patmanak.proton.andcalendarbridge.sync.CapturedCreateCurrentObservation
 import com.patmanak.proton.andcalendarbridge.sync.RecurrencePoint
 import com.patmanak.proton.andcalendarbridge.sync.RemoteChange
 import com.patmanak.proton.andcalendarbridge.sync.EventContent
@@ -453,6 +456,76 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
 
     override suspend fun inspectCapturedAttachment(receipt: CapturedCreateAttachmentReceipt): AppliedCapturedCreateAttachment? = operation {
         inspectCapturedAttachmentInternal(receipt)
+    }
+
+    override suspend fun captureCapturedCreateCurrent(baseline: CapturedCreateBaseline): CapturedCreateCurrentObservation = operation {
+        val receipt = baseline.receipt
+        val expected = capturedAttachmentValues(receipt) // Strict canonical identity before Provider IO.
+        val scope = baseline.scope
+        val account = accountFor(scope.account)
+        val calendar = try { calendarRow(scope, account) } catch (failure: CalendarProjectionException) {
+            if (failure.category == CalendarProjectionFailure.IDENTITY_CONFLICT)
+                return@operation CapturedCreateCurrentObservation.Unresolved
+            throw failure
+        } ?: return@operation CapturedCreateCurrentObservation.Unresolved
+        val uri = syncUri(Events.CONTENT_URI, account)
+        val local = capturedLocalSelection(receipt, calendar)
+        val unsupported = arrayOf(Events.RRULE, Events.RDATE, Events.EXRULE, Events.EXDATE, Events.DURATION,
+            Events.ORIGINAL_ID, Events.ORIGINAL_SYNC_ID, Events.ORIGINAL_INSTANCE_TIME, Events.ORIGINAL_ALL_DAY,
+            Events.ORGANIZER, Events.EVENT_COLOR, Events.EVENT_COLOR_KEY, Events.CUSTOM_APP_PACKAGE, Events.CUSTOM_APP_URI)
+        val emptyFlags = arrayOf(Events.HAS_ATTENDEE_DATA, Events.IS_ORGANIZER, Events.GUESTS_CAN_MODIFY,
+            Events.GUESTS_CAN_INVITE_OTHERS, Events.GUESTS_CAN_SEE_GUESTS, Events.HAS_ALARM,
+            Events.SELF_ATTENDEE_STATUS, Events.ACCESS_LEVEL)
+        val columns = arrayOf(Events._ID, Events.CALENDAR_ID, Events.DIRTY, Events.DELETED, Events.TITLE,
+            Events.DESCRIPTION, Events.EVENT_LOCATION, Events.DTSTART, Events.DTEND, Events.ALL_DAY,
+            Events.EVENT_TIMEZONE, Events.EVENT_END_TIMEZONE, Events.STATUS, Events.AVAILABILITY) +
+            ATTACHMENT_SYNC_COLUMNS + unsupported + emptyFlags
+        val values = resolver.query(uri, columns, local.sql, local.args, null)?.use {
+            if (it.count != 1 || !it.moveToFirst()) return@operation CapturedCreateCurrentObservation.Unresolved
+            ContentValues().apply { DatabaseUtils.cursorRowToContentValues(it, this) }
+        } ?: fail(CalendarProjectionFailure.PROVIDER_UNAVAILABLE)
+        val row = values.getAsLong(Events._ID)
+        val deleted = values.getAsInteger(Events.DELETED)
+        if (row == null || row <= 0 || values.getAsLong(Events.CALENDAR_ID) != calendar ||
+            values.getAsInteger(Events.DIRTY) != 1 || (deleted != 0 && deleted != 1) ||
+            values.getAsString(Events.SYNC_DATA5) != local.args[1] ||
+            expected.keySet().any { values.getAsString(it) != expected.getAsString(it) } ||
+            ATTACHMENT_SYNC_COLUMNS.any { it !in expected.keySet() && it != Events.SYNC_DATA5 && values[it] != null })
+            return@operation CapturedCreateCurrentObservation.Unresolved
+        val remote = capturedRemoteSelection(receipt, calendar)
+        val remoteMatches = resolver.query(uri, arrayOf(Events._ID), remote.sql, remote.args, null)?.use {
+            it.count == 1 && it.moveToFirst() && it.getLong(0) == row
+        } ?: fail(CalendarProjectionFailure.PROVIDER_UNAVAILABLE)
+        if (!remoteMatches) return@operation CapturedCreateCurrentObservation.Unresolved
+        if (unsupported.any { values[it] != null } || emptyFlags.any { values.getAsInteger(it) != 0 } ||
+            values.getAsInteger(Events.STATUS) != Events.STATUS_CONFIRMED ||
+            values.getAsInteger(Events.AVAILABILITY) != Events.AVAILABILITY_BUSY)
+            return@operation CapturedCreateCurrentObservation.Unsupported
+        val time = readSimpleTime(values) ?: return@operation CapturedCreateCurrentObservation.Unsupported
+        val snapshot = try {
+            CapturedCreateCurrent(baseline, EventContent(values.getAsString(Events.TITLE) ?: "", time,
+                values.getAsString(Events.DESCRIPTION) ?: "", values.getAsString(Events.EVENT_LOCATION) ?: "",
+                details = EventDetails()), deleted == 1)
+        } catch (_: IllegalArgumentException) { return@operation CapturedCreateCurrentObservation.Unsupported }
+        val checks = arrayListOf(assertion(syncUri(Calendars.CONTENT_URI, account), calendarSelection(scope, account), calendar),
+            ContentProviderOperation.newAssertQuery(uri).withSelection(local.sql, local.args)
+                .withValues(values).withExpectedCount(1).build(),
+            ContentProviderOperation.newAssertQuery(uri).withSelection(remote.sql, remote.args)
+                .withValue(Events._ID, row).withExpectedCount(1).build())
+        for ((child, column) in listOf(Reminders.CONTENT_URI to Reminders.EVENT_ID,
+            Attendees.CONTENT_URI to Attendees.EVENT_ID, ExtendedProperties.CONTENT_URI to ExtendedProperties.EVENT_ID)) {
+            val absent = resolver.query(syncUri(child, account), arrayOf("_id"), "$column=?", arrayOf(row.toString()), null)
+                ?.use { it.count == 0 } ?: fail(CalendarProjectionFailure.PROVIDER_UNAVAILABLE)
+            if (!absent) return@operation CapturedCreateCurrentObservation.Unsupported
+            checks += ContentProviderOperation.newAssertQuery(syncUri(child, account))
+                .withSelection("$column=?", arrayOf(row.toString())).withExpectedCount(0).build()
+        }
+        // Every identity, content/flag value and child absence is qualified in one atomic batch.
+        // This snapshot can become stale later; it grants no permission to clear the original row.
+        requirePermissions()
+        resolver.applyBatch(CalendarContract.AUTHORITY, checks)
+        requirePermissions()
+        CapturedCreateCurrentObservation.Supported(snapshot)
     }
 
     private fun inspectCapturedAttachmentInternal(receipt: CapturedCreateAttachmentReceipt): AppliedCapturedCreateAttachment? {
