@@ -191,7 +191,7 @@ class CoverageStoreDeviceTest {
                 db.version = 4
             }
             ImportStore(context, name).use { store ->
-                assertEquals(13, store.readableDatabase.version)
+                assertEquals(14, store.readableDatabase.version)
                 assertEquals(CoverageLedger(), store.staged { coverage })
                 val selection = store.selections(scope.account).single()
                 assertNull(selection.coverage); assertEquals(300L, selection.completedAt)

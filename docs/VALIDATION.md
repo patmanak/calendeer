@@ -1582,3 +1582,51 @@ recovery. They do not establish SQL durability, a killed-process journey,
 automatic worker resumption, current Proton access, refreshed signature
 verification on opening, server acceptance or concurrent-write protection.
 Production UPDATE/DELETE remain disabled.
+
+## Durable journal for protected title preparations
+
+`LocalEditPreparationTest` checks the domain title-only/paused profile, exact
+identity, explicit whole-second time, redacted diagnostics, strict UTF-8 limits
+and empty-detail snapshot isolation. Context identifiers and both format names
+cannot bypass the journal's row-size bounds. Legacy unknown detail data remains
+unknown. The context-bound test failed before the missing limit was added.
+
+`LocalEditPreparationStoreDeviceTest` uses isolated app-private SQLite fixtures.
+It checks first retention/reopen, exact replay versus altered evidence, missing
+or forged owners, foreign scopes/events, conflict between preparation and commit,
+historical inspection after conflict/pause/catalog absence, lease loss,
+cancellation and injected SQL rollback. Other cases check a 3 MiB payload beyond
+the default cursor window, competing helpers, orphaned/changed owners, malformed
+metadata, mismatched owner event/revision, mutable input isolation, opaque future
+formats, additive schema 13 migration and shared staging-capacity rollback.
+The first retention test failed on the initial store stub before implementation.
+
+Two `LocalEditPreparationCryptoDeviceTest` cases call the real
+`prepareAndSealLocalTitleEdit` wrapper for binary- and text-signed synthetic
+originals. They capture the exact intent in an isolated ImportStore, retain the
+sealed preparation, close the helper, and recover through a new helper and new
+Keystore/codec instances. The recovered fragments then undergo original-key
+decryption, renewed signature verification and native import/readback checks.
+The remote cache, acknowledged baseline, local intent and projection queue stay
+unchanged by preparation retention. No account, network or Provider operation
+is used by these fixtures.
+
+Run the two journal classes with AndroidJUnitRunner. Selected legacy
+migration/reopen cases also require `providerFixture=true`; this opts in their
+isolated fixtures, not a live synchronization journey. Downgrade fixtures remove
+the new table before simulating an older schema. The crypto/journal fixture uses
+the catalog's generation-zero scope; mismatched scopes must remain refused.
+
+All seven new domain cases and the full 160 sync/330 Proton-adapter JVM cases
+passed. Forty-one physical-device cases passed: nineteen journal cases, two
+journal/crypto cases, eight shared-title regressions and twelve legacy
+migration/reopen checks spanning schemas 1–12. The new journal case covers
+13-to-14 migration. App/test APK builds, lint (zero errors, twenty existing
+warnings) and independent review passed. The final APK was installed and launched.
+
+The journal freezes the historical paused snapshot; current conflict state remains
+in the owner table. It is not dispatch admission. UID expectations are still
+supplied by the fixture caller in the same process, so helper reopening does not
+qualify a killed-process journey or autonomous recovery. The journal does not
+revalidate current Proton access or refresh signatures without remote context.
+Production UPDATE/DELETE remain disabled.

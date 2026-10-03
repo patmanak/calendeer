@@ -349,7 +349,7 @@ class DeltaImportStoreDeviceTest {
                 ImportStore(context, name).use { store ->
                     assertTrue(store.selections(scope.account).single().available)
                     assertTrue(store.selections(scope.account).single().enabled)
-                    assertEquals(13, store.readableDatabase.version)
+                    assertEquals(14, store.readableDatabase.version)
                     assertFalse(store.selections(scope.account).single().historyGap)
                     assertNull(store.delta { reconciliationFormat })
                     assertEquals(RemoteChange.Deleted(EventId("legacy-deleted"), Revision("gone")), store.pending(scope).single().change)

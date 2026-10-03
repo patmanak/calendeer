@@ -32,9 +32,13 @@ object ProtonSharedTitleCryptoProbe {
     suspend fun runTimestampedText(): String = run(textSignatures = true, timestamped = true)
     suspend fun runProtectedBinary(): String = run(textSignatures = false, timestamped = true, protectPreparation = true)
     suspend fun runProtectedText(): String = run(textSignatures = true, timestamped = true, protectPreparation = true)
+    suspend fun runProtectedJournal(textSignatures: Boolean,
+        journal: suspend (LocalEditPreparation) -> LocalEditPreparation): String =
+        run(textSignatures = textSignatures, timestamped = true, protectPreparation = true, journal = journal)
 
     private suspend fun run(textSignatures: Boolean, reencrypted: Boolean = false,
-        timestamped: Boolean = false, protectPreparation: Boolean = false): String = withContext(Dispatchers.IO) {
+        timestamped: Boolean = false, protectPreparation: Boolean = false,
+        journal: (suspend (LocalEditPreparation) -> LocalEditPreparation)? = null): String = withContext(Dispatchers.IO) {
         var stage = "GENERATE"
         try {
             val crypto = AndroidCryptoContext()
@@ -56,7 +60,8 @@ object ProtonSharedTitleCryptoProbe {
                 val calendar = "synthetic-title-calendar"
                 val uid = "synthetic-title@calendeer.invalid"
                 val eventId = EventId("synthetic-title-event")
-                val scope = CalendarScope(AccountId(user.id), CalendarId(calendar), 1)
+                // ImportStore catalog fixtures start at generation zero; legacy crypto fixtures retain one.
+                val scope = CalendarScope(AccountId(user.id), CalendarId(calendar), if (journal != null) 0 else 1)
                 val session = CatalogSession(user, SessionId("synthetic-title-session"))
                 val passphraseText = String(calendarSecret, Charsets.UTF_8)
                 val memberPacket = address.useKeys(crypto) { buildJsonObject {
@@ -150,7 +155,7 @@ object ProtonSharedTitleCryptoProbe {
 
                 if (timestamped) return@withContext runTimestamped(crypto, addressSecret, calendarSecret,
                     addressArmored, calendarArmored, addressKey, address, scope, session, bootstrap, row,
-                    originalTitle, newTitle, clear, prefix, suffix, patched, alteredSignature, decoder, protectPreparation)
+                    originalTitle, newTitle, clear, prefix, suffix, patched, alteredSignature, decoder, protectPreparation, journal)
                 if (reencrypted) {
                     val metadata = buildJsonObject { put("ID", calendar); put("Type", 0) }
                     suspend fun prepare(candidate: JsonObject = row, context: JsonObject = bootstrap,
@@ -386,7 +391,8 @@ object ProtonSharedTitleCryptoProbe {
         calendarSecret: ByteArray, addressArmored: String, calendarArmored: String, addressKey: PrivateKey,
         address: UserAddress, scope: CalendarScope, session: CatalogSession, bootstrap: JsonObject, row: JsonObject,
         originalTitle: String, newTitle: String, clear: String, prefix: String, suffix: String, patched: String,
-        alteredSignature: String, decoder: ProtonEventDecryptor, protectPreparation: Boolean): String {
+        alteredSignature: String, decoder: ProtonEventDecryptor, protectPreparation: Boolean,
+        journal: (suspend (LocalEditPreparation) -> LocalEditPreparation)?): String {
         var stage = "TIMESTAMPED_START"
         try {
             val pgp = crypto.pgpCrypto
@@ -403,6 +409,7 @@ object ProtonSharedTitleCryptoProbe {
             val sameSecond = Instant.parse("2026-10-03T09:00:00Z")
             var savedPreparation: ProtonProtectedTitlePreparation? = null
             var savedBinding: ProtonTitlePreparationBinding? = null
+            var journalUsed = false
             suspend fun prepare(candidate: JsonObject = row, context: JsonObject = bootstrap,
                 candidateMetadata: JsonObject = metadata, candidateScope: CalendarScope = scope,
                 expectedId: EventId = eventId, expectedRevision: Revision = candidate.revision(context),
@@ -413,7 +420,23 @@ object ProtonSharedTitleCryptoProbe {
                     expectedUid, expectedTitle, replacement, candidateMetadata, context, candidate, timestamp)
                 val binding = ProtonTitlePreparationBinding(candidateScope, expectedId, expectedRevision,
                     expectedUid, expectedTitle, replacement, timestamp)
-                val receipt = engine.prepareAndSealTitleAt(session, binding, candidateMetadata, context,
+                val receipt = if (journal != null && !journalUsed) {
+                    journalUsed = true
+                    stage = "JOURNAL_DECODE"
+                    val base = decoder.decode(session, calendar, bootstrap, listOf(row)).changes.single()
+                    stage = "JOURNAL_INTENT"
+                    val intent = LocalEditIntent(MutationId("synthetic-title-edit"), scope, EVENT_FORMAT,
+                        base, base.content.copy(title = replacement))
+                    stage = "JOURNAL_SEAL"
+                    val sealed = engine.prepareAndSealLocalTitleEdit(session, intent, expectedUid, timestamp,
+                        candidateMetadata, context, candidate, ProtonEventPayloadProtector(crypto.keyStoreCrypto))
+                    stage = "JOURNAL_SQL"
+                    val recovered = journal(sealed)
+                    stage = "JOURNAL_READBACK"
+                    check(recovered == sealed)
+                    ProtonProtectedTitlePreparation(recovered.intent.scope, recovered.intent.base.eventId,
+                        recovered.intent.base.revision, recovered.format, recovered.protectedPayload)
+                } else engine.prepareAndSealTitleAt(session, binding, candidateMetadata, context,
                     candidate, ProtonEventPayloadProtector(crypto.keyStoreCrypto))
                 check(receipt.scope == candidateScope && receipt.eventId == expectedId && receipt.revision == expectedRevision &&
                     receipt.format == TITLE_PREPARATION_FORMAT)

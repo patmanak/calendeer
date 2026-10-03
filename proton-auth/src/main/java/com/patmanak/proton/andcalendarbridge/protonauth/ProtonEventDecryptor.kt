@@ -95,6 +95,22 @@ internal class ProtonEventDecryptor(private val crypto: CryptoContext, private v
         return ProtonTitlePreparationCodec(protector).seal(binding, prepared)
     }
 
+    /** Bind the protected title profile to a project-owned immutable local intent.
+     * Only title changes are admitted here. This does not qualify other display fields,
+     * current rights, mutation identity inside the adapter payload, or any remote write.
+     */
+    suspend fun prepareAndSealLocalTitleEdit(session: CatalogSession, intent: LocalEditIntent,
+        uid: String, timestamp: Instant, metadata: JsonObject, bootstrap: JsonObject, row: JsonObject,
+        protector: EventPayloadProtector): LocalEditPreparation {
+        val frozen = try { LocalEditPreparation.freezeIntent(intent) }
+            catch (_: IllegalArgumentException) { unsupportedEvents() }
+            catch (_: java.nio.charset.CharacterCodingException) { unsupportedEvents() }
+        val binding = ProtonTitlePreparationBinding(frozen.scope, frozen.base.eventId, frozen.base.revision,
+            uid, frozen.base.content.title, frozen.content.title, timestamp)
+        val prepared = prepareAndSealTitleAt(session, binding, metadata, bootstrap, row, protector)
+        return LocalEditPreparation(frozen, timestamp, prepared.format, prepared.protectedPayload)
+    }
+
     private suspend fun prepareSharedTitleFragments(session: CatalogSession, scope: CalendarScope, expectedEventId: EventId,
         expectedRevision: Revision, expectedUid: String, expectedTitle: String, newTitle: String,
         metadata: JsonObject, bootstrap: JsonObject, row: JsonObject, timestamp: Instant?): ProtonTimestampedSharedTitle {

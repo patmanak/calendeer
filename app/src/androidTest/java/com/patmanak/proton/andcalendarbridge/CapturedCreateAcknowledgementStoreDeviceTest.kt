@@ -465,7 +465,7 @@ class CapturedCreateAcknowledgementStoreDeviceTest {
                 old.version = 11
                 for (table in tables) before[table] = rows(old, table)
             }
-            assertEquals(13, store.writableDatabase.version)
+            assertEquals(14, store.writableDatabase.version)
             store.writableDatabase.rawQuery("PRAGMA synchronous", null).use { assertTrue(it.moveToFirst()); assertEquals(2, it.getInt(0)) }
             for (table in tables) assertEquals("Migration must preserve $table", before[table], rawRows(store, table))
             assertTrue(rawRows(store, "captured_create_acknowledgements").isEmpty())

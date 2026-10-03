@@ -7,6 +7,7 @@ import android.database.CursorWindow
 import android.database.sqlite.SQLiteCursor
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
+import android.database.sqlite.SQLiteException
 import com.patmanak.proton.andcalendarbridge.sync.*
 import com.patmanak.proton.andcalendarbridge.sync.catalog.CalendarSummary
 import java.time.Instant
@@ -14,7 +15,10 @@ import java.time.LocalDate
 import java.time.ZoneId
 import java.time.DateTimeException
 import java.util.UUID
+import java.nio.CharBuffer
+import java.nio.charset.CodingErrorAction
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.sync.Mutex
@@ -26,7 +30,7 @@ import org.json.JSONException
 
 /** App-private, backup-excluded durable import queue. Every page and checkpoint commits together. */
 class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
-    SQLiteOpenHelper(context, name, null, 13), SyncStore {
+    SQLiteOpenHelper(context, name, null, 14), SyncStore {
     private val lock = Mutex()
     /** Check the run lease both before its transaction and before durable commit. */
     @Volatile var admitTransaction: (CalendarScope) -> Boolean = { true }
@@ -47,9 +51,10 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
         createCapturedBases(db)
         createCapturedAcknowledgements(db)
         createCapturedHandoffs(db)
+        createLocalEditPreparations(db)
     }
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        check(oldVersion in 1..12 && newVersion == 13) { "Explicit import schema migration required" }
+        check(oldVersion in 1..13 && newVersion == 14) { "Explicit import schema migration required" }
         if (oldVersion < 2) createStaging(db)
         if (oldVersion < 3) createDelta(db)
         if (oldVersion < 4) createReconciliation(db)
@@ -73,7 +78,18 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
         if (oldVersion in 8..9) db.execSQL("ALTER TABLE local_edits ADD COLUMN kind TEXT NOT NULL DEFAULT 'UPDATE' CHECK(kind IN ('UPDATE','DELETE'))")
         if (oldVersion < 11) createCapturedBases(db)
         if (oldVersion < 12) createCapturedAcknowledgements(db)
-        createCapturedHandoffs(db)
+        if (oldVersion < 13) createCapturedHandoffs(db)
+        createLocalEditPreparations(db)
+    }
+    private fun createLocalEditPreparations(db: SQLiteDatabase) {
+        db.execSQL("""CREATE TABLE local_edit_preparations (
+            scope TEXT NOT NULL, mutation TEXT NOT NULL, event TEXT NOT NULL,
+            adapter TEXT NOT NULL, version INTEGER NOT NULL CHECK(version > 0),
+            base TEXT NOT NULL, local TEXT NOT NULL, state TEXT NOT NULL CHECK(state = 'PAUSED'),
+            timestamp TEXT NOT NULL, prep_adapter TEXT NOT NULL,
+            prep_version INTEGER NOT NULL CHECK(prep_version > 0), payload TEXT NOT NULL,
+            PRIMARY KEY(scope,mutation), UNIQUE(scope,event)
+        )""".trimIndent())
     }
     private fun createCapturedHandoffs(db: SQLiteDatabase) {
         db.execSQL("""CREATE TABLE captured_create_handoffs (
@@ -1042,6 +1058,92 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
         check(admitTransaction(scope)) { "Inactive import lease" }
         edit
     }
+    /** Freeze an exact captured owner and sealed fragments together, without dispatch admission.
+     * Existing evidence is immutable even after its current owner becomes conflicted or paused.
+     */
+    suspend fun retainLocalEditPreparation(value: LocalEditPreparation): Boolean {
+        // Snapshot caller-owned empty lists and serialized observations before the first suspension.
+        val frozen = value.copy(intent = LocalEditPreparation.freezeIntent(value.intent))
+        val intent = frozen.intent
+        val base = encodeChange(intent.base).also(::requirePreparationSnapshotBudget)
+        val local = encodeChange(intent.base.copy(content = intent.content)).also(::requirePreparationSnapshotBudget)
+        return stagingMutation(intent.scope) { db ->
+            val previous = readLocalEditPreparation(db, intent.scope, intent.base.eventId)
+            if (previous != null) {
+                require(previous == frozen) { "Local edit preparation is immutable" }
+                return@stagingMutation false
+            }
+            check(activeProjectionScope(db, intent.scope)) { "Inactive local preparation scope" }
+            require(readPreparationOwner(db, intent.scope, intent.base.eventId) == intent) { "Stale local preparation owner" }
+            db.insertOrThrow("local_edit_preparations", null, ContentValues().apply {
+                put("scope", key(intent.scope)); put("mutation", intent.id.value); put("event", intent.base.eventId.value)
+                put("adapter", intent.format.id); put("version", intent.format.version)
+                put("base", base); put("local", local); put("state", intent.state.name)
+                put("timestamp", frozen.timestamp.toString()); put("prep_adapter", frozen.format.id)
+                put("prep_version", frozen.format.version); put("payload", frozen.protectedPayload)
+            })
+            checkStagingCapacity(db)
+            true
+        }
+    }
+    /** Historical inspection only: a frozen PAUSED snapshot never resets the current conflict state. */
+    suspend fun localEditPreparation(scope: CalendarScope, eventId: EventId): LocalEditPreparation? =
+        stagingMutation(scope) { db -> readLocalEditPreparation(db, scope, eventId) }
+
+    private fun requirePreparationSnapshotBudget(value: String) {
+        require(value.length <= LocalEditPreparation.MAX_PAYLOAD_BYTES) { "Local preparation observation is too large" }
+        val bytes = Charsets.UTF_8.newEncoder().onMalformedInput(CodingErrorAction.REPORT)
+            .onUnmappableCharacter(CodingErrorAction.REPORT).encode(CharBuffer.wrap(value)).remaining()
+        require(bytes <= LocalEditPreparation.MAX_PAYLOAD_BYTES) { "Local preparation observation is too large" }
+    }
+    private fun preparationVersion(cursor: Cursor, column: Int): Int {
+        require(cursor.getType(column) == Cursor.FIELD_TYPE_INTEGER && cursor.getLong(column) in 1..Int.MAX_VALUE.toLong())
+        return cursor.getInt(column)
+    }
+    private fun readPreparationOwner(db: SQLiteDatabase, scope: CalendarScope, eventId: EventId): LocalEditIntent? =
+        try {
+            stagedQuery(db, "SELECT mutation,adapter,version,base,local,state,kind FROM local_edits WHERE scope=? AND event=?",
+                arrayOf(key(scope), eventId.value)).use { row ->
+                if (!row.moveToFirst()) null else {
+                    require(row.getString(6) == "UPDATE")
+                    val baseJson = row.getString(3).also(::requirePreparationSnapshotBudget)
+                    val localJson = row.getString(4).also(::requirePreparationSnapshotBudget)
+                    val base = decodeChange(baseJson) as RemoteChange.Upsert
+                    val local = decodeChange(localJson) as RemoteChange.Upsert
+                    require(base.eventId == eventId && local.eventId == eventId && local.revision == base.revision)
+                    LocalEditIntent(MutationId(row.getString(0)), scope, AdapterFormat(row.getString(1), preparationVersion(row, 2)),
+                        base, local.content, LocalEditState.valueOf(row.getString(5)))
+                }
+            }
+        } catch (failure: CancellationException) { throw failure }
+        catch (failure: SQLiteException) { throw failure }
+        catch (_: Exception) { throw IllegalStateException("Invalid local preparation owner") }
+
+    private fun readLocalEditPreparation(db: SQLiteDatabase, scope: CalendarScope, eventId: EventId): LocalEditPreparation? =
+        try {
+            stagedQuery(db, "SELECT mutation,adapter,version,base,local,state,timestamp,prep_adapter,prep_version,payload FROM local_edit_preparations WHERE scope=? AND event=?",
+                arrayOf(key(scope), eventId.value)).use { row ->
+                if (!row.moveToFirst()) null else {
+                    val baseJson = row.getString(3).also(::requirePreparationSnapshotBudget)
+                    val localJson = row.getString(4).also(::requirePreparationSnapshotBudget)
+                    val base = decodeChange(baseJson) as RemoteChange.Upsert
+                    val local = decodeChange(localJson) as RemoteChange.Upsert
+                    require(base.eventId == eventId && local.eventId == eventId && local.revision == base.revision)
+                    val frozen = LocalEditIntent(MutationId(row.getString(0)), scope,
+                        AdapterFormat(row.getString(1), preparationVersion(row, 2)), base, local.content,
+                        LocalEditState.valueOf(row.getString(5)))
+                    val timestamp = Instant.parse(row.getString(6))
+                    require(timestamp.toString() == row.getString(6)) { "Noncanonical local preparation time" }
+                    val preparation = LocalEditPreparation(frozen, timestamp,
+                        AdapterFormat(row.getString(7), preparationVersion(row, 8)), row.getString(9))
+                    val owner = readPreparationOwner(db, scope, eventId)
+                    require(owner?.copy(state = LocalEditState.PAUSED) == frozen) { "Local preparation owner mismatch" }
+                    preparation
+                }
+            }
+        } catch (failure: CancellationException) { throw failure }
+        catch (failure: SQLiteException) { throw failure }
+        catch (_: Exception) { throw IllegalStateException("Invalid retained edit preparation") }
     suspend fun localDelete(scope: CalendarScope, eventId: EventId): LocalDeleteIntent? = access { db ->
         check(admitTransaction(scope)) { "Inactive import lease" }; requireKnown(db, scope)
         val deletion = readLocalDelete(db, scope, eventId)
@@ -1414,7 +1516,7 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
     }
 
     private fun checkStagingCapacity(db: SQLiteDatabase) {
-        val bytes = db.rawQuery("SELECT COALESCE((SELECT SUM(length(CAST(payload AS BLOB))+COALESCE(length(CAST(coverage AS BLOB)),0)) FROM inbox),0) + COALESCE((SELECT SUM(length(CAST(payload AS BLOB))) FROM coverage_state),0) + COALESCE((SELECT SUM(length(CAST(payload AS BLOB))) FROM deferred_events),0) + COALESCE((SELECT SUM(length(CAST(received_payload AS BLOB))) FROM delta_state),0) + COALESCE((SELECT SUM(length(CAST(notice AS BLOB))+COALESCE(length(CAST(received AS BLOB)),0)) FROM delta_jobs),0) + COALESCE((SELECT SUM(length(CAST(payload AS BLOB))) FROM delta_reconciliation),0)", null).use {
+        val bytes = db.rawQuery("SELECT COALESCE((SELECT SUM(length(CAST(payload AS BLOB))+COALESCE(length(CAST(coverage AS BLOB)),0)) FROM inbox),0) + COALESCE((SELECT SUM(length(CAST(payload AS BLOB))) FROM coverage_state),0) + COALESCE((SELECT SUM(length(CAST(payload AS BLOB))) FROM deferred_events),0) + COALESCE((SELECT SUM(length(CAST(received_payload AS BLOB))) FROM delta_state),0) + COALESCE((SELECT SUM(length(CAST(notice AS BLOB))+COALESCE(length(CAST(received AS BLOB)),0)) FROM delta_jobs),0) + COALESCE((SELECT SUM(length(CAST(payload AS BLOB))) FROM delta_reconciliation),0) + COALESCE((SELECT SUM(length(CAST(payload AS BLOB))+length(CAST(base AS BLOB))+length(CAST(local AS BLOB))) FROM local_edit_preparations),0)", null).use {
             check(it.moveToFirst()); it.getLong(0)
         }
         if (bytes > STAGING_BUDGET_BYTES) throw ImportCapacityException()

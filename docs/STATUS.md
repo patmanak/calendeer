@@ -189,14 +189,44 @@ unsupported fragment structures are refused. Local protection authenticates the
 saved structure, not current Proton access or unsigned remote metadata. The codec
 does not re-verify Proton signatures or recalculate the base revision without
 bootstrap settings. No bootstrap or private key copy is included.
-This is a recoverable adapter format, with no database commit, automatic worker
-resumption, process-death qualification, complete event assembly or UPDATE
-dispatch. Ordinary synchronization remains read-only.
+The adapter format itself commits no database row and enables no automatic worker
+resumption, complete event assembly or UPDATE dispatch. Ordinary synchronization
+remains read-only.
 All eighteen protected-format cases and all 330 Proton-adapter JVM cases passed.
 Fourteen selected native synthetic cases passed, including both binary- and
 text-signed preparations reopened through new Keystore/codec instances, ciphertext
 damage refusal, and preserved original-key readback. Build, lint and independent
 review passed. No service or Calendar Provider fixture data was modified.
+
+Import schema 14 adds a separate immutable journal for protected title
+preparations. First retention requires the exact captured, paused local intent
+in an enabled, available scope. The journal freezes its mutation identity,
+observation format, base/local snapshots, explicit time and opaque preparation
+format/payload together. Exact replay returns the existing record without
+replacement. Historical inspection remains possible after a conflict or scope
+pause; it never resets the current intent's conflict state or admits a write.
+The Proton wrapper derives its sealed title binding from the frozen local intent.
+Both adapter and storage entry points snapshot admitted empty detail lists before
+suspension; a raw domain constructor alone does not guarantee that isolation.
+
+Transactions check the run lease and cancellation before committing. Each payload
+and serialized observation is limited to 4 MiB of strict UTF-8, context identifiers
+and format names to 4 KiB, and retained preparation data shares the existing
+32 MiB staging budget. Large rows use the staging cursor window. Existing schema
+13 tables are preserved by an additive migration.
+This remains an unwired offline preparation boundary. The expected Proton UID
+is caller-supplied when opening the sealed payload and is not a separate journal
+field. Helper/Keystore reopening does not establish killed-process recovery,
+automatic resumption, fresh account/access qualification or concurrent-write
+protection. Production UPDATE/DELETE remain disabled.
+
+All seven new domain cases passed with the complete 160 sync and 330
+Proton-adapter JVM suites. Forty-one selected physical-device cases passed:
+nineteen journal cases, two journal/crypto round-trips, eight shared-title
+regressions and twelve legacy migration/reopen checks. App/test APK builds,
+lint (zero errors) and independent source review passed. The final application
+was installed and launched after testing. No service or Provider fixture data
+was modified.
 
 An internal offline CREATE preparer now reuses Proton's simple-event partition:
 signed clear date metadata and signed encrypted display text. It uses Biweekly
