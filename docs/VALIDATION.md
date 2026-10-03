@@ -1294,3 +1294,30 @@ related regressions. The previously unwired owner failed the expected transfer
 result before integration. A controlled response loss also reproduced a missing
 batch-response check; the unchanged regression passed after the shared captured
 helpers refused absent or malformed responses before producing witnesses.
+
+All Calendar Provider batch paths now validate response cardinality, non-null
+entries and result shape before reporting success. Insertions additionally require
+an identity in the expected collection; fixed assertion/write proofs verify exact
+counts. Generic variable batches rely on the Provider's `withExpectedCount` checks
+for their exact counts. The additional `CapturedHandoffProviderDeviceTest` cases
+exercise response loss before and after execution, malformed results, calendar
+creation/removal, stamping, attachment and ordinary receipt recovery. Include
+`EventDetailsProviderDeviceTest` and `RecurrenceProviderDeviceTest` when changing
+this shared validation because those batches also insert and remove child rows.
+
+`CalendarCapturedHandoffLiveDeviceTest` is a separate retained-session service
+journey. It requires `calendarCapturedHandoff=true`, an explicitly authorized
+account hash, a unique synthetic fixture token and frozen second-precision dates.
+Its `capturedHandoffPhase=CREATE` invokes the production owner and all three
+journals: native capture, fresh preparation and one submission, authenticated
+readback, attachment, original evidence, acknowledgement and handoff. Creation
+admission is frozen before mutation. `INSPECT` resumes the same fixture without
+inserting, preparing or sending again; missing admission blocks reconstruction.
+Retain the synthetic event and restore only a schema-compatible APK. This journey
+does not qualify creation through a system-calendar UI, subsequent live changes,
+general outgoing edits or deletions.
+Do not set `SELF_ATTENDEE_STATUS` when constructing a participant-free native
+fixture: the Provider can insert a synthetic attendee even for status zero. If an
+earlier rejected fixture exists, the positive journey verifies its exact consumed
+reservation, missing stamp and absence of raw staging/dispatch evidence before
+admitting a distinct fixture. It never removes the child or rearms that reservation.

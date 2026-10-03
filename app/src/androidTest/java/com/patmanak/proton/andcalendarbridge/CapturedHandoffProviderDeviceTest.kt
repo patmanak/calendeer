@@ -31,6 +31,121 @@ import org.junit.runner.RunWith
 /** Isolated native conditional update and historical recovery qualification; no server writes. */
 @RunWith(AndroidJUnit4::class)
 class CapturedHandoffProviderDeviceTest {
+    @Test fun lostAttachmentResponseRequiresHistoricalRecoveryWithoutRewritingLaterEdit() = fixture {
+        unattached()
+        assertUnavailable { lost().attachCapturedCreate(receipt) }
+        mutate(ContentValues().apply { put(Events.TITLE, "Edit after lost attachment"); put(Events.DIRTY, 1) })
+        val before = values()
+        assertEquals(AppliedCapturedCreateAttachment(receipt), projection.inspectCapturedAttachment(receipt))
+        assertEquals(AppliedCapturedCreateAttachment(receipt), projection.attachCapturedCreate(receipt))
+        assertEquals(before, values()); assertEquals(1, rows())
+    }
+
+    @Test fun attachmentHistoryNeedsAConfirmedAssertionResponse() = fixture {
+        assertUnavailable { lost().inspectCapturedAttachment(receipt) }
+        for (transform in malformedResponses())
+            assertUnavailable { intercepted(mode = -1, batchResponse = transform).inspectCapturedAttachment(receipt) }
+    }
+
+    @Test fun stampResponseLossCanRecoverTheSameLocalIdentity() = fixture {
+        unmarked()
+        assertUnavailable { lost().captureAndStampSimpleCreate(target, row, localId) }
+        assertEquals(content, projection.inspectStampedSimpleCreate(target, localId)!!.content)
+        assertEquals(1, rows())
+    }
+
+    @Test fun stampedSnapshotNeedsAConfirmedAssertionResponse() = fixture {
+        unattached()
+        assertUnavailable { lost().inspectStampedSimpleCreate(target, localId) }
+    }
+
+    @Test fun ordinaryDirtySnapshotNeedsAConfirmedAssertionResponse() = fixture {
+        ordinary(); mutate(ContentValues().apply { put(Events.DIRTY, 1); put(Events.TITLE, "Local pending edit") })
+        val before = values()
+        assertUnavailable { lost().captureOwnedSimpleEdit(target, baseline.change) }
+        assertEquals(before, values())
+    }
+
+    @Test fun lostTrackedProjectionResponseRecoversItsReceiptWithoutReapplying() = fixture {
+        ordinary(); val receipt = tracked()
+        assertUnavailable { lost().applyTracked(receipt) }
+        mutate(ContentValues().apply { put(Events.DIRTY, 1); put(Events.TITLE, "Edit after generic projection") })
+        val before = values()
+        assertEquals(AppliedProjectionWitness(receipt), projection.inspectProjectionReceipt(receipt))
+        assertEquals(before, values()); assertEquals(1, rows())
+    }
+
+    @Test fun ordinaryProjectionReceiptNeedsAConfirmedAssertionResponse() = fixture {
+        ordinary(); val receipt = tracked(); projection.applyTracked(receipt)
+        assertUnavailable { lost().inspectProjectionReceipt(receipt) }
+    }
+
+    @Test fun existingCalendarUpdateNeedsAConfirmedResponse() = fixture {
+        assertUnavailable { lost().ensureCalendar(target, CalendarSummary(target.calendar, "Updated test calendar")) }
+    }
+
+    @Test fun newCalendarResponseLossIsTransientAndReusesTheCreatedCalendar() = fixture {
+        projection.removeOwnedCalendar(target)
+        assertUnavailable { lost().ensureCalendar(target, CalendarSummary(target.calendar, "Created test calendar")) }
+        val recovered = projection.ensureCalendarState(target, CalendarSummary(target.calendar, "Created test calendar"))
+        assertFalse(recovered.created); calendar = recovered.id
+    }
+
+    @Test fun calendarRemovalNeedsAConfirmedResponseAndCanBeRetriedAfterLoss() = fixture {
+        assertUnavailable { lost().removeOwnedCalendar(target) }
+        projection.removeOwnedCalendar(target)
+        assertNull(projection.inspectOwnedEvent(target, baseline.change.eventId, baseline.change.revision))
+    }
+
+    @Test fun lossBeforeProviderExecutionNeverProducesAStampOrAttachment() = fixture {
+        unmarked(); val before = values()
+        assertUnavailable { intercepted(mode = -1, beforeBatch = { throw android.os.RemoteException("Before execution") })
+            .captureAndStampSimpleCreate(target, row, localId) }
+        assertEquals(before, values()); assertNull(projection.inspectStampedSimpleCreate(target, localId))
+        projection.captureAndStampSimpleCreate(target, row, localId)
+        val stamped = values()
+        assertUnavailable { intercepted(mode = -1, beforeBatch = { throw android.os.RemoteException("Before execution") })
+            .attachCapturedCreate(receipt) }
+        assertEquals(stamped, values()); assertNull(projection.inspectCapturedAttachment(receipt))
+    }
+
+    @Test fun lostGenericResponseBeforeExecutionCannotProduceAnAppliedReceipt() = fixture {
+        ordinary(); val receipt = tracked(); val before = values()
+        assertUnavailable { intercepted(mode = -1, beforeBatch = { throw android.os.RemoteException("Before execution") })
+            .applyTracked(receipt) }
+        assertEquals(before, values()); assertNull(projection.inspectProjectionReceipt(receipt))
+    }
+
+    @Test fun malformedStampResponsesNeverEstablishSnapshots() = fixture {
+        unattached(); val before = values()
+        for (transform in malformedResponses())
+            assertUnavailable { intercepted(mode = -1, batchResponse = transform).inspectStampedSimpleCreate(target, localId) }
+        assertEquals(before, values())
+    }
+
+    @Test fun malformedGenericResultsCannotEstablishAnAppliedReceipt() = fixture {
+        ordinary(); val receipt = tracked()
+        val malformed = malformedResponses().filterIndexed { index, _ -> index != 2 } + listOf<(Array<ContentProviderResult>) -> Array<ContentProviderResult>>(
+            { it.copyOf().apply { this[0] = ContentProviderResult(-1) } },
+            { it.copyOf().apply { java.lang.reflect.Array.set(this, 0, null) } },
+        )
+        for (transform in malformed)
+            assertUnavailable { intercepted(mode = -1, batchResponse = transform).applyTracked(receipt) }
+        assertEquals(AppliedProjectionWitness(receipt), projection.inspectProjectionReceipt(receipt)); assertEquals(1, rows())
+    }
+
+    @Test fun malformedCalendarInsertIdentityNeverReportsAUsableCalendar() = fixture {
+        for (uri in listOf("content://foreign/calendars/1", "content://com.android.calendar/events/1",
+            "content://com.android.calendar/calendars/0", "content://com.android.calendar/calendars/invalid")) {
+            projection.removeOwnedCalendar(target)
+            assertUnavailable { intercepted(mode = -1, batchResponse = { results -> results.copyOf().apply {
+                this[1] = ContentProviderResult(Uri.parse(uri))
+            } }).ensureCalendar(target, CalendarSummary(target.calendar, "Malformed insertion fixture")) }
+            val recovered = projection.ensureCalendarState(target, CalendarSummary(target.calendar, "Malformed insertion fixture"))
+            assertFalse(recovered.created); calendar = recovered.id
+        }
+    }
+
     @Test fun originalCurrentBaseHasOnlySixAssertionsAndNoMutation() = fixture {
         val before = values(); val adapter = intercepted()
         assertEquals(CapturedHandoffCleanWitness(frame), adapter.inspectCapturedHandoffBase(frame))
@@ -378,6 +493,15 @@ class CapturedHandoffProviderDeviceTest {
         fun ordinary() {
             mutate(ContentValues().apply { putNull(Events.SYNC_DATA5); putNull(Events.SYNC_DATA6); putNull(Events.SYNC_DATA7) })
         }
+        fun unattached() {
+            mutate(ContentValues().apply {
+                listOf(Events._SYNC_ID, Events.SYNC_DATA1, Events.SYNC_DATA2, Events.SYNC_DATA3,
+                    Events.SYNC_DATA4, Events.SYNC_DATA6, Events.SYNC_DATA7).forEach { putNull(it) }
+                put(Events.DIRTY, 1)
+            })
+        }
+        fun unmarked() { unattached(); mutate(ContentValues().apply { putNull(Events.SYNC_DATA5) }) }
+        fun lost() = intercepted(mode = -1, afterBatch = { throw android.os.RemoteException("Controlled response loss") })
         fun updated() = baseline.change.copy(revision = Revision("generic-next"), content = content.copy(title = "Generic remote title"))
         fun tracked() = ProjectionReceipt(target, baseline.format, updated(), UUID.randomUUID().toString(), baseline.change)
         fun fieldAt(event: Long, column: String): String? = context.contentResolver.query(uri, arrayOf(column),
@@ -451,11 +575,11 @@ class CapturedHandoffProviderDeviceTest {
                     interceptedQueries++; return real.query(uri, columns, selection, args, order)
                 }
                 override fun applyBatch(operations: ArrayList<ContentProviderOperation>): Array<ContentProviderResult> {
-                    assertEquals(mode, operations.size)
+                    if (mode >= 0) assertEquals(mode, operations.size)
                     if (mode == 7) {
                         assertTrue(operations.take(6).all { it.isAssertQuery })
                         assertTrue(operations.last().isUpdate)
-                    } else assertTrue(operations.all { it.isAssertQuery })
+                    } else if (mode >= 0) assertTrue(operations.all { it.isAssertQuery })
                     interceptedBatches++; beforeBatch(); realBatchAttempts++
                     val result = real.applyBatch(CalendarContract.AUTHORITY, operations); afterBatch(); return batchResponse(result)
                 }

@@ -276,8 +276,8 @@ and permission checks follow fresh adapter context reads before UNKNOWN admissio
 Captured submissions require the exact sealed known-empty draft. Generic dispatch
 and association refuse captured links. UNKNOWN work only permits explicit readback;
 it never sends again or acknowledges the original local row. Duplicate-free
-association, subsequent-edit conflicts and live captured upload remain separate
-work.
+association for other content types and subsequent-edit service conflicts remain
+separate work.
 The import owner now retains incoming event projections while captured UNKNOWN
 work has no qualified remote identity. An explicit readback can retain a distinct
 immutable binding in dispatch journal v6; it narrows the hold to that remote event
@@ -333,8 +333,8 @@ Generic local captures reject all raw captured provenance before replay, even wh
 ACK is proven. Generic Provider writes and captures assert absent captured markers,
 including recurrence parents and descendants, preserving concurrent attachments.
 Physical SQL, Provider and coordinator fixtures passed these boundaries and their
-related regressions. Transport is controlled for captured-creation cases; live
-captured submission and handoff remain separate qualification work.
+related regressions. These fixtures use controlled transport; service behavior is
+qualified separately.
 An explicit durable handoff can now admit subsequent incoming updates for a
 qualified captured creation. Import journal v13 retains the original creation and
 ACK evidence separately from the advancing projection reference. Each specialized
@@ -352,6 +352,21 @@ Physical-device SQL, Provider and owner fixtures passed migration, conditional
 updates, interrupted-response recovery, local preservation and bounded backlog
 draining checks. Provider witnesses also require complete, well-formed batch
 responses; missing responses retain uncertainty rather than reporting success.
+This response validation now covers every Provider batch path, including calendar
+creation/removal, ordinary projections, local stamping and captured attachment.
+Fixed proof batches verify exact returned counts; variable batches validate each
+result shape and rely on the Provider's expected-count assertions. Physical
+response-loss, malformed-result, detail and recurrence regressions passed, including
+recovery without rewriting a later local edit.
+An opt-in retained-session service journey passed through the production owner,
+all three journals and the real Proton adapter: a known-empty timed native creation,
+one submission, authenticated readback, attachment to the original Android row,
+original acknowledgement and released handoff. Reopening then passed inspection
+without another preparation or send, preserving identity and non-resendable
+admission. The synthetic example is retained. A rejected native fixture with an
+implicit participant also remained unstamped and undispatched. Subsequent real
+Proton updates after handoff and creation through a system-calendar UI still need
+qualification; controlled incoming-update fixtures do not establish those journeys.
 The application still exposes no writable mirror or event editor. General outgoing
 queue/resolution, automatic Provider capture and conditional Proton UPDATE/DELETE
 guarantees remain unqualified. See

@@ -141,8 +141,10 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
                 .withValues(values).withExpectedCount(1).build()
         }
         requirePermissions()
-        val result = resolver.applyBatch(CalendarContract.AUTHORITY, operations)
-        val id = existing ?: result.last().uri?.let(ContentUris::parseId)
+        val result = checkedBatch(operations)
+        if (result[0].count != (if (existing == null) 0 else 1) ||
+            (existing != null && result[1].count != 1)) fail(CalendarProjectionFailure.PROVIDER_UNAVAILABLE)
+        val id = existing ?: result[1].uri?.let(ContentUris::parseId)
             ?: fail(CalendarProjectionFailure.PROVIDER_UNAVAILABLE)
         EnsuredCalendar(id, created = existing == null)
     }
@@ -240,7 +242,7 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
             }
         }
         requirePermissions()
-        resolver.applyBatch(CalendarContract.AUTHORITY, operations)
+        checkedBatch(operations)
         Unit
     }
 
@@ -264,11 +266,11 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
             metadata.getAsString(Events.SYNC_DATA2) != digest("revision-v1", receipt.change.revision.value) ||
             metadata.getAsString(Events.SYNC_DATA3) != receiptMarker(receipt)) return@operation null
         requirePermissions()
-        resolver.applyBatch(CalendarContract.AUTHORITY, arrayListOf(
+        capturedBatch(arrayListOf(
             assertion(syncUri(Calendars.CONTENT_URI, account), calendarSelection(scope, account), calendar),
             ContentProviderOperation.newAssertQuery(uri).withSelection(identity.sql, identity.args)
                 .withValues(metadata).withExpectedCount(1).build(),
-        ))
+        ), intArrayOf(1, 1))
         requirePermissions()
         AppliedProjectionWitness(receipt)
     }
@@ -363,7 +365,7 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
                 .withSelection("$column=?", arrayOf(row.toString())).withExpectedCount(0).build()
         }
         requirePermissions()
-        resolver.applyBatch(CalendarContract.AUTHORITY, checks)
+        capturedBatch(checks, intArrayOf(1, 1, 1, 0, 0, 0))
         requirePermissions()
         return OwnedLocalEditSnapshot(calendar, row, content)
     }
@@ -432,7 +434,8 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
         if (firstRow != null) checks += ContentProviderOperation.newUpdate(uri)
             .withSelection(selection.sql, selection.args).withValue(Events.SYNC_DATA5, marker).withExpectedCount(1).build()
         requirePermissions()
-        resolver.applyBatch(CalendarContract.AUTHORITY, checks)
+        capturedBatch(checks, if (firstRow == null) intArrayOf(1, 1, 1, 0, 0, 0)
+            else intArrayOf(1, 1, 0, 0, 0, 0, 1))
         requirePermissions()
         return OwnedLocalEditSnapshot(calendar, row, content)
     }
@@ -458,14 +461,14 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
         // User content and child rows are deliberately absent from the update. A concurrent edit
         // is retained; a concurrent deletion or identity change aborts this atomic batch.
         requirePermissions()
-        resolver.applyBatch(CalendarContract.AUTHORITY, arrayListOf(
+        capturedBatch(arrayListOf(
             assertion(syncUri(Calendars.CONTENT_URI, account), calendarSelection(scope, account), calendar),
             ContentProviderOperation.newAssertQuery(uri).withSelection(local.sql, local.args)
                 .withValues(values).withExpectedCount(1).build(),
             ContentProviderOperation.newAssertQuery(uri).withSelection(remote.sql, remote.args).withExpectedCount(0).build(),
             ContentProviderOperation.newUpdate(uri).withSelection(local.sql, local.args)
                 .withValues(metadata).withExpectedCount(1).build(),
-        ))
+        ), intArrayOf(1, 1, 0, 1))
         requirePermissions()
         AppliedCapturedCreateAttachment(receipt)
     }
@@ -666,11 +669,34 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
 
     /** A lost or malformed response cannot establish a write or assertion witness. */
     private fun capturedBatch(operations: ArrayList<ContentProviderOperation>, expected: IntArray) {
-        val results: Array<ContentProviderResult?>? = resolver.applyBatch(CalendarContract.AUTHORITY, operations)
-        if (results == null || results.size != expected.size) fail(CalendarProjectionFailure.PROVIDER_UNAVAILABLE)
+        val results = checkedBatch(operations)
+        if (results.size != expected.size) fail(CalendarProjectionFailure.PROVIDER_UNAVAILABLE)
         results.forEachIndexed { index, result ->
-            if (result == null || result.count != expected[index] || result.uri != null ||
-                result.extras != null || result.exception != null) fail(CalendarProjectionFailure.PROVIDER_UNAVAILABLE)
+            if (result.count != expected[index] || result.uri != null) fail(CalendarProjectionFailure.PROVIDER_UNAVAILABLE)
+        }
+    }
+
+    /** Validate the response before returning success. Expected counts remain enforced by the
+     * Provider's operations; fixed proof batches additionally check the exact returned counts. */
+    private fun checkedBatch(operations: ArrayList<ContentProviderOperation>): Array<ContentProviderResult> {
+        val results: Array<ContentProviderResult?>? = resolver.applyBatch(CalendarContract.AUTHORITY, operations)
+        if (results == null || results.size != operations.size) fail(CalendarProjectionFailure.PROVIDER_UNAVAILABLE)
+        return Array(results.size) { index ->
+            val result = results[index] ?: fail(CalendarProjectionFailure.PROVIDER_UNAVAILABLE)
+            if (result.extras != null || result.exception != null) fail(CalendarProjectionFailure.PROVIDER_UNAVAILABLE)
+            val operation = operations[index]
+            val count = result.count
+            if (operation.isInsert) {
+                val uri = result.uri ?: fail(CalendarProjectionFailure.PROVIDER_UNAVAILABLE)
+                val segments = uri.pathSegments
+                if (count != null || uri.scheme != "content" || uri.authority != operation.uri.authority ||
+                    segments.dropLast(1) != operation.uri.pathSegments ||
+                    segments.lastOrNull()?.toLongOrNull()?.let { it > 0 } != true)
+                    fail(CalendarProjectionFailure.PROVIDER_UNAVAILABLE)
+            } else if (result.uri != null || count == null || count < 0) {
+                fail(CalendarProjectionFailure.PROVIDER_UNAVAILABLE)
+            }
+            result
         }
     }
 
@@ -691,13 +717,13 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
         if (!remoteValues) return null
         val checks = ContentValues(values).apply { remove(Events.DIRTY); remove(Events.DELETED) }
         requirePermissions()
-        resolver.applyBatch(CalendarContract.AUTHORITY, arrayListOf(
+        capturedBatch(arrayListOf(
             assertion(syncUri(Calendars.CONTENT_URI, account), calendarSelection(scope, account), calendar),
             ContentProviderOperation.newAssertQuery(uri).withSelection(local.sql, local.args)
                 .withValues(checks).withExpectedCount(1).build(),
             ContentProviderOperation.newAssertQuery(uri).withSelection(remote.sql, remote.args)
                 .withValue(Events._ID, values.getAsLong(Events._ID)).withExpectedCount(1).build(),
-        ))
+        ), intArrayOf(1, 1, 1))
         requirePermissions()
         return AppliedCapturedCreateAttachment(receipt)
     }
@@ -846,10 +872,10 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
         val uri = syncUri(Calendars.CONTENT_URI, account)
         val selection = calendarSelection(scope, account)
         requirePermissions()
-        resolver.applyBatch(CalendarContract.AUTHORITY, arrayListOf(
+        capturedBatch(arrayListOf(
             assertion(uri, selection, existing),
             ContentProviderOperation.newDelete(uri).withSelection(selection.sql, selection.args).withExpectedCount(1).build(),
-        ))
+        ), intArrayOf(1, 1))
         Unit
     }
 
