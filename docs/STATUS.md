@@ -377,6 +377,24 @@ twenty existing warnings) and independent source review passed. These checks
 submit no Proton writes and do not qualify fresh authenticated preparation from
 a real Android row. See [validation](VALIDATION.md) for the evidence boundary.
 
+An opt-in integrated live journey now qualifies real Android title capture followed
+by authenticated Proton preparation through the combined entry. It reads the
+retained known-empty service fixture, seeds a temporary native Provider mirror and
+isolated SQL baseline, and captures its actual dirty row. A fixture-only namespace
+translation directs capture to a separate Provider generation while retaining the
+real account/calendar for authenticated reads; no captured snapshot is fabricated.
+
+The physical journey passed first retention, fresh SQL/Keystore recovery with
+native signature verification, and historical replay after a second Android edit.
+Only one capture and one preparation occurred; the later title remained dirty.
+The full remote event, production Provider row, baseline, edit/CREATE journals,
+session and selections were preserved. The temporary mirror/database were removed
+and the original Android account/calendar set retained. APK build, lint (zero
+errors, twenty existing warnings) and independent review passed. This establishes
+the integrated fixture path, not Samsung editing UI, production automatic capture,
+an atomic cross-system snapshot or UPDATE/DELETE compatibility. The service fixture
+remains available; no remote write occurred.
+
 An internal offline CREATE preparer now reuses Proton's simple-event partition:
 signed clear date metadata and signed encrypted display text. It uses Biweekly
 and Proton Core primitives, with caller-supplied UID/timestamp and selected keys.

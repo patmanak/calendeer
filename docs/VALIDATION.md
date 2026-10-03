@@ -1906,3 +1906,56 @@ source review passed. The application was installed and launched after the run.
 The boundary remains explicit and preserves the first durable intent before
 preparation. It does not grant a current Provider-content lease, acknowledge
 Android changes, resolve conflicts automatically or enable UPDATE/DELETE.
+
+## Integrated live Android capture and title preparation
+
+`CalendarCapturedTitlePreparationLiveDeviceTest` is opt-in through
+`calendarCapturedTitlePreparation=true`, an explicit retained fixture token and
+exact authorized account hash. It requires the previously submitted known-empty
+CREATE fixture, its non-resendable journal and acknowledged production baseline.
+Account identity is checked before authenticated event reads. Missing or changed
+fixtures fail instead of creating a replacement or resetting authentication.
+
+The test creates a temporary native Provider mirror under the existing Android
+account, using a random positive generation distinct from every selected scope.
+Its calendar must be newly created and absent from the initial account calendar
+set. A fixture-only projection port translates the exact SQL scope and base to
+this private Provider generation, then calls the real `captureOwnedSimpleEdit`.
+It fabricates no snapshot and refuses other projection operations. Its admission
+and permissions delegate to the native implementation. Namespace isolation is
+explicit: this does not establish the unmodified production Provider binding or
+an atomic namespace reservation against a concurrent creator.
+
+The isolated SQL baseline is seeded and acknowledged; no local edit is inserted
+by the fixture. A sync-adapter update changes only TITLE and DIRTY on the exact
+temporary row and calendar. The combined coordinator entry captures the complete
+native snapshot and calls the real authenticated preparation port. First retention
+must equal the full expected intent and explicit timestamp. After a second Android
+title change, replay returns HISTORICAL with one capture and one preparation,
+preserving the exact first record and the later dirty title.
+
+Independent SQL helpers reopen the retained record without reopening coordinator
+admission. Fresh Keystore/native verification checks the original and renewed
+signed fragments; a substituted intent is refused. Another authenticated read
+retains the complete original remote event. Production baseline, absent captured
+edit, complete Provider event row/identity, CREATE journal, session and selected
+scopes are unchanged. A separate Provider instance inspects production witnesses
+without changing the capture port's closed admission.
+
+Non-cancellable cleanup removes only the calendar proven newly created in the
+private namespace and the isolated database. It checks disappearance of that
+calendar, the original account/calendar set and production row afterward. It never
+removes the real Android account or retained remote event.
+
+The physical case passed with `OK (1 test)` and all five completion witnesses:
+real capture/preparation recovery, preserved later Android edit, unchanged remote
+and production data, completed isolated cleanup and disabled outgoing UPDATE.
+Test APK build, lint (zero errors, twenty existing warnings) and independent source
+review passed. The final app was installed and launched. Production sources were
+unchanged; earlier controlled tests remain separate evidence rather than newly
+reported runs.
+
+This qualifies one simple known-empty integrated fixture. It performs no remote
+write, no Samsung Calendar UI edit and no forced process interruption. Successive
+server reads are not concurrency protection; automatic capture, other profiles,
+conflict resolution and live UPDATE/DELETE remain unqualified.
