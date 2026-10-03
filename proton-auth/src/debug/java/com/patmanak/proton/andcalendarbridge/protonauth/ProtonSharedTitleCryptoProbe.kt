@@ -32,13 +32,16 @@ object ProtonSharedTitleCryptoProbe {
     suspend fun runTimestampedText(): String = run(textSignatures = true, timestamped = true)
     suspend fun runProtectedBinary(): String = run(textSignatures = false, timestamped = true, protectPreparation = true)
     suspend fun runProtectedText(): String = run(textSignatures = true, timestamped = true, protectPreparation = true)
+    suspend fun runQualifiedBinary(): String = run(textSignatures = false, timestamped = true, protectPreparation = true, qualifyLocalBase = true)
+    suspend fun runQualifiedText(): String = run(textSignatures = true, timestamped = true, protectPreparation = true, qualifyLocalBase = true)
     suspend fun runProtectedJournal(textSignatures: Boolean,
         journal: suspend (LocalEditPreparation) -> LocalEditPreparation): String =
         run(textSignatures = textSignatures, timestamped = true, protectPreparation = true, journal = journal)
 
     private suspend fun run(textSignatures: Boolean, reencrypted: Boolean = false,
         timestamped: Boolean = false, protectPreparation: Boolean = false,
-        journal: (suspend (LocalEditPreparation) -> LocalEditPreparation)? = null): String = withContext(Dispatchers.IO) {
+        journal: (suspend (LocalEditPreparation) -> LocalEditPreparation)? = null,
+        qualifyLocalBase: Boolean = false): String = withContext(Dispatchers.IO) {
         var stage = "GENERATE"
         try {
             val crypto = AndroidCryptoContext()
@@ -155,7 +158,7 @@ object ProtonSharedTitleCryptoProbe {
 
                 if (timestamped) return@withContext runTimestamped(crypto, addressSecret, calendarSecret,
                     addressArmored, calendarArmored, addressKey, address, scope, session, bootstrap, row,
-                    originalTitle, newTitle, clear, prefix, suffix, patched, alteredSignature, decoder, protectPreparation, journal)
+                    originalTitle, newTitle, clear, prefix, suffix, patched, alteredSignature, decoder, protectPreparation, journal, qualifyLocalBase)
                 if (reencrypted) {
                     val metadata = buildJsonObject { put("ID", calendar); put("Type", 0) }
                     suspend fun prepare(candidate: JsonObject = row, context: JsonObject = bootstrap,
@@ -392,7 +395,7 @@ object ProtonSharedTitleCryptoProbe {
         address: UserAddress, scope: CalendarScope, session: CatalogSession, bootstrap: JsonObject, row: JsonObject,
         originalTitle: String, newTitle: String, clear: String, prefix: String, suffix: String, patched: String,
         alteredSignature: String, decoder: ProtonEventDecryptor, protectPreparation: Boolean,
-        journal: (suspend (LocalEditPreparation) -> LocalEditPreparation)?): String {
+        journal: (suspend (LocalEditPreparation) -> LocalEditPreparation)?, qualifyLocalBase: Boolean): String {
         var stage = "TIMESTAMPED_START"
         try {
             val pgp = crypto.pgpCrypto
@@ -411,6 +414,7 @@ object ProtonSharedTitleCryptoProbe {
             var savedBinding: ProtonTitlePreparationBinding? = null
             var savedLocalPreparation: LocalEditPreparation? = null
             var journalUsed = false
+            var qualificationUsed = false
             suspend fun prepare(candidate: JsonObject = row, context: JsonObject = bootstrap,
                 candidateMetadata: JsonObject = metadata, candidateScope: CalendarScope = scope,
                 expectedId: EventId = eventId, expectedRevision: Revision = candidate.revision(context),
@@ -419,6 +423,15 @@ object ProtonSharedTitleCryptoProbe {
                 engine: ProtonEventDecryptor = decoder): ProtonTimestampedSharedTitle {
                 if (!protectPreparation) return engine.prepareSharedTitleAt(session, candidateScope, expectedId, expectedRevision,
                     expectedUid, expectedTitle, replacement, candidateMetadata, context, candidate, timestamp)
+                if (qualifyLocalBase && !qualificationUsed) {
+                    qualificationUsed = true
+                    stage = "LOCAL_BASE_QUALIFICATION"
+                    val recovered = checkLocalBaseQualification(decoder, address, session, scope, row, bootstrap,
+                        metadata, replacement, timestamp)
+                    savedLocalPreparation = recovered
+                    return ProtonTitlePreparationCodec(ProtonEventPayloadProtector(AndroidCryptoContext().keyStoreCrypto))
+                        .openLocal(recovered)
+                }
                 if (journal != null && !journalUsed) {
                     journalUsed = true
                     stage = "JOURNAL_DECODE"
@@ -627,6 +640,71 @@ object ProtonSharedTitleCryptoProbe {
             return "RESULT=SUCCESS"
             } catch (cancelled: CancellationException) { throw cancelled }
           catch (_: Exception) { return "RESULT=FAILURE STAGE=$stage" }
+    }
+
+    private suspend fun checkLocalBaseQualification(decoder: ProtonEventDecryptor, address: UserAddress,
+        session: CatalogSession, scope: CalendarScope, row: JsonObject, bootstrap: JsonObject,
+        metadata: JsonObject, title: String, timestamp: Instant): LocalEditPreparation {
+        val source = decoder.decode(session, scope.calendar.value, bootstrap, listOf(row)).changes.single()
+        fun intent(content: EventContent = source.content, format: AdapterFormat = EVENT_FORMAT) =
+            LocalEditIntent(MutationId("synthetic-qualified-edit"), scope, format, source.copy(content = content), content.copy(title = title))
+        val delegate = ProtonEventPayloadProtector(AndroidCryptoContext().keyStoreCrypto)
+        var sealed = 0
+        val protector = object : EventPayloadProtector {
+            override fun seal(plain: String): String { sealed++; return delegate.seal(plain) }
+            override fun open(protected: String) = delegate.open(protected)
+        }
+        val timed = source.content.time as EventTime.Timed
+        val alternatives = listOf(
+            source.content.copy(description = "Different synthetic description"),
+            source.content.copy(location = "Different synthetic location"),
+            source.content.copy(colorRgb = 0x6849D3), source.content.copy(details = null),
+            source.content.copy(time = timed.copy(start = timed.start.plusSeconds(1))),
+            source.content.copy(time = timed.copy(end = timed.end.plusSeconds(1))),
+            source.content.copy(time = timed.copy(start = timed.start.plusNanos(1))),
+            source.content.copy(time = timed.copy(zone = java.time.ZoneId.of("UTC"))),
+            source.content.copy(time = EventTime.AllDay(java.time.LocalDate.of(2026, 10, 3), java.time.LocalDate.of(2026, 10, 4))))
+        for (wrong in alternatives) {
+            refused { decoder.prepareAndSealLocalTitleEdit(session, intent(wrong), row.string("UID"), timestamp,
+                metadata, bootstrap, row, protector) }
+            check(sealed == 0)
+        }
+        refused { decoder.prepareAndSealLocalTitleEdit(session, intent(format = EVENT_FORMAT.copy(version = 2)),
+            row.string("UID"), timestamp, metadata, bootstrap, row, protector) }
+        check(sealed == 0)
+
+        // Valid shared signatures alone cannot qualify an unsupported complete import.
+        val malformed = JsonObject(row + ("Notifications" to JsonPrimitive("unsupported")))
+        val malformedBase = source.copy(revision = malformed.revision(bootstrap))
+        decoder.openSharedTitle(session, scope, malformedBase.eventId, malformedBase.revision,
+            row.string("UID"), source.content.title, bootstrap, malformed)
+        val deferred = decoder.decode(session, scope.calendar.value, bootstrap, listOf(malformed))
+        check(deferred.changes.isEmpty() && deferred.deferred.size == 1)
+        refused { decoder.prepareAndSealLocalTitleEdit(session, intent().copy(base = malformedBase),
+            row.string("UID"), timestamp, metadata, bootstrap, malformed, protector) }
+        check(sealed == 0)
+
+        // The same locally available addresses/keys must qualify the base and sign, with one DAO read.
+        val mutableRow = row.toMutableMap()
+        val mutableSettings = bootstrap.obj("CalendarSettings").toMutableMap()
+        val mutableMetadata = metadata.toMutableMap()
+        val reminders = mutableListOf<EventReminder>()
+        val mutableIntent = intent(source.content.copy(details = EventDetails(reminders = reminders)))
+        val expected = LocalEditPreparation.freezeIntent(mutableIntent)
+        var reads = 0
+        val changing = ProtonEventDecryptor(AndroidCryptoContext()) {
+            reads++; check(it == session.userId)
+            mutableRow["ModifyTime"] = JsonPrimitive(2)
+            mutableSettings["CalendarID"] = JsonPrimitive("changed-after-suspension")
+            mutableMetadata["Type"] = JsonPrimitive(1)
+            reminders.add(EventReminder(10))
+            listOf(address)
+        }
+        val recovered = changing.prepareAndSealLocalTitleEdit(session, mutableIntent, row.string("UID"), timestamp,
+            JsonObject(mutableMetadata), JsonObject(bootstrap + ("CalendarSettings" to JsonObject(mutableSettings))),
+            JsonObject(mutableRow), protector)
+        check(reads == 1 && sealed == 1 && recovered.intent == expected)
+        return recovered
     }
 
     private fun checkLocalRecovery(record: LocalEditPreparation, expected: ProtonTimestampedSharedTitle) {

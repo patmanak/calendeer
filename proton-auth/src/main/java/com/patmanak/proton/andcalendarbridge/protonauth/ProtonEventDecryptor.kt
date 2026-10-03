@@ -96,8 +96,8 @@ internal class ProtonEventDecryptor(private val crypto: CryptoContext, private v
     }
 
     /** Bind the protected title profile to a project-owned immutable local intent.
-     * Only title changes are admitted here. This does not qualify other display fields,
-     * current rights, full remote content equality, or any remote write.
+     * Only title changes are admitted here, against the complete supported imported base.
+     * Observed metadata equality does not prove current rights, opaque content or remote writes.
      */
     suspend fun prepareAndSealLocalTitleEdit(session: CatalogSession, intent: LocalEditIntent,
         uid: String, timestamp: Instant, metadata: JsonObject, bootstrap: JsonObject, row: JsonObject,
@@ -105,14 +105,17 @@ internal class ProtonEventDecryptor(private val crypto: CryptoContext, private v
         val frozen = try { LocalEditPreparation.freezeIntent(intent) }
             catch (_: IllegalArgumentException) { unsupportedEvents() }
             catch (_: java.nio.charset.CharacterCodingException) { unsupportedEvents() }
-        val prepared = prepareSharedTitleAt(session, frozen.scope, frozen.base.eventId, frozen.base.revision,
-            uid, frozen.base.content.title, frozen.content.title, metadata, bootstrap, row, timestamp)
+        if (frozen.format != EVENT_FORMAT) unsupportedEvents()
+        val prepared = prepareSharedTitleFragments(session, frozen.scope, frozen.base.eventId, frozen.base.revision,
+            uid, frozen.base.content.title, frozen.content.title, metadata, bootstrap, row, timestamp,
+            expectedBase = frozen.base)
         return ProtonTitlePreparationCodec(protector).sealLocal(frozen, uid, timestamp, prepared)
     }
 
     private suspend fun prepareSharedTitleFragments(session: CatalogSession, scope: CalendarScope, expectedEventId: EventId,
         expectedRevision: Revision, expectedUid: String, expectedTitle: String, newTitle: String,
-        metadata: JsonObject, bootstrap: JsonObject, row: JsonObject, timestamp: Instant?): ProtonTimestampedSharedTitle {
+        metadata: JsonObject, bootstrap: JsonObject, row: JsonObject, timestamp: Instant?,
+        expectedBase: RemoteChange.Upsert? = null): ProtonTimestampedSharedTitle {
         try {
             val frozenMetadata = snapshot(metadata)
             return withSharedTitle(session, scope, expectedEventId, expectedRevision, expectedUid, expectedTitle,
@@ -121,6 +124,14 @@ internal class ProtonEventDecryptor(private val crypto: CryptoContext, private v
                 // Personal partitions can contain their own DTSTAMP; never silently retain stale dates.
                 if (timestamp != null && (original.array("CalendarEvents").isNotEmpty() ||
                     original.array("AttendeesEvents").isNotEmpty())) unsupportedEvents()
+                // Decode the same frozen observation with the already unlocked keys and addresses.
+                // Compare before patching/signing/sealing; never normalize away an intent mismatch.
+                if (expectedBase != null) {
+                    val decoded = decodeRows(scope.calendar.value, frozenBootstrap, listOf(original),
+                        expectedUid, keys, addresses)
+                    if (decoded.deferred.isNotEmpty() || decoded.changes.singleOrNull() != expectedBase)
+                        unsupportedEvents()
+                }
                 val selected = ProtonCreateContextPolicy.select(scope, frozenMetadata, frozenBootstrap, addresses)
                 val parts = original.array("SharedEvents").map { it as JsonObject }
                 val clearPart = parts.single { it.number("Type") == 2L }

@@ -113,8 +113,18 @@ and recovers UID from protected storage after matching the expected intention.
 It reuses the existing strict envelope/fragment checks and Core Keystore
 protector. The generic format remains unchanged and is not converted or
 interpreted by this opener. No library or upstream source was added. This pins
-the supplied local observation, not equality of every base field with remote
-plaintext, current account/access, worker recovery or UPDATE eligibility.
+the saved local observation; opening does not requalify old records against remote
+content, current account/access, worker recovery or UPDATE eligibility.
+
+Fresh local-title preparation now reuses `decodeRows` inside the existing frozen
+shared-title key/address context. Before patching, signing or sealing it requires
+the current import format and exact equality of the complete supported upsert
+with the frozen intent base; any deferred mapping is refused. This adds no library,
+copied upstream source, cryptographic primitive, network call or extra address
+read. Signed shared content uses the existing Core verification; equality of
+unsigned row/settings metadata remains observation equality. This does not certify
+arbitrary opaque fields, current access or server concurrency, and does not change
+either protected format or reinterpret historical journal records.
 
 ## Experimental single CREATE submission and inspection
 

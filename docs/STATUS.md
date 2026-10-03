@@ -237,14 +237,32 @@ zone and precision; null details remain distinct from known-empty details.
 Only then is the UID recovered from the protected binding. The original generic
 format remains intact and is refused by this new opener; no SQL migration or
 conversion of old preparations occurs.
-This authenticates the saved local expectation, without qualifying equality of
-every base display field with the remote plaintext, current access, an automatic
-worker or a killed-process journey. UPDATE/DELETE dispatch remains disabled.
+Opening authenticates the saved local expectation; it does not requalify an old
+record against remote content or current access, start an automatic worker, or
+establish a killed-process journey. UPDATE/DELETE dispatch remains disabled.
 All eighteen new recovery-contract cases and all 348 Proton-adapter JVM cases
 passed. Twenty-nine selected physical cases passed: nineteen journal cases,
 two record-only native recovery cases and eight shared-title regressions.
 App/test APK builds, lint (zero errors) and independent review passed. The final
 application was installed and launched without service or Provider fixture writes.
+
+New local-title preparations require the current import observation format and
+exact equality with the complete supported upsert decoded from the supplied
+frozen row/bootstrap. This covers identity, revision and every imported content
+field, including date type, endpoints, zone, precision, color and null versus
+empty details. Deferred or mismatched content is refused before patching, signing
+or sealing. Verification and preparation share the same locally unlocked keys
+and address read; no second DAO read or network operation is introduced.
+This compares the supported mapping of that observation, not arbitrary opaque
+Proton fields or fresh server state. Unsigned metadata remains observed metadata.
+Existing protected records are not migrated or retroactively qualified by opening
+them. Current access, concurrent-write protection and production UPDATE/DELETE
+remain separate, disabled work.
+All 348 Proton-adapter JVM cases and eighteen selected physical-device crypto
+cases passed, including two new base-qualification fixtures, two journal recovery
+fixtures and fourteen shared-title/create/import regressions. App/test APK builds,
+lint (zero errors) and independent source review passed. The final application
+was installed and launched without service or Provider fixture writes.
 
 An internal offline CREATE preparer now reuses Proton's simple-event partition:
 signed clear date metadata and signed encrypted display text. It uses Biweekly

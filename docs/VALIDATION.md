@@ -1666,8 +1666,42 @@ The final application was installed and launched. These fixtures use no service
 or Calendar Provider writes.
 
 This qualifies opening a retained preparation without a caller UID dependency,
-not a killed-process journey or automatic worker resumption. Sealing authenticates
-the local observation supplied by its caller; it does not compare every display
-field with authenticated remote plaintext. Current rights/context, refreshed
+not a killed-process journey or automatic worker resumption. Opening authenticates
+the saved local observation; it does not requalify old records against remote
+content. Current rights/context, refreshed
 signature verification and concurrent-write protection remain separate work.
 Production UPDATE/DELETE remain disabled.
+
+## Complete imported-base qualification before local-title sealing
+
+`ProtonLocalTitleBaseCryptoDeviceTest` uses synthetic Core keys with binary and
+text shared signatures. Its first description-mismatch assertion failed against
+the previous implementation, which accepted the mismatched intent and sealed it.
+The corrected wrapper refuses an unsupported observation format and compares the
+complete frozen base with the supported upsert decoded using the same key/address
+context. No patch, signing or protection is admitted on a mismatch or deferred
+decode.
+
+The fixtures refuse differences in description, location, color, null details,
+start/end, nanosecond precision, zone identity and timed/all-day type. They count
+protector calls to require zero seals on every refusal. Malformed notification
+metadata retains valid shared signatures and passes title opening, but defers in
+the full importer and is refused by preparation. A positive case mutates the
+caller-owned row, settings, metadata and empty reminder list during the local
+address read: the preparation retains the frozen intent and performs exactly one
+address read. Fresh Keystore opening, original-key decryption, renewed-signature
+verification and full native import then check the resulting fragments.
+
+This qualifies fresh preparation against the supported mapping of the supplied
+observation, including observed unsigned metadata. It does not authenticate every
+opaque remote field, refresh access or establish concurrent-write safety. Opening
+older local-title v1 records does not apply the new preparation guard or migrate
+their contents. No service or Calendar Provider fixture writes are required;
+production UPDATE/DELETE remain disabled.
+
+The 348 Proton-adapter JVM cases passed with zero failures or errors. The eighteen
+selected native cases passed: two new base checks, two journal/crypto round-trips,
+eight shared-title regressions, five create/preparation regressions and one import
+crypto regression. App/test APK builds and lint passed (zero errors, twenty
+existing warnings), as did independent source review. The final application was
+installed and launched after testing.
