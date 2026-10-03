@@ -1314,8 +1314,36 @@ readback, attachment, original evidence, acknowledgement and handoff. Creation
 admission is frozen before mutation. `INSPECT` resumes the same fixture without
 inserting, preparing or sending again; missing admission blocks reconstruction.
 Retain the synthetic event and restore only a schema-compatible APK. This journey
-does not qualify creation through a system-calendar UI, subsequent live changes,
-general outgoing edits or deletions.
+does not qualify creation through a system-calendar UI or general outgoing edits
+or deletions.
+
+The same retained fixture supports a separate incoming-update qualification:
+`PREPARE_UPDATE` freezes the full current reference, original evidence and native
+ownership before a title-only edit through the official Proton client.
+`VERIFY_UPDATE` requests production synchronization and requires the new revision
+and exact title on the original Android row, with all other content unchanged,
+immutable creation evidence and drained event-specific work. It freezes the
+advanced reference only after those checks pass.
+`CAPTURE_LOCAL` then admits one conditional title-only Android mutation. Its
+atomic batch asserts the canonical calendar identity, original row, complete
+clean content, frozen markers and absent children. Exact batch responses and
+operation-time calendar grants are required. Durable admission prevents replay
+after a missing response; rerunning never writes again. The production owner must
+retain the later intention as `PAUSED` against the advanced reference.
+`INSPECT_LOCAL` checks that retained intention, waiting state and dirty native
+content without requesting synchronization or repairing the fixture. Ordinary
+startup/import work can still run when the application launches.
+These phases do not enable writable UI or send Proton UPDATE/DELETE. Unsupported
+data introduced by the official-client edit must stay blocked rather than be
+removed to make the fixture pass. Build, lint and independent source review passed.
+All four retained-session phases passed on a physical device: the official-client
+title change projected onto the original row with unchanged remaining content;
+the later local edit stayed paused against the advanced base; inspection after a
+controlled application process stop and reopen retained the dirty row, provenance
+and waiting state. No new submission, native event or calendar was created by
+these phases. The visible remote and local examples are retained. This does not
+qualify editing through a system-calendar UI, natural process death, concurrent
+service writers, richer events or conditional Proton UPDATE/DELETE.
 Do not set `SELF_ATTENDEE_STATUS` when constructing a participant-free native
 fixture: the Provider can insert a synthetic attendee even for status zero. If an
 earlier rejected fixture exists, the positive journey verifies its exact consumed

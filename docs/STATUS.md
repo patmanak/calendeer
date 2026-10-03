@@ -365,8 +365,15 @@ original acknowledgement and released handoff. Reopening then passed inspection
 without another preparation or send, preserving identity and non-resendable
 admission. The synthetic example is retained. A rejected native fixture with an
 implicit participant also remained unstamped and undispatched. Subsequent real
-Proton updates after handoff and creation through a system-calendar UI still need
-qualification; controlled incoming-update fixtures do not establish those journeys.
+Proton title updates after handoff have now passed a retained-session journey:
+an edit through the official client advanced the reference and projected onto the
+original Android row, preserving immutable creation evidence and draining the
+event-specific queue. A subsequent one-shot native title edit was retained as a
+paused intention against that advanced base without dispatch. Inspection after a
+controlled process stop and reopen preserved the dirty row and waiting state.
+These checks use the production owner, journals, Provider and real incoming Proton
+adapter. Creation or editing through a system-calendar UI remains unqualified;
+the local mutation in this journey uses an explicit conditional Provider batch.
 The application still exposes no writable mirror or event editor. General outgoing
 queue/resolution, automatic Provider capture and conditional Proton UPDATE/DELETE
 guarantees remain unqualified. See

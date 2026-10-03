@@ -3,6 +3,8 @@ package com.patmanak.proton.andcalendarbridge
 
 import android.content.ContentUris
 import android.content.ContentValues
+import android.content.ContentProviderOperation
+import android.content.SharedPreferences
 import android.content.Context
 import android.os.Bundle
 import android.provider.CalendarContract
@@ -22,7 +24,11 @@ import com.patmanak.proton.andcalendarbridge.protonauth.ProtonCreateSubmissionPr
 import com.patmanak.proton.andcalendarbridge.sync.*
 import java.time.Instant
 import java.time.ZoneId
+import java.time.LocalDate
 import java.util.UUID
+import android.os.SystemClock
+import kotlinx.coroutines.delay
+import org.json.JSONObject
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
@@ -39,7 +45,8 @@ class CalendarCapturedHandoffLiveDeviceTest {
         val args = InstrumentationRegistry.getArguments()
         assumeTrue(args.getString("calendarCapturedHandoff") == "true")
         val phase = args.getString("capturedHandoffPhase")
-        assertTrue("Explicit qualification phase required", phase in setOf("CREATE", "INSPECT"))
+        assertTrue("Explicit qualification phase required", phase in setOf("CREATE", "INSPECT", "PREPARE_UPDATE",
+            "VERIFY_UPDATE", "CAPTURE_LOCAL", "INSPECT_LOCAL"))
         val token = args.getString("createFixtureToken").orEmpty()
         val accountHash = args.getString("createAccountHash").orEmpty()
         assertTrue("Unique synthetic fixture required", token.matches(Regex("[a-f0-9]{12}")))
@@ -129,6 +136,10 @@ class CalendarCapturedHandoffLiveDeviceTest {
             it.intent.reservation.id == capture && it.attempt == attempt && it.draft.content == content
         } == true)
         val identity = CapturedCreateDispatchIdentity.of(checkNotNull(submission))
+        if (phase !in setOf("CREATE", "INSPECT")) {
+            qualifyAfterHandoff(checkNotNull(phase), app, projection, prefs, target, identity, local, capture, attempt, token)
+            return@runBlocking
+        }
         val bindingBefore = CreateAttemptStore(app).use { it.capturedBinding(identity) }
         val handoffBefore = bindingBefore?.let { binding ->
             ImportStore(app).use { it.capturedHandoff(target, binding.eventId) }
@@ -172,6 +183,277 @@ class CalendarCapturedHandoffLiveDeviceTest {
 
     private fun status(name: String) = InstrumentationRegistry.getInstrumentation().sendStatus(0,
         Bundle().apply { putBoolean(name, true) })
+
+    /** Only CAPTURE_LOCAL admits a local edit; none of these phases submits outgoing Proton work. */
+    private suspend fun qualifyAfterHandoff(phase: String, app: BridgeApplication, projection: AndroidCalendarProjection,
+        prefs: SharedPreferences, target: CalendarScope, identity: CapturedCreateDispatchIdentity,
+        local: LocalEventId, capture: MutationId, attempt: MutationId, token: String) {
+        val binding = CreateAttemptStore(app).use { checkNotNull(it.capturedBinding(identity)) }
+        assertTrue("Retain the exact original captured association", binding.identity == identity)
+        suspend fun role() = ImportStore(app).use { checkNotNull(it.capturedHandoff(target, binding.eventId)) }
+        suspend fun sameNativeRow(cleanFrame: CapturedCreateHandoffFrame? = null) {
+            cleanFrame?.let {
+                val witness = projection.inspectOwnedEvent(target, binding.eventId, it.base.revision)
+                assertTrue("Bind the remote identity to the original clean native locator", witness != null &&
+                    witness.eventRow == prefs.getLong("event_row", -1) && witness.calendarRow == prefs.getLong("calendar_row", -1))
+            }
+            app.contentResolver.query(Events.CONTENT_URI, arrayOf(Events._ID, Events.CALENDAR_ID, Events._SYNC_ID,
+                Events.SYNC_DATA2), "${Events._ID}=?", arrayOf(prefs.getLong("event_row", -1).toString()), null)!!.use {
+                assertTrue("Retain the same original owned row and current revision", it.count == 1 && it.moveToFirst() &&
+                    it.getLong(0) == prefs.getLong("event_row", -1) && it.getLong(1) == prefs.getLong("calendar_row", -1) &&
+                    !it.getString(2).isNullOrEmpty() && !it.getString(3).isNullOrEmpty())
+            }
+            if (prefs.contains("update_native")) {
+                val frozen = JSONObject(checkNotNull(prefs.getString("update_native", null)))
+                val current = nativeMarkers(app, prefs)
+                assertTrue("Keep the immutable native association and original capture markers", listOf(Events._SYNC_ID,
+                    Events.SYNC_DATA1, Events.SYNC_DATA4, Events.SYNC_DATA5, Events.SYNC_DATA6, Events.SYNC_DATA7).all {
+                    frozen.get(it) == current.get(it)
+                })
+            }
+        }
+        fun frozenFrame(key: String, current: CapturedCreateHandoffFrame): CapturedCreateHandoffFrame {
+            assertTrue("Original creation receipt must stay immutable", prefs.getString("update_origin", null) ==
+                current.receipt.fingerprint())
+            return decodeFrame(checkNotNull(prefs.getString(key, null)), current.receipt)
+        }
+        val original = role()
+        assertTrue("Require the existing released handoff", original.state == CapturedCreateHandoffState.RELEASED)
+        if (phase == "PREPARE_UPDATE") {
+            assertTrue("Do not prepare over a retained local edit", !original.waiting && !prefs.contains("local_edit_admitted"))
+            assertTrue("Freeze a supported clean reference", supportsCapturedHandoff(original.frame.base) &&
+                projection.inspectCapturedHandoffBase(original.frame)?.frame == original.frame)
+            sameNativeRow(original.frame)
+            val calendar = nativeCalendar(app, projection, prefs, target)
+            ImportStore(app).use {
+                assertTrue("Prepare only after the event queue drains", it.capturedHandoffPending(original.frame) == null &&
+                    it.capturedHandoffProjection(original.frame) == null && it.localEdit(target, binding.eventId) == null &&
+                    it.localDelete(target, binding.eventId) == null)
+            }
+            if (prefs.contains("update_frame")) {
+                assertTrue("Never replace the frozen pre-update reference", frozenFrame("update_frame", original.frame) == original.frame)
+                assertTrue("Never replace the frozen calendar ownership", prefs.getString("update_calendar", null) == calendar.toString())
+            } else {
+                assertTrue("Freeze the full reference before the external Proton edit", prefs.edit()
+                    .putString("update_origin", original.frame.receipt.fingerprint())
+                    .putString("update_frame", encodeFrame(original.frame))
+                    .putString("update_calendar", calendar.toString())
+                    .putString("update_native", nativeMarkers(app, prefs).toString()).commit())
+            }
+            status("captured_update_reference_frozen")
+            return
+        }
+        val before = frozenFrame("update_frame", original.frame)
+        val remoteTitle = "Calendeer QA - Proton edit $token"
+        val localTitle = "Calendeer QA - Local edit $token"
+        if (phase == "VERIFY_UPDATE") {
+            assertTrue("Do not refresh over this fixture's later local edit", !prefs.contains("local_edit_admitted"))
+            app.imports.requestSync()
+            val deadline = SystemClock.elapsedRealtime() + 120_000
+            var current = original
+            while (current.frame.base.content.title != remoteTitle && SystemClock.elapsedRealtime() < deadline) {
+                delay(500)
+                current = role()
+            }
+            assertTrue("Incoming content must advance the released reference", current.state == CapturedCreateHandoffState.RELEASED &&
+                !current.waiting && current.frame.receipt == before.receipt && current.frame.base.revision != before.base.revision &&
+                current.frame.base.content == before.base.content.copy(title = remoteTitle))
+            val receipt = checkNotNull(current.frame.lastProjection)
+            assertTrue("Incoming receipt must start at the exact frozen reference", receipt.previousBase == before.base &&
+                receipt.change == current.frame.base && projection.inspectCapturedHandoffProjection(
+                    CapturedHandoffProjection(before, receipt))?.plan == CapturedHandoffProjection(before, receipt))
+            assertTrue("Qualify the clean advanced native reference", projection.inspectCapturedHandoffBase(current.frame)?.frame == current.frame)
+            sameNativeRow(current.frame)
+            ImportStore(app).use {
+                assertTrue("Consume only the qualified incoming event", it.capturedHandoffPending(current.frame) == null &&
+                    it.capturedHandoffProjection(current.frame) == null && it.localEdit(target, binding.eventId) == null &&
+                    it.localDelete(target, binding.eventId) == null)
+            }
+            val encoded = encodeFrame(current.frame)
+            if (prefs.contains("advanced_frame")) assertTrue("Never replace an already qualified update", prefs.getString("advanced_frame", null) == encoded)
+            else assertTrue("Retain the qualified advanced reference", prefs.edit().putString("advanced_frame", encoded)
+                .putString("advanced_native", nativeMarkers(app, prefs).toString()).commit())
+            status("captured_proton_update_projected_on_original_row")
+            status("captured_immutable_creation_evidence_preserved")
+            status("captured_incoming_event_drained")
+            return
+        }
+        val advanced = frozenFrame("advanced_frame", original.frame)
+        assertTrue("The local fixture must use the qualified advanced base", original.frame == advanced &&
+            advanced.base.content == before.base.content.copy(title = remoteTitle) && advanced.lastProjection?.previousBase == before.base)
+        if (phase == "CAPTURE_LOCAL") {
+            if (!prefs.contains("local_edit_admitted")) {
+                assertTrue("Admit only the still-clean advanced original", !original.waiting &&
+                    projection.inspectCapturedHandoffBase(advanced)?.frame == advanced)
+                sameNativeRow(advanced)
+                val frozenCalendar = JSONObject(checkNotNull(prefs.getString("update_calendar", null)))
+                assertTrue("Preserve the original calendar ownership", nativeCalendar(app, projection, prefs, target).toString() == frozenCalendar.toString())
+                fun activeTarget() = app.imports.state.value.let { state -> state.authenticated &&
+                    state.selections.any { it.scope == target && it.enabled && it.available } }
+                assertTrue("Require active authorization before admission", activeTarget() && projection.hasPermissions())
+                ImportStore(app).use {
+                    assertTrue("Do not replace existing local work", it.localEdit(target, binding.eventId) == null &&
+                        it.localDelete(target, binding.eventId) == null && it.capturedHandoffProjection(advanced) == null &&
+                        it.capturedHandoffPending(advanced) == null)
+                }
+                // Persist admission first. A missing/lost response never permits replaying this write.
+                assertTrue("Freeze local mutation and one-shot native admission", prefs.edit()
+                    .putString("local_edit_mutation", UUID.randomUUID().toString()).putBoolean("local_edit_admitted", true).commit())
+                val account = projection.accountFor(target.account)
+                val uri = Events.CONTENT_URI.buildUpon().appendQueryParameter(CalendarContract.CALLER_IS_SYNCADAPTER, "true")
+                    .appendQueryParameter(CalendarContract.Calendars.ACCOUNT_NAME, account.name)
+                    .appendQueryParameter(CalendarContract.Calendars.ACCOUNT_TYPE, account.type).build()
+                val selection = "${Events._ID}=? AND ${Events.CALENDAR_ID}=?"
+                val values = arrayOf(prefs.getLong("event_row", -1).toString(), prefs.getLong("calendar_row", -1).toString())
+                val expected = expectedSimpleNative(prefs.getLong("calendar_row", -1), advanced.base.content).apply {
+                    put(Events.DIRTY, 0)
+                    val frozen = JSONObject(checkNotNull(prefs.getString("advanced_native", null)))
+                    for (column in markerColumns) if (frozen.isNull(column)) putNull(column) else put(column, frozen.getString(column))
+                }
+                val calendarExpected = ContentValues().apply {
+                    for (column in calendarColumns) put(column, frozenCalendar.getString(column))
+                }
+                val operations = arrayListOf(ContentProviderOperation.newAssertQuery(CalendarContract.Calendars.CONTENT_URI)
+                    .withSelection("${CalendarContract.Calendars._ID}=?", arrayOf(values[1]))
+                    .withValues(calendarExpected).withExpectedCount(1).build(),
+                    ContentProviderOperation.newAssertQuery(uri).withSelection(selection, values)
+                        .withValues(expected).withExpectedCount(1).build())
+                for ((childUri, eventColumn) in listOf(Attendees.CONTENT_URI to Attendees.EVENT_ID,
+                    Reminders.CONTENT_URI to Reminders.EVENT_ID, ExtendedProperties.CONTENT_URI to ExtendedProperties.EVENT_ID)) {
+                    operations += ContentProviderOperation.newAssertQuery(childUri).withSelection("$eventColumn=?", arrayOf(values[0]))
+                        .withExpectedCount(0).build()
+                }
+                operations += ContentProviderOperation.newUpdate(uri).withSelection(selection, values).withValues(ContentValues().apply {
+                        put(Events.TITLE, localTitle); put(Events.DIRTY, 1)
+                    }).withExpectedCount(1).build()
+                assertTrue("Require current authorization immediately before the native batch", activeTarget() && projection.hasPermissions())
+                val response = app.contentResolver.applyBatch(CalendarContract.AUTHORITY, operations)
+                assertTrue("Require grants after the native batch", projection.hasPermissions())
+                val counts = listOf(1, 1, 0, 0, 0, 1)
+                assertTrue("Require an exact confirmed native edit response", response != null && response.size == counts.size &&
+                    response.indices.all { response[it]?.let { result -> result.count == counts[it] && result.uri == null &&
+                        result.extras == null && result.exception == null } == true })
+            }
+            assertLocalNative(app, prefs, advanced, localTitle)
+            val result = app.imports.reconcileHandoffLocalCreate(target, local, capture, attempt,
+                MutationId(checkNotNull(prefs.getString("local_edit_mutation", null))))
+            assertTrue("Retain the supported local edit without dispatch", result == CapturedCreateReconciliationResult.RETAINED)
+            status("captured_later_local_intention_retained")
+        } else assertTrue("Read-only inspection requires the admitted local edit", phase == "INSPECT_LOCAL" &&
+            prefs.getBoolean("local_edit_admitted", false))
+        val finalRole = role()
+        assertTrue("Preserve the advanced reference while holding later local work", finalRole.frame == advanced && finalRole.waiting &&
+            finalRole.state == CapturedCreateHandoffState.RELEASED)
+        sameNativeRow()
+        assertLocalNative(app, prefs, advanced, localTitle)
+        ImportStore(app).use {
+            val edit = it.localEdit(target, binding.eventId)
+            assertTrue("Reopened intention must refer to the current base, not the sent original", edit != null &&
+                edit.id.value == prefs.getString("local_edit_mutation", null) && edit.scope == target && edit.format == advanced.format &&
+                edit.base == advanced.base && edit.content == advanced.base.content.copy(title = localTitle) && edit.state == LocalEditState.PAUSED &&
+                it.localDelete(target, binding.eventId) == null && it.capturedHandoffProjection(advanced) == null &&
+                it.capturedHandoffPending(advanced) == null)
+        }
+        status("captured_local_edit_uses_advanced_base")
+        status("captured_local_edit_waiting_preserved")
+    }
+
+    /** Queries only: inspection cannot acknowledge DIRTY or repair missing rows. */
+    private fun assertLocalNative(app: BridgeApplication, prefs: SharedPreferences, frame: CapturedCreateHandoffFrame, title: String) {
+        app.contentResolver.query(Events.CONTENT_URI, arrayOf(Events.TITLE, Events.DIRTY, Events.DELETED, Events.SYNC_DATA3),
+            "${Events._ID}=?", arrayOf(prefs.getLong("event_row", -1).toString()), null)!!.use {
+            assertTrue("Keep the later local edit dirty and the qualified projection marker unchanged", it.count == 1 && it.moveToFirst() &&
+                it.getString(0) == title && it.getInt(1) == 1 && it.getInt(2) == 0 && it.getString(3) ==
+                "calendeer-projection-receipt-v${frame.lastProjection?.protocol}:${frame.lastProjection?.nonce}")
+        }
+        val frozen = JSONObject(checkNotNull(prefs.getString("advanced_native", null)))
+        val current = nativeMarkers(app, prefs)
+        assertTrue("Keep every frozen ownership and evidence marker", markerColumns.all { frozen.get(it) == current.get(it) })
+        val expected = expectedSimpleNative(prefs.getLong("calendar_row", -1), frame.base.content.copy(title = title))
+        val columns = expected.keySet().toTypedArray()
+        app.contentResolver.query(Events.CONTENT_URI, columns, "${Events._ID}=?",
+            arrayOf(prefs.getLong("event_row", -1).toString()), null)!!.use {
+            assertTrue("Preserve the complete supported local native shape", it.count == 1 && it.moveToFirst() &&
+                columns.indices.all { column -> if (expected[columns[column]] == null) it.isNull(column)
+                    else it.getString(column) == expected[columns[column]].toString() })
+        }
+        for ((uri, eventColumn) in listOf(Attendees.CONTENT_URI to Attendees.EVENT_ID,
+            Reminders.CONTENT_URI to Reminders.EVENT_ID, ExtendedProperties.CONTENT_URI to ExtendedProperties.EVENT_ID)) {
+            app.contentResolver.query(uri, arrayOf("_id"), "$eventColumn=?",
+                arrayOf(prefs.getLong("event_row", -1).toString()), null)!!.use {
+                assertTrue("Keep known-empty child data without discarding anything", it.count == 0)
+            }
+        }
+    }
+
+    private val markerColumns = arrayOf(Events._SYNC_ID, Events.SYNC_DATA1, Events.SYNC_DATA2, Events.SYNC_DATA3,
+        Events.SYNC_DATA4, Events.SYNC_DATA5, Events.SYNC_DATA6, Events.SYNC_DATA7)
+
+    private val calendarColumns = arrayOf(CalendarContract.Calendars._ID, CalendarContract.Calendars.ACCOUNT_NAME,
+        CalendarContract.Calendars.ACCOUNT_TYPE, CalendarContract.Calendars._SYNC_ID, CalendarContract.Calendars.CAL_SYNC1)
+
+    private fun nativeCalendar(app: BridgeApplication, projection: AndroidCalendarProjection, prefs: SharedPreferences,
+        target: CalendarScope): JSONObject = app.contentResolver.query(CalendarContract.Calendars.CONTENT_URI, calendarColumns,
+        "${CalendarContract.Calendars._ID}=?", arrayOf(prefs.getLong("calendar_row", -1).toString()), null)!!.use {
+        val account = projection.accountFor(target.account)
+        assertTrue("Require the canonical owned calendar", it.count == 1 && it.moveToFirst() &&
+            it.getLong(0) == prefs.getLong("calendar_row", -1) && it.getString(1) == account.name &&
+            it.getString(2) == account.type && !it.getString(3).isNullOrEmpty() && it.getString(4) == "calendar-bridge-projection-v1")
+        JSONObject().apply { calendarColumns.forEachIndexed { index, name -> put(name, it.getString(index)) } }
+    }
+
+    private fun expectedSimpleNative(calendar: Long, content: EventContent) = candidate(calendar, content).apply {
+        put(Events.SELF_ATTENDEE_STATUS, 0)
+        for (column in arrayOf(Events.RRULE, Events.RDATE, Events.EXRULE, Events.EXDATE, Events.DURATION,
+            Events.ORIGINAL_ID, Events.ORIGINAL_SYNC_ID, Events.ORIGINAL_INSTANCE_TIME, Events.ORIGINAL_ALL_DAY,
+            Events.CUSTOM_APP_PACKAGE, Events.CUSTOM_APP_URI, Events.SYNC_DATA8, Events.SYNC_DATA9, Events.SYNC_DATA10)) putNull(column)
+    }
+
+    private fun nativeMarkers(app: BridgeApplication, prefs: SharedPreferences): JSONObject =
+        app.contentResolver.query(Events.CONTENT_URI, markerColumns, "${Events._ID}=?",
+            arrayOf(prefs.getLong("event_row", -1).toString()), null)!!.use {
+            assertTrue("Require exactly the retained native original", it.count == 1 && it.moveToFirst())
+            JSONObject().apply { markerColumns.forEachIndexed { index, name ->
+                put(name, if (it.isNull(index)) JSONObject.NULL else it.getString(index))
+            } }
+        }
+
+    private fun encodeFrame(frame: CapturedCreateHandoffFrame) = JSONObject().apply {
+        put("schema", 1); put("base", encodeSimpleChange(frame.base))
+        frame.lastProjection?.let { put("last", JSONObject().apply {
+            put("nonce", it.nonce); put("change", encodeSimpleChange(it.change))
+            put("previous", encodeSimpleChange(checkNotNull(it.previousBase))); put("protocol", it.protocol)
+        }) }
+    }.toString()
+
+    private fun decodeFrame(payload: String, receipt: CapturedCreateHandoffReceipt): CapturedCreateHandoffFrame = JSONObject(payload).let {
+        require(it.getInt("schema") == 1)
+        val last = if (it.has("last")) it.getJSONObject("last").let { value ->
+            ProjectionReceipt(receipt.scope, receipt.format, decodeSimpleChange(value.getJSONObject("change")), value.getString("nonce"),
+                decodeSimpleChange(value.getJSONObject("previous")), value.getInt("protocol"))
+        } else null
+        CapturedCreateHandoffFrame(receipt, decodeSimpleChange(it.getJSONObject("base")), last)
+    }
+
+    private fun encodeSimpleChange(change: RemoteChange.Upsert): JSONObject {
+        require(supportsCapturedHandoff(change))
+        return JSONObject().apply {
+            put("id", change.eventId.value); put("revision", change.revision.value)
+            put("title", change.content.title); put("description", change.content.description); put("location", change.content.location)
+            when (val time = change.content.time) {
+                is EventTime.Timed -> { put("timed", true); put("start", time.start.toString()); put("end", time.end.toString()); put("zone", time.zone.id) }
+                is EventTime.AllDay -> { put("timed", false); put("start", time.start.toString()); put("end", time.endExclusive.toString()) }
+            }
+        }
+    }
+
+    private fun decodeSimpleChange(value: JSONObject): RemoteChange.Upsert {
+        val time = if (value.getBoolean("timed")) EventTime.Timed(Instant.parse(value.getString("start")),
+            Instant.parse(value.getString("end")), ZoneId.of(value.getString("zone"))) else
+            EventTime.AllDay(LocalDate.parse(value.getString("start")), LocalDate.parse(value.getString("end")))
+        return RemoteChange.Upsert(EventId(value.getString("id")), Revision(value.getString("revision")),
+            EventContent(value.getString("title"), time, value.getString("description"), value.getString("location"), details = EventDetails()))
+    }
 
     /** Retain the rejected self-attendee case; never erase or readmit its consumed reservation.
      * A distinct positive fixture is permitted only after proving the old case never staged/sent. */
