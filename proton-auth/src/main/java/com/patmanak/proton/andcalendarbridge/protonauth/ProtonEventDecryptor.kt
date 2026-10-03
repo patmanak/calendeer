@@ -9,6 +9,7 @@ import java.util.Base64
 import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonPrimitive
 import me.proton.core.crypto.common.context.CryptoContext
 import me.proton.core.crypto.common.keystore.encrypt
 import me.proton.core.crypto.common.keystore.PlainByteArray
@@ -54,6 +55,51 @@ internal class ProtonEventDecryptor(private val crypto: CryptoContext, private v
     suspend fun openSharedTitle(session: CatalogSession, scope: CalendarScope, expectedEventId: EventId,
         expectedRevision: Revision, expectedUid: String, expectedTitle: String,
         bootstrap: JsonObject, row: JsonObject): ProtonSharedTitleBasis {
+        return withSharedTitle(session, scope, expectedEventId, expectedRevision, expectedUid, expectedTitle,
+            bootstrap, row) { basis, _, _, _ -> basis }
+    }
+
+    /** Offline crypto fragment, never an UPDATE payload or proof of event edit eligibility.
+     * Reuses the existing shared session key; only the encrypted part's Data/Signature change.
+     * Calendar WRITE selection is local evidence, not current session/server authorization.
+     */
+    suspend fun prepareSharedTitle(session: CatalogSession, scope: CalendarScope, expectedEventId: EventId,
+        expectedRevision: Revision, expectedUid: String, expectedTitle: String, newTitle: String,
+        metadata: JsonObject, bootstrap: JsonObject, row: JsonObject): ProtonReencryptedSharedTitle {
+        try {
+            val frozenMetadata = snapshot(metadata)
+            return withSharedTitle(session, scope, expectedEventId, expectedRevision, expectedUid, expectedTitle,
+                bootstrap, row) { basis, keys, addresses, frozenBootstrap ->
+                val selected = ProtonCreateContextPolicy.select(scope, frozenMetadata, frozenBootstrap, addresses)
+                val original = basis.originalRow
+                val secretPart = original.array("SharedEvents").map { it as JsonObject }.single { it.number("Type") == 3L }
+                if (!selected.address.email.equals(secretPart.string("Author"), ignoreCase = true)) unsupportedEvents()
+                val patched = basis.patchTitle(newTitle).patchedPlaintext
+                if (patched.encryptedShared == basis.originalPlaintext.encryptedShared)
+                    return@withSharedTitle ProtonReencryptedSharedTitle(original, secretPart, changed = false)
+                GateCProtectedStorageGuard.requireAvailable(crypto.keyStoreCrypto)
+                if (selected.signingKey.unlockOrNull(crypto)?.use { true } != true) missingLocalKeys()
+                val sessionKey = keys.decryptSessionKeyOrNull(Base64.getDecoder().decode(original.string("SharedKeyPacket")))
+                    ?: missingLocalKeys()
+                val encrypted = sessionKey.use { key ->
+                    val bytes = patched.encryptedShared.toByteArray(Charsets.UTF_8)
+                    try { Base64.getEncoder().encodeToString(crypto.pgpCrypto.encryptData(bytes, key)) }
+                    finally { bytes.fill(0) }
+                }
+                val signature = selected.signingKey.signText(crypto, patched.encryptedShared)
+                val replacement = JsonObject(secretPart + mapOf("Data" to JsonPrimitive(encrypted), "Signature" to JsonPrimitive(signature)))
+                // Original signatures stay only on their original parts in the original row.
+                ProtonReencryptedSharedTitle(original, replacement, changed = true)
+            }
+        } catch (cancelled: CancellationException) { throw cancelled }
+          catch (failure: RemoteImportException) { throw failure }
+          catch (_: Exception) { unsupportedEvents() }
+    }
+
+    private suspend fun <T> withSharedTitle(session: CatalogSession, scope: CalendarScope, expectedEventId: EventId,
+        expectedRevision: Revision, expectedUid: String, expectedTitle: String,
+        bootstrap: JsonObject, row: JsonObject,
+        action: (ProtonSharedTitleBasis, KeyHolderContext, List<UserAddress>, JsonObject) -> T): T {
         try {
             if (scope.account.value != session.userId.id) unsupportedEvents()
             // Snapshot before the first suspension, including settings used in the revision.
@@ -79,8 +125,9 @@ internal class ProtonEventDecryptor(private val crypto: CryptoContext, private v
                 val plain = ProtonEventTextParts(clear, secret)
                 // Bind both signed iCalendar UIDs, not merely the unsigned row UID.
                 ProtonSharedTitlePatcher.patch(plain, expectedTitle, expectedTitle, expectedUid)
-                ProtonSharedTitleBasis(scope, expectedEventId, expectedRevision, expectedUid, expectedTitle,
+                val basis = ProtonSharedTitleBasis(scope, expectedEventId, expectedRevision, expectedUid, expectedTitle,
                     frozenRow.toString(), plain)
+                action(basis, keys, addresses, frozenBootstrap)
             }
         } catch (cancelled: CancellationException) { throw cancelled }
           catch (failure: RemoteImportException) { throw failure }

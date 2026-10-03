@@ -14,6 +14,9 @@ import me.proton.core.domain.entity.UserId
 import me.proton.core.key.domain.*
 import me.proton.core.key.domain.entity.key.KeyId
 import me.proton.core.key.domain.entity.key.PrivateKey
+import me.proton.core.key.domain.entity.key.PrivateKeyRing
+import me.proton.core.key.domain.entity.key.PublicKeyRing
+import me.proton.core.key.domain.entity.keyholder.KeyHolderContext
 import me.proton.core.network.domain.session.SessionId
 import me.proton.core.user.domain.entity.*
 
@@ -21,8 +24,10 @@ import me.proton.core.user.domain.entity.*
 object ProtonSharedTitleCryptoProbe {
     suspend fun runBinary(): String = run(textSignatures = false)
     suspend fun runText(): String = run(textSignatures = true)
+    suspend fun runReencryptedBinary(): String = run(textSignatures = false, reencrypted = true)
+    suspend fun runReencryptedText(): String = run(textSignatures = true, reencrypted = true)
 
-    private suspend fun run(textSignatures: Boolean): String = withContext(Dispatchers.IO) {
+    private suspend fun run(textSignatures: Boolean, reencrypted: Boolean = false): String = withContext(Dispatchers.IO) {
         var stage = "GENERATE"
         try {
             val crypto = AndroidCryptoContext()
@@ -60,6 +65,7 @@ object ProtonSharedTitleCryptoProbe {
                     putJsonArray("Members") { add(buildJsonObject {
                         put("ID", "synthetic-title-member"); put("CalendarID", calendar)
                         put("AddressID", addressId.id); put("Email", email)
+                        put("Flags", 1); put("Permissions", 16)
                     }) }
                     putJsonArray("Keys") { add(buildJsonObject {
                         put("ID", "synthetic-title-calendar-key"); put("CalendarID", calendar)
@@ -133,6 +139,153 @@ object ProtonSharedTitleCryptoProbe {
                 stage = "NO_OP"
                 val noOp = basis.patchTitle(originalTitle)
                 check(noOp.originalRow == row && noOp.patchedPlaintext.clearShared == clear && noOp.patchedPlaintext.encryptedShared == secret)
+
+                if (reencrypted) {
+                    val metadata = buildJsonObject { put("ID", calendar); put("Type", 0) }
+                    suspend fun prepare(candidate: JsonObject = row, context: JsonObject = bootstrap,
+                        candidateMetadata: JsonObject = metadata, candidateScope: CalendarScope = scope,
+                        expectedId: EventId = eventId, expectedRevision: Revision = candidate.revision(context),
+                        expectedUid: String = uid, expectedTitle: String = originalTitle,
+                        replacement: String = newTitle, engine: ProtonEventDecryptor = decoder): ProtonReencryptedSharedTitle =
+                        engine.prepareSharedTitle(session, candidateScope, expectedId, expectedRevision,
+                            expectedUid, expectedTitle, replacement, candidateMetadata, context, candidate)
+
+                    stage = "REENCRYPT"
+                    val prepared = prepare()
+                    val originalPart = row.array("SharedEvents").map { it as JsonObject }.single { it.number("Type") == 3L }
+                    val part = prepared.encryptedSharedPart
+                    check(prepared.changed && prepared.originalRow == row)
+                    check(part.filterKeys { it != "Data" && it != "Signature" } ==
+                        originalPart.filterKeys { it != "Data" && it != "Signature" })
+                    check(part.string("Data") != originalPart.string("Data"))
+                    check(part.string("Signature") != originalPart.string("Signature"))
+                    check(prepared.originalRow.array("SharedEvents") == row.array("SharedEvents"))
+                    check(prepared.originalRow.string("SharedKeyPacket") == row.string("SharedKeyPacket"))
+                    check(!prepared.toString().contains(uid) && !prepared.toString().contains(newTitle))
+                    check(prepared.originalRow !== prepared.originalRow && prepared.encryptedSharedPart !== prepared.encryptedSharedPart)
+
+                    stage = "ORIGINAL_PACKET_DECRYPT"
+                    val calendarKey = PrivateKey(calendarArmored, true,
+                        passphrase = PlainByteArray(calendarSecret).encrypt(crypto.keyStoreCrypto))
+                    val reopened = KeyHolderContext(crypto, PrivateKeyRing(crypto, listOf(calendarKey)),
+                        PublicKeyRing(emptyList())).use { keys ->
+                        val retainedKey = keys.decryptSessionKeyOrNull(Base64.getDecoder().decode(row.string("SharedKeyPacket")))
+                            ?: error("Synthetic packet unavailable")
+                        val bytes = retainedKey.use { key ->
+                            keys.decryptDataOrNull(Base64.getDecoder().decode(part.string("Data")), key)
+                                ?: error("Synthetic ciphertext unavailable")
+                        }
+                        try { String(bytes, Charsets.UTF_8) } finally { bytes.fill(0) }
+                    }
+                    check(reopened == patched && reopened.startsWith(prefix) && reopened.endsWith(suffix))
+                    check(biweekly.Biweekly.parse(reopened).first().events.single().summary.value.replace("\r\n", "\n") == newTitle)
+                    stage = "NEW_SIGNATURE"
+                    val addressPublicKey = addressKey.publicKey(crypto)
+                    check(addressPublicKey.verifyText(crypto, reopened, part.string("Signature")))
+                    check(!addressPublicKey.verifyData(crypto, reopened.toByteArray(Charsets.UTF_8), originalPart.string("Signature")) &&
+                        !addressPublicKey.verifyText(crypto, reopened, originalPart.string("Signature")))
+                    stage = "REENCRYPT_NO_OP"
+                    val unchanged = prepare(replacement = originalTitle)
+                    check(!unchanged.changed && unchanged.originalRow == row && unchanged.encryptedSharedPart == originalPart)
+                    stage = "AUTHOR_CASE"
+                    val authorCaseRow = changedPart(row, 1, "Author", JsonPrimitive(email.uppercase()))
+                    val authorCase = prepare(candidate = authorCaseRow)
+                    check(authorCase.encryptedSharedPart.string("Author") == email.uppercase())
+
+                    stage = "REENCRYPT_SOURCE_BINDING"
+                    refused { prepare(expectedId = EventId("foreign-event")) }
+                    refused { prepare(expectedRevision = Revision("foreign-revision")) }
+                    refused { prepare(expectedUid = "foreign@calendeer.invalid") }
+                    refused { prepare(expectedTitle = "Stale title") }
+                    refused { prepare(candidateScope = scope.copy(account = AccountId("foreign-account"))) }
+                    refused { prepare(candidateScope = scope.copy(calendar = CalendarId("foreign-calendar"))) }
+                    refused { prepare(candidate = changedPart(row, 1, "Signature", JsonPrimitive(alteredSignature))) }
+                    refused { prepare(candidate = changedPart(row, 0, "Signature", JsonPrimitive(alteredSignature))) }
+                    refused { prepare(candidate = changedPart(row, 1, "Author", null)) }
+                    refused { prepare(candidate = changedPart(row, 1, "Author", JsonPrimitive("foreign@example.invalid"))) }
+                    stage = "OWNED_WRITE_CONTEXT"
+                    refused { prepare(candidateMetadata = JsonObject(metadata + ("Type" to JsonPrimitive(1)))) }
+                    refused { prepare(candidateMetadata = JsonObject(metadata + ("ID" to JsonPrimitive("foreign-calendar")))) }
+                    refused { prepare(candidateMetadata = JsonObject(metadata - "Type")) }
+                    val member = bootstrap.array("Members").single() as JsonObject
+                    for ((field, value) in listOf("Flags" to 0, "Permissions" to 0)) {
+                        val blockedBootstrap = JsonObject(bootstrap + ("Members" to JsonArray(listOf(
+                            JsonObject(member + (field to JsonPrimitive(value)))))))
+                        refused { prepare(context = blockedBootstrap) }
+                        refused { prepare(context = blockedBootstrap, replacement = originalTitle) }
+                    }
+                    refused { prepare(context = JsonObject(bootstrap + ("Members" to JsonArray(listOf(
+                        JsonObject(member - "Permissions")))))) }
+                    refused { prepare(engine = ProtonEventDecryptor(crypto) {
+                        listOf(address.copy(email = "different@example.invalid"))
+                    }) }
+                    refused { prepare(engine = ProtonEventDecryptor(crypto) { listOf(address.copy(enabled = false)) }) }
+                    refused { prepare(engine = ProtonEventDecryptor(crypto) { listOf(address.copy(canSend = false)) }) }
+                    stage = "DIFFERENT_OWNED_WRITER"
+                    val otherAddress = address.copy(addressId = AddressId("synthetic-other-address"),
+                        email = "synthetic-other@example.invalid")
+                    val otherMember = JsonObject(member + mapOf("AddressID" to JsonPrimitive(otherAddress.addressId.id),
+                        "Email" to JsonPrimitive(otherAddress.email)))
+                    refused { prepare(context = JsonObject(bootstrap + ("Members" to JsonArray(listOf(otherMember)))),
+                        engine = ProtonEventDecryptor(crypto) { listOf(address, otherAddress) }) }
+                    stage = "OWNED_SIGNING_KEYS"
+                    val wrongSigningKey = PrivateKey(addressArmored, true,
+                        passphrase = PlainByteArray("synthetic-wrong-passphrase".toByteArray()).encrypt(crypto.keyStoreCrypto))
+                    refused(RemoteImportFailure.LOCAL_KEYS) { prepare(engine = ProtonEventDecryptor(crypto) {
+                        listOf(address.copy(keys = listOf(UserAddressKey(addressId, 1, 3, active = true,
+                            keyId = KeyId("synthetic-title-key"), privateKey = wrongSigningKey))))
+                    }) }
+                    refused(RemoteImportFailure.LOCAL_KEYS) { prepare(engine = ProtonEventDecryptor(crypto) { emptyList() }) }
+
+                    stage = "PRIMARY_SIGNING_UNLOCK"
+                    val otherArmored = pgp.generateNewPrivateKey("synthetic-signer", "example.invalid", addressSecret)
+                    val unavailablePrimary = PrivateKey(otherArmored, true,
+                        passphrase = PlainByteArray("synthetic-wrong-passphrase".toByteArray()).encrypt(crypto.keyStoreCrypto))
+                    val availableSecondary = PrivateKey(addressArmored, false,
+                        passphrase = PlainByteArray(addressSecret).encrypt(crypto.keyStoreCrypto))
+                    val partlyAvailableAddress = address.copy(keys = listOf(
+                        UserAddressKey(addressId, 1, 3, active = true, keyId = KeyId("synthetic-unavailable-primary"),
+                            privateKey = unavailablePrimary),
+                        UserAddressKey(addressId, 2, 1, active = true, keyId = KeyId("synthetic-available-secondary"),
+                            privateKey = availableSecondary)))
+                    val partlyAvailableDecoder = ProtonEventDecryptor(crypto) { listOf(partlyAvailableAddress) }
+                    // The original secondary can open bootstrap/content, but cannot sign as primary.
+                    check(open(engine = partlyAvailableDecoder).originalPlaintext.encryptedShared == secret)
+                    refused(RemoteImportFailure.LOCAL_KEYS) { prepare(engine = partlyAvailableDecoder) }
+                    val signingFreeNoOp = prepare(replacement = originalTitle, engine = partlyAvailableDecoder)
+                    check(!signingFreeNoOp.changed && signingFreeNoOp.encryptedSharedPart == originalPart)
+
+                    stage = "REENCRYPT_FROZEN_INPUTS"
+                    val mutableMetadata = metadata.toMutableMap()
+                    val mutableOpaque = row.obj("OpaqueMetadata").toMutableMap()
+                    val mutableParts = row.array("SharedEvents").toMutableList()
+                    val mutableRow = row.toMutableMap().apply {
+                        put("OpaqueMetadata", JsonObject(mutableOpaque)); put("SharedEvents", JsonArray(mutableParts))
+                    }
+                    val mutableMembers = bootstrap.array("Members").toMutableList()
+                    val mutableBootstrap = bootstrap.toMutableMap().apply { put("Members", JsonArray(mutableMembers)) }
+                    var keyReads = 0
+                    val mutatingDecoder = ProtonEventDecryptor(crypto) {
+                        keyReads++
+                        mutableMetadata.clear(); mutableOpaque.clear(); mutableParts.clear()
+                        mutableMembers.clear(); mutableBootstrap.clear()
+                        listOf(address)
+                    }
+                    val frozen = prepare(candidate = JsonObject(mutableRow), context = JsonObject(mutableBootstrap),
+                        candidateMetadata = JsonObject(mutableMetadata), expectedRevision = row.revision(bootstrap), engine = mutatingDecoder)
+                    check(keyReads == 1 && frozen.originalRow == row && frozen.changed)
+                    val frozenPart = frozen.encryptedSharedPart
+                    mutableRow.clear()
+                    check(frozen.originalRow == row && frozen.encryptedSharedPart == frozenPart)
+
+                    stage = "REENCRYPT_CANCELLATION"
+                    val cancelled = CancellationException("Synthetic cancellation")
+                    var propagated = false
+                    try { prepare(engine = ProtonEventDecryptor(crypto) { throw cancelled }) }
+                    catch (actual: CancellationException) { propagated = actual === cancelled }
+                    check(propagated)
+                    return@withContext "RESULT=SUCCESS"
+                }
 
                 stage = "FROZEN_INPUTS"
                 val mutableMetadata = row.obj("OpaqueMetadata").toMutableMap()

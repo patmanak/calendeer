@@ -120,6 +120,26 @@ The 291 Proton-adapter JVM cases and eight selected native synthetic
 signature/import/preparation checks passed, along with build, lint and independent
 review. These checks did not modify account data or qualify a service UPDATE.
 
+An internal offline continuation can now re-encrypt the patched shared text with
+the event's original shared session key and sign it using Proton Core. It reuses
+the owned personal-calendar WRITE selection policy and requires the selected
+local primary signer to match the original encrypted-part author. A single local
+key read uses frozen event, bootstrap and calendar metadata. The result keeps the
+unchanged original JSON separate from a replacement encrypted shared part; only
+that part's Data and Signature change. Its other fields, including Author, are
+retained structurally without claiming their semantics remain valid. No-op changes
+retain the original ciphertext/signature without generating replacements.
+Clear text/signatures, other partitions and key packets remain unchanged. This
+is a cryptographic fragment experiment, with no event-level edit eligibility,
+active-session proof, timestamp/sequence update, persistence, payload assembly,
+transport or advertised UPDATE capability. Live service compatibility and
+concurrent-write protection remain unestablished.
+The 294 Proton-adapter JVM cases and ten selected native signature/import/
+preparation cases passed, including reading with an available secondary key while
+a distinct primary signing key is locked: changed titles are refused, and no-op
+fragments stay unchanged. Build, lint and independent review passed. No service
+UPDATE or Calendar Provider edit was attempted by these fixtures.
+
 An internal offline CREATE preparer now reuses Proton's simple-event partition:
 signed clear date metadata and signed encrypted display text. It uses Biweekly
 and Proton Core primitives, with caller-supplied UID/timestamp and selected keys.

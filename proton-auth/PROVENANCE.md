@@ -46,6 +46,24 @@ IDs/revision, session validity and rights are not authenticated by those signatu
 The internal experiment does not provide a sealed read receipt, re-encryption,
 replacement signatures, UPDATE payload, timestamp update or concurrency guarantee.
 
+The separate `prepareSharedTitle` experiment now reuses the existing Core
+`decryptSessionKeyOrNull`, `encryptData` and address-key `signText` primitives.
+It keeps the original shared session key and key packet instead of invoking the
+CREATE encryptor's new-key generation or lossy display-model serializer. It
+reuses the local `ProtonCreateContextPolicy` selection checks for a unique owned
+personal-calendar WRITE member/primary signer, then requires the encrypted-part
+author to match that selected local address. This selection does not establish
+event-level rights or a live session. Shared opening and preparation use the
+same frozen inputs and one local address read.
+
+`ProtonReencryptedSharedTitle.kt` retains the original row separately from a
+response-shaped replacement encrypted shared part. Only Data and Signature
+are replaced; unknown part metadata is copied without semantic qualification.
+No-op changes retain ciphertext/signature exactly. No new dependency or upstream
+code was copied. This is local primitive integration, not a qualified Proton
+UPDATE builder; no wire request, timestamp/sequence change or server guarantee
+is supplied. Existing crypto adaptation/library notices still apply.
+
 ## Experimental single CREATE submission and inspection
 
 `ProtonCreateSubmissionAdapter.kt` and `ProtonCreateSubmissionCodec.kt` adapt

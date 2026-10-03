@@ -17,4 +17,12 @@ class ProtonSharedTitleCryptoDeviceTest {
     @Test fun textSignedSharedPartsRetainExactWhitespaceAndRejectUnboundOrUnverifiedTitles() = runBlocking {
         assertEquals("RESULT=SUCCESS", ProtonSharedTitleCryptoProbe.runText())
     }
+
+    @Test fun binarySignedTitlesReencryptWithOriginalPacketAndRejectInvalidWriteContext() = runBlocking {
+        assertEquals("RESULT=SUCCESS", ProtonSharedTitleCryptoProbe.runReencryptedBinary())
+    }
+
+    @Test fun textSignedTitlesReencryptWithOriginalPacketAndPreserveOpaqueSpans() = runBlocking {
+        assertEquals("RESULT=SUCCESS", ProtonSharedTitleCryptoProbe.runReencryptedText())
+    }
 }

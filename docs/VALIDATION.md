@@ -1426,3 +1426,37 @@ import/preparation cases passed on an authorized physical device. Application an
 test APK builds, lint (zero errors) and independent source review passed. The
 current application was reopened after the isolated tests; existing test account
 examples were retained. No service update or system-calendar edit was attempted.
+
+## Offline shared-title re-encryption
+
+`ProtonReencryptedSharedTitleTest` verifies that the original JSON and replacement
+shared part remain separate, deeply isolated snapshots with redacted diagnostics.
+Fabricated ciphertext in these JVM container checks provides no crypto evidence.
+
+Two additional `ProtonSharedTitleCryptoDeviceTest` fixtures start from binary- or
+text-signed originals. Native Core decrypts the new Data using the original
+SharedKeyPacket, recovers the exact patched plaintext and verifies its new text
+signature. Both signature verifiers reject the old signature on the changed text.
+Only Data/Signature differ in the shared part; its Author/opaque metadata, the
+original clear part, other partitions and original key packet remain unchanged.
+No-op preparation retains the exact original ciphertext/signature. Author case
+is preserved after case-insensitive comparison with the selected local signer.
+
+Refusals exercise source bindings/signatures, stale titles, missing or foreign
+personal-calendar metadata, missing WRITE rights/member flags, disabled/non-sending
+addresses, unavailable keys and a locally trusted author different from the selected
+writer. Metadata, bootstrap and row backing collections are mutated during the
+single local address read; preparation must use their earlier snapshots. Cancellation
+must propagate. These are isolated fixtures, with no account, network, Provider
+mutation or event-level authorization proof. Timestamps/SEQUENCE, semantic validity
+of opaque part metadata and live UPDATE/conflict behavior remain unqualified.
+An additional key-isolation case uses a distinct unavailable primary signing key
+and an available original secondary address key. Original content opens through
+the secondary; a changed title is refused with LOCAL_KEYS, while no-op preparation
+retains the original fragment without unlocking the unavailable primary.
+
+All 294 Proton-adapter JVM cases passed. All ten selected native cases passed on
+an authorized physical device: four shared-title cases and six existing import/
+preparation regressions. Application/test APK builds, lint (zero errors) and
+independent source review passed. Calendeer was reopened after testing. No real
+event or account attribute was modified by the isolated fixtures.
