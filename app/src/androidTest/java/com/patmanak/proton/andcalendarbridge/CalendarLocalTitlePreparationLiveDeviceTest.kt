@@ -36,7 +36,11 @@ class CalendarLocalTitlePreparationLiveDeviceTest {
         val identityHash = args.getString("createAccountHash").orEmpty()
         assertTrue("An explicit retained fixture and account are required",
             token.matches(Regex("[a-f0-9]{12}")) && identityHash.matches(Regex("[a-f0-9]{64}")))
+        val phase = args.getString("titlePreparationPhase") ?: "SINGLE"
+        assertTrue("Only explicit live preparation phases are supported", phase in setOf("SINGLE", "PREPARE", "PREPARE_STOP"))
+        val persistForRestart = phase != "SINGLE"
         val app = compose.activity.application as BridgeApplication
+        if (persistForRestart) LocalTitleRestartFixture.requireAbsent(app, token)
         compose.waitUntil(60_000) { app.imports.state.value.authenticated &&
             app.imports.state.value.selections.isNotEmpty() && !app.imports.state.value.busy }
         val prefs = app.getSharedPreferences("known-empty-create-live-qualification-v2", Context.MODE_PRIVATE)
@@ -76,7 +80,8 @@ class CalendarLocalTitlePreparationLiveDeviceTest {
         val intent = LocalEditIntent(MutationId("synthetic-local-title-${UUID.randomUUID()}"), scope,
             format, base, base.content.copy(title = "Calendeer QA — prepared title only"))
         val timestamp = Instant.now().truncatedTo(ChronoUnit.SECONDS)
-        val name = "title-live-preparation-${UUID.randomUUID()}.db"
+        val name = if (persistForRestart) LocalTitleRestartFixture.databaseName(token)
+            else "title-live-preparation-${UUID.randomUUID()}.db"
         val jobs = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         val schedules = AtomicInteger()
         val scheduler = object : ImportScheduler {
@@ -93,6 +98,7 @@ class CalendarLocalTitlePreparationLiveDeviceTest {
             override suspend fun apply(intent: ProjectionIntent, seriesUid: String?) = error("No Provider writes")
         }
         var retained: LocalEditPreparation? = null
+        var persisted = false
         try {
             ImportStore(app, name).use { store ->
                 store.remember(scope.account, listOf(CalendarSummary(scope.calendar, "Synthetic qualification")))
@@ -151,11 +157,23 @@ class CalendarLocalTitlePreparationLiveDeviceTest {
                 app.imports.state.value.selections.map { it.scope to it.enabled } == beforeSelections)
             assertTrue("Keep the non-resendable CREATE journal unchanged",
                 CreateAttemptStore(app, "calendar-known-empty-create-live-qualification-v2.db").use { it.read(originalAttempt.scope, originalAttempt.id) } == originalAttempt)
+            if (persistForRestart) {
+                LocalTitleRestartFixture.remember(app, token, identityHash, requireNotNull(retained))
+                persisted = true
+            }
             InstrumentationRegistry.getInstrumentation().sendStatus(0, Bundle().apply {
                 putBoolean("real_title_preparation_retained_and_recovered", true)
                 putBoolean("remote_fixture_and_provider_identity_unchanged", true)
                 putBoolean("outgoing_update_enabled", false)
+                if (persistForRestart) putInt("preparation_process_pid", android.os.Process.myPid())
+                if (phase == "PREPARE_STOP") putBoolean("title_preparation_ready_for_stop", true)
             })
-        } finally { jobs.coroutineContext[Job]!!.cancelAndJoin(); app.deleteDatabase(name) }
+            // The host kills this still-live process only after observing the committed marker.
+            // All SQL helpers and preparation calls above have already returned/closed.
+            if (phase == "PREPARE_STOP") withTimeout(90_000) { awaitCancellation() }
+        } finally {
+            jobs.coroutineContext[Job]!!.cancelAndJoin()
+            if (!persisted) app.deleteDatabase(name)
+        }
     }
 }

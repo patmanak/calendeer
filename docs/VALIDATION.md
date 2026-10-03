@@ -1821,7 +1821,52 @@ the retained service fixture, session and permissions were preserved.
 This qualifies one simple known-empty live preparation and protected native
 recovery profile. Normal application startup may schedule ordinary read-only
 workers. The Provider witness does not measure present event contents; service
-observations are successive reads, not a concurrency guarantee. Killed-process
-resumption, other event profiles, general editable mode and live UPDATE/DELETE
-remain unqualified. The isolated SQL fixture is removed after each test, and no
-remote event is edited or deleted.
+observations are successive reads, not a concurrency guarantee. Other event
+profiles, general editable mode and live UPDATE/DELETE remain unqualified. The
+ordinary isolated SQL fixture is removed after each test; the explicit process
+qualification below retains it across phases. No remote event is edited or deleted.
+
+## Offline local-title recovery after a controlled process stop
+
+The live title fixture additionally accepts `titlePreparationPhase=PREPARE_STOP`.
+It performs the same real preparation, recovery and original-event inspections,
+then closes all SQL helpers and saves a private on-device manifest. The manifest
+pins scope, mutation, event, observation/preparation formats, timestamp, ciphertext
+digest and process PID. Existing manifests/databases block another preparation;
+there is no automatic reconstruction or replacement of missing recovery data.
+
+The host observes `title_preparation_ready_for_stop=true` together with all
+completed preparation witnesses, verifies that exact PID is still alive, runs
+`am force-stop` and checks that no application PID remains. This intentionally
+aborts the waiting instrumentation. Its abort is accepted only after the marker,
+exact live PID and host stop; it is not reported as a normally passed JUnit case.
+The host waits for its ADB helper to finish before continuing or releasing device
+ownership, including on failure.
+
+`CalendarLocalTitleRestartDeviceTest` then runs with
+`calendarLocalTitleRestart=true` and `titleRestartPhase=VERIFY`, using the same
+explicit fixture/account witnesses. It has no Activity rule, sign-in restoration
+or real Proton port. A different process and absent active network are required.
+It reads the preserved journal without reseeding it, checks every manifest binding,
+and compares the paused owner, projected baseline, imported base and empty pending
+projection queue. A fresh Keystore codec opens the complete historical record.
+A different account witness, substituted timestamp and corrupted ciphertext fail.
+
+The coordinator uses controlled historical account/permission observations and
+a preparation port that fails if invoked. Replay returns HISTORICAL without
+changing the record or timestamp. The network must remain absent through the
+end of verification. `titleRestartPhase=CLEANUP` removes only the manifest-bound
+isolated database and preferences; the original service fixture is retained.
+
+The physical host journey passed: committed marker and exact PID stop/absence,
+offline verification in a different process, then cleanup. VERIFY and CLEANUP
+each completed with `OK (1 test)`. App/test APK builds, lint (zero errors, twenty
+existing warnings) and independent review passed. Airplane mode, Wi-Fi and mobile
+data settings were captured and restored exactly, checked before final launch.
+
+The offline probe authenticates protected storage and historical binding only;
+it does not perform fresh signature verification, read current server data or
+renew access rights. Application startup can still initialize ordinary local
+bookkeeping. This stop occurs after a completed commit, not during a transaction
+or simultaneous-process race. Power-loss/reboot recovery, automatic resumption,
+other event profiles and live UPDATE/DELETE remain unqualified.

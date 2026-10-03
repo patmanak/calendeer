@@ -333,8 +333,27 @@ launched with its session and permissions retained. Preparation makes no service
 write or Provider edit; normal application startup can still schedule ordinary
 read-only imports. The Provider witness measures identity/revision/dirty state,
 not present event content. This establishes one live preparation/recovery profile,
-not killed-process recovery, server concurrency or UPDATE compatibility. General
+not server concurrency or UPDATE compatibility. General
 editable mode and automatic preparation remain unavailable.
+
+A host-controlled offline process-stop journey now qualifies retained title
+preparation recovery after commit. The connected phase completes its existing
+service/native checks, closes its SQL helpers, saves a private test manifest and
+waits with a committed marker. The host verifies the exact preparation PID is
+alive, stops it and observes its absence. A different process with no active
+network reopens the same journal and fresh Keystore codec. Scope, mutation, event,
+formats, timestamp, ciphertext digest, paused owner and both historical SQL bases
+are unchanged. Historical replay uses a preparer that fails if called and returns
+HISTORICAL; substituted account witnesses, timestamps and ciphertext are refused.
+
+The physical stop/offline-recovery journey, app/test builds, lint (zero errors)
+and independent review passed. Original network settings were restored and
+checked, the isolated test fixture was removed, and the final app was launched.
+The offline phase opens no Activity or authenticated Proton port; its account and
+permission observations are controlled. It verifies protected historical storage,
+not renewed signatures or current service/Android access. This is a stop after
+commit, not an interrupted transaction, power loss, reboot, simultaneous-process
+ordering or autonomous worker resumption. Production UPDATE/DELETE remain disabled.
 
 An internal offline CREATE preparer now reuses Proton's simple-event partition:
 signed clear date metadata and signed encrypted display text. It uses Biweekly

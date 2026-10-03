@@ -14,6 +14,15 @@ import me.proton.core.crypto.android.context.AndroidCryptoContext
 
 /** Debug-only retained-record verification. No payload, identity, key or event text is returned. */
 object ProtonLocalTitlePreparationProbe {
+    /** Fresh offline storage opening only. No account lookup, bootstrap or signature revalidation. */
+    suspend fun openHistorical(record: LocalEditPreparation): Boolean = withContext(Dispatchers.IO) {
+        try {
+            ProtonTitlePreparationCodec(ProtonEventPayloadProtector(AndroidCryptoContext().keyStoreCrypto))
+                .openLocal(record).changed
+        } catch (cancelled: CancellationException) { throw cancelled }
+          catch (_: Exception) { false }
+    }
+
     /** Fresh storage opening and native signature/decryption checks, with a read-only bootstrap.
      * The reconstructed row exists only in memory; it is never an UPDATE request.
      * This verifies historical evidence, not current remote access or concurrent-write admission.
