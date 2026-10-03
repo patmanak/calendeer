@@ -37,4 +37,6 @@
     <string name="import_status_series_pending">Algumas ocorrências aguardam a série original antes da importação. Atualize para tentar novamente.</string>
     <string name="import_recurrence_limits">São importadas as recorrências comuns e as alterações de uma ocorrência. As formas não suportadas ficam pendentes.</string>
     <string name="import_status_create_pending">Algumas alterações do calendário estão em espera para evitar eventos duplicados.</string>
+    <string name="import_local_changes">Alterações do Android preservadas: %1$d · Conflitos registados: %2$d</string>
+    <string name="import_local_changes_help">Estas alterações capturadas não são enviadas para o Proton. As atualizações dos eventos afetados no Android estão suspensas; as versões são preservadas para resolução posterior.</string>
 </resources>

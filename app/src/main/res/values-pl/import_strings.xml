@@ -37,4 +37,6 @@
     <string name="import_status_series_pending">Niektóre wystąpienia czekają na oryginalną serię przed importem. Odśwież, aby spróbować ponownie.</string>
     <string name="import_recurrence_limits">Importowane są typowe reguły cykliczne i zmiany pojedynczych wystąpień. Nieobsługiwane formy pozostają oczekujące.</string>
     <string name="import_status_create_pending">Niektóre zmiany w kalendarzu są wstrzymane, aby uniknąć powielania wydarzeń.</string>
+    <string name="import_local_changes">Zachowane zmiany Androida: %1$d · Zarejestrowane konflikty: %2$d</string>
+    <string name="import_local_changes_help">Te zapisane zmiany nie są wysyłane do Proton. Aktualizacje powiązanych wydarzeń w Androidzie są wstrzymane; wersje są zachowane do późniejszego rozwiązania konfliktów.</string>
 </resources>

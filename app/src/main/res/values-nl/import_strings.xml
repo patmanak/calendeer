@@ -37,4 +37,6 @@
     <string name="import_status_series_pending">Sommige afspraken wachten op hun oorspronkelijke reeks voordat ze worden geïmporteerd. Vernieuw om opnieuw te proberen.</string>
     <string name="import_recurrence_limits">Gangbare herhalingsregels en wijzigingen aan één afspraak worden geïmporteerd. Niet-ondersteunde vormen blijven in behandeling.</string>
     <string name="import_status_create_pending">Sommige kalenderwijzigingen worden uitgesteld om dubbele afspraken te voorkomen.</string>
+    <string name="import_local_changes">Bewaarde Android-wijzigingen: %1$d · Vastgelegde conflicten: %2$d</string>
+    <string name="import_local_changes_help">Deze vastgelegde wijzigingen worden niet naar Proton verzonden. Updates van de betrokken Android-afspraken zijn gepauzeerd; de versies blijven bewaard totdat de conflicten kunnen worden opgelost.</string>
 </resources>

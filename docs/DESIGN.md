@@ -24,6 +24,14 @@ Settings contains appearance, language and the existing connected-account action
 Returning from settings restores the main destination; sign-out returns to login.
 No event editor or calendar browsing interface is added.
 
+Each calendar reports retained Android change and recorded conflict counts when
+its local UPDATE/DELETE journal is nonempty. A short explanation states that these
+captured changes are not uploaded and affected Android event updates are on hold.
+Counts remain visible for paused/unavailable calendars and without calendar
+permission, but disappear on sign-out. Zero counts hide the entire explanation.
+No event contents, event identifiers or resolution actions are presented. This
+reports captured history; it does not claim automatic detection of all local edits.
+
 An active authentication attempt or challenge cannot be hidden by settings
 navigation. Server human verification takes priority even after sign-in, including
 when requested during synchronization. Existing credential clearing, secure-window

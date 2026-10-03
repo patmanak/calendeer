@@ -2035,3 +2035,37 @@ Provider or server contents. Retained title metadata never renews crypto/access 
 permits dispatch. No schema migration, UI/worker caller, automatic resolution,
 Provider fixture write or service request is added. UPDATE/DELETE remain disabled;
 live conflict resolution and conditional writes are NOT RUN.
+
+## Retained local changes in the calendar controls
+
+`LocalChangeSummaryDeviceTest` uses isolated real SQL for five cases. Its targeted
+RED case found zero retained changes after an UPDATE capture instead of one before
+the metadata query was added. The completed cases cover UPDATE and DELETE, conflict
+counts that remain after an imported return to the base, account/calendar/generation
+isolation, independent helper reopening, paused/unavailable scopes, zero capture
+and unreadable opaque journal contents. The summary does not decode event payloads,
+change retained owners/bases or release their suppressed projections. Constructor
+checks prevent negative counts or a conflict count exceeding retained changes.
+
+`CalendarImportUiDeviceTest` now has twelve cases, including four new cases for
+counts with missing permission, paused/unavailable calendars, updated counts,
+zero/sign-out hiding and no unsolicited action. An isolated SQL-to-panel journey
+captures a synthetic UPDATE and passes real selection metadata to the composable;
+captured/base titles and event/mutation IDs remain absent from its semantics tree.
+A private synthetic French light presentation capture was visually inspected:
+the count and explanation are readable without clipping. XML/placeholder checks
+passed for all eight languages; rendering in every language/theme remains NOT RUN.
+
+Physical execution selected `LocalChangeSummaryDeviceTest`,
+`CalendarImportUiDeviceTest`, `LocalEditStoreDeviceTest` and
+`ImportStoreDeviceTest`. All forty-three cases passed without failures or skips.
+All ten app JVM cases passed through `:app:testDebugUnitTest`; app/test APK builds
+and `:app:lintDebug` passed with zero errors and twenty existing warnings.
+Independent source/documentation review passed. Isolated SQL databases and the
+temporary device capture were cleaned, and the final app was installed and launched.
+
+The fixtures make no service or Provider event requests. The UI exposes metadata
+only; no event viewer/editor, capture callback, conflict resolver or dispatch is
+added. Counts describe existing journal entries, not every current Android edit
+or present service conflict. CREATE experiment journals are excluded. Schema 14
+and UPDATE/DELETE dispatch restrictions are unchanged.

@@ -434,6 +434,19 @@ cases and forty-two title-owner/journal regressions passed, along with app/test
 APK builds, lint (zero errors, twenty existing warnings) and independent source
 review. The final app was installed and launched. UPDATE/DELETE remain disabled.
 
+The calendar controls now show counts of retained Android UPDATE/DELETE changes
+and recorded conflicts, with an explicit non-upload/held-update explanation in
+all eight languages. Both counts come from one scoped metadata-only SQL statement;
+captured event contents are not decoded or placed in the UI. Paused/unavailable
+calendars retain the summary, zero counts hide it and sign-out hides the panel.
+There are no new capture, event-viewing, resolution or submission controls.
+Five new physical SQL cases, twelve presentation cases (including four new cases
+and an isolated SQL-to-panel journey), and twenty-six import/local-edit journal
+regressions passed. Ten app JVM cases, APK builds, lint (zero errors, twenty
+existing warnings), synthetic visual inspection and independent source review
+passed. The final app was installed and launched. These counts report already
+captured intentions; automatic detection and outgoing UPDATE/DELETE stay disabled.
+
 The shared sync endpoint's one-shot transport permit now qualifies a single
 supported CREATE envelope before constructing its body. UPDATE/DELETE, mixed
 operations, overwrite/import, ambiguous JSON and unknown envelope fields are

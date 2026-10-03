@@ -14,6 +14,9 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.captureToImage
+import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.patmanak.proton.andcalendarbridge.data.importing.ImportStore
 import com.patmanak.proton.andcalendarbridge.data.importing.ImportUiState
@@ -30,8 +33,10 @@ import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
+import kotlinx.coroutines.runBlocking
+import java.util.UUID
 
-/** Synthetic presentation only. Does not instantiate a store, request real permissions or import. */
+/** Synthetic presentation and one isolated SQL metadata journey. No Provider or service access. */
 @RunWith(AndroidJUnit4::class)
 class CalendarImportUiDeviceTest {
     @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()
@@ -58,6 +63,69 @@ class CalendarImportUiDeviceTest {
                     modifier = Modifier.verticalScroll(rememberScrollState()))
             }
         }
+    }
+
+    @Test fun retainedChangesExplainTheHoldWithoutRequiringPermissionsOrOfferingEventActions() {
+        start(ImportUiState(selections = listOf(selection.copy(retainedLocalChangeCount = 3, localConflictCount = 1)),
+            authenticated = true, hasPermission = false))
+        compose.onNodeWithText(compose.activity.getString(R.string.import_local_changes, 3, 1)).assertExists()
+        compose.onNodeWithTag(CalendarImportTags.LOCAL_CHANGES_HELP).performScrollTo().assertExists()
+        compose.onNodeWithText(compose.activity.getString(R.string.import_local_changes_help)).assertExists()
+        compose.onNodeWithTag(CalendarImportTags.PROJECTION_PENDING).assertDoesNotExist()
+        compose.onNodeWithTag(CalendarImportTags.SYNC).assertIsNotEnabled()
+        compose.runOnIdle { assertEquals(0, syncRequests); assertEquals(0, enableRequests); assertEquals(0, permissionRequests) }
+    }
+
+    @Test fun countChangesAndUnavailableCalendarsKeepTheSummaryUntilNoCapturedChangesRemain() {
+        start(ImportUiState(selections = listOf(selection.copy(enabled = true, status = "IMPORTED",
+            retainedLocalChangeCount = 1)), authenticated = true, hasPermission = true))
+        compose.onNodeWithText(compose.activity.getString(R.string.import_local_changes, 1, 0)).assertExists()
+        compose.runOnIdle { state.value = state.value.copy(selections = listOf(selection.copy(available = false,
+            retainedLocalChangeCount = 2, localConflictCount = 2))) }
+        compose.onNodeWithText(compose.activity.getString(R.string.import_status_unavailable)).assertExists()
+        compose.onNodeWithText(compose.activity.getString(R.string.import_local_changes, 2, 2)).assertExists()
+        compose.onNodeWithTag(CalendarImportTags.TOGGLE).assertIsNotEnabled()
+        compose.onNodeWithTag(CalendarImportTags.LOCAL_CHANGES_HELP).assertExists()
+        compose.runOnIdle { state.value = state.value.copy(selections = listOf(selection)) }
+        compose.onNodeWithTag(CalendarImportTags.LOCAL_CHANGES).assertDoesNotExist()
+        compose.onNodeWithTag(CalendarImportTags.LOCAL_CHANGES_HELP).assertDoesNotExist()
+    }
+
+    @Test fun signOutHidesRetainedCountsAsWellAsCalendarControls() {
+        start(ImportUiState(selections = listOf(selection.copy(retainedLocalChangeCount = 1)), authenticated = true))
+        compose.onNodeWithTag(CalendarImportTags.LOCAL_CHANGES).assertExists()
+        compose.runOnIdle { state.value = state.value.copy(authenticated = false) }
+        compose.onNodeWithTag(CalendarImportTags.LOCAL_CHANGES).assertDoesNotExist()
+        compose.onNodeWithTag(CalendarImportTags.LOCAL_CHANGES_HELP).assertDoesNotExist()
+    }
+
+    @Test fun isolatedSqlMetadataReachesThePanelWithoutDisplayingCapturedEventContents() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val name = "local-summary-ui-${UUID.randomUUID()}.db"
+        val store = ImportStore(context, name)
+        try {
+            val target = selection.scope
+            val format = AdapterFormat("controlled-import", 1)
+            val base = RemoteChange.Upsert(EventId("private-event-id"), Revision("base"),
+                EventContent("Private fixture title", EventTime.AllDay(LocalDate.of(2030, 10, 1), LocalDate.of(2030, 10, 2))))
+            store.remember(target.account, listOf(selection.summary)); store.setEnabled(target, true)
+            store.transaction(target) { putRemote(base); putProjection(ProjectionIntent(target, base)); checkpoint = PageCheckpoint(target, format) }
+            assertEquals(1, store.acknowledge(ProjectionIntent(target, base)))
+            store.captureLocalEdit(LocalEditIntent(MutationId("private-mutation-id"), target, format, base,
+                base.content.copy(title = "Private captured title")))
+            start(ImportUiState(selections = store.selections(target.account), authenticated = true, hasPermission = true))
+            compose.onNodeWithTag(CalendarImportTags.LOCAL_CHANGES).performScrollTo().assertExists()
+            compose.onNodeWithText(compose.activity.getString(R.string.import_local_changes, 1, 0)).assertExists()
+            for (hidden in listOf("Private fixture title", "Private captured title", "private-event-id", "private-mutation-id")) {
+                compose.onNodeWithText(hidden).assertDoesNotExist()
+            }
+            // Synthetic UI pixels only, stored privately by the instrumentation host for visual inspection.
+            compose.onNodeWithTag(CalendarImportTags.PANEL).captureToImage().asAndroidBitmap().let { bitmap ->
+                java.io.File(context.cacheDir, "local-change-summary-ui.png").outputStream().use {
+                    check(bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it))
+                }
+            }
+        } finally { store.close(); context.deleteDatabase(name) }
     }
 
     @Test fun signedOutDoesNotShowImportConfigurationOrRequestPermission() {

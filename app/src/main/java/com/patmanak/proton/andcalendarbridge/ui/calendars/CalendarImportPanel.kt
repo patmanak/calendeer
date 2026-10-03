@@ -100,6 +100,16 @@ fun CalendarImportPanel(
                         style = MaterialTheme.typography.bodySmall,
                         modifier = Modifier.testTag(CalendarImportTags.PROJECTION_PENDING))
                 }
+                if (selection.retainedLocalChangeCount > 0) {
+                    Text(stringResource(R.string.import_local_changes, selection.retainedLocalChangeCount, selection.localConflictCount),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (selection.localConflictCount > 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.testTag(CalendarImportTags.LOCAL_CHANGES).semantics { liveRegion = LiveRegionMode.Polite })
+                    Text(stringResource(R.string.import_local_changes_help),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.testTag(CalendarImportTags.LOCAL_CHANGES_HELP))
+                }
                 selection.completedAt?.let { timestamp ->
                     val context = LocalContext.current
                     val locale = LocalConfiguration.current.locales.toLanguageTags()
@@ -161,4 +171,6 @@ internal object CalendarImportTags {
     const val HISTORY_GAP = "import_history_gap"
     const val COVERAGE = "import_coverage"
     const val PROJECTION_PENDING = "import_projection_pending"
+    const val LOCAL_CHANGES = "import_local_changes"
+    const val LOCAL_CHANGES_HELP = "import_local_changes_help"
 }

@@ -37,4 +37,6 @@
     <string name="import_status_series_pending">Einige Vorkommen warten vor dem Import auf ihre ursprüngliche Serie. Zum erneuten Versuch aktualisieren.</string>
     <string name="import_recurrence_limits">Gängige Wiederholungsregeln und Änderungen einzelner Vorkommen werden importiert. Nicht unterstützte Formen bleiben ausstehend.</string>
     <string name="import_status_create_pending">Einige Kalenderänderungen werden zurückgehalten, um doppelte Termine zu vermeiden.</string>
+    <string name="import_local_changes">Aufbewahrte Android-Änderungen: %1$d · Erfasste Konflikte: %2$d</string>
+    <string name="import_local_changes_help">Diese erfassten Änderungen werden nicht an Proton gesendet. Aktualisierungen der betroffenen Android-Termine sind angehalten; die Versionen bleiben für eine spätere Konfliktlösung erhalten.</string>
 </resources>

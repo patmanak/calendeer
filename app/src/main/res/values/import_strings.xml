@@ -37,4 +37,6 @@
     <string name="import_status_series_pending">Waiting for the original series before importing some occurrences. Refresh to retry.</string>
     <string name="import_recurrence_limits">Common recurrence rules and single-occurrence changes are imported. Unsupported recurrence forms remain pending.</string>
     <string name="import_status_create_pending">Some calendar changes are on hold to avoid duplicate events.</string>
+    <string name="import_local_changes">Retained Android changes: %1$d · Recorded conflicts: %2$d</string>
+    <string name="import_local_changes_help">These captured changes are not sent to Proton. Updates to the affected Android events are on hold; retained versions are kept for later resolution.</string>
 </resources>

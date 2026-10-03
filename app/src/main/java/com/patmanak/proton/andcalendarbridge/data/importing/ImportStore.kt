@@ -159,7 +159,9 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
     data class Selection(val scope: CalendarScope, val summary: CalendarSummary, val enabled: Boolean,
         val status: String, val completedAt: Long?, val nextAttempt: Long = 0, val deferredCount: Int = 0,
         val unverifiedCount: Int = 0, val available: Boolean = true, val historyGap: Boolean = false,
-        val coverage: CoverageRun? = null, val pendingProjectionCount: Int = 0) {
+        val coverage: CoverageRun? = null, val pendingProjectionCount: Int = 0,
+        val retainedLocalChangeCount: Int = 0, val localConflictCount: Int = 0) {
+        init { require(retainedLocalChangeCount >= 0 && localConflictCount in 0..retainedLocalChangeCount) }
         override fun toString() = "ImportSelection(REDACTED)"
     }
 
@@ -198,7 +200,10 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
     }
 
     suspend fun selections(account: AccountId): List<Selection> = access { db ->
-        db.query("calendars", null, "account=?", arrayOf(account.value), null, null, "rowid").use { cursor ->
+        // One metadata-only statement keeps retained/conflicted counts coherent, including inactive scopes.
+        db.rawQuery("SELECT c.*, (SELECT COUNT(*) FROM local_edits l WHERE l.scope=c.scope) AS retained_local_changes, " +
+            "(SELECT COUNT(*) FROM local_edits l WHERE l.scope=c.scope AND l.state='CONFLICT') AS local_conflicts " +
+            "FROM calendars c WHERE c.account=? ORDER BY c.rowid", arrayOf(account.value)).use { cursor ->
             buildList {
                 while (cursor.moveToNext()) {
                     fun string(name: String) = cursor.getString(cursor.getColumnIndexOrThrow(name))
@@ -214,7 +219,9 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
                         countUnverified(db, CalendarScope(account, id, long("generation"))), long("available") != 0L,
                         hasReconciliation(db, CalendarScope(account, id, long("generation"))),
                         readCoverage(db, CalendarScope(account, id, long("generation"))).active,
-                        countPending(db, CalendarScope(account, id, long("generation")))))
+                        countPending(db, CalendarScope(account, id, long("generation"))),
+                        cursor.getInt(cursor.getColumnIndexOrThrow("retained_local_changes")),
+                        cursor.getInt(cursor.getColumnIndexOrThrow("local_conflicts"))))
                 }
             }
         }
