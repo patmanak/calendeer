@@ -103,6 +103,23 @@ not every opaque property's semantics or a complete Proton envelope. It has no
 production caller, signing, persistence, transport or UPDATE capability; timestamps
 and signatures still require a separately qualified update preparation path.
 
+The experiment can now open a frozen original response using the existing local
+Proton key bootstrap and signature verification. It requires exactly signed clear
+and signed encrypted shared parts, binds both signed UIDs and the expected title,
+and checks the caller's account/calendar/event/revision observation. JSON and
+bootstrap snapshots precede key access. Alternative address-key packets and
+unresolved authors are refused. Opaque metadata and personal/attendee partitions
+are retained structurally without validation or rewriting. Original JSON with its
+shared signatures and patched plaintext remain separate, ephemeral, redacted containers; original
+signatures are never assigned to patched text. Core text signatures use their
+canonical text semantics, while received plaintext spans stay unchanged.
+These checks authenticate the selected shared content, not unsigned JSON metadata,
+an active session, access rights or a concurrent-write precondition. There is still
+no production caller or outgoing update preparation/dispatch.
+The 291 Proton-adapter JVM cases and eight selected native synthetic
+signature/import/preparation checks passed, along with build, lint and independent
+review. These checks did not modify account data or qualify a service UPDATE.
+
 An internal offline CREATE preparer now reuses Proton's simple-event partition:
 signed clear date metadata and signed encrypted display text. It uses Biweekly
 and Proton Core primitives, with caller-supplied UID/timestamp and selected keys.

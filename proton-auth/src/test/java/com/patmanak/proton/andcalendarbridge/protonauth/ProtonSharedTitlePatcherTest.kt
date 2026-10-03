@@ -38,6 +38,15 @@ class ProtonSharedTitlePatcherTest {
         assertEquals(original.encryptedShared, result.encryptedShared)
     }
 
+    @Test fun bothSignedUidsMustMatchTheExpectedReadBindingEvenOnNoOp() {
+        val original = parts()
+        assertSame(original, ProtonSharedTitlePatcher.patch(original, "Original title", "Original title", uid))
+        try {
+            ProtonSharedTitlePatcher.patch(original, "Original title", "Original title", "other@calendeer.invalid")
+            fail("An unrelated expected UID must be refused")
+        } catch (failure: ProtonTitlePatchException) { assertNull(failure.cause) }
+    }
+
     @Test fun onlyTheEventSummarySpanChangesWhileOpaqueDataAndNestedTitlesRemainExact() {
         val before = "X-FUTURE;P=\"https://example.invalid/a:b\":first\r\n" +
             "X-FUTURE:duplicate\r\nDESCRIPTION:Keep, raw\\ntext\r\n\t and folding\r\n"

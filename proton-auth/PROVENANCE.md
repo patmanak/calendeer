@@ -29,6 +29,23 @@ update, persistence, transport, production caller or mutation capability. This i
 not a complete UPDATE serializer or arbitrary JSON round-trip. Existing Biweekly
 license notices apply; no dependency or copied-upstream code was added.
 
+`ProtonEventDecryptor.openSharedTitle` extends this experiment with the existing
+Core key-bootstrap and binary/text signature verification paths described below.
+The bootstrap helper is shared with page decoding; page recovery and budget
+semantics are unchanged. New local containers in `ProtonSharedTitleBasis.kt`
+keep the original JSON and patched plaintext separate. Both signed UIDs are
+matched to the expected observation before admitting a title basis. Complete JSON
+values are copied before local key access and preserved structurally, rather than
+being rebuilt from the display model. This is original project integration, not
+an imported Proton edit/save implementation. No new dependency or copied source
+was added. Existing adaptation notices and licenses remain applicable.
+
+Only the two shared parts are signature-verified/decrypted. Other JSON fields and
+personal/attendee partitions remain opaque, unqualified originals. Expected scope,
+IDs/revision, session validity and rights are not authenticated by those signatures.
+The internal experiment does not provide a sealed read receipt, re-encryption,
+replacement signatures, UPDATE payload, timestamp update or concurrency guarantee.
+
 ## Experimental single CREATE submission and inspection
 
 `ProtonCreateSubmissionAdapter.kt` and `ProtonCreateSubmissionCodec.kt` adapt

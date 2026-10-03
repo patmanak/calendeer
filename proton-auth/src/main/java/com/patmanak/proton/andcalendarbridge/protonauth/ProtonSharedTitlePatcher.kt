@@ -24,7 +24,7 @@ internal class ProtonTitlePatchException : IllegalStateException("Shared title p
  * Framing, identity and title checks do not certify other properties as valid or safe to upload.
  */
 internal object ProtonSharedTitlePatcher {
-    fun patch(original: ProtonEventTextParts, expectedTitle: String, newTitle: String): ProtonEventTextParts {
+    fun patch(original: ProtonEventTextParts, expectedTitle: String, newTitle: String, expectedUid: String? = null): ProtonEventTextParts {
         try {
             budget(original.clearShared, original.encryptedShared)
             val expected = title(expectedTitle)
@@ -32,6 +32,7 @@ internal object ProtonSharedTitlePatcher {
             val clear = inspect(original.clearShared, hasTitle = false)
             val secret = inspect(original.encryptedShared, hasTitle = true)
             require(clear.uid == secret.uid && clear.stamp == secret.stamp)
+            require(expectedUid == null || clear.uid == expectedUid)
             require(secret.title == expected)
             if (next == expected) return original
 

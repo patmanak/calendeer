@@ -8,6 +8,7 @@ import java.nio.charset.CodingErrorAction
 import java.util.Base64
 import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.Json
 import me.proton.core.crypto.common.context.CryptoContext
 import me.proton.core.crypto.common.keystore.encrypt
 import me.proton.core.crypto.common.keystore.PlainByteArray
@@ -42,6 +43,58 @@ internal class ProtonEventDecryptor(private val crypto: CryptoContext, private v
         return decodePage(session.userId, calendar, bootstrap, listOf(row), uid).changes.singleOrNull()
     }
     suspend fun decodePage(user: UserId, calendar: String, bootstrap: JsonObject, rows: List<JsonObject>, expectedUid: String? = null): EventDecodeResult {
+        return withCalendarKeys(user, calendar, bootstrap) { calendarKeys, addresses ->
+            decodeRows(calendar, bootstrap, rows, expectedUid, calendarKeys, addresses)
+        }
+    }
+
+    /** Offline shared-signature verification only. Expected bindings come from the caller's read.
+     * No active-session/access proof, network, signing, persistence or update payload construction.
+     */
+    suspend fun openSharedTitle(session: CatalogSession, scope: CalendarScope, expectedEventId: EventId,
+        expectedRevision: Revision, expectedUid: String, expectedTitle: String,
+        bootstrap: JsonObject, row: JsonObject): ProtonSharedTitleBasis {
+        try {
+            if (scope.account.value != session.userId.id) unsupportedEvents()
+            // Snapshot before the first suspension, including settings used in the revision.
+            val frozenRow = snapshot(row)
+            val frozenBootstrap = snapshot(bootstrap)
+            if (frozenBootstrap.obj("CalendarSettings").string("CalendarID") != scope.calendar.value) unsupportedEvents()
+            if (frozenRow.string("CalendarID") != scope.calendar.value || frozenRow.string("ID") != expectedEventId.value ||
+                frozenRow.string("UID") != expectedUid || frozenRow.revision(frozenBootstrap) != expectedRevision ||
+                frozenRow.optionalString("AddressKeyPacket") != null) unsupportedEvents()
+            val parts = frozenRow.array("SharedEvents").map { it as? JsonObject ?: unsupportedEvents() }
+            if (parts.map { it.number("Type") }.sorted() != listOf(2L, 3L)) unsupportedEvents()
+            // Preserve all opaque metadata/personal/attendee parts; do not interpret or certify them.
+            return withCalendarKeys(session.userId, scope.calendar.value, frozenBootstrap) { keys, addresses ->
+                if (addresses.any { it.userId != session.userId }) unsupportedEvents()
+                val clearPart = parts.single { it.number("Type") == 2L }
+                val secretPart = parts.single { it.number("Type") == 3L }
+                val clear = clearPart.string("Data")
+                val secret = keys.decryptPart(frozenRow.string("SharedKeyPacket"), secretPart.string("Data"))
+                val budget = EventTextBudget()
+                budget.consume(clear)
+                budget.consume(secret)
+                if (!verify(clearPart, clear, addresses) || !verify(secretPart, secret, addresses)) unsupportedEvents()
+                val plain = ProtonEventTextParts(clear, secret)
+                // Bind both signed iCalendar UIDs, not merely the unsigned row UID.
+                ProtonSharedTitlePatcher.patch(plain, expectedTitle, expectedTitle, expectedUid)
+                ProtonSharedTitleBasis(scope, expectedEventId, expectedRevision, expectedUid, expectedTitle,
+                    frozenRow.toString(), plain)
+            }
+        } catch (cancelled: CancellationException) { throw cancelled }
+          catch (failure: RemoteImportException) { throw failure }
+          catch (_: Exception) { unsupportedEvents() }
+    }
+
+    private fun snapshot(value: JsonObject): JsonObject {
+        val text = value.toString()
+        if (text.length > 4_194_304 || text.toByteArray(Charsets.UTF_8).size > 4_194_304) unsupportedEvents()
+        return Json.parseToJsonElement(text) as? JsonObject ?: unsupportedEvents()
+    }
+
+    private suspend fun <T> withCalendarKeys(user: UserId, calendar: String, bootstrap: JsonObject,
+        action: (KeyHolderContext, List<UserAddress>) -> T): T {
         val addresses = localAddresses.get(user)
         if (addresses.isEmpty() || addresses.none { address -> address.keys.any { it.privateKey.isActive } }) missingLocalKeys()
         return try {
@@ -73,50 +126,55 @@ internal class ProtonEventDecryptor(private val crypto: CryptoContext, private v
         if (keys.isEmpty()) missingLocalKeys()
         if (keys.none { it.unlockOrNull(crypto)?.use { true } == true }) missingLocalKeys()
         KeyHolderContext(crypto, PrivateKeyRing(crypto, keys), PublicKeyRing(emptyList())).use { calendarKeys ->
-            val pageBudget = EventDecodeBudget()
-            val changes = mutableListOf<RemoteChange.Upsert>()
-            val deferred = mutableListOf<DeferredEventContent>()
-            rows.forEach { row ->
-                // Identity is validated outside the per-event recovery boundary.
-                if (row.string("CalendarID") != calendar || row.string("ID").isBlank()) unsupportedEvents()
-                val eventId = EventId(row.string("ID"))
-                val revision = row.revision(bootstrap)
-                val eventBudget = EventTextBudget()
-                try {
-                val texts = mutableListOf<String>()
-                for (field in listOf("SharedEvents", "CalendarEvents", "AttendeesEvents")) {
-                    for (element in row.array(field)) {
-                        val part = element as? JsonObject ?: unsupportedEvents()
-                        val type = part.number("Type")
-                        if (type !in 0..3) unsupportedEvents()
-                        val plain = if (type and 1L == 0L) part.string("Data") else {
-                            if (field != "CalendarEvents" && row.optionalString("AddressKeyPacket") != null) {
-                                val address = addresses.firstOrNull { it.addressId.id == row.optionalString("AddressID") } ?: unsupportedEvents()
-                                address.useKeys(crypto) { decryptPart(row.string("AddressKeyPacket"), part.string("Data")) }
-                            } else calendarKeys.decryptPart(row.optionalString(if (field == "CalendarEvents") "CalendarKeyPacket" else "SharedKeyPacket")
-                                ?: unsupportedEvents(), part.string("Data"))
-                        }
-                        eventBudget.consume(plain)
-                        if (type and 2L != 0L && !verify(part, plain, addresses)) throw UnverifiedEventContent()
-                        texts.add(plain)
-                    }
-                }
-                val content = ProtonICalendar.parse(texts, row, bootstrap, expectedUid).copy(colorRgb = row.eventColorRgb())
-                pageBudget.accept(eventBudget)
-                changes.add(RemoteChange.Upsert(eventId, revision, content))
-                } catch (cancelled: CancellationException) { throw cancelled }
-                  catch (_: UnverifiedEventContent) {
-                    deferred.add(DeferredEventContent(eventId, revision, DeferredEventReason.UNVERIFIED_CONTENT))
-                } catch (failure: RemoteImportException) {
-                    if (failure.reason != RemoteImportFailure.UNSUPPORTED) throw failure
-                    deferred.add(DeferredEventContent(eventId, revision, DeferredEventReason.UNSUPPORTED_CONTENT))
-                }
-            }
-            EventDecodeResult(changes, deferred)
+            action(calendarKeys, addresses)
         }
         } catch (cancelled: CancellationException) { throw cancelled }
           catch (failure: RemoteImportException) { throw failure }
           catch (_: Exception) { unsupportedEvents() }
+    }
+
+    private fun decodeRows(calendar: String, bootstrap: JsonObject, rows: List<JsonObject>, expectedUid: String?,
+        calendarKeys: KeyHolderContext, addresses: List<UserAddress>): EventDecodeResult {
+        val pageBudget = EventDecodeBudget()
+        val changes = mutableListOf<RemoteChange.Upsert>()
+        val deferred = mutableListOf<DeferredEventContent>()
+        rows.forEach { row ->
+            // Identity is validated outside the per-event recovery boundary.
+            if (row.string("CalendarID") != calendar || row.string("ID").isBlank()) unsupportedEvents()
+            val eventId = EventId(row.string("ID"))
+            val revision = row.revision(bootstrap)
+            val eventBudget = EventTextBudget()
+            try {
+            val texts = mutableListOf<String>()
+            for (field in listOf("SharedEvents", "CalendarEvents", "AttendeesEvents")) {
+                for (element in row.array(field)) {
+                    val part = element as? JsonObject ?: unsupportedEvents()
+                    val type = part.number("Type")
+                    if (type !in 0..3) unsupportedEvents()
+                    val plain = if (type and 1L == 0L) part.string("Data") else {
+                        if (field != "CalendarEvents" && row.optionalString("AddressKeyPacket") != null) {
+                            val address = addresses.firstOrNull { it.addressId.id == row.optionalString("AddressID") } ?: unsupportedEvents()
+                            address.useKeys(crypto) { decryptPart(row.string("AddressKeyPacket"), part.string("Data")) }
+                        } else calendarKeys.decryptPart(row.optionalString(if (field == "CalendarEvents") "CalendarKeyPacket" else "SharedKeyPacket")
+                            ?: unsupportedEvents(), part.string("Data"))
+                    }
+                    eventBudget.consume(plain)
+                    if (type and 2L != 0L && !verify(part, plain, addresses)) throw UnverifiedEventContent()
+                    texts.add(plain)
+                }
+            }
+            val content = ProtonICalendar.parse(texts, row, bootstrap, expectedUid).copy(colorRgb = row.eventColorRgb())
+            pageBudget.accept(eventBudget)
+            changes.add(RemoteChange.Upsert(eventId, revision, content))
+            } catch (cancelled: CancellationException) { throw cancelled }
+              catch (_: UnverifiedEventContent) {
+                deferred.add(DeferredEventContent(eventId, revision, DeferredEventReason.UNVERIFIED_CONTENT))
+            } catch (failure: RemoteImportException) {
+                if (failure.reason != RemoteImportFailure.UNSUPPORTED) throw failure
+                deferred.add(DeferredEventContent(eventId, revision, DeferredEventReason.UNSUPPORTED_CONTENT))
+            }
+        }
+        return EventDecodeResult(changes, deferred)
     }
     private fun missingLocalKeys(): Nothing = throw RemoteImportException(RemoteImportFailure.LOCAL_KEYS)
     private fun KeyHolderContext.decryptPart(packet: String, data: String): String {

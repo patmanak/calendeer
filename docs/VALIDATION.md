@@ -1395,3 +1395,34 @@ preservation, personal/attendee partitions, rights, concurrency and live service
 updates require separate qualification. Unit tests do not establish those claims.
 All 13 focused cases and the 287 Proton-adapter JVM cases passed. Independent
 source review passed; no device or service mutation was performed for this slice.
+
+## Opening verified shared text for offline title patches
+
+`ProtonSharedTitlePatcherTest` additionally binds both signed iCalendar UIDs to
+the expected observation, including no-op changes. `ProtonSharedTitleBasisTest`
+checks independent deep JSON copies, redacted container/error diagnostics and the
+separation between an unchanged original signed row and changed plaintext.
+Container fixtures alone do not establish signature verification.
+
+`ProtonSharedTitleCryptoDeviceTest` runs two isolated native fixtures with fresh
+synthetic Core keys, binary and canonical text signatures. They open the exact
+clear/encrypted shared originals, patch a Unicode/escaped title and check raw
+untouched spans and all opaque JSON fields. Row and bootstrap backing maps are
+mutated during local key access to verify snapshots occur before suspension.
+Refusals cover account/calendar/event/revision bindings, unsigned UID substitution
+against the signed UIDs, stale titles, ambiguous shared part types, alternative
+address-key packets, altered signatures/plaintext, unresolved authors, foreign
+local key owners, missing keys, tampered passphrase signatures and foreign
+calendar settings. Cancellation must propagate without conversion to a failure.
+
+Run the selected native class with `ProtonEventCryptoDeviceTest` and
+`ProtonEventPreparationCryptoDeviceTest` to cover the shared bootstrap helper's
+existing import and preparation behavior. These fixtures use no account data,
+network, Calendar Provider writes or service mutation. Neither native signatures
+nor JSON preservation qualify opaque partition semantics, active-session/access
+guards, timestamp updates, concurrent writes or live UPDATE compatibility.
+The 291 Proton-adapter JVM cases passed. The two new native cases and six existing
+import/preparation cases passed on an authorized physical device. Application and
+test APK builds, lint (zero errors) and independent source review passed. The
+current application was reopened after the isolated tests; existing test account
+examples were retained. No service update or system-calendar edit was attempted.
