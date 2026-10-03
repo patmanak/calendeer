@@ -178,6 +178,26 @@ clear authors, and a folded DTSTAMP that needs a new signature even at the same
 instant. Build, lint and independent review passed. No service or Provider data
 was modified by these fixtures.
 
+The offline preparer can now seal these fragments in a separate versioned
+protected format using the existing Proton Core Keystore protector. The real
+entry point verifies/prepares with one frozen binding before sealing. UID, old
+and new titles and the explicit edit time stay inside the protected payload;
+external headers contain scope, event, opaque base revision and format. Opening
+requires the exact expected binding and retains the original and both fragments
+separately. Unknown formats, mismatched observations, ambiguous JSON and
+unsupported fragment structures are refused. Local protection authenticates the
+saved structure, not current Proton access or unsigned remote metadata. The codec
+does not re-verify Proton signatures or recalculate the base revision without
+bootstrap settings. No bootstrap or private key copy is included.
+This is a recoverable adapter format, with no database commit, automatic worker
+resumption, process-death qualification, complete event assembly or UPDATE
+dispatch. Ordinary synchronization remains read-only.
+All eighteen protected-format cases and all 330 Proton-adapter JVM cases passed.
+Fourteen selected native synthetic cases passed, including both binary- and
+text-signed preparations reopened through new Keystore/codec instances, ciphertext
+damage refusal, and preserved original-key readback. Build, lint and independent
+review passed. No service or Calendar Provider fixture data was modified.
+
 An internal offline CREATE preparer now reuses Proton's simple-event partition:
 signed clear date metadata and signed encrypted display text. It uses Biweekly
 and Proton Core primitives, with caller-supplied UID/timestamp and selected keys.

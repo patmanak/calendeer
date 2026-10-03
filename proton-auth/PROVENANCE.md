@@ -87,6 +87,24 @@ case, complete event envelope or accepted timestamp policy for all Proton client
 No new dependency or upstream code was copied. There is no production caller,
 persistence, transport, current rights proof or concurrent-write guarantee.
 
+`ProtonTitlePreparationCodec.kt` adds an original, internal protected format for
+recovering the separate timestamped fragments with their exact caller bindings.
+`ProtonEventDecryptor.prepareAndSealTitleAt` connects the actual shared verifier,
+patcher and Core crypto to the existing `EventPayloadProtector`; production
+protection uses `ProtonEventPayloadProtector` and its Keystore availability guard.
+The format has its own kind/version, strict envelope keys, bounded UTF-8 and
+duplicate-key preflight using the existing `UniqueJsonKeys` scanner. No new
+library or upstream code was copied, and no cryptography was invented.
+
+The codec validates structural preservation, not the signatures themselves. Core
+text canonicalization means different raw spans can legitimately share signature
+bytes; changed Data does not require unequal Signature bytes. Unchanged Data must
+retain its complete original part. The opaque original revision is bound to the
+expected observation, without recalculating it or retaining bootstrap/private
+keys. Reopening local protected data supplies no current session/access proof,
+remote acknowledgement or mutation guarantee. There is no SQL persistence,
+automatic resumption, complete event/request assembly or UPDATE transport.
+
 ## Experimental single CREATE submission and inspection
 
 `ProtonCreateSubmissionAdapter.kt` and `ProtonCreateSubmissionCodec.kt` adapt

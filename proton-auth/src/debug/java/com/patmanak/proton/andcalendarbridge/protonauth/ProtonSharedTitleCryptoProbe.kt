@@ -30,9 +30,11 @@ object ProtonSharedTitleCryptoProbe {
     suspend fun runReencryptedText(): String = run(textSignatures = true, reencrypted = true)
     suspend fun runTimestampedBinary(): String = run(textSignatures = false, timestamped = true)
     suspend fun runTimestampedText(): String = run(textSignatures = true, timestamped = true)
+    suspend fun runProtectedBinary(): String = run(textSignatures = false, timestamped = true, protectPreparation = true)
+    suspend fun runProtectedText(): String = run(textSignatures = true, timestamped = true, protectPreparation = true)
 
     private suspend fun run(textSignatures: Boolean, reencrypted: Boolean = false,
-        timestamped: Boolean = false): String = withContext(Dispatchers.IO) {
+        timestamped: Boolean = false, protectPreparation: Boolean = false): String = withContext(Dispatchers.IO) {
         var stage = "GENERATE"
         try {
             val crypto = AndroidCryptoContext()
@@ -148,7 +150,7 @@ object ProtonSharedTitleCryptoProbe {
 
                 if (timestamped) return@withContext runTimestamped(crypto, addressSecret, calendarSecret,
                     addressArmored, calendarArmored, addressKey, address, scope, session, bootstrap, row,
-                    originalTitle, newTitle, clear, prefix, suffix, patched, alteredSignature, decoder)
+                    originalTitle, newTitle, clear, prefix, suffix, patched, alteredSignature, decoder, protectPreparation)
                 if (reencrypted) {
                     val metadata = buildJsonObject { put("ID", calendar); put("Type", 0) }
                     suspend fun prepare(candidate: JsonObject = row, context: JsonObject = bootstrap,
@@ -384,7 +386,7 @@ object ProtonSharedTitleCryptoProbe {
         calendarSecret: ByteArray, addressArmored: String, calendarArmored: String, addressKey: PrivateKey,
         address: UserAddress, scope: CalendarScope, session: CatalogSession, bootstrap: JsonObject, row: JsonObject,
         originalTitle: String, newTitle: String, clear: String, prefix: String, suffix: String, patched: String,
-        alteredSignature: String, decoder: ProtonEventDecryptor): String {
+        alteredSignature: String, decoder: ProtonEventDecryptor, protectPreparation: Boolean): String {
         var stage = "TIMESTAMPED_START"
         try {
             val pgp = crypto.pgpCrypto
@@ -399,14 +401,32 @@ object ProtonSharedTitleCryptoProbe {
             val metadata = buildJsonObject { put("ID", calendar); put("Type", 0) }
             val advanced = Instant.parse("2026-10-03T09:30:00Z")
             val sameSecond = Instant.parse("2026-10-03T09:00:00Z")
+            var savedPreparation: ProtonProtectedTitlePreparation? = null
+            var savedBinding: ProtonTitlePreparationBinding? = null
             suspend fun prepare(candidate: JsonObject = row, context: JsonObject = bootstrap,
                 candidateMetadata: JsonObject = metadata, candidateScope: CalendarScope = scope,
                 expectedId: EventId = eventId, expectedRevision: Revision = candidate.revision(context),
                 expectedUid: String = uid, expectedTitle: String = originalTitle,
                 replacement: String = newTitle, timestamp: Instant = advanced,
-                engine: ProtonEventDecryptor = decoder): ProtonTimestampedSharedTitle =
-                engine.prepareSharedTitleAt(session, candidateScope, expectedId, expectedRevision,
+                engine: ProtonEventDecryptor = decoder): ProtonTimestampedSharedTitle {
+                if (!protectPreparation) return engine.prepareSharedTitleAt(session, candidateScope, expectedId, expectedRevision,
                     expectedUid, expectedTitle, replacement, candidateMetadata, context, candidate, timestamp)
+                val binding = ProtonTitlePreparationBinding(candidateScope, expectedId, expectedRevision,
+                    expectedUid, expectedTitle, replacement, timestamp)
+                val receipt = engine.prepareAndSealTitleAt(session, binding, candidateMetadata, context,
+                    candidate, ProtonEventPayloadProtector(crypto.keyStoreCrypto))
+                check(receipt.scope == candidateScope && receipt.eventId == expectedId && receipt.revision == expectedRevision &&
+                    receipt.format == TITLE_PREPARATION_FORMAT)
+                check(!receipt.protectedPayload.contains(expectedUid) && !receipt.protectedPayload.contains(expectedTitle) &&
+                    !receipt.protectedPayload.contains(replacement))
+                check(receipt.toString() == "ProtonProtectedTitlePreparation(redacted)")
+                check(binding.toString() == "ProtonTitlePreparationBinding(redacted)")
+                savedPreparation = receipt
+                savedBinding = binding
+                // New instances recover the saved protected value; this does not simulate process death.
+                return ProtonTitlePreparationCodec(ProtonEventPayloadProtector(AndroidCryptoContext().keyStoreCrypto))
+                    .open(receipt, binding)
+            }
             val originalParts = row.array("SharedEvents").map { it as JsonObject }
             val originalClear = originalParts.single { it.number("Type") == 2L }
             val originalSecret = originalParts.single { it.number("Type") == 3L }
@@ -415,6 +435,11 @@ object ProtonSharedTitleCryptoProbe {
             val expectedSecret = patched.replace("DTSTAMP:20261003T090000Z", "DTSTAMP:20261003T093000Z")
             stage = "TIMESTAMPED_CLEAR_DATES"
             val prepared = prepare()
+            if (protectPreparation) {
+                stage = "PROTECTED_RECOVERY_BINDINGS"
+                checkProtectedRecovery(checkNotNull(savedPreparation), checkNotNull(savedBinding), prepared)
+                stage = "TIMESTAMPED_CLEAR_DATES"
+            }
             check(prepared.clearSharedPart.string("Data") == expectedClear)
             check(prepared.changed && prepared.originalRow == row)
             check(prepared.originalRow.array("SharedEvents") == row.array("SharedEvents"))
@@ -570,6 +595,38 @@ object ProtonSharedTitleCryptoProbe {
             return "RESULT=SUCCESS"
             } catch (cancelled: CancellationException) { throw cancelled }
           catch (_: Exception) { return "RESULT=FAILURE STAGE=$stage" }
+    }
+
+    private fun checkProtectedRecovery(record: ProtonProtectedTitlePreparation, binding: ProtonTitlePreparationBinding,
+        expected: ProtonTimestampedSharedTitle) {
+        val codec = ProtonTitlePreparationCodec(ProtonEventPayloadProtector(AndroidCryptoContext().keyStoreCrypto))
+        val reopened = codec.open(record, binding)
+        check(reopened.originalRow == expected.originalRow && reopened.clearSharedPart == expected.clearSharedPart &&
+            reopened.encryptedSharedPart == expected.encryptedSharedPart && reopened.changed == expected.changed)
+        fun rejected(reason: ProtonTitlePreparationFailure, action: () -> Unit) {
+            var refused = false
+            try { action() }
+            catch (actual: ProtonTitlePreparationException) { refused = actual.reason == reason && actual.cause == null }
+            check(refused)
+        }
+        val wrongTitle = ProtonTitlePreparationBinding(binding.scope, binding.eventId, binding.revision, binding.uid,
+            binding.expectedTitle, "Different synthetic target", binding.timestamp)
+        rejected(ProtonTitlePreparationFailure.UNSUPPORTED) { codec.open(record, wrongTitle) }
+        rejected(ProtonTitlePreparationFailure.UNSUPPORTED) {
+            codec.open(ProtonProtectedTitlePreparation(record.scope.copy(generation = record.scope.generation + 1),
+                record.eventId, record.revision, record.format, record.protectedPayload), binding)
+        }
+        rejected(ProtonTitlePreparationFailure.UNSUPPORTED) {
+            codec.open(ProtonProtectedTitlePreparation(record.scope, record.eventId, record.revision,
+                AdapterFormat(record.format.id, record.format.version + 1), record.protectedPayload), binding)
+        }
+        val damaged = record.protectedPayload.toCharArray()
+        val index = damaged.size / 2
+        damaged[index] = if (damaged[index] == 'A') 'B' else 'A'
+        rejected(ProtonTitlePreparationFailure.STORAGE) {
+            codec.open(ProtonProtectedTitlePreparation(record.scope, record.eventId, record.revision, record.format,
+                String(damaged)), binding)
+        }
     }
 
     private suspend fun refused(reason: RemoteImportFailure = RemoteImportFailure.UNSUPPORTED, action: suspend () -> Unit) {

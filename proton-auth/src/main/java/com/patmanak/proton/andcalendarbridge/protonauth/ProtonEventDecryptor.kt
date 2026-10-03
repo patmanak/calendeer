@@ -83,6 +83,18 @@ internal class ProtonEventDecryptor(private val crypto: CryptoContext, private v
         prepareSharedTitleFragments(session, scope, expectedEventId, expectedRevision, expectedUid,
             expectedTitle, newTitle, metadata, bootstrap, row, timestamp)
 
+    /** Recoverable protected format only; no database commit, automatic resumption or dispatch.
+     * Original verification and crypto precede sealing. Local sealing is not a remote read receipt
+     * or current session/access proof; no bootstrap or private key material is retained.
+     */
+    suspend fun prepareAndSealTitleAt(session: CatalogSession, binding: ProtonTitlePreparationBinding,
+        metadata: JsonObject, bootstrap: JsonObject, row: JsonObject,
+        protector: EventPayloadProtector): ProtonProtectedTitlePreparation {
+        val prepared = prepareSharedTitleAt(session, binding.scope, binding.eventId, binding.revision,
+            binding.uid, binding.expectedTitle, binding.newTitle, metadata, bootstrap, row, binding.timestamp)
+        return ProtonTitlePreparationCodec(protector).seal(binding, prepared)
+    }
+
     private suspend fun prepareSharedTitleFragments(session: CatalogSession, scope: CalendarScope, expectedEventId: EventId,
         expectedRevision: Revision, expectedUid: String, expectedTitle: String, newTitle: String,
         metadata: JsonObject, bootstrap: JsonObject, row: JsonObject, timestamp: Instant?): ProtonTimestampedSharedTitle {

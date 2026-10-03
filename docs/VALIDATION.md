@@ -1532,3 +1532,53 @@ in-memory keys and events, without service or Calendar Provider writes.
 This verifies the restricted offline fragments, not an uploadable event envelope,
 current access/session proof, timestamp-bearing personal parts, concurrent-write
 protection or Proton UPDATE acceptance. Production UPDATE/DELETE remain disabled.
+
+## Recoverable protected title preparations
+
+`ProtonTitlePreparationCodecTest` covers the independent protected-format contract
+using fabricated parts and a memory protector, without claiming cryptographic
+evidence. Round-trips keep the original row, clear fragment and encrypted fragment
+separate. Every expected scope/event/revision/UID/title/time binding must match,
+and external headers and format must match before opening storage. Strict kind,
+version, keysets and duplicate-key preflight reject ambiguous JSON, including
+escaped duplicate names and duplicates within opaque originals.
+
+Structural checks run before sealing and after reopening. They require exactly
+the two original shared types, matching source identity, empty personal/attendee
+arrays, a nonblank shared key packet, and no alternative address key packet.
+Fragments preserve all fields except Data/Signature. Unchanged Data retains the
+complete original part; changed Data need not have different signature bytes,
+because the codec does not verify Proton crypto and text signatures authenticate
+canonical text. The changed flag must agree with actual part differences.
+The opaque base revision is compared to the expected observation, not recomputed
+from unsigned JSON without bootstrap settings.
+
+Tests also cover character/strict UTF-8 bounds before and after protection,
+malformed Unicode, excessive JSON depth, invalid edit precision/range, filtered
+storage/structure failures, exact cancellation propagation and redacted
+diagnostics. Both inputs and opened fragments retain independent snapshots.
+The round-trip test first failed on the initial unsupported codec. A later
+focused key-profile test reproduced acceptance of a missing SharedKeyPacket
+before the shared profile checks were added.
+
+Two more `ProtonSharedTitleCryptoDeviceTest` cases call the real
+`prepareAndSealTitleAt` entry with binary- or text-signed synthetic originals.
+They recover through new AndroidCryptoContext/protector/codec instances before
+running the full timestamp/signature/original-session-key/native-import checks.
+Expected target, header generation and format mismatches are refused, and a
+modified protected ciphertext yields a filtered storage failure. No bootstrap
+or private key copy is added to the protected format. The native fixtures use
+the existing Core Keystore protector, including its availability guard.
+
+All eighteen codec cases and all 330 Proton-adapter JVM cases passed. Fourteen
+selected native cases passed on an authorized physical device: eight shared-title
+cases and six existing import/preparation regressions. App/test APK builds, lint
+(zero errors) and independent source review passed. The final application was
+installed and reopened after testing. No service or Provider fixture data was
+modified.
+
+These results qualify a recoverable protected adapter format and new-instance
+recovery. They do not establish SQL durability, a killed-process journey,
+automatic worker resumption, current Proton access, refreshed signature
+verification on opening, server acceptance or concurrent-write protection.
+Production UPDATE/DELETE remain disabled.

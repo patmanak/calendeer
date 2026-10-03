@@ -71,8 +71,16 @@ are replaced within a changed fragment, and unknown part metadata remains opaque
 
 The original JSON and both fragments remain separate ephemeral copies. A no-op
 does not establish metadata eligibility for a subsequent edit. There is no
-production caller, active-session/access proof, persistent envelope or service
+production caller, active-session/access proof, database persistence or service
 qualification. Synchronizing personal timestamps and preserving a complete wire
 envelope remain unresolved. Existing title-only fragments retain their earlier
 timestamp behavior. No event JSON or UPDATE request is assembled, and the
 [conditional-write boundary](CONDITIONAL_WRITES.md) remains unchanged.
+
+The later offline `prepareAndSealTitleAt` path protects these separate fragments
+with the existing Keystore protector in a distinct versioned preparation format.
+Reopening requires the exact expected observation, including titles and instant;
+it validates preserved structure but does not re-verify Proton signatures or
+recalculate the opaque source revision. It retains no bootstrap/private key copy.
+Recovering with new codec/protector instances does not establish database storage,
+automatic restart recovery, current access or service compatibility.

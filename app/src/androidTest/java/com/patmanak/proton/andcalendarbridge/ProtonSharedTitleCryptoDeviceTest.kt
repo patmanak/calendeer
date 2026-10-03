@@ -33,4 +33,12 @@ class ProtonSharedTitleCryptoDeviceTest {
     @Test fun textSignedTitlesRenewChangedTimestampSignaturesAndRejectUnsafeContexts() = runBlocking {
         assertEquals("RESULT=SUCCESS", ProtonSharedTitleCryptoProbe.runTimestampedText())
     }
+
+    @Test fun binarySignedTitleFragmentsRecoverThroughNewKeystoreAndCodecInstances() = runBlocking {
+        assertEquals("RESULT=SUCCESS", ProtonSharedTitleCryptoProbe.runProtectedBinary())
+    }
+
+    @Test fun textSignedTitleFragmentsRecoverWithoutChangingTheOriginalSessionKey() = runBlocking {
+        assertEquals("RESULT=SUCCESS", ProtonSharedTitleCryptoProbe.runProtectedText())
+    }
 }
