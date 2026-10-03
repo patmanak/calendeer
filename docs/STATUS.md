@@ -282,7 +282,7 @@ and current intent ownership belong to the application. Fresh reads are
 successive observations, not an atomic server snapshot or concurrency guarantee.
 The local sealed format is unchanged; old records are not upgraded by opening.
 Controlled read/session fixtures and native Core crypto test this integration;
-live service qualification of this new port remains pending. UPDATE/DELETE stay
+the retained-session live preparation journey is qualified below. UPDATE/DELETE stay
 disabled. All thirteen new adapter cases and both new shared-facade cases passed,
 with the complete 363 Proton-adapter and 160 sync JVM suites. Twenty selected
 native crypto cases, app/test APK builds, lint (zero errors) and independent source
@@ -312,8 +312,29 @@ cases passed, including nineteen journal regressions, two native crypto/journal
 round-trips through the coordinator, nine capture regressions and two native
 adapter-context regressions. App JVM tests, app/test APK builds, lint (zero errors)
 and independent source review passed. The final application was installed and
-launched without service or Provider fixture writes. Killed-process orchestration,
-live service qualification and concurrent-write guarantees remain separate work.
+launched without service or Provider fixture writes. Killed-process orchestration
+and concurrent-write guarantees remain separate work.
+
+An opt-in retained-session live journey now passes the real authenticated title
+preparation port through the coordinator and an isolated journal. It uses a
+previously retained synthetic simple event with known-empty details, checks the
+exact authorized account before event reads, and changes only the intended title.
+The protected preparation survives reopening through independent SQL helpers and
+a fresh Keystore codec. Native decoding verifies both the original event and the
+in-memory replacement's renewed signatures and complete expected content; changed
+intent and damaged ciphertext are refused. Historical replay calls no preparer.
+
+A second authenticated service inspection retained the entire original event.
+The production baseline, absence of a captured edit, original non-resendable CREATE
+journal, Android owned-event identity/revision and account selections were unchanged.
+Twenty-seven related native cases and the live case passed, along with app/test APK
+builds, lint (zero errors) and independent review. The final app was installed and
+launched with its session and permissions retained. Preparation makes no service
+write or Provider edit; normal application startup can still schedule ordinary
+read-only imports. The Provider witness measures identity/revision/dirty state,
+not present event content. This establishes one live preparation/recovery profile,
+not killed-process recovery, server concurrency or UPDATE compatibility. General
+editable mode and automatic preparation remain unavailable.
 
 An internal offline CREATE preparer now reuses Proton's simple-event partition:
 signed clear date metadata and signed encrypted display text. It uses Biweekly

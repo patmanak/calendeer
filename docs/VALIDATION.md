@@ -1782,3 +1782,46 @@ service or Calendar Provider fixture writes occur. Live port qualification,
 killed-process/automatic resumption and server concurrency remain unqualified.
 Schema 14 and historical opening are unchanged; production UPDATE/DELETE remain
 disabled, and no UI or worker automatically calls this entry.
+
+## Retained-session live local-title preparation
+
+`CalendarLocalTitlePreparationLiveDeviceTest` is opt-in through
+`calendarLocalTitlePreparation=true`, with an explicitly configured retained
+synthetic fixture token and exact account identity hash. It uses the previous
+known-empty CREATE fixture only after its submission was recorded; inspection is
+read-only and the original attempt remains non-resendable. The exact account is
+checked before event reads. Missing, changed, inaccessible or no longer imported
+fixtures fail rather than creating another event or resetting the session.
+
+The test reads the complete remote fixture and acknowledged production baseline,
+then captures a title-only intent into isolated real SQL. The real authenticated
+preparation port performs fresh context/original reads through the coordinator;
+the isolated scheduler and projection have no write effects. First retention and
+historical replay pass, with only one call to the preparer. Independent helpers
+inspect the journal without reopening the coordinator's closed transaction lease.
+
+Debug-only `ProtonLocalTitlePreparationProbe` opens the complete retained record
+with a fresh Keystore codec and reads calendar bootstrap under the authentication
+mutex. The production native decoder verifies the original signed row against the
+complete base and the renewed shared fragments against the complete intended
+content. Replacement fragments are combined only in memory; no UPDATE request
+is constructed. Session identity is checked after reads and native decoding.
+An altered local intent and corrupted ciphertext are refused. Diagnostics return
+only booleans; no keys, payloads, identities or event text are printed.
+
+The live case passed on the authorized physical device. A second authenticated
+inspection returned the exact original remote event. The production SQL baseline,
+absence of captured edit, original CREATE journal, selected scopes and owned
+Provider identity/revision/dirty witness were unchanged. Twenty-seven native
+regressions also passed: twenty-three owner cases, two journal/crypto cases and
+two adapter-context cases. App/test APK builds, lint (zero errors, twenty existing
+warnings) and independent review passed. The final app was installed and launched;
+the retained service fixture, session and permissions were preserved.
+
+This qualifies one simple known-empty live preparation and protected native
+recovery profile. Normal application startup may schedule ordinary read-only
+workers. The Provider witness does not measure present event contents; service
+observations are successive reads, not a concurrency guarantee. Killed-process
+resumption, other event profiles, general editable mode and live UPDATE/DELETE
+remain unqualified. The isolated SQL fixture is removed after each test, and no
+remote event is edited or deleted.
