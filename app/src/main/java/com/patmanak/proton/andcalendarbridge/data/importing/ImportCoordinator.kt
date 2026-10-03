@@ -26,6 +26,14 @@ data class ImportUiState(val selections: List<ImportStore.Selection> = emptyList
     val hasPermission: Boolean = false, val authenticated: Boolean = false, val busy: Boolean = false)
 enum class CreateAssociationResult { INACTIVE, UNRESOLVED, WAITING_IMPORT, WAITING_PROVIDER, ASSOCIATED }
 enum class LocalEditCaptureResult { INACTIVE, UNQUALIFIED, RETAINED, CONFLICT, UNAVAILABLE }
+sealed interface LocalEditInspection {
+    data class Available(val review: LocalEditReview) : LocalEditInspection {
+        override fun toString() = "LocalEditInspection.Available(REDACTED)"
+    }
+    data object Inactive : LocalEditInspection
+    data object Unqualified : LocalEditInspection
+    data object Unavailable : LocalEditInspection
+}
 enum class LocalTitlePreparationResult { INACTIVE, UNQUALIFIED, RETAINED, HISTORICAL, CONFLICT, UNSUPPORTED, UNAVAILABLE }
 enum class LocalCreatePreparationResult { INACTIVE, UNQUALIFIED, RETAINED, UNSUPPORTED, UNAVAILABLE }
 enum class LocalCreateSubmissionResult { INACTIVE, UNQUALIFIED, RETAINED, UNRESOLVED, UNSUPPORTED, UNAVAILABLE }
@@ -382,6 +390,28 @@ class ImportCoordinator(
             if (captured.state == LocalEditState.CONFLICT) LocalEditCaptureResult.CONFLICT else LocalEditCaptureResult.RETAINED
         } catch (cancelled: CancellationException) { throw cancelled }
           catch (_: Exception) { LocalEditCaptureResult.UNAVAILABLE }
+          finally {
+              store.admitTransaction = { false }
+              projection.admitOperation = { false }
+          }
+    }
+
+    /** Explicit local history inspection. Never reads Provider contents or renews remote rights. */
+    suspend fun inspectLocalEdit(target: CalendarScope, eventId: EventId, id: MutationId): LocalEditInspection = mutex.withLock {
+        val expected = generation
+        val policy = createPolicyRevision.get()
+        val active = { authenticated && generation == expected && createPolicyRevision.get() == policy && hasCalendarPermissions() }
+        try {
+            if (!isCurrent(expected, target.account) || !active()) return@withLock LocalEditInspection.Inactive
+            store.admitTransaction = { it == target && active() }
+            // Historical owners remain inspectable after a calendar is paused or disappears from discovery.
+            if (store.selections(target.account).none { it.scope == target }) return@withLock LocalEditInspection.Unqualified
+            val review = store.inspectLocalEdit(target, eventId, id) ?: return@withLock LocalEditInspection.Unqualified
+            currentCoroutineContext().ensureActive()
+            if (!isCurrent(expected, target.account) || !active()) return@withLock LocalEditInspection.Inactive
+            LocalEditInspection.Available(review)
+        } catch (cancelled: CancellationException) { throw cancelled }
+          catch (_: Exception) { LocalEditInspection.Unavailable }
           finally {
               store.admitTransaction = { false }
               projection.admitOperation = { false }

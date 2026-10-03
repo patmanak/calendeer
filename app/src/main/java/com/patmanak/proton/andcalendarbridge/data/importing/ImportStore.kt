@@ -1060,6 +1060,25 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
         check(admitTransaction(scope)) { "Inactive import lease" }
         edit
     }
+    /** Atomic historical SQL read, including paused/unavailable calendars. No preparation/upload admission. */
+    suspend fun inspectLocalEdit(scope: CalendarScope, eventId: EventId, mutationId: MutationId): LocalEditReview? =
+        stagingMutation(scope) { db ->
+            val update = db.rawQuery("SELECT kind FROM local_edits WHERE scope=? AND event=?",
+                arrayOf(key(scope), eventId.value)).use { it.moveToFirst() && it.getString(0) == "UPDATE" }
+            if (!update) return@stagingMutation null
+            val owner = readPreparationOwner(db, scope, eventId) ?: return@stagingMutation null
+            if (owner.id != mutationId) return@stagingMutation null
+            val imported = stagedQuery(db, "SELECT payload FROM records WHERE scope=? AND event=?",
+                arrayOf(key(scope), eventId.value)).use { if (it.moveToFirst()) decodeChange(it.getString(0)) else null }
+            val format = db.rawQuery("SELECT checkpoint FROM calendars WHERE scope=?", arrayOf(key(scope))).use {
+                if (!it.moveToFirst() || it.isNull(0)) null else decodeCheckpoint(scope, it.getString(0)).format
+            }
+            val retained = readLocalEditPreparation(db, scope, eventId)
+            LocalEditReview(owner, readBaseline(db, scope, eventId), imported, format,
+                hasRawEventRow(db, "deferred_events", scope, eventId),
+                retained?.let { RetainedLocalTitleInfo(it.format, it.timestamp) })
+        }
+
     /** Freeze an exact captured owner and sealed fragments together, without dispatch admission.
      * Existing evidence is immutable even after its current owner becomes conflicted or paused.
      */

@@ -1999,3 +1999,39 @@ changes. Constructor refusal has sanitized diagnostics without the payload or
 underlying cause. If durable admission occurred earlier, its unknown outcome stays
 recorded; refusal is not a reason to reopen or resend it. UPDATE/DELETE remain
 disabled pending a qualified concurrency strategy.
+
+## Read-only inspection of captured UPDATE history
+
+`LocalEditReviewTest` establishes the domain comparison with eight cases. Its
+initial case failed with UNOBSERVED instead of UNCHANGED before the relation was
+implemented. The suite distinguishes absent records from explicit tombstones,
+unknown/incompatible checkpoint formats, deferred evidence, changed opaque
+revisions or content, retained conflict, missing projected bases and non-title
+capture. Foreign event identities are refused and diagnostic strings are redacted.
+
+`LocalEditInspectionDeviceTest` uses real isolated SQLite databases and controlled
+session/permission ports that refuse every service and Provider operation. Its
+seventeen cases cover exact owner reads, preserved preparations and monotone
+conflicts after an import returns to its base, tombstones versus absence, deferred
+data, format uncertainty, paused/unavailable known calendars, scope/mutation
+isolation, initial/final permission and account loss, reconnect and policy changes,
+cancellation, sanitized failures, corrupt owners/preparations/imported/projected
+identities, DELETE refusal and independent helper reopening. Applicable reads
+compare every SQL table before/after and check scheduler counts and closed leases.
+Reconnect/policy fixtures hold the next asynchronous owner's session read until
+cleanup so its separate lease cannot mask the inspected owner's closure.
+
+All 168 sync and ten app JVM cases passed via `:sync:test` and
+`:app:testDebugUnitTest`. Native execution selected `LocalEditInspectionDeviceTest`,
+`LocalEditPreparationStoreDeviceTest` and
+`LocalTitlePreparationCoordinatorDeviceTest`: all fifty-nine physical cases passed
+without failures or skips. App/test APK builds and `:app:lintDebug` passed with
+zero errors and twenty existing warnings. Independent source review passed, and
+the final app was installed and launched after isolated database cleanup.
+
+The SQL snapshot is atomic only inside its private transaction. Selection/session
+checks are separate observations; historical SQL records do not establish current
+Provider or server contents. Retained title metadata never renews crypto/access or
+permits dispatch. No schema migration, UI/worker caller, automatic resolution,
+Provider fixture write or service request is added. UPDATE/DELETE remain disabled;
+live conflict resolution and conditional writes are NOT RUN.

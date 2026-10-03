@@ -419,6 +419,21 @@ CREATE requests are refused; ordinary reads continue. A separate scoped SQLite
 dispatch journal commits `OUTCOME_UNKNOWN` before admitting an attempt and has
 no automatic requeue. A separate explicit captured path is described below;
 there is no background outgoing work or general capture/conflict transaction.
+An explicit internal inspection now reads the captured UPDATE owner, acknowledged
+SQL base, imported record, observation format, deferred marker and retained title
+metadata together without changing any SQL table. Missing or incompatible formats,
+deferred evidence, absence, equality, changes and explicit deletion are distinct;
+the recorded conflict survives an imported return to the original base. The exact
+scope/event/mutation is required, with frozen generation/policy and session/
+permission checks. Known paused/unavailable calendars retain historical inspection.
+No Provider contents or service data are read, no protected preparation payload is
+returned, and no UI/worker or conflict resolution is enabled. This local history
+does not grant upload authority or establish present cross-system state.
+All 168 sync and ten app JVM cases passed. Seventeen new physical SQL inspection
+cases and forty-two title-owner/journal regressions passed, along with app/test
+APK builds, lint (zero errors, twenty existing warnings) and independent source
+review. The final app was installed and launched. UPDATE/DELETE remain disabled.
+
 The shared sync endpoint's one-shot transport permit now qualifies a single
 supported CREATE envelope before constructing its body. UPDATE/DELETE, mixed
 operations, overwrite/import, ambiguous JSON and unknown envelope fields are

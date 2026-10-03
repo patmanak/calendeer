@@ -175,6 +175,18 @@ payload consumption and receipt removal share one private transaction; newer
 remote evidence remains separate. Legacy and complex projections have no such
 proof, and Provider and private storage still do not share a transaction.
 
+Explicit `inspectLocalEdit` reads an exact captured UPDATE owner, acknowledged
+projection base, imported record, checkpoint format, deferred marker and retained
+title metadata in one SQL transaction. It leaves every journal and projection
+table unchanged. The coordinator freezes generation/policy and rechecks session
+and permissions before returning; known paused/unavailable calendars can retain
+historical inspection. This is local history, not an atomic observation across
+SQL, Provider and server. Format uncertainty and deferred evidence take precedence
+over comparison; missing records never imply deletion. Recorded conflict stays
+distinct even if the imported record returns to the captured base. Retained title
+metadata conveys no protected payload, current qualification or upload authority.
+There is no UI/worker caller or automatic resolution.
+
 ## Delivery slices and acceptance
 
 1. Buildable configuration app: eight languages/system mode and three persistent
