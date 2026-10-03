@@ -64,6 +64,17 @@ code was copied. This is local primitive integration, not a qualified Proton
 UPDATE builder; no wire request, timestamp/sequence change or server guarantee
 is supplied. Existing crypto adaptation/library notices still apply.
 
+`ProtonSharedTitlePatcher.patchAt` adds an original local metadata policy using
+the same framing scanner and Java time parsing/formatting. It rewrites only the
+two DTSTAMP spans and clear LAST-MODIFIED after the title patch, keeping CREATED,
+SEQUENCE and unrelated raw spans intact. The policy requires a specific plaintext
+layout; it does not copy an upstream save use case or claim universal Proton
+timestamp semantics. The [source audit](../docs/research/TITLE_EDIT_METADATA.md)
+records pinned Android/Web differences and why SEQUENCE is not a conflict token.
+No new dependency or upstream code was copied. Changed clear and encrypted shared
+text needs qualified replacement signatures; this method remains separate from crypto preparation, with
+no production caller, persistent envelope or transport.
+
 ## Experimental single CREATE submission and inspection
 
 `ProtonCreateSubmissionAdapter.kt` and `ProtonCreateSubmissionCodec.kt` adapt

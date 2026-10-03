@@ -1460,3 +1460,28 @@ an authorized physical device: four shared-title cases and six existing import/
 preparation regressions. Application/test APK builds, lint (zero errors) and
 independent source review passed. Calendeer was reopened after testing. No real
 event or account attribute was modified by the isolated fixtures.
+
+## Offline title metadata policy
+
+`ProtonSharedTitleTimestampTest` exercises the separate plaintext `patchAt`
+experiment with an explicit edit instant. Exact string comparisons permit only
+SUMMARY, both DTSTAMP spans and clear LAST-MODIFIED to change. CREATED and the
+original SEQUENCE stay exact, including case, folding and leading zeroes. Other
+opaque spans and nested alarm metadata remain untouched. Logical no-ops return
+the original strings without applying additional edit eligibility checks; UID,
+title and the explicit instant's representation are still validated.
+
+Refusals cover unsupported precision/range, backwards edit times, invalid dates,
+creation after previous modification stamps, missing/duplicate/parameterized or
+misplaced metadata, negative/nondecimal/overflowing sequence values, recognized
+event-level recurrence/invitation markers, calendar/event METHOD and output byte
+budget overflow. The legacy title-only API retains its earlier behavior.
+These are plaintext policy checks, not event-level rights or service validation.
+The method has no crypto-preparation/production caller. Earlier native crypto
+results do not qualify signatures on the new timestamp-bearing plaintext;
+renewing both signatures and timestamp-bearing personal parts remains untested.
+The legacy EXRULE marker was initially admitted; a targeted recurrence-refusal
+test failed before adding the explicit exclusion in both shared partitions.
+All 15 focused cases and the 309 Proton-adapter JVM cases then passed. Application
+build, lint (zero errors) and independent source review passed. No device or
+service operation was performed; this slice qualifies only the local text policy.

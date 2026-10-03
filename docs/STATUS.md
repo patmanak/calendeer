@@ -140,6 +140,25 @@ a distinct primary signing key is locked: changed titles are refused, and no-op
 fragments stay unchanged. Build, lint and independent review passed. No service
 UPDATE or Calendar Provider edit was attempted by these fixtures.
 
+A separate offline plaintext metadata experiment now accepts an explicit
+whole-second UTC edit time for a restricted Android-shaped shared layout. It
+updates both DTSTAMP spans and clear LAST-MODIFIED, preserves CREATED and the
+raw existing SEQUENCE, and retains all other text spans. Recognized event-level
+recurrence/invitation markers and root calendar METHOD prevent transformation;
+ambiguous, misplaced or backdated metadata is refused. Logical no-ops retain
+both original strings, even when additional metadata would forbid an edit.
+The [metadata source audit](research/TITLE_EDIT_METADATA.md) distinguishes local
+admission choices from differing official client layouts and timestamp rules.
+This function has no production or crypto-preparation caller: both modified
+parts need separately qualified signatures, and personal partition timestamps,
+current access and complete wire preservation remain unresolved. Existing
+title-only crypto fragments retain their original timestamp behavior. No event
+UPDATE is assembled or submitted.
+All 15 focused timestamp-policy cases and all 309 Proton-adapter JVM cases
+passed. Build, lint and independent review passed. A targeted EXRULE refusal
+case failed before the legacy recurrence marker was explicitly excluded.
+No device or service operation was performed for this plaintext-only slice.
+
 An internal offline CREATE preparer now reuses Proton's simple-event partition:
 signed clear date metadata and signed encrypted display text. It uses Biweekly
 and Proton Core primitives, with caller-supplied UID/timestamp and selected keys.
