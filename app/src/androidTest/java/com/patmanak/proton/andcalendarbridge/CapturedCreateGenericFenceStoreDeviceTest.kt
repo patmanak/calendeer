@@ -211,7 +211,7 @@ class CapturedCreateGenericFenceStoreDeviceTest {
         val before = snapshot(store)
         store.close()
         ImportStore(context, name).use { reopened ->
-            assertEquals(12, reopened.writableDatabase.version)
+            assertEquals(13, reopened.writableDatabase.version)
             blocked(reopened); unchanged(reopened, before); assertEquals(1, pending(reopened))
         }
     }
@@ -249,7 +249,7 @@ class CapturedCreateGenericFenceStoreDeviceTest {
 
     @Test fun cleanSourceRefusesRawOrdinaryReceiptEvenWhenMalformed() = fixture { context, name, store ->
         val receipt = prove(store)
-        store.prepareProjection(ProjectionIntent(scope, first.change), format)
+        retainLegacyOrdinaryProjectionFixture(store, scope, format, first.change)
         raw(context, name) { it.execSQL("UPDATE projection_receipts SET payload='unreadable-projection-proof'") }
         val before = snapshot(store)
         reject { store.capturedCleanSource(receipt) }; unchanged(store, before); assertEquals(1, pending(store))

@@ -4,6 +4,7 @@ import android.Manifest
 import android.accounts.Account
 import android.accounts.AccountManager
 import android.content.ContentProviderOperation
+import android.content.ContentProviderResult
 import android.content.ContentUris
 import android.content.ContentValues
 import android.content.Context
@@ -35,6 +36,12 @@ import com.patmanak.proton.andcalendarbridge.sync.CapturedCreateCurrentObservati
 import com.patmanak.proton.andcalendarbridge.sync.CapturedCreateAcknowledgementReceipt
 import com.patmanak.proton.andcalendarbridge.sync.AppliedCapturedCreateAcknowledgement
 import com.patmanak.proton.andcalendarbridge.sync.CapturedCreateCleanWitness
+import com.patmanak.proton.andcalendarbridge.sync.CapturedCreateHandoffFrame
+import com.patmanak.proton.andcalendarbridge.sync.CapturedHandoffCleanWitness
+import com.patmanak.proton.andcalendarbridge.sync.CapturedHandoffCurrent
+import com.patmanak.proton.andcalendarbridge.sync.CapturedHandoffCurrentObservation
+import com.patmanak.proton.andcalendarbridge.sync.CapturedHandoffProjection
+import com.patmanak.proton.andcalendarbridge.sync.AppliedCapturedHandoffProjection
 import com.patmanak.proton.andcalendarbridge.sync.RecurrencePoint
 import com.patmanak.proton.andcalendarbridge.sync.RemoteChange
 import com.patmanak.proton.andcalendarbridge.sync.EventContent
@@ -487,17 +494,53 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
             CapturedCreateCleanWitness(receipt) else null
     }
 
+    override val capturedHandoffProtocol: Int get() = 1
+
+    override suspend fun inspectCapturedHandoffBase(frame: CapturedCreateHandoffFrame): CapturedHandoffCleanWitness? = operation {
+        val ack = frame.receipt.acknowledgement
+        if (captureCapturedCurrent(ack.baseline, expectedAck = ack, clean = true, handoff = frame) is CapturedCreateCurrentObservation.Supported)
+            CapturedHandoffCleanWitness(frame) else null
+    }
+
+    override suspend fun captureCapturedHandoffCurrent(frame: CapturedCreateHandoffFrame): CapturedHandoffCurrentObservation = operation {
+        val ack = frame.receipt.acknowledgement
+        when (val observed = captureCapturedCurrent(ack.baseline, expectedAck = ack, handoff = frame)) {
+            is CapturedCreateCurrentObservation.Supported -> CapturedHandoffCurrentObservation.Supported(
+                CapturedHandoffCurrent(frame, observed.snapshot.content, observed.snapshot.deleted))
+            CapturedCreateCurrentObservation.Unsupported -> CapturedHandoffCurrentObservation.Unsupported
+            CapturedCreateCurrentObservation.Unresolved -> CapturedHandoffCurrentObservation.Unresolved
+        }
+    }
+
+    override suspend fun applyCapturedHandoffProjection(plan: CapturedHandoffProjection): AppliedCapturedHandoffProjection? = operation {
+        val ack = plan.frame.receipt.acknowledgement
+        if (captureCapturedCurrent(ack.baseline, expectedAck = ack, clean = true, handoff = plan.frame,
+                handoffProjection = plan) is CapturedCreateCurrentObservation.Supported)
+            AppliedCapturedHandoffProjection(plan) else null
+    }
+
+    override suspend fun inspectCapturedHandoffProjection(plan: CapturedHandoffProjection): AppliedCapturedHandoffProjection? = operation {
+        if (inspectCapturedHistory(plan.frame.receipt.acknowledgement, plan.receipt))
+            AppliedCapturedHandoffProjection(plan) else null
+    }
+
     private fun capturedAcknowledgementMarker(receipt: CapturedCreateAcknowledgementReceipt) =
         "calendeer-captured-ack-v1:" + receipt.fingerprint()
 
     private fun captureCapturedCurrent(baseline: CapturedCreateBaseline,
         expectedAck: CapturedCreateAcknowledgementReceipt? = null,
         writeAck: CapturedCreateAcknowledgementReceipt? = null,
-        clean: Boolean = false): CapturedCreateCurrentObservation {
+        clean: Boolean = false,
+        handoff: CapturedCreateHandoffFrame? = null,
+        handoffProjection: CapturedHandoffProjection? = null): CapturedCreateCurrentObservation {
         val ackMarker = (expectedAck ?: writeAck)?.let(::capturedAcknowledgementMarker)
         val receipt = baseline.receipt
         val expected = capturedAttachmentValues(receipt) // Strict canonical identity before Provider IO.
         if (expectedAck != null) expected.put(Events.SYNC_DATA7, ackMarker)
+        if (handoff != null) {
+            expected.put(Events.SYNC_DATA2, digest("revision-v1", handoff.base.revision.value))
+            expected.put(Events.SYNC_DATA3, handoff.lastProjection?.let(::receiptMarker))
+        }
         val scope = baseline.scope
         val account = accountFor(scope.account)
         val calendar = try { calendarRow(scope, account) } catch (failure: CalendarProjectionException) {
@@ -545,7 +588,8 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
                 values.getAsString(Events.DESCRIPTION) ?: "", values.getAsString(Events.EVENT_LOCATION) ?: "",
                 details = EventDetails()), deleted == 1, acknowledgement = expectedAck)
         } catch (_: IllegalArgumentException) { return CapturedCreateCurrentObservation.Unsupported }
-        if ((writeAck != null || clean) && !snapshot.unchanged) return CapturedCreateCurrentObservation.Unresolved
+        val unchanged = if (handoff == null) snapshot.unchanged else !snapshot.deleted && snapshot.content == handoff.base.content
+        if ((writeAck != null || clean) && !unchanged) return CapturedCreateCurrentObservation.Unresolved
         val checks = arrayListOf(assertion(syncUri(Calendars.CONTENT_URI, account), calendarSelection(scope, account), calendar),
             ContentProviderOperation.newAssertQuery(uri).withSelection(local.sql, local.args)
                 .withValues(values).withExpectedCount(1).build(),
@@ -562,48 +606,72 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
         if (writeAck != null) checks += ContentProviderOperation.newUpdate(uri)
             .withSelection(local.sql, local.args).withValue(Events.DIRTY, 0)
             .withValue(Events.SYNC_DATA7, ackMarker).withExpectedCount(1).build()
-        // ACK admits from these current assertions, never from a previously returned snapshot.
+        if (handoffProjection != null) checks += ContentProviderOperation.newUpdate(uri)
+            .withSelection(local.sql, local.args).withValues(eventValues(handoffProjection.receipt.change).apply {
+                put(Events.SYNC_DATA2, digest("revision-v1", handoffProjection.receipt.change.revision.value))
+                put(Events.SYNC_DATA3, receiptMarker(handoffProjection.receipt))
+            }).withExpectedCount(1).build()
+        // ACK and incoming handoff writes admit from current assertions, never a prior snapshot.
         // Every identity, content/flag value and child absence is qualified in this one batch.
         requirePermissions()
-        resolver.applyBatch(CalendarContract.AUTHORITY, checks)
+        capturedBatch(checks, if (writeAck != null || handoffProjection != null)
+            intArrayOf(1, 1, 1, 0, 0, 0, 1) else intArrayOf(1, 1, 1, 0, 0, 0))
         requirePermissions()
         return CapturedCreateCurrentObservation.Supported(snapshot)
     }
 
     override suspend fun inspectCapturedAcknowledgement(receipt: CapturedCreateAcknowledgementReceipt): AppliedCapturedCreateAcknowledgement? = operation {
+        if (inspectCapturedHistory(receipt)) AppliedCapturedCreateAcknowledgement(receipt) else null
+    }
+
+    private fun inspectCapturedHistory(receipt: CapturedCreateAcknowledgementReceipt, projectionReceipt: ProjectionReceipt? = null): Boolean {
         val baseline = receipt.baseline
         val expected = capturedAttachmentValues(baseline.receipt)
         expected.put(Events.SYNC_DATA7, capturedAcknowledgementMarker(receipt))
+        if (projectionReceipt != null) {
+            expected.put(Events.SYNC_DATA2, digest("revision-v1", projectionReceipt.change.revision.value))
+            expected.put(Events.SYNC_DATA3, receiptMarker(projectionReceipt))
+        }
         val scope = baseline.scope
         val account = accountFor(scope.account)
         val calendar = try { calendarRow(scope, account) } catch (failure: CalendarProjectionException) {
-            if (failure.category == CalendarProjectionFailure.IDENTITY_CONFLICT) return@operation null
+            if (failure.category == CalendarProjectionFailure.IDENTITY_CONFLICT) return false
             throw failure
-        } ?: return@operation null
+        } ?: return false
         val uri = syncUri(Events.CONTENT_URI, account)
         val local = capturedLocalSelection(baseline.receipt, calendar)
-        val values = attachmentMetadata(uri, local) ?: return@operation null
+        val values = attachmentMetadata(uri, local) ?: return false
         if (expected.keySet().any { values.getAsString(it) != expected.getAsString(it) } ||
             values.getAsString(Events.SYNC_DATA5) != local.args[1] ||
             ATTACHMENT_SYNC_COLUMNS.any { it !in expected.keySet() && it != Events.SYNC_DATA5 && values[it] != null })
-            return@operation null
+            return false
         val remote = capturedRemoteSelection(baseline.receipt, calendar)
         val remoteMatches = resolver.query(uri, arrayOf(Events._ID), remote.sql, remote.args, null)?.use {
             it.count == 1 && it.moveToFirst() && it.getLong(0) == values.getAsLong(Events._ID)
         } ?: fail(CalendarProjectionFailure.PROVIDER_UNAVAILABLE)
-        if (!remoteMatches) return@operation null
+        if (!remoteMatches) return false
         // Historical proof ignores later user data, children and dirty/deleted flags.
         val metadata = ContentValues(values).apply { remove(Events.DIRTY); remove(Events.DELETED) }
         requirePermissions()
-        resolver.applyBatch(CalendarContract.AUTHORITY, arrayListOf(
+        capturedBatch(arrayListOf(
             assertion(syncUri(Calendars.CONTENT_URI, account), calendarSelection(scope, account), calendar),
             ContentProviderOperation.newAssertQuery(uri).withSelection(local.sql, local.args)
                 .withValues(metadata).withExpectedCount(1).build(),
             ContentProviderOperation.newAssertQuery(uri).withSelection(remote.sql, remote.args)
                 .withValue(Events._ID, values.getAsLong(Events._ID)).withExpectedCount(1).build(),
-        ))
+        ), intArrayOf(1, 1, 1))
         requirePermissions()
-        AppliedCapturedCreateAcknowledgement(receipt)
+        return true
+    }
+
+    /** A lost or malformed response cannot establish a write or assertion witness. */
+    private fun capturedBatch(operations: ArrayList<ContentProviderOperation>, expected: IntArray) {
+        val results: Array<ContentProviderResult?>? = resolver.applyBatch(CalendarContract.AUTHORITY, operations)
+        if (results == null || results.size != expected.size) fail(CalendarProjectionFailure.PROVIDER_UNAVAILABLE)
+        results.forEachIndexed { index, result ->
+            if (result == null || result.count != expected[index] || result.uri != null ||
+                result.extras != null || result.exception != null) fail(CalendarProjectionFailure.PROVIDER_UNAVAILABLE)
+        }
     }
 
     private fun inspectCapturedAttachmentInternal(receipt: CapturedCreateAttachmentReceipt): AppliedCapturedCreateAttachment? {

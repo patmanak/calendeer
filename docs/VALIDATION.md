@@ -1261,3 +1261,36 @@ and the installed package has `INTERNET`. Inspect the app-specific system networ
 policy before changing the endpoint, TLS checks or client identity. A successful
 anonymous ping establishes transport reachability, not account login or Calendar
 compatibility.
+
+## Durable captured-creation handoff
+
+`CapturedCreateHandoffTest` exercises independent origin/current references,
+canonical admission identity, full previous-reference checks and unsupported data.
+The Android opt-in fixtures use real SQLite journals and the installed Calendar
+Provider with controlled transport:
+
+- `CapturedHandoffStoreDeviceTest`: migration 12 to 13, immutable role/source,
+  corrupt or orphaned evidence, exact prepared receipts, atomic reference advancement,
+  newer queues, committed replay and specialized local intentions.
+- `CapturedHandoffProviderDeviceTest`: conditional existing-row updates, full origin
+  markers, current-reference assertions, races, children, duplicate identities,
+  historical recovery and dirty/tombstone snapshots.
+- `CapturedHandoffIntegrationDeviceTest`: explicit owner transfer, reopening,
+  responses lost at Provider/SQL boundaries, reloaded incoming data, policy and
+  permission invalidation, specialized capture, generic replay refusal and bounded
+  backlog draining without continuations for held work.
+
+Run the classes with the existing `providerFixture=true` instrumentation opt-in.
+Fixtures create isolated accounts/calendars and remove their runner data. They do
+not submit a live captured creation or qualify Proton conditional UPDATE/DELETE,
+a writable system-calendar UI, automatic capture or simultaneous-process ordering.
+A journal upgraded to v13 requires a compatible app during restoration; do not
+restore an older APK merely to repeat a test. Legacy-proof refusal fixtures inject
+pre-existing SQL evidence directly because ordinary preparation now rejects all
+captured provenance before replay.
+
+Physical SQL, Provider and owner fixtures passed these handoff boundaries and
+related regressions. The previously unwired owner failed the expected transfer
+result before integration. A controlled response loss also reproduced a missing
+batch-response check; the unchanged regression passed after the shared captured
+helpers refused absent or malformed responses before producing witnesses.

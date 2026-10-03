@@ -34,6 +34,7 @@ enum class CapturedCreateBaselineResult { INACTIVE, UNRESOLVED, RETAINED }
 enum class CapturedCreateReconciliationResult { INACTIVE, UNRESOLVED, UNSUPPORTED, UNCHANGED, RETAINED, CONFLICT }
 enum class CapturedCreateAcknowledgementResult { INACTIVE, UNRESOLVED, UNSUPPORTED, ACKNOWLEDGED }
 enum class CapturedCreateCleanResult { INACTIVE, UNRESOLVED, CLEAN }
+enum class CapturedCreateHandoffResult { INACTIVE, UNRESOLVED, WAITING, HANDED_OFF }
 /** One process owner for foreground and durable worker triggers; no event content reaches UI. */
 class ImportCoordinator(
     private val context: Context,
@@ -335,6 +336,7 @@ class ImportCoordinator(
         try {
             val selected = store.selections(target.account).singleOrNull { it.scope == target }
             if (selected?.enabled != true || !selected.available) return@withLock LocalEditCaptureResult.INACTIVE
+            if (capturedRawHold(target).holds(eventId)) throw CapturedProjectionPending()
             val format = store.transaction(target) { checkpoint?.format }
             if (format != remote.format) return@withLock LocalEditCaptureResult.UNQUALIFIED
             if (store.localDelete(target, eventId) != null) return@withLock LocalEditCaptureResult.UNQUALIFIED
@@ -368,6 +370,7 @@ class ImportCoordinator(
         try {
             val selected = store.selections(target.account).singleOrNull { it.scope == target }
             if (selected?.enabled != true || !selected.available) return@withLock LocalEditCaptureResult.INACTIVE
+            if (capturedRawHold(target).holds(eventId)) throw CapturedProjectionPending()
             val format = store.transaction(target) { checkpoint?.format }
             if (format != remote.format) return@withLock LocalEditCaptureResult.UNQUALIFIED
             if (store.localEdit(target, eventId) != null) return@withLock LocalEditCaptureResult.UNQUALIFIED
@@ -1071,9 +1074,193 @@ class ImportCoordinator(
         }
     }
 
+    /** Explicit transfer; never submit again or adopt an original through ordinary projection. */
+    suspend fun handoffLocalCreate(target: CalendarScope, localId: LocalEventId, id: MutationId,
+        attempt: MutationId): CapturedCreateHandoffResult = mutex.withLock {
+        handoffLocalCreateLocked(target, localId, id, attempt)
+    }
+
+    private suspend fun handoffLocalCreateLocked(target: CalendarScope, localId: LocalEventId, id: MutationId,
+        attempt: MutationId): CapturedCreateHandoffResult {
+        val captures = localCreates ?: return CapturedCreateHandoffResult.UNRESOLVED
+        val journal = creates ?: return CapturedCreateHandoffResult.UNRESOLVED
+        ensureCreateLifecycle()
+        val expected = generation
+        val policy = createPolicyRevision.get()
+        val active = { authenticated && generation == expected && createPolicyRevision.get() == policy && hasCalendarPermissions() }
+        suspend fun available(): Boolean = isCurrent(expected, target.account) && active() &&
+            store.selections(target.account).singleOrNull { it.scope == target }?.let { it.enabled && it.available } == true && active()
+        try {
+            if (!available()) return CapturedCreateHandoffResult.INACTIVE
+            store.admitTransaction = { it == target && active() }
+            captures.admitCapture = { it == target && active() }
+            projection.admitOperation = active
+            val submission = captures.readSubmission(target, localId) ?: return CapturedCreateHandoffResult.UNRESOLVED
+            val capture = submission.reservation.intent.reservation
+            if (capture.scope != target || capture.localId != localId || capture.id != id ||
+                submission.reservation.attempt != attempt || capture.format != remote.format)
+                return CapturedCreateHandoffResult.UNRESOLVED
+            val identity = CapturedCreateDispatchIdentity.of(submission)
+            val binding = journal.capturedBinding(identity) ?: return CapturedCreateHandoffResult.UNRESOLVED
+            val attachment = journal.capturedAttachment(binding) ?: return CapturedCreateHandoffResult.UNRESOLVED
+            val original = CapturedCreateBaseline(attachment, RemoteChange.Upsert(binding.eventId,
+                binding.verifiedRevision, submission.reservation.intent.content))
+            var role = store.capturedHandoff(target, binding.eventId)
+            if (role == null) {
+                val ack = store.capturedAcknowledgement(target, binding.eventId) ?: return CapturedCreateHandoffResult.UNRESOLVED
+                if (ack.state != CapturedCreateAcknowledgementState.PROVEN || ack.receipt.baseline != original)
+                    return CapturedCreateHandoffResult.UNRESOLVED
+                val frame = CapturedCreateHandoffFrame(CapturedCreateHandoffReceipt(ack.receipt, java.util.UUID.randomUUID().toString()), original.change)
+                if (!available()) return CapturedCreateHandoffResult.INACTIVE
+                if (!handoffSource(frame, active)) return CapturedCreateHandoffResult.UNRESOLVED
+                role = store.reserveCapturedHandoff(frame.receipt)
+            }
+            if (role.frame.receipt.acknowledgement.baseline != original || !handoffSource(role.frame, active))
+                return CapturedCreateHandoffResult.UNRESOLVED
+            if (!available()) return CapturedCreateHandoffResult.INACTIVE
+            if (role.state == CapturedCreateHandoffState.PENDING) {
+                val clean = projection.inspectAcknowledgedCreateClean(role.frame.receipt.acknowledgement)
+                if (!available()) return CapturedCreateHandoffResult.INACTIVE
+                if (clean?.receipt != role.frame.receipt.acknowledgement || !handoffSource(role.frame, active) ||
+                    store.capturedHandoff(target, binding.eventId) != role) return CapturedCreateHandoffResult.UNRESOLVED
+                role = store.retainCapturedHandoff(role.frame.receipt, clean)
+            } else {
+                if (!recoverHandoffProjection(role.frame, expected, active)) {
+                    store.waitCapturedHandoff(role.frame)
+                    return CapturedCreateHandoffResult.WAITING
+                }
+                role = store.capturedHandoff(target, binding.eventId) ?: return CapturedCreateHandoffResult.UNRESOLVED
+                val clean = projection.inspectCapturedHandoffBase(role.frame)
+                if (!available()) return CapturedCreateHandoffResult.INACTIVE
+                if (clean?.frame != role.frame || !handoffSource(role.frame, active) || !store.resumeCapturedHandoff(clean)) {
+                    store.waitCapturedHandoff(role.frame)
+                    return CapturedCreateHandoffResult.WAITING
+                }
+            }
+            if (!available()) return CapturedCreateHandoffResult.INACTIVE
+            return if (store.capturedHandoff(target, binding.eventId)?.let {
+                it.frame == role.frame && it.state == CapturedCreateHandoffState.RELEASED && !it.waiting
+            } == true && handoffSource(role.frame, active)) CapturedCreateHandoffResult.HANDED_OFF else CapturedCreateHandoffResult.UNRESOLVED
+        } catch (cancelled: CancellationException) {
+            currentCoroutineContext().ensureActive()
+            if (!active()) return CapturedCreateHandoffResult.INACTIVE else throw cancelled
+        } catch (_: Exception) {
+            return if (!active()) CapturedCreateHandoffResult.INACTIVE else CapturedCreateHandoffResult.UNRESOLVED
+        } finally {
+            captures.admitCapture = { false }; store.admitTransaction = { false }; projection.admitOperation = { false }
+        }
+    }
+
+    /** Immutable local/dispatch provenance is checked separately from the mutable import reference. */
+    private suspend fun handoffSource(frame: CapturedCreateHandoffFrame, active: () -> Boolean): Boolean {
+        val captures = localCreates ?: return false
+        val journal = creates ?: return false
+        val original = frame.receipt.acknowledgement.baseline
+        val attachment = original.receipt
+        val identity = attachment.binding.identity
+        if (!active() || remote.format != frame.format || projection.capturedHandoffProtocol != frame.receipt.protocol ||
+            projection.capturedAcknowledgementProtocol != frame.receipt.acknowledgement.protocol ||
+            projection.capturedAttachmentProtocol != attachment.protocol ||
+            store.transaction(frame.scope) { checkpoint?.format } != frame.format) return false
+        val previous = captures.admitCapture
+        captures.admitCapture = { it == frame.scope && active() }
+        try {
+            val submission = captures.readSubmission(frame.scope, identity.localId) ?: return false
+            return CapturedCreateDispatchIdentity.of(submission) == identity &&
+                submission.reservation.intent.content == original.change.content &&
+                journal.capturedBinding(identity) == attachment.binding &&
+                journal.capturedAttachment(attachment.binding) == attachment && active()
+        } finally { captures.admitCapture = previous }
+    }
+
+    /** Recover only historical proof. No Provider write, even after a later edit or unsupported import. */
+    private suspend fun recoverHandoffProjection(frame: CapturedCreateHandoffFrame, expected: Long,
+        active: () -> Boolean): Boolean {
+        if (!handoffSource(frame, active)) return false
+        val prepared = store.capturedHandoffProjection(frame) ?: return true
+        val witness = projection.inspectCapturedHandoffProjection(prepared) ?: return false
+        if (witness.plan != prepared || !isCurrent(expected, frame.scope.account) || !active() || !handoffSource(frame, active)) return false
+        return store.restoreCapturedHandoffProjection(witness)
+    }
+
+    /** Retain a later dirty intention against the current reference, never the original sent base. */
+    suspend fun reconcileHandoffLocalCreate(target: CalendarScope, localId: LocalEventId, id: MutationId,
+        attempt: MutationId, mutation: MutationId): CapturedCreateReconciliationResult = mutex.withLock {
+        val captures = localCreates ?: return@withLock CapturedCreateReconciliationResult.UNRESOLVED
+        val journal = creates ?: return@withLock CapturedCreateReconciliationResult.UNRESOLVED
+        ensureCreateLifecycle()
+        val expected = generation
+        val policy = createPolicyRevision.get()
+        val active = { authenticated && generation == expected && createPolicyRevision.get() == policy && hasCalendarPermissions() }
+        suspend fun available(): Boolean = isCurrent(expected, target.account) && active() &&
+            store.selections(target.account).singleOrNull { it.scope == target }?.let { it.enabled && it.available } == true && active()
+        try {
+            if (!available()) return@withLock CapturedCreateReconciliationResult.INACTIVE
+            store.admitTransaction = { it == target && active() }; captures.admitCapture = { it == target && active() }; projection.admitOperation = active
+            val submission = captures.readSubmission(target, localId) ?: return@withLock CapturedCreateReconciliationResult.UNRESOLVED
+            val capture = submission.reservation.intent.reservation
+            if (capture.id != id || capture.localId != localId || capture.scope != target || submission.reservation.attempt != attempt ||
+                mutation == id || mutation == attempt || mutation.value == localId.value) return@withLock CapturedCreateReconciliationResult.UNRESOLVED
+            val binding = journal.capturedBinding(CapturedCreateDispatchIdentity.of(submission)) ?: return@withLock CapturedCreateReconciliationResult.UNRESOLVED
+            var role = store.capturedHandoff(target, binding.eventId) ?: return@withLock CapturedCreateReconciliationResult.UNRESOLVED
+            if (role.state != CapturedCreateHandoffState.RELEASED || !handoffSource(role.frame, active) ||
+                !recoverHandoffProjection(role.frame, expected, active)) return@withLock CapturedCreateReconciliationResult.UNRESOLVED
+            role = store.capturedHandoff(target, binding.eventId) ?: return@withLock CapturedCreateReconciliationResult.UNRESOLVED
+            val observed = projection.captureCapturedHandoffCurrent(role.frame)
+            if (!available()) return@withLock CapturedCreateReconciliationResult.INACTIVE
+            if (!handoffSource(role.frame, active) || store.capturedHandoff(target, binding.eventId) != role)
+                return@withLock CapturedCreateReconciliationResult.UNRESOLVED
+            val snapshot = (observed as? CapturedHandoffCurrentObservation.Supported)?.snapshot
+            if (snapshot?.frame != role.frame) {
+                store.waitCapturedHandoff(role.frame)
+                return@withLock if (observed == CapturedHandoffCurrentObservation.Unsupported)
+                    CapturedCreateReconciliationResult.UNSUPPORTED else CapturedCreateReconciliationResult.UNRESOLVED
+            }
+            val retained = store.retainCapturedHandoffLocalChange(snapshot, mutation)
+            if (!available()) return@withLock CapturedCreateReconciliationResult.INACTIVE
+            val second = projection.captureCapturedHandoffCurrent(role.frame) as? CapturedHandoffCurrentObservation.Supported
+            if (!available()) return@withLock CapturedCreateReconciliationResult.INACTIVE
+            if (second?.snapshot != snapshot || !handoffSource(role.frame, active) ||
+                store.capturedHandoff(target, binding.eventId)?.frame != role.frame) return@withLock CapturedCreateReconciliationResult.UNRESOLVED
+            when (retained) {
+                null -> CapturedCreateReconciliationResult.UNCHANGED
+                LocalEditState.PAUSED -> CapturedCreateReconciliationResult.RETAINED
+                LocalEditState.CONFLICT -> CapturedCreateReconciliationResult.CONFLICT
+            }
+        } catch (cancelled: CancellationException) {
+            currentCoroutineContext().ensureActive()
+            if (!active()) CapturedCreateReconciliationResult.INACTIVE else throw cancelled
+        } catch (_: Exception) {
+            if (!active()) CapturedCreateReconciliationResult.INACTIVE else CapturedCreateReconciliationResult.UNRESOLVED
+        } finally {
+            captures.admitCapture = { false }; store.admitTransaction = { false }; projection.admitOperation = { false }
+        }
+    }
+
     private class CapturedProjectionPending : IllegalStateException("Captured creation reconciliation pending")
-    private suspend fun capturedProjectionHold(target: CalendarScope) =
-        creates?.capturedProjectionHold(target, remote.format) ?: CapturedProjectionHold()
+    private suspend fun capturedRawHold(target: CalendarScope): CapturedProjectionHold {
+        val dispatch = creates?.capturedProjectionHold(target, remote.format) ?: CapturedProjectionHold()
+        val provenance = try { store.capturedProvenanceEvents(target) }
+        catch (_: IllegalArgumentException) { return dispatch.copy(scopeBlocked = true) }
+        return dispatch.copy(events = dispatch.events + provenance)
+    }
+    private suspend fun capturedProjectionHold(target: CalendarScope): CapturedProjectionHold {
+        val raw = capturedRawHold(target)
+        if (raw.scopeBlocked || raw.events.isEmpty()) return raw
+        val expected = generation
+        val policy = createPolicyRevision.get()
+        val active = { authenticated && generation == expected && createPolicyRevision.get() == policy && hasCalendarPermissions() }
+        val released = mutableSetOf<EventId>()
+        for (event in raw.events) {
+            try {
+                val role = store.capturedHandoff(target, event) ?: continue
+                if (role.state == CapturedCreateHandoffState.RELEASED && !role.waiting &&
+                    handoffSource(role.frame, active) && store.capturedHandoffCanProject(role.frame) && active()) released += event
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { /* Malformed or lost provenance remains held; other events can drain. */ }
+        }
+        return raw.copy(events = raw.events - released)
+    }
 
     // Keep the hold read and status publication out of the larger import coroutine.
     private suspend fun publishImportProgress(target: CalendarScope, status: String, completedAt: Long? = null) {
@@ -1089,6 +1276,7 @@ class ImportCoordinator(
     }
 
     private suspend fun captureBaseline(expected: Long, target: CalendarScope, eventId: EventId): RemoteChange.Upsert? {
+        if (capturedRawHold(target).holds(eventId)) throw CapturedProjectionPending()
         requireProjectionAvailable(target, eventId)
         val receipt = store.projectionReceipt(target, eventId)
         val recovered = receipt?.let { recoverProjection(expected, it) } ?: false
@@ -1111,6 +1299,10 @@ class ImportCoordinator(
 
     /** Kept out of the larger import coroutine; preparation precedes every tracked Provider write. */
     private suspend fun projectPending(intent: ProjectionIntent, expected: Long) {
+        if (capturedRawHold(intent.scope).holds(intent.change.eventId)) {
+            projectCapturedHandoff(intent, expected)
+            return
+        }
         requireProjectionAvailable(intent.scope, intent.change.eventId)
         val outstanding = store.projectionReceipt(intent.scope, intent.change.eventId)
         if (outstanding != null) {
@@ -1134,6 +1326,66 @@ class ImportCoordinator(
                 store.deletedSeriesUid(intent.scope, intent.change.eventId) else null)
             requireProjectionAvailable(intent.scope, intent.change.eventId)
             store.acknowledge(intent)
+        }
+    }
+
+    /** The durable transfer authorizes only conditional specialized updates, never generic ACK. */
+    private suspend fun projectCapturedHandoff(intent: ProjectionIntent, expected: Long) {
+        val target = intent.scope
+        val event = intent.change.eventId
+        val policy = createPolicyRevision.get()
+        val active = { authenticated && generation == expected && createPolicyRevision.get() == policy && hasCalendarPermissions() }
+        val previousStore = store.admitTransaction
+        val previousProjection = projection.admitOperation
+        store.admitTransaction = { it == target && active() }
+        projection.admitOperation = active
+        var frame: CapturedCreateHandoffFrame? = null
+        suspend fun available(): Boolean = isCurrent(expected, target.account) && active() &&
+            store.selections(target.account).singleOrNull { it.scope == target }?.let { it.enabled && it.available } == true && active()
+        suspend fun waitForResolution() {
+            if (active()) frame?.let { store.waitCapturedHandoff(it) }
+        }
+        try {
+            if (!available()) throw CancellationException("Inactive captured projection")
+            var role = store.capturedHandoff(target, event) ?: return
+            frame = role.frame
+            if (role.state != CapturedCreateHandoffState.RELEASED || role.waiting || !handoffSource(role.frame, active) ||
+                !store.capturedHandoffCanProject(role.frame)) return
+            var prepared = store.capturedHandoffProjection(role.frame)
+            if (prepared != null) {
+                val proof = projection.inspectCapturedHandoffProjection(prepared)
+                if (!available()) throw CancellationException("Inactive captured recovery")
+                if (!handoffSource(role.frame, active)) { waitForResolution(); return }
+                if (proof != null) {
+                    check(proof.plan == prepared) { "Captured projection proof differs" }
+                    check(store.restoreCapturedHandoffProjection(proof)) { "Captured projection recovery unresolved" }
+                    role = store.capturedHandoff(target, event) ?: return
+                    frame = role.frame
+                    prepared = null
+                }
+            }
+            // Recovery can advance the reference and leave a different/newer queue entry.
+            val current = store.capturedHandoffPending(role.frame) ?: return
+            if (!store.capturedHandoffCanProject(role.frame) || !supportsCapturedHandoff(current.change)) {
+                waitForResolution(); return
+            }
+            if (prepared != null && prepared.receipt.change != current.change) { waitForResolution(); return }
+            val clean = projection.inspectCapturedHandoffBase(role.frame)
+            if (!available()) throw CancellationException("Inactive captured qualification")
+            if (clean?.frame != role.frame || !handoffSource(role.frame, active)) { waitForResolution(); return }
+            val plan = prepared ?: store.prepareCapturedHandoffProjection(role.frame, current)
+            if (!available()) throw CancellationException("Inactive captured write")
+            if (!handoffSource(role.frame, active)) { waitForResolution(); return }
+            val proof = projection.applyCapturedHandoffProjection(plan)
+            if (!available()) throw CancellationException("Inactive captured acknowledgement")
+            if (proof?.plan != plan || !handoffSource(role.frame, active)) { waitForResolution(); return }
+            check(store.restoreCapturedHandoffProjection(proof)) { "Captured projection acknowledgement unresolved" }
+        } catch (failure: CalendarProjectionException) {
+            if (failure.category in setOf(CalendarProjectionFailure.PROVIDER_REJECTED,
+                    CalendarProjectionFailure.IDENTITY_CONFLICT, CalendarProjectionFailure.CALENDAR_MISSING)) waitForResolution() else throw failure
+        } finally {
+            store.admitTransaction = previousStore
+            projection.admitOperation = previousProjection
         }
     }
 

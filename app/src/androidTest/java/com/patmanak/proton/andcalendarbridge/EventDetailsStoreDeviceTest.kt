@@ -158,6 +158,7 @@ class EventDetailsStoreDeviceTest {
         store.close()
         val context = ApplicationProvider.getApplicationContext<Context>()
         SQLiteDatabase.openDatabase(context.getDatabasePath(name).path, null, SQLiteDatabase.OPEN_READWRITE).use { db ->
+            db.execSQL("DROP TABLE captured_create_handoffs")
             db.execSQL("DROP TABLE captured_create_acknowledgements")
             db.execSQL("DROP TABLE captured_create_bases")
             db.execSQL("DROP TABLE IF EXISTS mapping_profiles")
@@ -168,7 +169,7 @@ class EventDetailsStoreDeviceTest {
             db.version = 6
         }
         ImportStore(context, name).use { reopened ->
-            assertEquals(12, reopened.readableDatabase.version); assertEquals(0, profileCount(reopened))
+            assertEquals(13, reopened.readableDatabase.version); assertEquals(0, profileCount(reopened))
             assertEquals(receipt, reopened.delta { received }); assertEquals(ledger, reopened.delta { coverage })
             assertEquals("legacy-series", reopened.deletedSeriesUid(scope, master.eventId))
             assertEquals(legacy, reopened.readableDatabase.rawQuery("SELECT payload FROM records WHERE event='legacy'", null).use {

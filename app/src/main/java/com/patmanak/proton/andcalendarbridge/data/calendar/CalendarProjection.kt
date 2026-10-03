@@ -18,10 +18,25 @@ import com.patmanak.proton.andcalendarbridge.sync.CapturedCreateCurrentObservati
 import com.patmanak.proton.andcalendarbridge.sync.CapturedCreateAcknowledgementReceipt
 import com.patmanak.proton.andcalendarbridge.sync.AppliedCapturedCreateAcknowledgement
 import com.patmanak.proton.andcalendarbridge.sync.CapturedCreateCleanWitness
+import com.patmanak.proton.andcalendarbridge.sync.CapturedCreateHandoffFrame
+import com.patmanak.proton.andcalendarbridge.sync.CapturedHandoffCleanWitness
+import com.patmanak.proton.andcalendarbridge.sync.CapturedHandoffCurrentObservation
+import com.patmanak.proton.andcalendarbridge.sync.CapturedHandoffProjection
+import com.patmanak.proton.andcalendarbridge.sync.AppliedCapturedHandoffProjection
 import com.patmanak.proton.andcalendarbridge.sync.catalog.CalendarSummary
 
 /** Android-layer boundary. A failed apply leaves its durable intent unacknowledged for replay. */
 interface CalendarProjection {
+    val capturedHandoffProtocol: Int? get() = null
+    /** Assert the current clean reference and full origin in one batch; no future write lease. */
+    suspend fun inspectCapturedHandoffBase(frame: CapturedCreateHandoffFrame): CapturedHandoffCleanWitness? = null
+    /** Exact current dirty snapshot, including a present tombstone; no deletion from absence. */
+    suspend fun captureCapturedHandoffCurrent(frame: CapturedCreateHandoffFrame): CapturedHandoffCurrentObservation =
+        CapturedHandoffCurrentObservation.Unresolved
+    /** Conditional atomic update of the existing unique row. Never insert or erase origin markers. */
+    suspend fun applyCapturedHandoffProjection(plan: CapturedHandoffProjection): AppliedCapturedHandoffProjection? = null
+    /** Historical marker proof only. Ignore and preserve subsequent local content and dirty flags. */
+    suspend fun inspectCapturedHandoffProjection(plan: CapturedHandoffProjection): AppliedCapturedHandoffProjection? = null
     var admitOperation: () -> Boolean
     fun hasPermissions(): Boolean
     fun accountFor(accountId: AccountId): Account

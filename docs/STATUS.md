@@ -323,8 +323,7 @@ All local capture entries respect the unresolved reservation fence. Interrupted
 admission without a marker remains conservatively blocked, requiring future
 explicit resolution. Different incoming data and captured projection holds stay
 intact. Historical acknowledgement is not current clean content, hold release or
-a current remote version. Hold release remains a separate prerequisite for
-bidirectional operation.
+a current remote version.
 An explicit offline qualification now distinguishes a currently clean original
 from its historical ACK. It requires the exact proven source, unchanged supported
 Android content, clean/non-deleted flags, unique identities and absent children
@@ -335,7 +334,24 @@ ACK is proven. Generic Provider writes and captures assert absent captured marke
 including recurrence parents and descendants, preserving concurrent attachments.
 Physical SQL, Provider and coordinator fixtures passed these boundaries and their
 related regressions. Transport is controlled for captured-creation cases; live
-captured submission and durable hold transfer remain separate qualification work.
+captured submission and handoff remain separate qualification work.
+An explicit durable handoff can now admit subsequent incoming updates for a
+qualified captured creation. Import journal v13 retains the original creation and
+ACK evidence separately from the advancing projection reference. Each specialized
+Provider update asserts the entire current reference, ownership, unique identity,
+clean flags and child absence atomically; it never inserts a missing original or
+removes its provenance. Historical marker recovery can advance SQL after a lost
+response while preserving later Android edits and newer incoming data. Subsequent
+local capture uses the current reference. Dirty, missing or unsupported rows wait
+durably without repeatedly scheduling work, allowing unrelated events to drain.
+Ordinary projection and cached local-capture replay cannot adopt captured work,
+including orphaned or corrupt journal entries. This transfer is limited to
+known-empty simple incoming updates; remote deletion, recurrence, color and richer
+details remain held. Automatic handoff, local capture and writable UI are not enabled.
+Physical-device SQL, Provider and owner fixtures passed migration, conditional
+updates, interrupted-response recovery, local preservation and bounded backlog
+draining checks. Provider witnesses also require complete, well-formed batch
+responses; missing responses retain uncertainty rather than reporting success.
 The application still exposes no writable mirror or event editor. General outgoing
 queue/resolution, automatic Provider capture and conditional Proton UPDATE/DELETE
 guarantees remain unqualified. See

@@ -172,7 +172,7 @@ class CapturedCreateBaselineStoreDeviceTest {
         assertTrue(store.retainCapturedBaseline(first, witness()))
         assertEquals(local, store.localEdit(scope, first.change.eventId)); assertEquals(1, rawPending(store))
         raw(context, name) { it.execSQL("DELETE FROM local_edits") }
-        val receipt = store.prepareProjection(ProjectionIntent(scope, first.change), format)
+        val receipt = retainLegacyOrdinaryProjectionFixture(store, scope, format, first.change)
         assertTrue(store.retainCapturedBaseline(first, witness()))
         assertEquals(receipt, store.projectionReceipt(scope, first.change.eventId)); assertEquals(1, rawPending(store))
     }
@@ -358,7 +358,7 @@ class CapturedCreateBaselineStoreDeviceTest {
                 old.version = 10
                 for (table in tables) before[table] = rows(old, table)
             }
-            assertEquals(12, store.writableDatabase.version)
+            assertEquals(13, store.writableDatabase.version)
             for (table in tables) assertEquals("Migration must preserve $table", before[table], rows(store.writableDatabase, table))
             store.writableDatabase.rawQuery("SELECT count(*) FROM captured_create_bases", null).use {
                 assertTrue(it.moveToFirst()); assertEquals(0, it.getInt(0))

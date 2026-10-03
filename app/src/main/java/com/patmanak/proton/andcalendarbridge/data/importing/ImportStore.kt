@@ -26,7 +26,7 @@ import org.json.JSONException
 
 /** App-private, backup-excluded durable import queue. Every page and checkpoint commits together. */
 class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
-    SQLiteOpenHelper(context, name, null, 12), SyncStore {
+    SQLiteOpenHelper(context, name, null, 13), SyncStore {
     private val lock = Mutex()
     /** Check the run lease both before its transaction and before durable commit. */
     @Volatile var admitTransaction: (CalendarScope) -> Boolean = { true }
@@ -46,9 +46,10 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
         createProjectionReceipts(db)
         createCapturedBases(db)
         createCapturedAcknowledgements(db)
+        createCapturedHandoffs(db)
     }
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        check(oldVersion in 1..11 && newVersion == 12) { "Explicit import schema migration required" }
+        check(oldVersion in 1..12 && newVersion == 13) { "Explicit import schema migration required" }
         if (oldVersion < 2) createStaging(db)
         if (oldVersion < 3) createDelta(db)
         if (oldVersion < 4) createReconciliation(db)
@@ -71,7 +72,18 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
         if (oldVersion < 9) createProjectionReceipts(db)
         if (oldVersion in 8..9) db.execSQL("ALTER TABLE local_edits ADD COLUMN kind TEXT NOT NULL DEFAULT 'UPDATE' CHECK(kind IN ('UPDATE','DELETE'))")
         if (oldVersion < 11) createCapturedBases(db)
-        createCapturedAcknowledgements(db)
+        if (oldVersion < 12) createCapturedAcknowledgements(db)
+        createCapturedHandoffs(db)
+    }
+    private fun createCapturedHandoffs(db: SQLiteDatabase) {
+        db.execSQL("""CREATE TABLE captured_create_handoffs (
+            scope TEXT NOT NULL, event TEXT NOT NULL, nonce TEXT NOT NULL UNIQUE,
+            protocol INTEGER NOT NULL CHECK(protocol = 1), ack_nonce TEXT NOT NULL,
+            ack_fingerprint TEXT NOT NULL, fingerprint TEXT NOT NULL,
+            state TEXT NOT NULL CHECK(state IN ('PENDING','RELEASED')),
+            waiting INTEGER NOT NULL DEFAULT 0 CHECK(waiting IN (0,1)), last_projection TEXT,
+            PRIMARY KEY(scope,event)
+        )""".trimIndent())
     }
     private fun createCapturedAcknowledgements(db: SQLiteDatabase) {
         db.execSQL("""CREATE TABLE captured_create_acknowledgements (
@@ -370,6 +382,7 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
 
     /** CAS acknowledgement: a newer pending value cannot be consumed by an old provider write. */
     suspend fun acknowledge(intent: ProjectionIntent): Int = stagingMutation(intent.scope) { db ->
+        requireOrdinaryLocalCapture(db, intent.scope, intent.change.eventId)
         val consumed = db.update("records", ContentValues().apply { put("pending", 0) },
             "scope=? AND event=? AND payload=? AND pending=1 AND NOT EXISTS " +
                 "(SELECT 1 FROM local_edits l WHERE l.scope=records.scope AND l.event=records.event)",
@@ -400,6 +413,7 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
         if (witness.receipt != baseline.receipt) return false
         return stagingMutation(baseline.scope) { db ->
             val event = baseline.change.eventId
+            if (hasRawEventRow(db, "captured_create_handoffs", baseline.scope, event)) return@stagingMutation false
             if (!activeProjectionScope(db, baseline.scope) ||
                 !capturedFormatMatches(db, baseline.scope, baseline.format)) return@stagingMutation false
             if (hasCapturedBase(db, baseline.scope, event)) {
@@ -557,7 +571,8 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
      */
     private fun requireOrdinaryLocalCapture(db: SQLiteDatabase, scope: CalendarScope, event: EventId) {
         check(!hasRawEventRow(db, "captured_create_bases", scope, event) &&
-            !hasRawEventRow(db, "captured_create_acknowledgements", scope, event)) {
+            !hasRawEventRow(db, "captured_create_acknowledgements", scope, event) &&
+            !hasRawEventRow(db, "captured_create_handoffs", scope, event)) {
             "Captured work requires its exact specialized local snapshot"
         }
     }
@@ -634,6 +649,7 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
         }
 
     private fun readCapturedBase(db: SQLiteDatabase, scope: CalendarScope, event: EventId): CapturedCreateBaseline? {
+        if (hasRawEventRow(db, "captured_create_handoffs", scope, event)) return null
         if (!activeProjectionScope(db, scope)) return null
         return db.query("captured_create_bases", arrayOf("account", "calendar", "generation", "attempt", "adapter", "version",
             "payload_fingerprint", "local_id", "capture_id", "capture_adapter", "capture_version", "timestamp",
@@ -665,9 +681,291 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
     } catch (_: IllegalArgumentException) { null }
     catch (_: DateTimeException) { null }
     catch (_: JSONException) { null }
+    /** Raw provenance is a fence even if a journal row is orphaned or unreadable. */
+    suspend fun capturedProvenanceEvents(scope: CalendarScope): Set<EventId> = access { db ->
+        check(admitTransaction(scope)) { "Inactive import lease" }; requireKnown(db, scope)
+        val events = db.rawQuery("SELECT event FROM captured_create_bases WHERE scope=? UNION " +
+            "SELECT event FROM captured_create_acknowledgements WHERE scope=? UNION " +
+            "SELECT event FROM captured_create_handoffs WHERE scope=?", arrayOf(key(scope), key(scope), key(scope))).use {
+            buildSet { while (it.moveToNext()) add(EventId(it.getString(0))) }
+        }
+        check(admitTransaction(scope)) { "Inactive import lease" }; events
+    }
+
+    suspend fun capturedHandoff(scope: CalendarScope, event: EventId): CapturedCreateHandoffRecord? = access { db ->
+        check(admitTransaction(scope)) { "Inactive import lease" }; requireKnown(db, scope)
+        val record = readCapturedHandoff(db, scope, event)
+        check(admitTransaction(scope)) { "Inactive import lease" }; record
+    }
+
+    /** Reservation transfers no data and grants no future permission to overwrite Android. */
+    suspend fun reserveCapturedHandoff(receipt: CapturedCreateHandoffReceipt): CapturedCreateHandoffRecord =
+        stagingMutation(receipt.scope) { db ->
+            val existing = readCapturedHandoff(db, receipt.scope, receipt.eventId)
+            if (existing != null) {
+                check(existing.frame.receipt.acknowledgement == receipt.acknowledgement) { "Handoff source is immutable" }
+                if (existing.state == CapturedCreateHandoffState.PENDING) requireHandoffNoLocalWork(db, receipt.scope, receipt.eventId)
+                return@stagingMutation existing
+            }
+            requireCapturedAcknowledgementSource(db, receipt.acknowledgement.baseline)
+            check(readCapturedAcknowledgement(db, receipt.scope, receipt.eventId) ==
+                CapturedCreateAcknowledgementRecord(receipt.acknowledgement, CapturedCreateAcknowledgementState.PROVEN)) {
+                "Handoff requires exact proven acknowledgement"
+            }
+            db.insertOrThrow("captured_create_handoffs", null, ContentValues().apply {
+                put("scope", key(receipt.scope)); put("event", receipt.eventId.value); put("nonce", receipt.nonce)
+                put("protocol", receipt.protocol); put("ack_nonce", receipt.acknowledgement.nonce)
+                put("ack_fingerprint", receipt.acknowledgement.fingerprint()); put("fingerprint", receipt.fingerprint())
+                put("state", CapturedCreateHandoffState.PENDING.name); put("waiting", 0); putNull("last_projection")
+            })
+            checkNotNull(readCapturedHandoff(db, receipt.scope, receipt.eventId))
+        }
+
+    suspend fun retainCapturedHandoff(receipt: CapturedCreateHandoffReceipt,
+        witness: CapturedCreateCleanWitness): CapturedCreateHandoffRecord = stagingMutation(receipt.scope) { db ->
+        check(witness.receipt == receipt.acknowledgement) { "Handoff clean source differs" }
+        val existing = requireHandoffFrame(db, CapturedCreateHandoffFrame(receipt, receipt.acknowledgement.baseline.change))
+        requireHandoffNoLocalWork(db, receipt.scope, receipt.eventId)
+        if (existing.state == CapturedCreateHandoffState.PENDING) {
+            check(db.update("captured_create_handoffs", ContentValues().apply { put("state", "RELEASED") },
+                "scope=? AND event=? AND nonce=? AND state='PENDING'", arrayOf(key(receipt.scope), receipt.eventId.value, receipt.nonce)) == 1)
+        }
+        checkNotNull(readCapturedHandoff(db, receipt.scope, receipt.eventId))
+    }
+
+    /** Current pending content is read afresh after receipt recovery; stale intents cannot prepare. */
+    suspend fun capturedHandoffPending(frame: CapturedCreateHandoffFrame): ProjectionIntent? = access { db ->
+        check(admitTransaction(frame.scope)) { "Inactive import lease" }; requireKnown(db, frame.scope)
+        requireHandoffFrame(db, frame)
+        val pending = readHandoffPending(db, frame.scope, frame.eventId)
+        check(admitTransaction(frame.scope)) { "Inactive import lease" }; pending
+    }
+
+    suspend fun capturedHandoffCanProject(frame: CapturedCreateHandoffFrame): Boolean = stagingMutation(frame.scope) { db ->
+        val record = requireHandoffFrame(db, frame)
+        val outstanding = readHandoffProjectionReceipt(db, frame.scope, frame.eventId)
+        outstanding?.let { CapturedHandoffProjection(frame, it) }
+        val pending = readHandoffPending(db, frame.scope, frame.eventId)
+        record.state == CapturedCreateHandoffState.RELEASED && !record.waiting &&
+            !hasLocalMutation(db, frame.scope, frame.eventId) && !hasRawEventRow(db, "deferred_events", frame.scope, frame.eventId) &&
+            (pending != null || outstanding == null) && pending?.change?.let(::supportsCapturedHandoff) != false
+    }
+
+    /** Historical prepared proof is recoverable even when the newest pending value differs. */
+    suspend fun capturedHandoffProjection(frame: CapturedCreateHandoffFrame): CapturedHandoffProjection? = access { db ->
+        check(admitTransaction(frame.scope)) { "Inactive import lease" }; requireKnown(db, frame.scope)
+        check(requireHandoffFrame(db, frame).state == CapturedCreateHandoffState.RELEASED) { "Handoff is pending" }
+        val receipt = readHandoffProjectionReceipt(db, frame.scope, frame.eventId)
+        val plan = receipt?.let { CapturedHandoffProjection(frame, it) }
+        check(admitTransaction(frame.scope)) { "Inactive import lease" }; plan
+    }
+
+    suspend fun prepareCapturedHandoffProjection(frame: CapturedCreateHandoffFrame,
+        intent: ProjectionIntent): CapturedHandoffProjection = stagingMutation(frame.scope) { db ->
+        val record = requireHandoffFrame(db, frame)
+        check(record.state == CapturedCreateHandoffState.RELEASED && !record.waiting) { "Handoff cannot project" }
+        check(intent.scope == frame.scope && intent.change.eventId == frame.eventId && supportsCapturedHandoff(intent.change)) {
+            "Unsupported handoff projection"
+        }
+        check(!hasLocalMutation(db, frame.scope, frame.eventId) && !hasRawEventRow(db, "deferred_events", frame.scope, frame.eventId) &&
+            readHandoffPending(db, frame.scope, frame.eventId) == intent) { "Stale or blocked handoff projection" }
+        val existing = readHandoffProjectionReceipt(db, frame.scope, frame.eventId)
+        if (existing != null) {
+            val plan = CapturedHandoffProjection(frame, existing)
+            check(plan.receipt.change == intent.change) { "Unresolved handoff projection" }; return@stagingMutation plan
+        }
+        val receipt = ProjectionReceipt(frame.scope, frame.format, intent.change as RemoteChange.Upsert,
+            UUID.randomUUID().toString(), frame.base)
+        val plan = CapturedHandoffProjection(frame, receipt)
+        db.insertOrThrow("projection_receipts", null, ContentValues().apply {
+            put("scope", key(frame.scope)); put("event", frame.eventId.value); put("nonce", receipt.nonce)
+            put("payload", encodeChange(receipt.change)); put("adapter", frame.format.id); put("version", frame.format.version)
+            put("previous_base", encodeChange(frame.base)); put("protocol", receipt.protocol)
+        })
+        plan
+    }
+
+    /** Restore only the exact historical write. A committed replay never consumes requeued work. */
+    suspend fun restoreCapturedHandoffProjection(witness: AppliedCapturedHandoffProjection): Boolean =
+        stagingMutation(witness.plan.frame.scope) { db ->
+            val plan = witness.plan; val frame = plan.frame; val receipt = plan.receipt
+            val record = readCapturedHandoff(db, frame.scope, frame.eventId) ?: return@stagingMutation false
+            if (record.state != CapturedCreateHandoffState.RELEASED || record.frame.receipt != frame.receipt ||
+                hasLocalMutation(db, frame.scope, frame.eventId)) return@stagingMutation false
+            val outstanding = readHandoffProjectionReceipt(db, frame.scope, frame.eventId)
+            if (record.frame == CapturedCreateHandoffFrame(frame.receipt, receipt.change, receipt)) {
+                return@stagingMutation outstanding == null
+            }
+            if (record.frame != frame || outstanding != receipt) return@stagingMutation false
+            check(db.update("projection_bases", ContentValues().apply { put("payload", encodeChange(receipt.change)) },
+                "scope=? AND event=? AND payload=?", arrayOf(key(frame.scope), frame.eventId.value, encodeChange(frame.base))) == 1)
+            check(db.update("captured_create_handoffs", ContentValues().apply { put("last_projection", encodeHandoffProjection(receipt)) },
+                "scope=? AND event=? AND nonce=?", arrayOf(key(frame.scope), frame.eventId.value, frame.receipt.nonce)) == 1)
+            db.update("records", ContentValues().apply { put("pending", 0) }, "scope=? AND event=? AND payload=? AND pending=1",
+                arrayOf(key(frame.scope), frame.eventId.value, encodeChange(receipt.change)))
+            check(db.delete("projection_receipts", "scope=? AND event=? AND nonce=? AND payload=? AND adapter=? AND version=? AND previous_base IS ? AND protocol=?",
+                arrayOf(key(frame.scope), frame.eventId.value, receipt.nonce, encodeChange(receipt.change), receipt.format.id,
+                    receipt.format.version.toString(), encodeChange(frame.base), receipt.protocol.toString())) == 1)
+            true
+        }
+
+    suspend fun waitCapturedHandoff(frame: CapturedCreateHandoffFrame): Boolean = stagingMutation(frame.scope) { db ->
+        val record = requireHandoffFrame(db, frame)
+        if (record.state != CapturedCreateHandoffState.RELEASED) return@stagingMutation false
+        if (!record.waiting) check(db.update("captured_create_handoffs", ContentValues().apply { put("waiting", 1) },
+            "scope=? AND event=? AND nonce=? AND waiting=0", arrayOf(key(frame.scope), frame.eventId.value, frame.receipt.nonce)) == 1)
+        true
+    }
+
+    suspend fun resumeCapturedHandoff(witness: CapturedHandoffCleanWitness): Boolean = stagingMutation(witness.frame.scope) { db ->
+        val frame = witness.frame; val record = requireHandoffFrame(db, frame)
+        if (record.state != CapturedCreateHandoffState.RELEASED) return@stagingMutation false
+        requireHandoffNoLocalWork(db, frame.scope, frame.eventId)
+        if (record.waiting) check(db.update("captured_create_handoffs", ContentValues().apply { put("waiting", 0) },
+            "scope=? AND event=? AND nonce=? AND waiting=1", arrayOf(key(frame.scope), frame.eventId.value, frame.receipt.nonce)) == 1)
+        true
+    }
+
+    /** Captures only a current full frame. Neither the origin nor any incoming queue is rewritten. */
+    suspend fun retainCapturedHandoffLocalChange(snapshot: CapturedHandoffCurrent, mutation: MutationId): LocalEditState? =
+        stagingMutation(snapshot.frame.scope) { db ->
+            val frame = snapshot.frame; val scope = frame.scope; val event = frame.eventId
+            check(requireHandoffFrame(db, frame).state == CapturedCreateHandoffState.RELEASED) { "Handoff is pending" }
+            check(!hasRawEventRow(db, "projection_receipts", scope, event)) { "Handoff projection proof is unresolved" }
+            val link = frame.receipt.acknowledgement.baseline.receipt.binding.identity
+            require(mutation != link.captureId && mutation != link.attempt.id && mutation.value != link.localId.value) {
+                "Local change requires a separate mutation identity"
+            }
+            if (snapshot.deleted) LocalDeleteIntent(mutation, scope, frame.format, frame.base, snapshot.content)
+            else if (!snapshot.unchanged) LocalEditIntent(mutation, scope, frame.format, frame.base, snapshot.content)
+            val kind = if (snapshot.deleted) "DELETE" else "UPDATE"
+            val base = encodeChange(frame.base); val local = encodeChange(frame.base.copy(content = snapshot.content))
+            val previous = db.rawQuery("SELECT mutation,adapter,version,base,local,state,kind FROM local_edits WHERE scope=? AND event=?",
+                arrayOf(key(scope), event.value)).use { row ->
+                if (!row.moveToFirst()) null else {
+                    check(!snapshot.unchanged && row.getString(0) == mutation.value && row.getString(1) == frame.format.id &&
+                        row.getString(2) == frame.format.version.toString() && row.getString(3) == base && row.getString(4) == local &&
+                        row.getString(6) == kind) { "Handoff local intention is immutable" }
+                    LocalEditState.valueOf(row.getString(5))
+                }
+            }
+            if (previous == null) {
+                check(!db.rawQuery("SELECT 1 FROM local_edits WHERE scope=? AND mutation=?", arrayOf(key(scope), mutation.value)).use { it.moveToFirst() }) {
+                    "Local mutation identity already belongs to other work"
+                }
+                if (snapshot.unchanged) return@stagingMutation null
+            }
+            val exactRemote = db.rawQuery("SELECT payload FROM records WHERE scope=? AND event=?", arrayOf(key(scope), event.value))
+                .use { it.moveToFirst() && it.getString(0) == base }
+            val state = if (previous == LocalEditState.CONFLICT || !exactRemote || hasRawEventRow(db, "deferred_events", scope, event))
+                LocalEditState.CONFLICT else LocalEditState.PAUSED
+            if (previous != null) {
+                if (state != previous) check(db.update("local_edits", ContentValues().apply { put("state", state.name) },
+                    "scope=? AND event=? AND mutation=? AND state=?", arrayOf(key(scope), event.value, mutation.value, previous.name)) == 1)
+            } else db.insertOrThrow("local_edits", null, ContentValues().apply {
+                put("scope", key(scope)); put("event", event.value); put("mutation", mutation.value)
+                put("adapter", frame.format.id); put("version", frame.format.version); put("base", base)
+                put("local", local); put("state", state.name); put("kind", kind)
+            })
+            check(db.update("captured_create_handoffs", ContentValues().apply { put("waiting", 1) },
+                "scope=? AND event=? AND nonce=?", arrayOf(key(scope), event.value, frame.receipt.nonce)) == 1)
+            state
+        }
+
+    private fun requireHandoffNoLocalWork(db: SQLiteDatabase, scope: CalendarScope, event: EventId) {
+        check(!hasLocalMutation(db, scope, event) && !hasRawEventRow(db, "projection_receipts", scope, event)) {
+            "Handoff cannot bypass unresolved local work"
+        }
+    }
+    private fun requireHandoffFrame(db: SQLiteDatabase, frame: CapturedCreateHandoffFrame): CapturedCreateHandoffRecord {
+        val record = checkNotNull(readCapturedHandoff(db, frame.scope, frame.eventId)) { "Handoff source is absent" }
+        check(record.frame == frame) { "Handoff current reference changed" }; return record
+    }
+    private fun readHandoffPending(db: SQLiteDatabase, scope: CalendarScope, event: EventId): ProjectionIntent? =
+        db.rawQuery("SELECT payload FROM records WHERE scope=? AND event=? AND pending=1", arrayOf(key(scope), event.value)).use {
+            if (!it.moveToFirst()) null else {
+                val change = decodeChange(it.getString(0))
+                check(change.eventId == event && encodeChange(change) == it.getString(0)) { "Handoff pending evidence is malformed" }
+                ProjectionIntent(scope, change)
+            }
+        }
+    private fun readHandoffProjectionReceipt(db: SQLiteDatabase, scope: CalendarScope, event: EventId): ProjectionReceipt? {
+        val receipt = readProjectionReceipt(db, scope, event) ?: return null
+        db.rawQuery("SELECT nonce,payload,adapter,version,previous_base,protocol FROM projection_receipts WHERE scope=? AND event=?",
+            arrayOf(key(scope), event.value)).use {
+            check(it.moveToFirst() && it.getString(0) == receipt.nonce && it.getString(1) == encodeChange(receipt.change) &&
+                it.getString(2) == receipt.format.id && it.getString(3) == receipt.format.version.toString() &&
+                !it.isNull(4) && it.getString(4) == receipt.previousBase?.let(::encodeChange) && it.getString(5) == "1") {
+                "Handoff prepared proof is malformed"
+            }
+        }
+        return receipt
+    }
+
+    /** Origin decoding deliberately does not compare projection_bases, which advances after transfer. */
+    private fun readCapturedHistoricalBase(db: SQLiteDatabase, scope: CalendarScope, event: EventId): CapturedCreateBaseline? =
+        db.query("captured_create_bases", arrayOf("account", "calendar", "generation", "attempt", "adapter", "version",
+            "payload_fingerprint", "local_id", "capture_id", "capture_adapter", "capture_version", "timestamp",
+            "content_fingerprint", "fingerprint_version", "verified_revision", "nonce", "protocol", "payload"),
+            "scope=? AND event=?", arrayOf(key(scope), event.value), null, null, null).use {
+            if (!it.moveToFirst()) null else checkNotNull(decodeCapturedBase(it, scope, event)) { "Handoff origin is malformed" }.also { baseline ->
+                val identity = baseline.receipt.binding.identity
+                check(it.getString(2) == scope.generation.toString() && it.getString(5) == identity.attempt.format.version.toString() &&
+                    it.getString(10) == identity.captureFormat.version.toString() && it.getString(11) == identity.timestamp.epochSecond.toString() &&
+                    it.getString(13) == identity.fingerprintVersion.toString() && it.getString(16) == baseline.receipt.protocol.toString()) {
+                    "Handoff origin numeric evidence is malformed"
+                }
+            }
+        }
+
+    private fun readCapturedHandoff(db: SQLiteDatabase, scope: CalendarScope, event: EventId): CapturedCreateHandoffRecord? =
+        db.rawQuery("SELECT nonce,protocol,ack_nonce,ack_fingerprint,fingerprint,state,waiting,last_projection " +
+            "FROM captured_create_handoffs WHERE scope=? AND event=?", arrayOf(key(scope), event.value)).use { row ->
+            if (!row.moveToFirst()) return@use null
+            check(activeProjectionScope(db, scope)) { "Inactive handoff scope" }
+            val origin = checkNotNull(readCapturedHistoricalBase(db, scope, event)) { "Handoff origin is absent" }
+            check(capturedFormatMatches(db, scope, origin.format)) { "Incompatible handoff format" }
+            val acknowledgement = db.rawQuery("SELECT nonce,protocol,fingerprint,state FROM captured_create_acknowledgements WHERE scope=? AND event=?",
+                arrayOf(key(scope), event.value)).use { ack ->
+                check(ack.moveToFirst() && ack.getString(1) == "1" && ack.getString(3) == "PROVEN") { "Handoff acknowledgement is unresolved" }
+                CapturedCreateAcknowledgementReceipt(origin, ack.getString(0), ack.getInt(1)).also {
+                    check(ack.getString(2) == it.fingerprint()) { "Handoff acknowledgement source changed" }
+                }
+            }
+            check(row.getString(1) == "1" && row.getString(2) == acknowledgement.nonce && row.getString(3) == acknowledgement.fingerprint()) {
+                "Handoff source is malformed"
+            }
+            val receipt = CapturedCreateHandoffReceipt(acknowledgement, row.getString(0), row.getInt(1))
+            check(row.getString(4) == receipt.fingerprint() && row.getString(6) in listOf("0", "1")) { "Handoff proof is malformed" }
+            val base = db.rawQuery("SELECT payload FROM projection_bases WHERE scope=? AND event=?", arrayOf(key(scope), event.value)).use {
+                check(it.moveToFirst()) { "Handoff current reference is absent" }
+                val change = decodeChange(it.getString(0)) as? RemoteChange.Upsert
+                check(change != null && change.eventId == event && encodeChange(change) == it.getString(0)) { "Handoff current reference is malformed" }
+                change
+            }
+            val last = if (row.isNull(7)) null else decodeHandoffProjection(scope, row.getString(7))
+            CapturedCreateHandoffRecord(CapturedCreateHandoffFrame(receipt, base, last),
+                CapturedCreateHandoffState.valueOf(row.getString(5)), row.getString(6) == "1")
+        }
+
+    private fun encodeHandoffProjection(receipt: ProjectionReceipt): String = JSONObject().apply {
+        put("adapter", receipt.format.id); put("version", receipt.format.version); put("nonce", receipt.nonce)
+        put("protocol", receipt.protocol); put("change", encodeChange(receipt.change))
+        put("previous", receipt.previousBase?.let(::encodeChange) ?: JSONObject.NULL)
+    }.toString()
+    private fun decodeHandoffProjection(scope: CalendarScope, payload: String): ProjectionReceipt {
+        val json = JSONObject(payload)
+        check(json.length() == 6) { "Handoff projection proof is malformed" }
+        val receipt = ProjectionReceipt(scope, AdapterFormat(json.getString("adapter"), json.getInt("version")),
+            decodeChange(json.getString("change")) as RemoteChange.Upsert, json.getString("nonce"),
+            if (json.isNull("previous")) null else decodeChange(json.getString("previous")) as RemoteChange.Upsert, json.getInt("protocol"))
+        check(encodeHandoffProjection(receipt) == payload) { "Handoff projection proof is not canonical" }; return receipt
+    }
+
     /** Persist before Provider apply. Preparation alone is never evidence that the row was written. */
     suspend fun prepareProjection(intent: ProjectionIntent, format: AdapterFormat): ProjectionReceipt =
         stagingMutation(intent.scope) { db ->
+            requireOrdinaryLocalCapture(db, intent.scope, intent.change.eventId)
             check(activeProjectionScope(db, intent.scope)) { "Inactive projection scope" }
             require(ProjectionReceipt.supports(intent.change)) { "Unsupported projection receipt content" }
             require(projectionFormatMatches(db, intent.scope, format)) { "Incompatible projection format" }
@@ -705,6 +1003,7 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
      */
     suspend fun restoreProjection(witness: AppliedProjectionWitness): Boolean = stagingMutation(witness.receipt.scope) { db ->
         val receipt = witness.receipt
+        requireOrdinaryLocalCapture(db, receipt.scope, receipt.change.eventId)
         if (readProjectionReceipt(db, receipt.scope, receipt.change.eventId) != receipt) return@stagingMutation false
         if (!activeProjectionScope(db, receipt.scope) || !projectionFormatMatches(db, receipt.scope, receipt.format) ||
             hasLocalMutation(db, receipt.scope, receipt.change.eventId)) return@stagingMutation false

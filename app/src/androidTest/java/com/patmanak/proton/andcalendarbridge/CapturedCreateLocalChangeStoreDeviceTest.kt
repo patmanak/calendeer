@@ -202,7 +202,7 @@ class CapturedCreateLocalChangeStoreDeviceTest {
     }
 
     @Test fun rawOutstandingProjectionReceiptAlwaysRefusesEvenWhenItsPayloadIsCorrupt() = fixture { context, name, store ->
-        val receipt = store.prepareProjection(ProjectionIntent(scope, first.change), format)
+        val receipt = retainLegacyOrdinaryProjectionFixture(store, scope, format, first.change)
         val before = rawRows(store, "records")
         reject { store.retainCapturedLocalChange(current(), mutation) }
         reject { store.retainCapturedLocalChange(current(local = content), mutation) }
