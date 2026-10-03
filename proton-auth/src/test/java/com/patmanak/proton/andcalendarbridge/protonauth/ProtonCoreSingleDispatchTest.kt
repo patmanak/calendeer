@@ -23,10 +23,31 @@ import retrofit2.http.*
 /** Real published Core/Retrofit retry path with synthetic sessions and loopback HTTP only. */
 class ProtonCoreSingleDispatchTest {
     internal interface FixtureApi : BaseRetrofitApi {
+        @Streaming @GET("calendar/v1/{calendar}/events/{event}")
+        suspend fun observe(@Path("calendar") calendar: String, @Path("event") event: String): retrofit2.Response<ResponseBody>
         @PUT("calendar/v1/synthetic/events/sync")
         suspend fun create(@Body body: RequestBody, @Tag attempt: ProtonSingleDispatchAttempt): ResponseBody
         @retrofit2.http.Headers("Content-Type: application/json") @PUT("calendar/v1/synthetic/events/sync")
         suspend fun wrapped(@Body body: RequestBody, @Tag attempt: ProtonSingleDispatchAttempt): ResponseBody
+    }
+
+    @Test fun coreExposesSanitizedGetMetadataWithoutConditionalHeaders() = runBlocking {
+        withServer { server ->
+            server.enqueue(MockResponse().setBody("""{"Code":1000,"Event":{"ID":"synthetic-event","CalendarID":"synthetic-calendar","ModifyTime":2}}""")
+                .addHeader("ETag", "synthetic-tag"))
+            val result = manager(server, SyntheticSessions()).invoke(forceNoRetryOnConnectionErrors = true) { api ->
+                readEventVersion(api.observe("synthetic-calendar", "synthetic-event"),
+                    ProtonFeedScope("synthetic-user", 0, "synthetic-calendar"), "synthetic-event")
+            }
+            assertEquals(EventHeaderShape.SINGLE, result.valueOrThrow.etag)
+            assertEquals(EventNumberShape.NON_NEGATIVE_INTEGER, result.valueOrThrow.modifyTime)
+            val request = server.takeRequest()
+            assertEquals("GET", request.method)
+            assertEquals("Bearer synthetic-access", request.getHeader("Authorization"))
+            assertEquals("synthetic-session", request.getHeader("x-pm-uid"))
+            for (name in listOf("If-Match", "If-None-Match", "If-Unmodified-Since", "If-Modified-Since", "Range")) assertNull(request.getHeader(name))
+            assertEquals(1, server.requestCount)
+        }
     }
 
     @Test fun tokenRefreshReentersCoreButMakesOnlyOnePut() = runBlocking {

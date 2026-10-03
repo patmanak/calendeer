@@ -29,6 +29,31 @@ Keep run-specific outputs, device/account identities, questions and reviewer
 handoffs in ignored local files. Update public acceptance and limitations when
 behavior changes, not for each command run.
 
+## Debug-only read-only event version inspection
+
+`ProtonEventVersionProbeTest` covers descriptive header/number categories,
+bounded strict UTF-8 parsing, exact event/calendar envelopes, body closure,
+cancellation and account/session refusal. `ProtonCoreSingleDispatchTest` also
+checks metadata access through the published Core backend with synthetic sessions
+and loopback HTTP. Only a GET reaches the fixture, with no conditional headers.
+These fixtures establish local transport behavior, not server preconditions.
+
+`CalendarEventVersionLiveDeviceTest` is opt-in via
+`calendarEventVersionInspection=true`, `createFixtureToken` and `createAccountHash`.
+It requires the separately authorized retained known-empty CREATE fixture, its
+existing uncertain journal and selected calendar; it cannot submit a new event.
+Authorize the exact test identity before any event reads. Execute the whole
+installation/test/restoration journey under the applicable device lock.
+
+The test obtains authenticated readback before/after the metadata GET, compares
+the decoded event, SQL projected baseline and UPDATE/DELETE intentions, uncertain
+CREATE record, selections/access and Provider ownership/revision/dirty/deleted
+witness. It does not snapshot every table, checkpoint or Provider field. Output
+contains enum categories and boolean witnesses only; keep all fixture/run inputs
+and logs private. Retain the synthetic event and restore the normal app screen.
+On the qualified response ETag/Last-Modified were absent and ModifyTime/CreateTime
+were non-negative integers. Production UPDATE/DELETE remain unavailable.
+
 ## Targeted configuration tests on an authorized device
 
 Build the instrumentation APK with `:app:assembleDebugAndroidTest`. Install the

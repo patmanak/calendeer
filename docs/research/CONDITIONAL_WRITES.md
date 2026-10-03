@@ -1,8 +1,9 @@
 # Conditional Proton Calendar writes
 
-Inspection date: 2026-10-03. Evidence: published client source, not a server
+Inspection date: 2026-10-03. The client-source audit below is not a server
 contract or live conditional-write qualification. No account/device operation,
-upstream build or protocol mutation was performed for this audit.
+upstream build or protocol mutation was performed for that source audit.
+A subsequent debug-only read-only inspection is described separately below.
 
 ## Decision
 
@@ -171,3 +172,45 @@ The submission adapter can already have committed `OUTCOME_UNKNOWN` before
 that journal, produce `NotApplied` or admit another attempt. The existing codec
 qualifies the supported payload before durable admission. This additional transport
 fence does not enable UPDATE/DELETE or resolve their conditional-write dependency.
+
+## Debug read-only metadata inspection
+
+`ProtonEventVersionProbe` exists only in the debug source set. It performs the
+existing authenticated event GET through Proton Core, under the authentication
+runtime lock, after exact account/hash and session checks. A session change
+before dispatch prevents the request; a change after it discards the profile.
+It neither prepares nor submits a mutation and adds no conditional headers.
+
+The response uses the existing 1 MiB strict UTF-8/envelope parser and checks the
+event/calendar identities. Both success and error bodies are closed on refusal,
+parse errors and cancellation. Public results contain only header cardinality
+and emptiness, and numeric-field categories. No raw tag/date, timestamp, event
+content, stable identity or credential is returned or persisted. `SINGLE` does
+not validate HTTP syntax; combined header values are not parsed as separate tags.
+Numeric classification accepts bounded non-negative lexical integers only.
+The existing event parser additionally requires a valid `ModifyTime`, so a live
+response with a missing/null/invalid modification field is refused rather than
+returned as a profile. The pure classifier tests also cover those categories.
+
+An authorized retained synthetic-event inspection observed:
+
+| Item | Observation on that response |
+| --- | --- |
+| ETag | Absent |
+| Last-Modified | Absent |
+| ModifyTime | Non-negative integer |
+| CreateTime | Non-negative integer |
+
+This is one successful GET, not a guarantee about every event, server response
+or endpoint. Before/after checks retained the same decoded remote event,
+projected SQL baseline, local UPDATE/DELETE intentions, uncertain CREATE attempt,
+calendar selection/access and Provider ownership/revision/dirty/deleted witness.
+They do not compare every database table or every Provider field. No event or
+account attribute was deliberately mutated; the synthetic fixture was retained.
+
+These timestamps do not demonstrate an atomic comparison at the mutation
+endpoint. HTTP's conditional-request rules describe server evaluation of a
+precondition, not mere header presence on a prior GET; no supported Proton
+precondition for the batch sync endpoint has been established here.
+[HTTP conditional requests](https://www.rfc-editor.org/rfc/rfc9110.html#section-13.1.1)
+UPDATE/DELETE remain unavailable; live conditional submissions remain NOT RUN.

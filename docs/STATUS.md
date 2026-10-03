@@ -92,6 +92,13 @@ unavailable pending an authoritative precondition contract or a separately accep
 conflict strategy. Android editing-source reuse also needs explicit unknown-field
 preservation qualification before constructing update payloads.
 
+A debug-only authenticated GET probe now inspects header presence and numeric
+version-field shapes without returning their values. On one retained synthetic
+event, ETag and Last-Modified were absent while ModifyTime/CreateTime were integer
+fields. Before/after decoded readback and selected local/Provider witnesses were
+unchanged on the physical test device. This establishes neither universal header
+absence nor a mutation precondition; production interfaces/capabilities are unchanged.
+
 An internal offline shared-title experiment now replaces only the original
 encrypted-shared SUMMARY span while retaining the entire clear-shared text and
 all other text spans exactly. It reuses Biweekly for typed identity checks and
