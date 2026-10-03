@@ -37,7 +37,8 @@ class LocalEditPreparationCryptoDeviceTest {
                     assertEquals(intent, store.captureLocalEdit(intent))
                     assertTrue(store.retainLocalEditPreparation(value))
                 }
-                // A different helper reads committed SQL, then a different Keystore/codec opens it.
+                // A different helper reads committed SQL, then a different Keystore/codec opens
+                // only the retained record, without an externally captured UID or binding.
                 // This is not a killed-process or automatic worker recovery journey.
                 ImportStore(context, name).use { reopened ->
                     val recovered = requireNotNull(reopened.localEditPreparation(scope, intent.base.eventId))

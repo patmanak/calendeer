@@ -10,6 +10,7 @@ import java.util.concurrent.CancellationException
 import kotlinx.serialization.json.*
 
 internal val TITLE_PREPARATION_FORMAT = AdapterFormat("proton-calendar-offline-title-preparation", 1)
+internal val LOCAL_TITLE_PREPARATION_FORMAT = AdapterFormat("proton-calendar-offline-local-title-preparation", 1)
 
 /** Frozen caller observation, not proof of current access or event edit eligibility. */
 internal class ProtonTitlePreparationBinding(
@@ -36,18 +37,48 @@ internal class ProtonTitlePreparationException(val reason: ProtonTitlePreparatio
  * Proton row metadata. Opaque fields and revision are retained without asserting their semantics.
  */
 internal class ProtonTitlePreparationCodec(private val protector: EventPayloadProtector) {
+    /** Seal a complete historical local observation; this is not remote content/access qualification. */
+    fun sealLocal(intent: LocalEditIntent, uid: String, timestamp: Instant,
+        fragments: ProtonTimestampedSharedTitle): LocalEditPreparation {
+        val frozen = structure { LocalEditPreparation.freezeIntent(intent) }
+        val binding = frozen.binding(uid, timestamp)
+        val plain = structure {
+            val owner = frozen.json()
+            JsonObject(envelope(binding, fragments) + mapOf("kind" to JsonPrimitive(LOCAL_KIND), "localIntent" to owner))
+                .encoded()
+        }
+        val protected = storage { protector.seal(plain) }
+        return structure {
+            bounded(protected)
+            LocalEditPreparation(frozen, timestamp, LOCAL_TITLE_PREPARATION_FORMAT, protected)
+        }
+    }
+
+    /** Read only the sealed historical preparation. UID comes from authenticated local storage,
+     * never from a separate caller expectation or unprotected database field. No dispatch admission.
+     */
+    fun openLocal(record: LocalEditPreparation): ProtonTimestampedSharedTitle {
+        val (frozen, owner) = structure {
+            require(record.format == LOCAL_TITLE_PREPARATION_FORMAT)
+            val frozen = record.copy(intent = LocalEditPreparation.freezeIntent(record.intent))
+            frozen to frozen.intent.json()
+        }
+        val plain = storage { protector.open(frozen.protectedPayload) }
+        return structure {
+            val root = parse(plain)
+            require(root.keys == LOCAL_ROOT_KEYS && root.strictString("kind") == LOCAL_KIND && root.strictNumber("version") == 1L)
+            require(root.strictObject("localIntent") == owner)
+            // Compare the expected full intent before using the authenticated UID.
+            val binding = frozen.intent.binding(root.strictObject("binding").strictString("uid"), frozen.timestamp)
+            validateBinding(binding)
+            require(root.strictObject("binding") == binding.json())
+            fragments(root, binding)
+        }
+    }
+
     fun seal(binding: ProtonTitlePreparationBinding, fragments: ProtonTimestampedSharedTitle): ProtonProtectedTitlePreparation {
         val plain = structure {
-            validateBinding(binding)
-            val original = fragments.originalRow
-            val clear = fragments.clearSharedPart
-            val encrypted = fragments.encryptedSharedPart
-            validateFragments(binding, original, clear, encrypted, fragments.changed)
-            buildJsonObject {
-                put("kind", KIND); put("version", 1); put("binding", binding.json())
-                put("originalRow", original); put("clearSharedPart", clear); put("encryptedSharedPart", encrypted)
-                put("changed", fragments.changed)
-            }.toString().also { bounded(it); require(UniqueJsonKeys(it).validate()) }
+            envelope(binding, fragments).encoded()
         }
         val protected = storage { protector.seal(plain) }
         structure { bounded(protected) }
@@ -63,18 +94,76 @@ internal class ProtonTitlePreparationCodec(private val protector: EventPayloadPr
         }
         val plain = storage { protector.open(record.protectedPayload) }
         return structure {
-            bounded(plain)
-            require(UniqueJsonKeys(plain).validate())
-            val root = Json.parseToJsonElement(plain) as? JsonObject ?: refuse()
+            val root = parse(plain)
             require(root.keys == ROOT_KEYS && root.strictString("kind") == KIND && root.strictNumber("version") == 1L)
             require(root.strictObject("binding") == expected.json())
-            val changed = (root["changed"] as? JsonPrimitive)?.takeUnless { it.isString }?.booleanOrNull ?: refuse()
-            val original = root.strictObject("originalRow")
-            val clear = root.strictObject("clearSharedPart")
-            val encrypted = root.strictObject("encryptedSharedPart")
-            validateFragments(expected, original, clear, encrypted, changed)
-            ProtonTimestampedSharedTitle(original, clear, encrypted, changed)
+            fragments(root, expected)
         }
+    }
+
+    private fun LocalEditIntent.binding(uid: String, timestamp: Instant) = ProtonTitlePreparationBinding(
+        scope, base.eventId, base.revision, uid, base.content.title, content.title, timestamp)
+
+    /** Closed typed representation. It pins the caller's complete observation, not remote semantics. */
+    private fun LocalEditIntent.json(): JsonObject = buildJsonObject {
+        put("id", id.value)
+        put("scope", buildJsonObject {
+            put("account", scope.account.value); put("calendar", scope.calendar.value); put("generation", scope.generation)
+        })
+        put("format", buildJsonObject { put("id", format.id); put("version", format.version) })
+        put("state", state.name)
+        put("base", buildJsonObject {
+            put("eventId", base.eventId.value); put("revision", base.revision.value); put("content", base.content.json())
+        })
+        put("content", content.json())
+    }.also { bounded(it.toString()) }
+
+    private fun EventContent.json(): JsonObject {
+        bounded(title, MAX_TITLE_BYTES, allowEmpty = true)
+        bounded(description, allowEmpty = true); bounded(location, allowEmpty = true)
+        return buildJsonObject {
+            put("title", title); put("description", description); put("location", location)
+            put("color", colorRgb?.let(::JsonPrimitive) ?: JsonNull)
+            put("details", if (details == null) JsonNull else buildJsonObject {})
+            put("recurrence", JsonNull) // The frozen title-only profile already refuses recurrence.
+            put("time", buildJsonObject {
+                when (val value = time) {
+                    is EventTime.AllDay -> {
+                        put("type", "ALL_DAY"); put("start", value.start.toString()); put("end", value.endExclusive.toString())
+                    }
+                    is EventTime.Timed -> {
+                        put("type", "TIMED"); put("start", value.start.toString()); put("end", value.end.toString())
+                        put("zone", value.zone.id)
+                    }
+                }
+            })
+        }
+    }
+
+    private fun envelope(binding: ProtonTitlePreparationBinding, fragments: ProtonTimestampedSharedTitle): JsonObject {
+        validateBinding(binding)
+        val original = fragments.originalRow
+        val clear = fragments.clearSharedPart
+        val encrypted = fragments.encryptedSharedPart
+        validateFragments(binding, original, clear, encrypted, fragments.changed)
+        return buildJsonObject {
+            put("kind", KIND); put("version", 1); put("binding", binding.json())
+            put("originalRow", original); put("clearSharedPart", clear); put("encryptedSharedPart", encrypted)
+            put("changed", fragments.changed)
+        }
+    }
+    private fun JsonObject.encoded() = toString().also { bounded(it); require(UniqueJsonKeys(it).validate()) }
+    private fun parse(plain: String): JsonObject {
+        bounded(plain); require(UniqueJsonKeys(plain).validate())
+        return Json.parseToJsonElement(plain) as? JsonObject ?: refuse()
+    }
+    private fun fragments(root: JsonObject, binding: ProtonTitlePreparationBinding): ProtonTimestampedSharedTitle {
+        val changed = (root["changed"] as? JsonPrimitive)?.takeUnless { it.isString }?.booleanOrNull ?: refuse()
+        val original = root.strictObject("originalRow")
+        val clear = root.strictObject("clearSharedPart")
+        val encrypted = root.strictObject("encryptedSharedPart")
+        validateFragments(binding, original, clear, encrypted, changed)
+        return ProtonTimestampedSharedTitle(original, clear, encrypted, changed)
     }
 
     private fun validateBinding(binding: ProtonTitlePreparationBinding) {
@@ -149,10 +238,12 @@ internal class ProtonTitlePreparationCodec(private val protector: EventPayloadPr
 
     private companion object {
         const val KIND = "offline-title-preparation"
+        const val LOCAL_KIND = "offline-local-title-preparation"
         const val MAX_PAYLOAD_BYTES = 4_194_304
         const val MAX_ID_BYTES = 4096
         const val MAX_TITLE_BYTES = 65_536
         val RENEWED_KEYS = setOf("Data", "Signature")
         val ROOT_KEYS = setOf("kind", "version", "binding", "originalRow", "clearSharedPart", "encryptedSharedPart", "changed")
+        val LOCAL_ROOT_KEYS = ROOT_KEYS + "localIntent"
     }
 }

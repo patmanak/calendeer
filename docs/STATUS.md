@@ -214,9 +214,9 @@ and serialized observation is limited to 4 MiB of strict UTF-8, context identifi
 and format names to 4 KiB, and retained preparation data shares the existing
 32 MiB staging budget. Large rows use the staging cursor window. Existing schema
 13 tables are preserved by an additive migration.
-This remains an unwired offline preparation boundary. The expected Proton UID
-is caller-supplied when opening the sealed payload and is not a separate journal
-field. Helper/Keystore reopening does not establish killed-process recovery,
+This remains an unwired offline preparation boundary. The earlier generic format
+requires a caller-supplied UID when opening; no UID database column is added.
+Helper/Keystore reopening does not establish killed-process recovery,
 automatic resumption, fresh account/access qualification or concurrent-write
 protection. Production UPDATE/DELETE remain disabled.
 
@@ -227,6 +227,24 @@ regressions and twelve legacy migration/reopen checks. App/test APK builds,
 lint (zero errors) and independent source review passed. The final application
 was installed and launched after testing. No service or Provider fixture data
 was modified.
+
+A distinct local-title preparation format now seals the entire historical local
+intent together with the title binding and UID. Its opener takes only the retained
+journal record. Before exposing fragments, it matches the sealed mutation,
+scope, event/revision, observation format, paused state and complete base/local
+display observations against that record. Dates retain their type, endpoints,
+zone and precision; null details remain distinct from known-empty details.
+Only then is the UID recovered from the protected binding. The original generic
+format remains intact and is refused by this new opener; no SQL migration or
+conversion of old preparations occurs.
+This authenticates the saved local expectation, without qualifying equality of
+every base display field with the remote plaintext, current access, an automatic
+worker or a killed-process journey. UPDATE/DELETE dispatch remains disabled.
+All eighteen new recovery-contract cases and all 348 Proton-adapter JVM cases
+passed. Twenty-nine selected physical cases passed: nineteen journal cases,
+two record-only native recovery cases and eight shared-title regressions.
+App/test APK builds, lint (zero errors) and independent review passed. The final
+application was installed and launched without service or Provider fixture writes.
 
 An internal offline CREATE preparer now reuses Proton's simple-event partition:
 signed clear date metadata and signed encrypted display text. It uses Biweekly

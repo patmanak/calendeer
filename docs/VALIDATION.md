@@ -1625,8 +1625,49 @@ migration/reopen checks spanning schemas 1–12. The new journal case covers
 warnings) and independent review passed. The final APK was installed and launched.
 
 The journal freezes the historical paused snapshot; current conflict state remains
-in the owner table. It is not dispatch admission. UID expectations are still
-supplied by the fixture caller in the same process, so helper reopening does not
-qualify a killed-process journey or autonomous recovery. The journal does not
+in the owner table. It is not dispatch admission. The original qualification used
+caller-supplied UID expectations. Helper reopening does not qualify a
+killed-process journey or autonomous worker recovery. The journal does not
 revalidate current Proton access or refresh signatures without remote context.
+Production UPDATE/DELETE remain disabled.
+
+## Record-only local-title preparation recovery
+
+`ProtonLocalTitlePreparationCodecTest` checks a separate, versioned local-intent
+format with fabricated fragments and a memory protector. Its round-trip opens
+only a `LocalEditPreparation`, without an external UID or binding. The complete
+typed local observation must match the sealed record: mutation, scope, event and
+revision, observation format, paused state, both display snapshots and explicit
+edit time. Cases cover all display fields, color null versus an override, unknown
+versus empty details, timed/all-day type, endpoints, zone and nanosecond precision.
+Equal titles and remote identities do not permit swapping another mutation's
+sealed preparation.
+
+Future, foreign and generic v1 formats are refused before storage opening.
+Strict root/nested shapes, duplicate names, malformed Unicode, UID/source mismatch,
+fragment preservation, depth/UTF-8 limits, redaction, storage failure and
+cancellation retain the existing closed behavior. Empty detail lists are copied
+before the protector can change the caller's mutable input. The first round-trip
+failed on the initial unsupported entry point before implementation.
+
+The two journal crypto fixtures now call the real local-intent preparer and
+return the recovered SQL record to a new Keystore/codec instance. Its `openLocal`
+call receives no separate UID or title binding. Additional native checks refuse
+changed mutation/title/time/format and damaged ciphertext. The resulting original
+row and separate fragments then pass the existing original-key decryption,
+renewed-signature and native import checks. Generic v1 keeps its separate opener
+and regression fixtures; no journal migration or legacy conversion is performed.
+
+All eighteen new contract cases and all 348 Proton-adapter JVM cases passed.
+Twenty-nine selected physical cases passed: nineteen store cases, two record-only
+crypto/journal cases and eight shared-title regressions. App/test APK builds,
+lint (zero errors, twenty existing warnings) and independent source review passed.
+The final application was installed and launched. These fixtures use no service
+or Calendar Provider writes.
+
+This qualifies opening a retained preparation without a caller UID dependency,
+not a killed-process journey or automatic worker resumption. Sealing authenticates
+the local observation supplied by its caller; it does not compare every display
+field with authenticated remote plaintext. Current rights/context, refreshed
+signature verification and concurrent-write protection remain separate work.
 Production UPDATE/DELETE remain disabled.

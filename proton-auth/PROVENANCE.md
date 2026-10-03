@@ -102,8 +102,19 @@ bytes; changed Data does not require unequal Signature bytes. Unchanged Data mus
 retain its complete original part. The opaque original revision is bound to the
 expected observation, without recalculating it or retaining bootstrap/private
 keys. Reopening local protected data supplies no current session/access proof,
-remote acknowledgement or mutation guarantee. There is no SQL persistence,
-automatic resumption, complete event/request assembly or UPDATE transport.
+remote acknowledgement or mutation guarantee. The codec performs no SQL writes;
+the app's ImportStore separately owns the immutable preparation journal. There is
+no automatic resumption, complete event/request assembly or UPDATE transport.
+
+The same original codec now also supports a distinct local-intent preparation
+format. Its protected envelope includes the complete typed historical local
+intent and title binding, so `openLocal` needs only the retained journal record
+and recovers UID from protected storage after matching the expected intention.
+It reuses the existing strict envelope/fragment checks and Core Keystore
+protector. The generic format remains unchanged and is not converted or
+interpreted by this opener. No library or upstream source was added. This pins
+the supplied local observation, not equality of every base field with remote
+plaintext, current account/access, worker recovery or UPDATE eligibility.
 
 ## Experimental single CREATE submission and inspection
 
