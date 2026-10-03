@@ -1366,3 +1366,32 @@ independent source review. These are controlled engine fixtures, not evidence of
 Proton conditional mutation or Android capture. Current production import adapters
 inherit the empty capability set; the experimental CREATE submission port is a
 separate boundary and does not advertise generic mutation capability.
+
+## Offline shared-title preservation
+
+`ProtonSharedTitlePatcherTest` exercises an internal plaintext-only experiment,
+not an authenticated remote read or an UPDATE payload. Exact string comparisons
+verify that only the top-level encrypted-shared SUMMARY span changes: clear text,
+opaque duplicates, quoted parameters, folding, field order, VALARM titles and
+other components stay untouched. No-op changes return the original strings.
+Biweekly escapes and folds a new Unicode title, including delimiters and text
+that resembles component framing, and reparsing recovers its logical value.
+Generated lines must fit 75 UTF-8 octets. Tests cover CJK, surrogate pairs and
+mixed text at folding boundaries; long whitespace runs that make the dependency
+exceed this bound are refused. Untouched original lines are not refolded.
+
+Rejection cases cover stale expected titles, missing/duplicate/parameterized
+SUMMARY/UID/DTSTAMP, mismatched identities, strict UTC stamps, invalid framing,
+multiple events/calendars, invalid encoding, controls and bounded size/depth/lines.
+A near-limit input is accepted unchanged but refused when its patched output
+exceeds the combined byte budget. Original inputs and closed diagnostics remain
+intact on refusal. The scanner preserves opaque values rather than interpreting
+their semantics; a retained malformed unrelated date deliberately demonstrates
+that preservation is not complete RFC validation or upload qualification.
+
+The experiment has no production caller, signature/key handling, timestamp update,
+storage, transport or advertised UPDATE capability. Full encrypted/JSON envelope
+preservation, personal/attendee partitions, rights, concurrency and live service
+updates require separate qualification. Unit tests do not establish those claims.
+All 13 focused cases and the 287 Proton-adapter JVM cases passed. Independent
+source review passed; no device or service mutation was performed for this slice.

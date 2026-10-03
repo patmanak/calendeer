@@ -92,6 +92,17 @@ unavailable pending an authoritative precondition contract or a separately accep
 conflict strategy. Android editing-source reuse also needs explicit unknown-field
 preservation qualification before constructing update payloads.
 
+An internal offline shared-title experiment now replaces only the original
+encrypted-shared SUMMARY span while retaining the entire clear-shared text and
+all other text spans exactly. It reuses Biweekly for typed identity checks and
+title escaping/folding, preserving opaque properties, their parameters, duplicates
+and nested components without rebuilding them from the display model. Ambiguous
+identity/title/framing and parameterized event titles are refused. No-op changes
+retain both original strings exactly. This validates selected plaintext fields,
+not every opaque property's semantics or a complete Proton envelope. It has no
+production caller, signing, persistence, transport or UPDATE capability; timestamps
+and signatures still require a separately qualified update preparation path.
+
 An internal offline CREATE preparer now reuses Proton's simple-event partition:
 signed clear date metadata and signed encrypted display text. It uses Biweekly
 and Proton Core primitives, with caller-supplied UID/timestamp and selected keys.

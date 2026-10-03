@@ -1,5 +1,34 @@
 # Proton authentication adapter provenance
 
+## Offline shared-title preservation experiment
+
+`ProtonSharedTitlePatcher.kt` is an original, internal plaintext experiment using
+the existing Biweekly 0.6.8 dependency, also used by the inspected Proton Android
+Calendar source. It does not copy the Android split/edit use case. The
+[conditional-write audit](../docs/research/CONDITIONAL_WRITES.md) explains why that
+field-by-field split is insufficient for general preservation.
+
+Biweekly validates UID/DTSTAMP/SUMMARY and serializes only the new SUMMARY block.
+A bounded local framing scanner locates the original span; all other source spans
+stay raw rather than passing through a full-document writer. Quoted parameters,
+duplicates and nested components remain untouched. Event SUMMARY parameters are
+refused rather than silently dropped or retained with a contradictory ALTREP.
+The experiment validates framing and selected fields, not every RFC property.
+Unsupported untouched properties can be preserved without becoming safe to upload.
+
+The pinned transitive Vinnie 2.0.2 writer counts UTF-16 units when folding, not
+UTF-8 octets. The experiment configures its existing writer with a conservative
+Unicode width, then independently checks generated lines against 75 octets.
+Vinnie's whitespace exceptions can exceed that width; those results are refused.
+No original line is refolded. A failing Unicode boundary test established the
+default-width limitation before the configuration and byte check were added.
+
+Input/output remain ephemeral `ProtonEventTextParts` with redacted diagnostics.
+There is no authentication, envelope/signature/key-packet handling, timestamp
+update, persistence, transport, production caller or mutation capability. This is
+not a complete UPDATE serializer or arbitrary JSON round-trip. Existing Biweekly
+license notices apply; no dependency or copied-upstream code was added.
+
 ## Experimental single CREATE submission and inspection
 
 `ProtonCreateSubmissionAdapter.kt` and `ProtonCreateSubmissionCodec.kt` adapt
