@@ -18,9 +18,21 @@ import me.proton.core.key.domain.*
 import me.proton.core.key.domain.entity.key.KeyId
 import me.proton.core.key.domain.entity.key.PrivateKey
 import me.proton.core.user.domain.entity.*
+import okhttp3.HttpUrl.Companion.toHttpUrl
+import okio.Buffer
 
 /** Synthetic keys only. A fabricated server read shape does not establish live CREATE compatibility. */
 object ProtonEventPreparationCryptoProbe {
+    /** Native producer compatibility only: constructing/writing the body makes no HTTP call. */
+    private fun checkCreateOnlyPermit(request: JsonObject) {
+        val payload = request.toString()
+        val attempt = ProtonSingleDispatchAttempt("https://calendeer.invalid/calendar/v1/synthetic/events/sync".toHttpUrl(), payload)
+        check(attempt.requestBody.isOneShot())
+        val buffer = Buffer()
+        try { attempt.requestBody.writeTo(buffer); check(buffer.readUtf8() == payload) }
+        finally { buffer.clear() }
+    }
+
     suspend fun run(): String = withContext(Dispatchers.IO) {
         var stage = "GENERATE"
         try {
@@ -92,6 +104,8 @@ object ProtonEventPreparationCryptoProbe {
                     check(!requestParts[0].string("Data").contains("SUMMARY:"))
                     check(!requestParts[1].string("Data").contains(content.title))
                     check(prepared.event.keys == setOf("Permissions", "IsOrganizer", "SharedKeyPacket", "SharedEventContent"))
+                    stage = "CREATE_ONLY_PERMIT"
+                    checkCreateOnlyPermit(ProtonCreateSubmissionCodec.request("synthetic-member", prepared.event))
                     // Synthetic service normalization: author resolution, response field names and identity.
                     // No request was sent and this is not an observed server response.
                     val row = buildJsonObject {
@@ -265,6 +279,8 @@ object ProtonEventPreparationCryptoProbe {
                         check(decoded.draft == draft && decoded.policy == CreatedEventReadbackPolicy.KNOWN_EMPTY_V2)
                         check(decoded.uid == uid && decoded.context == ProtonCreateSubmissionCodec.context(
                             ProtonCreateContextPolicy.select(scope, metadata, bootstrap, listOf(address))))
+                        stage = "CREATE_ONLY_PERMIT"
+                        checkCreateOnlyPermit(decoded.request)
                         decoded.request.array("Events").single().jsonObject.obj("Event")
                     } else envelope.obj("event")
                     stage = "EXPLICIT_NOTIFICATION_OVERRIDE"

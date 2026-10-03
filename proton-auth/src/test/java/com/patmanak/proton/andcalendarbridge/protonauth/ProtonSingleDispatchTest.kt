@@ -26,7 +26,7 @@ class ProtonSingleDispatchTest {
         server.enqueue(MockResponse().setResponseCode(503).addHeader("Retry-After", "0"))
         server.enqueue(MockResponse().setBody("must not be reached"))
         val client = OkHttpClient.Builder().withSingleDispatchGuards().build()
-        val request = ProtonSingleDispatchAttempt(server.url("/calendar/v1/synthetic/events/sync"), "{}").request()
+        val request = ProtonSingleDispatchAttempt(server.url("/calendar/v1/synthetic/events/sync"), singleCreateFixture).request()
         client.newCall(request).execute().use { assertEquals(503, it.code) }
         assertEquals("One admitted attempt must make at most one request", 1, server.requestCount)
     }
@@ -34,7 +34,7 @@ class ProtonSingleDispatchTest {
     @Test fun repeatInvocationOfTheSameAttemptStopsBeforeTheSecondRequest() = server { server ->
         server.enqueue(MockResponse().setResponseCode(401)); server.enqueue(MockResponse().setBody("must not be reached"))
         val client = guarded()
-        val attempt = ProtonSingleDispatchAttempt(server.url("/calendar/v1/synthetic/events/sync"), "{}")
+        val attempt = ProtonSingleDispatchAttempt(server.url("/calendar/v1/synthetic/events/sync"), singleCreateFixture)
         client.newCall(attempt.request()).execute().use { assertEquals(401, it.code) }
         denied { client.newCall(attempt.request()).execute().close() }
         assertEquals(1, server.requestCount)
@@ -44,7 +44,7 @@ class ProtonSingleDispatchTest {
     @Test fun unmarkedWritesAndReboundAttemptsFailClosedButReadsContinue() = server { server ->
         val client = guarded()
         val url = server.url("/calendar/v1/synthetic/events/sync")
-        val attempt = ProtonSingleDispatchAttempt(url, "{}")
+        val attempt = ProtonSingleDispatchAttempt(url, singleCreateFixture)
         val unmarked = Request.Builder().url(url).put("{}".toRequestBody()).build()
         for (request in listOf(unmarked, attempt.request().newBuilder().url(server.url("/foreign")).build(),
             attempt.request().newBuilder().get().build(), attempt.request().newBuilder().put("{}".toRequestBody()).build())) {
@@ -63,7 +63,7 @@ class ProtonSingleDispatchTest {
             MockResponse().setSocketPolicy(SocketPolicy.NO_RESPONSE))) {
             server.enqueue(response)
             val before = server.requestCount
-            val attempt = ProtonSingleDispatchAttempt(server.url("/calendar/v1/synthetic/events/sync"), "{}")
+            val attempt = ProtonSingleDispatchAttempt(server.url("/calendar/v1/synthetic/events/sync"), singleCreateFixture)
             try { client.newCall(attempt.request()).execute().close() } catch (_: java.io.IOException) { }
             assertEquals(before + 1, server.requestCount)
             denied { client.newCall(attempt.request()).execute().close() }
@@ -77,7 +77,7 @@ class ProtonSingleDispatchTest {
             chain.proceed(chain.request()).close()
             chain.proceed(chain.request())
         }.build()
-        val attempt = ProtonSingleDispatchAttempt(server.url("/calendar/v1/synthetic/events/sync"), "{}")
+        val attempt = ProtonSingleDispatchAttempt(server.url("/calendar/v1/synthetic/events/sync"), singleCreateFixture)
         denied { client.newCall(attempt.request()).execute().close() }
         assertEquals(1, server.requestCount)
     }
@@ -85,7 +85,7 @@ class ProtonSingleDispatchTest {
     @Test fun cancellationAfterReceiptCannotReuseTheAttempt() = server { server ->
         server.enqueue(MockResponse().setSocketPolicy(SocketPolicy.NO_RESPONSE))
         val client = guarded()
-        val attempt = ProtonSingleDispatchAttempt(server.url("/calendar/v1/synthetic/events/sync"), "{}")
+        val attempt = ProtonSingleDispatchAttempt(server.url("/calendar/v1/synthetic/events/sync"), singleCreateFixture)
         val call = client.newCall(attempt.request())
         val pool = java.util.concurrent.Executors.newSingleThreadExecutor()
         try {
@@ -100,7 +100,7 @@ class ProtonSingleDispatchTest {
     @Test fun concurrentCallsShareOnePermit() = server { server ->
         server.enqueue(MockResponse().setBody("synthetic")); server.enqueue(MockResponse().setBody("must not be reached"))
         val client = guarded()
-        val attempt = ProtonSingleDispatchAttempt(server.url("/calendar/v1/synthetic/events/sync"), "{}")
+        val attempt = ProtonSingleDispatchAttempt(server.url("/calendar/v1/synthetic/events/sync"), singleCreateFixture)
         val start = java.util.concurrent.CountDownLatch(1)
         val pool = java.util.concurrent.Executors.newFixedThreadPool(2)
         try {

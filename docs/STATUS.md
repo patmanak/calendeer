@@ -419,6 +419,20 @@ CREATE requests are refused; ordinary reads continue. A separate scoped SQLite
 dispatch journal commits `OUTCOME_UNKNOWN` before admitting an attempt and has
 no automatic requeue. A separate explicit captured path is described below;
 there is no background outgoing work or general capture/conflict transaction.
+The shared sync endpoint's one-shot transport permit now qualifies a single
+supported CREATE envelope before constructing its body. UPDATE/DELETE, mixed
+operations, overwrite/import, ambiguous JSON and unknown envelope fields are
+refused locally. Both current CREATE profiles retain their exact bytes; a local
+4 MiB UTF-8 ceiling includes a length precheck. This is an operation discriminator,
+not rights, crypto or server concurrency evidence. An already claimed SQL attempt
+remains outcome unknown after a transport refusal; the guard never rolls it back
+or makes it resendable. See [conditional-write limits](research/CONDITIONAL_WRITES.md).
+Six new transport cases and all 369 Proton-adapter JVM cases passed. Five physical
+native preparation cases passed, with four exercising permit/body compatibility
+for generated shared-only or reopened explicit-empty requests. App/test APK builds,
+lint (zero errors, twenty existing warnings) and independent source review passed.
+These are synthetic/loopback checks, with no remote mutation or conditional-write
+qualification. The final app was installed and launched.
 Physical SQLite fixtures verify reopening, immutable work, competing helpers,
 rollback and cancellation after admission. Real sealed preparations also survive
 reopening and refuse readmission after the unknown transition. These are controlled

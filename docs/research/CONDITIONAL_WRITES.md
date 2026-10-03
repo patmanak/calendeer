@@ -139,3 +139,35 @@ observed state; it cannot retroactively prevent a concurrent edit being lost.
 
 Live conditional UPDATE/DELETE, backend atomicity, arbitrary opaque round-trips
 and extracted-upstream buildability remain **NOT RUN / UNESTABLISHED**.
+
+## Enforced local transport boundary
+
+The current `ProtonSingleDispatchAttempt` now accepts only the existing single
+CREATE shape on the shared v1 sync endpoint. It validates before constructing
+the one-shot body or entering Core/HTTP. The exact root is `MemberID`, `IsImport`
+and `Events`; the array contains one `Overwrite: 0` / `Event` operation. Member
+identity must be a nonblank string and import/overwrite must be numeric zero.
+The event admits the existing shared-only fields or the same fields with explicit
+empty `Notifications`. Identity/update/delete/move containers, mixed operations,
+overwrite/import and extra fields cannot acquire this permit. Duplicate JSON names,
+including escaped equivalents, are refused at every level.
+
+The supported fields retain their established types: numeric `Permissions` and
+`IsOrganizer` equal to one, a nonblank string key packet and array shared content.
+The discriminator does not validate fragment signatures or acquire scope/rights;
+those remain responsibilities of preparation, protected codec and submission
+admission. Original payload bytes are preserved. A length precheck and 4 MiB
+UTF-8 transport ceiling accommodate the existing bounded plaintext's encryption,
+base64 and JSON overhead; this is a local limit, not a service guarantee.
+
+A loopback test reads an original event, advances the simulated remote state,
+then tries an UPDATE through this CREATE permit. Before the guard, the PUT reached
+the fixture and overwrote its newer value; afterward, only the GET reaches it.
+This proves a local rejection, not Proton stale-base rejection. Supported CREATE
+and Core's single-dispatch/re-entry behavior retain separate regression checks.
+
+The submission adapter can already have committed `OUTCOME_UNKNOWN` before
+`remote.send` constructs its transport permit. A local refusal does not roll back
+that journal, produce `NotApplied` or admit another attempt. The existing codec
+qualifies the supported payload before durable admission. This additional transport
+fence does not enable UPDATE/DELETE or resolve their conditional-write dependency.

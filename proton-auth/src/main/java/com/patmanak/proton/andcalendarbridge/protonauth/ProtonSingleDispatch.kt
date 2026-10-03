@@ -3,13 +3,16 @@ package com.patmanak.proton.andcalendarbridge.protonauth
 
 import java.io.IOException
 import java.util.concurrent.atomic.AtomicBoolean
+import kotlinx.serialization.json.*
 import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaType
 import okio.BufferedSink
 
-/** A process-local permit for one already durably admitted attempt, not a retry/idempotency key. */
+/** A process-local permit for one already durably admitted CREATE, not a retry/idempotency key.
+ * The shared sync endpoint also accepts UPDATE/DELETE: a permit must not authorize those shapes.
+ */
 internal class ProtonSingleDispatchAttempt(private val url: HttpUrl, payload: String) {
-    private val body = SingleDispatchBody(payload.toByteArray(Charsets.UTF_8))
+    private val body = SingleDispatchBody(createOnlyBytes(payload))
     private val entered = AtomicBoolean()
     private val exchanged = AtomicBoolean()
 
@@ -25,6 +28,39 @@ internal class ProtonSingleDispatchAttempt(private val url: HttpUrl, payload: St
 
 /** Never include the URL, body, headers or underlying transport exception in diagnostics. */
 internal class ProtonSingleDispatchDenied : IOException("CREATE_SINGLE_DISPATCH_DENIED")
+
+/** Operation discrimination only; original signing, scope, rights and journal admission belong
+ * to the existing preparation/submission path. The two current CREATE profiles stay compatible.
+ * Keep the original bytes after qualification: no payload rewrite or preparation migration.
+ */
+private fun createOnlyBytes(payload: String): ByteArray {
+    // The serializer accepts up to 1 MiB plaintext; encryption/base64 and JSON add overhead.
+    // This is a local 4 MiB transport ceiling, not a claimed Proton server limit.
+    val limit = 4 * 1024 * 1024
+    if (payload.length > limit || !UniqueJsonKeys(payload).validate()) throw ProtonSingleDispatchDenied()
+    val accepted = try {
+        val root = Json.parseToJsonElement(payload) as? JsonObject
+        val member = root?.get("MemberID") as? JsonPrimitive
+        val events = root?.get("Events") as? JsonArray
+        val operation = events?.singleOrNull() as? JsonObject
+        val event = operation?.get("Event") as? JsonObject
+        val fields = setOf("Permissions", "IsOrganizer", "SharedKeyPacket", "SharedEventContent")
+        fun number(value: JsonElement?, expected: Long) = (value as? JsonPrimitive)?.let {
+            !it.isString && it.longOrNull == expected
+        } == true
+        val packet = event?.get("SharedKeyPacket") as? JsonPrimitive
+        root?.keys == setOf("MemberID", "IsImport", "Events") && member?.isString == true && member.content.isNotBlank() &&
+            number(root["IsImport"], 0) && operation?.keys == setOf("Overwrite", "Event") && number(operation["Overwrite"], 0) &&
+            event != null && (event.keys == fields || event.keys == fields + "Notifications") &&
+            number(event["Permissions"], 1) && number(event["IsOrganizer"], 1) && packet?.isString == true && packet.content.isNotBlank() &&
+            event["SharedEventContent"] is JsonArray &&
+            ("Notifications" !in event || (event["Notifications"] as? JsonArray)?.isEmpty() == true)
+    } catch (_: Exception) { false }
+    if (!accepted) throw ProtonSingleDispatchDenied()
+    val bytes = payload.toByteArray(Charsets.UTF_8)
+    if (bytes.size > limit) { bytes.fill(0); throw ProtonSingleDispatchDenied() }
+    return bytes
+}
 
 private class SingleDispatchBody(private val bytes: ByteArray) : RequestBody() {
     private val written = AtomicBoolean()

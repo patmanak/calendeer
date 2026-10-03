@@ -1959,3 +1959,43 @@ This qualifies one simple known-empty integrated fixture. It performs no remote
 write, no Samsung Calendar UI edit and no forced process interruption. Successive
 server reads are not concurrency protection; automatic capture, other profiles,
 conflict resolution and live UPDATE/DELETE remain unqualified.
+
+## CREATE-only transport permits on the shared sync endpoint
+
+`ProtonCreateOnlyDispatchTest` uses loopback HTTP only. Its RED case obtains an
+original event through GET, advances the fixture's remote state and submits an
+UPDATE-shaped body with a CREATE single-dispatch tag. The original transport
+permit accepts it and the fixture's newer value is overwritten. The same case
+must preserve the newer value and observe only one GET after envelope validation.
+This reproduces an internal transport gap, not an observed production upload or
+a Proton backend defect.
+
+Six new tests cover that race, UPDATE/DELETE/move/mixed containers, import and
+overwrite, malformed or ambiguous JSON, strict field types, current shared-only
+and explicit-empty profiles, byte-identical bodies and the 4 MiB UTF-8 boundary.
+Eight existing OkHttp and three published Core/Retrofit tests use a valid synthetic
+CREATE envelope instead of an empty placeholder. They retain their checks for
+503 follow-ups, token refresh, rebound/rewrapped bodies, redirects, lost responses,
+timeouts, cancellation, concurrent invocation and repeated interceptor exchanges.
+The deliberately unguarded 503 reproduction still demonstrates why the connection
+retry flag alone is insufficient. All seventeen focused cases passed.
+
+Debug-only `ProtonEventPreparationCryptoProbe` additionally passes native generated
+shared-only requests and reopened explicit-empty submission requests through the
+new permit. It writes their one-shot bodies into a local buffer and compares exact
+bytes, without creating an HTTP call. Existing timed/all-day, protected recovery,
+signature/readback and folded-whitespace assertions remain. This checks native
+producer compatibility, not fresh live CREATE acceptance.
+
+All 369 Proton-adapter JVM cases passed without failures, errors or skips. Five
+physical native preparation cases passed; four exercise the added permit/body
+check through generated shared-only or reopened explicit-empty requests. Both
+app/test APK builds, lint (zero errors, twenty existing warnings) and independent
+source review passed. The final app was installed and launched after testing.
+No live mutation or server-precondition experiment was performed.
+
+No domain model, capability, journal schema, stored preparation or outgoing worker
+changes. Constructor refusal has sanitized diagnostics without the payload or
+underlying cause. If durable admission occurred earlier, its unknown outcome stays
+recorded; refusal is not a reason to reopen or resend it. UPDATE/DELETE remain
+disabled pending a qualified concurrency strategy.

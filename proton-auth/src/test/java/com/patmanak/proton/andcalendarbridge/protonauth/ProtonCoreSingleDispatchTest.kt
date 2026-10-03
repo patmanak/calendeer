@@ -35,7 +35,7 @@ class ProtonCoreSingleDispatchTest {
             server.enqueue(MockResponse().setBody("must not be reached"))
             val sessions = SyntheticSessions()
             val manager = manager(server, sessions)
-            val attempt = ProtonSingleDispatchAttempt(server.url("/calendar/v1/synthetic/events/sync"), "{}")
+            val attempt = ProtonSingleDispatchAttempt(server.url("/calendar/v1/synthetic/events/sync"), singleCreateFixture)
             var invocations = 0
             val result = manager.invoke(forceNoRetryOnConnectionErrors = true) { api ->
                 invocations++; api.create(attempt.requestBody, attempt).use { it.string() }
@@ -54,7 +54,7 @@ class ProtonCoreSingleDispatchTest {
     @Test fun retrofitContentTypeWrapperIsDeniedBeforeExchange() = runBlocking {
         withServer { server ->
             server.enqueue(MockResponse().setBody("must not be reached"))
-            val attempt = ProtonSingleDispatchAttempt(server.url("/calendar/v1/synthetic/events/sync"), "{}")
+            val attempt = ProtonSingleDispatchAttempt(server.url("/calendar/v1/synthetic/events/sync"), singleCreateFixture)
             val result = manager(server, SyntheticSessions()).invoke(forceNoRetryOnConnectionErrors = true) { api ->
                 api.wrapped(attempt.requestBody, attempt).use { it.string() }
             }
@@ -65,14 +65,14 @@ class ProtonCoreSingleDispatchTest {
     @Test fun successfulCoreRequestPreservesPayloadAndClientHeaders() = runBlocking {
         withServer { server ->
             server.enqueue(MockResponse().setBody("synthetic-response"))
-            val attempt = ProtonSingleDispatchAttempt(server.url("/calendar/v1/synthetic/events/sync"), "{}")
+            val attempt = ProtonSingleDispatchAttempt(server.url("/calendar/v1/synthetic/events/sync"), singleCreateFixture)
             val result = manager(server, SyntheticSessions()).invoke(forceNoRetryOnConnectionErrors = true) { api ->
                 api.create(attempt.requestBody, attempt).use { it.string() }
             }
             assertEquals("synthetic-response", result.valueOrThrow)
             assertEquals(1, server.requestCount)
             val request = server.takeRequest()
-            assertEquals("{}", request.body.readUtf8())
+            assertEquals(singleCreateFixture, request.body.readUtf8())
             assertEquals("application/json; charset=utf-8", request.getHeader("Content-Type"))
             assertEquals(CalendarBridgeApiClient.forReleaseVersion("0.1.0").appVersionHeader, request.getHeader("x-pm-appversion"))
         }
