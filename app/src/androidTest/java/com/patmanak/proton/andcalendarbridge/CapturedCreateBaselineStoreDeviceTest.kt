@@ -357,7 +357,7 @@ class CapturedCreateBaselineStoreDeviceTest {
                 old.version = 10
                 for (table in tables) before[table] = rows(old, table)
             }
-            assertEquals(11, store.writableDatabase.version)
+            assertEquals(12, store.writableDatabase.version)
             for (table in tables) assertEquals("Migration must preserve $table", before[table], rows(store.writableDatabase, table))
             store.writableDatabase.rawQuery("SELECT count(*) FROM captured_create_bases", null).use {
                 assertTrue(it.moveToFirst()); assertEquals(0, it.getInt(0))

@@ -369,5 +369,47 @@ the historical intention remains retained and the current row stays dirty.
 `UNCHANGED` describes local content observed at that instant, with no retained
 local intention. It creates no durable clean proof and cannot authorize a later
 acknowledgement. Access and full source identities are requalified around these
-operations. Incoming holds remain active; there is no observer, upload, writable
-UI, original-row acknowledgement or projection release.
+operations. This reconciliation does not acknowledge the original row or release
+incoming projection. There is no observer, upload or writable UI.
+
+## Conditional original-row acknowledgement
+
+`acknowledgeLocalCreate` is an explicit offline operation for an unchanged
+original. It reconstructs the authoritative sent reference and requalifies the
+account, selection, permissions, formats and full source journals. An old
+`UNCHANGED` result never authorizes this operation.
+
+Import schema v12 adds an immutable acknowledgement reservation. Its transaction
+requires exact captured provenance and absence of raw local intentions and
+ordinary projection receipts. Only the invocation that inserts its first
+`UNKNOWN` reservation can attempt a Provider write. Competing proposals retain
+the first nonce. Every local capture entry point checks this durable fence before
+new capture or replay; corrupt or unresolved evidence blocks admission.
+
+The Provider requalifies the complete current row, unique local and remote
+identities, ownership, supported content, flags and absence of children in one
+atomic batch. Only content identical to the sent reference with no tombstone
+can be cleaned. The batch changes only `DIRTY` and a dedicated acknowledgement
+marker, preserving the local and attachment markers. Unsupported data and edits
+made before the batch remain untouched.
+
+Reopening, cancellation, a lost response or failed private commit only permits
+inspection of the same nonce. An exact scoped marker proves the historical batch
+even after a new edit, reminder or tombstone; inspection never cleans those newer
+changes. Retaining this proof promotes the reservation to `PROVEN` without
+consuming incoming records, deferred evidence, pending flags or the captured hold.
+Replay of an already proven acknowledgement still inspects Android and preserves
+any later local intention. `ACKNOWLEDGED` means historical proof, not currently
+clean content or a current remote version.
+
+After proven acknowledgement, reconciliation accepts only that exact marker and
+can retain a later supported UPDATE/DELETE against the original sent reference.
+The snapshot carries its acknowledgement provenance, which must match the durable
+record in the capture transaction; a pre-acknowledgement snapshot cannot be reused
+after promotion to proven state.
+Missing, ambiguous or corrupted markers cannot be adopted from a private proven
+state. An interruption after reservation but before the Provider batch can leave
+`UNKNOWN` permanently blocked without a marker: no automatic retry or new nonce
+is allowed. Explicit resolution remains future work. The private transaction and
+Provider batch are separate; real power loss and simultaneous processes are not
+qualified. Incoming hold release and writable UI remain separate stages.

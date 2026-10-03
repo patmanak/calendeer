@@ -32,6 +32,7 @@ enum class CapturedCreateBindingResult { INACTIVE, UNRESOLVED, RETAINED }
 enum class CapturedCreateAttachmentResult { INACTIVE, UNRESOLVED, ATTACHED }
 enum class CapturedCreateBaselineResult { INACTIVE, UNRESOLVED, RETAINED }
 enum class CapturedCreateReconciliationResult { INACTIVE, UNRESOLVED, UNSUPPORTED, UNCHANGED, RETAINED, CONFLICT }
+enum class CapturedCreateAcknowledgementResult { INACTIVE, UNRESOLVED, UNSUPPORTED, ACKNOWLEDGED }
 /** One process owner for foreground and durable worker triggers; no event content reaches UI. */
 class ImportCoordinator(
     private val context: Context,
@@ -839,6 +840,92 @@ class ImportCoordinator(
         }
     }
 
+    /** Explicit one-shot clean acknowledgement of an unchanged captured original.
+     * ACKNOWLEDGED proves a historical batch only; incoming holds and remote evidence remain.
+     */
+    suspend fun acknowledgeLocalCreate(target: CalendarScope, localId: LocalEventId, id: MutationId,
+        attempt: MutationId): CapturedCreateAcknowledgementResult = mutex.withLock {
+        val captures = localCreates ?: return@withLock CapturedCreateAcknowledgementResult.UNRESOLVED
+        val journal = creates ?: return@withLock CapturedCreateAcknowledgementResult.UNRESOLVED
+        ensureCreateLifecycle()
+        val expected = generation
+        val policy = createPolicyRevision.get()
+        val active = { authenticated && generation == expected && createPolicyRevision.get() == policy && hasCalendarPermissions() }
+        suspend fun available(): Boolean {
+            if (!isCurrent(expected, target.account) || !active()) return false
+            val selected = store.selections(target.account).singleOrNull { it.scope == target }
+            return selected?.enabled == true && selected.available && active()
+        }
+        try {
+            if (!available()) return@withLock CapturedCreateAcknowledgementResult.INACTIVE
+            store.admitTransaction = { it == target && active() }
+            captures.admitCapture = { it == target && active() }
+            projection.admitOperation = { active() }
+            val submission = captures.readSubmission(target, localId) ?: return@withLock CapturedCreateAcknowledgementResult.UNRESOLVED
+            val reserved = submission.reservation
+            val capture = reserved.intent.reservation
+            if (capture.scope != target || capture.localId != localId || capture.id != id || reserved.attempt != attempt ||
+                capture.format != remote.format || store.transaction(target) { checkpoint?.format } != capture.format ||
+                projection.capturedAttachmentProtocol != 1 || projection.capturedAcknowledgementProtocol != 1)
+                return@withLock CapturedCreateAcknowledgementResult.UNRESOLVED
+            val identity = CapturedCreateDispatchIdentity.of(submission)
+            val binding = journal.capturedBinding(identity) ?: return@withLock CapturedCreateAcknowledgementResult.UNRESOLVED
+            val attachment = journal.capturedAttachment(binding) ?: return@withLock CapturedCreateAcknowledgementResult.UNRESOLVED
+            val baseline = CapturedCreateBaseline(attachment,
+                RemoteChange.Upsert(binding.eventId, binding.verifiedRevision, reserved.intent.content))
+            suspend fun exactSource(): Boolean = captures.readSubmission(target, localId) == submission &&
+                remote.format == capture.format && projection.capturedAttachmentProtocol == attachment.protocol &&
+                projection.capturedAcknowledgementProtocol == 1 &&
+                store.transaction(target) { checkpoint?.format } == capture.format &&
+                journal.capturedBinding(identity) == binding && journal.capturedAttachment(binding) == attachment &&
+                store.capturedBaseline(target, binding.eventId) == baseline
+            if (!available()) return@withLock CapturedCreateAcknowledgementResult.INACTIVE
+            if (!exactSource()) return@withLock CapturedCreateAcknowledgementResult.UNRESOLVED
+            var record = store.capturedAcknowledgement(target, binding.eventId)
+            if (record != null && record.receipt.baseline != baseline) return@withLock CapturedCreateAcknowledgementResult.UNRESOLVED
+            var fresh = false
+            if (record == null) {
+                val observed = projection.captureCapturedCreateCurrent(baseline)
+                if (!available()) return@withLock CapturedCreateAcknowledgementResult.INACTIVE
+                if (!exactSource()) return@withLock CapturedCreateAcknowledgementResult.UNRESOLVED
+                if (observed == CapturedCreateCurrentObservation.Unsupported) return@withLock CapturedCreateAcknowledgementResult.UNSUPPORTED
+                val snapshot = (observed as? CapturedCreateCurrentObservation.Supported)?.snapshot
+                    ?: return@withLock CapturedCreateAcknowledgementResult.UNRESOLVED
+                if (snapshot.baseline != baseline || snapshot.acknowledgement != null || !snapshot.unchanged) return@withLock CapturedCreateAcknowledgementResult.UNRESOLVED
+                val reservation = store.reserveCapturedAcknowledgement(CapturedCreateAcknowledgementReceipt(baseline, java.util.UUID.randomUUID().toString()))
+                record = reservation.record
+                fresh = reservation.fresh
+            }
+            val admitted = checkNotNull(record)
+            if (!available()) return@withLock CapturedCreateAcknowledgementResult.INACTIVE
+            if (!exactSource() || store.capturedAcknowledgement(target, binding.eventId) != admitted)
+                return@withLock CapturedCreateAcknowledgementResult.UNRESOLVED
+            // Only this invocation's fresh reservation may call the write port. All gaps and
+            // reopened outcomes inspect the original immutable nonce; none can rearm the batch.
+            val proof = if (fresh) projection.acknowledgeCapturedCreate(admitted.receipt)
+                else projection.inspectCapturedAcknowledgement(admitted.receipt)
+            if (!available()) return@withLock CapturedCreateAcknowledgementResult.INACTIVE
+            if (proof?.receipt != admitted.receipt || !exactSource() ||
+                store.capturedAcknowledgement(target, binding.eventId) != admitted)
+                return@withLock CapturedCreateAcknowledgementResult.UNRESOLVED
+            val proven = if (admitted.state == CapturedCreateAcknowledgementState.PROVEN) admitted
+                else store.retainCapturedAcknowledgement(proof)
+            if (!available()) return@withLock CapturedCreateAcknowledgementResult.INACTIVE
+            if (!exactSource() || store.capturedAcknowledgement(target, binding.eventId) != proven)
+                return@withLock CapturedCreateAcknowledgementResult.UNRESOLVED
+            CapturedCreateAcknowledgementResult.ACKNOWLEDGED
+        } catch (cancelled: CancellationException) {
+            currentCoroutineContext().ensureActive()
+            if (!active()) CapturedCreateAcknowledgementResult.INACTIVE else throw cancelled
+        } catch (_: Exception) {
+            if (!active()) CapturedCreateAcknowledgementResult.INACTIVE else CapturedCreateAcknowledgementResult.UNRESOLVED
+        } finally {
+            captures.admitCapture = { false }
+            store.admitTransaction = { false }
+            projection.admitOperation = { false }
+        }
+    }
+
     /** Snapshot and retain the current local intention only; no Provider ACK or hold release. */
     suspend fun reconcileLocalCreate(target: CalendarScope, localId: LocalEventId, id: MutationId,
         attempt: MutationId, mutation: MutationId): CapturedCreateReconciliationResult = mutex.withLock {
@@ -870,7 +957,16 @@ class ImportCoordinator(
             val receipt = journal.capturedAttachment(binding) ?: return@withLock CapturedCreateReconciliationResult.UNRESOLVED
             val baseline = CapturedCreateBaseline(receipt,
                 RemoteChange.Upsert(binding.eventId, binding.verifiedRevision, reserved.intent.content))
-            suspend fun exact(): Boolean = captures.readSubmission(target, localId) == submission &&
+            val acknowledgement = store.capturedAcknowledgement(target, binding.eventId)
+            if (acknowledgement != null && (acknowledgement.state != CapturedCreateAcknowledgementState.PROVEN ||
+                acknowledgement.receipt.baseline != baseline || projection.capturedAcknowledgementProtocol != acknowledgement.receipt.protocol))
+                return@withLock CapturedCreateReconciliationResult.UNRESOLVED
+            suspend fun currentSnapshot(): CapturedCreateCurrentObservation = if (acknowledgement == null)
+                projection.captureCapturedCreateCurrent(baseline)
+                else projection.captureAcknowledgedCreateCurrent(acknowledgement.receipt)
+            suspend fun exact(): Boolean = store.capturedAcknowledgement(target, binding.eventId) == acknowledgement &&
+                (acknowledgement == null || projection.capturedAcknowledgementProtocol == acknowledgement.receipt.protocol) &&
+                captures.readSubmission(target, localId) == submission &&
                 remote.format == capture.format && projection.capturedAttachmentProtocol == receipt.protocol &&
                 store.transaction(target) { checkpoint?.format } == capture.format &&
                 journal.capturedBinding(identity) == binding && journal.capturedAttachment(binding) == receipt &&
@@ -879,18 +975,18 @@ class ImportCoordinator(
             if (!exact()) return@withLock CapturedCreateReconciliationResult.UNRESOLVED
             // Cached intentions cannot qualify the original row. Every replay takes a fresh,
             // assertion-only snapshot of the complete attachment, content and child absence.
-            val observed = projection.captureCapturedCreateCurrent(baseline)
+            val observed = currentSnapshot()
             if (!available()) return@withLock CapturedCreateReconciliationResult.INACTIVE
             if (!exact()) return@withLock CapturedCreateReconciliationResult.UNRESOLVED
             if (observed == CapturedCreateCurrentObservation.Unsupported)
                 return@withLock CapturedCreateReconciliationResult.UNSUPPORTED
             val snapshot = (observed as? CapturedCreateCurrentObservation.Supported)?.snapshot
                 ?: return@withLock CapturedCreateReconciliationResult.UNRESOLVED
-            if (snapshot.baseline != baseline) return@withLock CapturedCreateReconciliationResult.UNRESOLVED
+            if (snapshot.baseline != baseline || snapshot.acknowledgement != acknowledgement?.receipt) return@withLock CapturedCreateReconciliationResult.UNRESOLVED
             val retained = store.retainCapturedLocalChange(snapshot, mutation)
             if (!available()) return@withLock CapturedCreateReconciliationResult.INACTIVE
             if (!exact()) return@withLock CapturedCreateReconciliationResult.UNRESOLVED
-            val current = projection.captureCapturedCreateCurrent(baseline) as? CapturedCreateCurrentObservation.Supported
+            val current = currentSnapshot() as? CapturedCreateCurrentObservation.Supported
             if (!available()) return@withLock CapturedCreateReconciliationResult.INACTIVE
             if (current?.snapshot != snapshot || !exact()) return@withLock CapturedCreateReconciliationResult.UNRESOLVED
             // Even this second observation is point-in-time evidence, never a future ACK lease.

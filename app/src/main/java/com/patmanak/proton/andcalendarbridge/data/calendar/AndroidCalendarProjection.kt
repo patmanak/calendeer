@@ -32,6 +32,8 @@ import com.patmanak.proton.andcalendarbridge.sync.AppliedCapturedCreateAttachmen
 import com.patmanak.proton.andcalendarbridge.sync.CapturedCreateBaseline
 import com.patmanak.proton.andcalendarbridge.sync.CapturedCreateCurrent
 import com.patmanak.proton.andcalendarbridge.sync.CapturedCreateCurrentObservation
+import com.patmanak.proton.andcalendarbridge.sync.CapturedCreateAcknowledgementReceipt
+import com.patmanak.proton.andcalendarbridge.sync.AppliedCapturedCreateAcknowledgement
 import com.patmanak.proton.andcalendarbridge.sync.RecurrencePoint
 import com.patmanak.proton.andcalendarbridge.sync.RemoteChange
 import com.patmanak.proton.andcalendarbridge.sync.EventContent
@@ -459,15 +461,37 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
     }
 
     override suspend fun captureCapturedCreateCurrent(baseline: CapturedCreateBaseline): CapturedCreateCurrentObservation = operation {
+        captureCapturedCurrent(baseline)
+    }
+
+    override val capturedAcknowledgementProtocol: Int get() = 1
+
+    override suspend fun acknowledgeCapturedCreate(receipt: CapturedCreateAcknowledgementReceipt): AppliedCapturedCreateAcknowledgement? = operation {
+        if (captureCapturedCurrent(receipt.baseline, writeAck = receipt) is CapturedCreateCurrentObservation.Supported)
+            AppliedCapturedCreateAcknowledgement(receipt) else null
+    }
+
+    override suspend fun captureAcknowledgedCreateCurrent(receipt: CapturedCreateAcknowledgementReceipt): CapturedCreateCurrentObservation = operation {
+        captureCapturedCurrent(receipt.baseline, expectedAck = receipt)
+    }
+
+    private fun capturedAcknowledgementMarker(receipt: CapturedCreateAcknowledgementReceipt) =
+        "calendeer-captured-ack-v1:" + receipt.fingerprint()
+
+    private fun captureCapturedCurrent(baseline: CapturedCreateBaseline,
+        expectedAck: CapturedCreateAcknowledgementReceipt? = null,
+        writeAck: CapturedCreateAcknowledgementReceipt? = null): CapturedCreateCurrentObservation {
+        val ackMarker = (expectedAck ?: writeAck)?.let(::capturedAcknowledgementMarker)
         val receipt = baseline.receipt
         val expected = capturedAttachmentValues(receipt) // Strict canonical identity before Provider IO.
+        if (expectedAck != null) expected.put(Events.SYNC_DATA7, ackMarker)
         val scope = baseline.scope
         val account = accountFor(scope.account)
         val calendar = try { calendarRow(scope, account) } catch (failure: CalendarProjectionException) {
             if (failure.category == CalendarProjectionFailure.IDENTITY_CONFLICT)
-                return@operation CapturedCreateCurrentObservation.Unresolved
+                return CapturedCreateCurrentObservation.Unresolved
             throw failure
-        } ?: return@operation CapturedCreateCurrentObservation.Unresolved
+        } ?: return CapturedCreateCurrentObservation.Unresolved
         val uri = syncUri(Events.CONTENT_URI, account)
         val local = capturedLocalSelection(receipt, calendar)
         val unsupported = arrayOf(Events.RRULE, Events.RDATE, Events.EXRULE, Events.EXDATE, Events.DURATION,
@@ -481,7 +505,7 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
             Events.EVENT_TIMEZONE, Events.EVENT_END_TIMEZONE, Events.STATUS, Events.AVAILABILITY) +
             ATTACHMENT_SYNC_COLUMNS + unsupported + emptyFlags
         val values = resolver.query(uri, columns, local.sql, local.args, null)?.use {
-            if (it.count != 1 || !it.moveToFirst()) return@operation CapturedCreateCurrentObservation.Unresolved
+            if (it.count != 1 || !it.moveToFirst()) return CapturedCreateCurrentObservation.Unresolved
             ContentValues().apply { DatabaseUtils.cursorRowToContentValues(it, this) }
         } ?: fail(CalendarProjectionFailure.PROVIDER_UNAVAILABLE)
         val row = values.getAsLong(Events._ID)
@@ -491,22 +515,23 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
             values.getAsString(Events.SYNC_DATA5) != local.args[1] ||
             expected.keySet().any { values.getAsString(it) != expected.getAsString(it) } ||
             ATTACHMENT_SYNC_COLUMNS.any { it !in expected.keySet() && it != Events.SYNC_DATA5 && values[it] != null })
-            return@operation CapturedCreateCurrentObservation.Unresolved
+            return CapturedCreateCurrentObservation.Unresolved
         val remote = capturedRemoteSelection(receipt, calendar)
         val remoteMatches = resolver.query(uri, arrayOf(Events._ID), remote.sql, remote.args, null)?.use {
             it.count == 1 && it.moveToFirst() && it.getLong(0) == row
         } ?: fail(CalendarProjectionFailure.PROVIDER_UNAVAILABLE)
-        if (!remoteMatches) return@operation CapturedCreateCurrentObservation.Unresolved
+        if (!remoteMatches) return CapturedCreateCurrentObservation.Unresolved
         if (unsupported.any { values[it] != null } || emptyFlags.any { values.getAsInteger(it) != 0 } ||
             values.getAsInteger(Events.STATUS) != Events.STATUS_CONFIRMED ||
             values.getAsInteger(Events.AVAILABILITY) != Events.AVAILABILITY_BUSY)
-            return@operation CapturedCreateCurrentObservation.Unsupported
-        val time = readSimpleTime(values) ?: return@operation CapturedCreateCurrentObservation.Unsupported
+            return CapturedCreateCurrentObservation.Unsupported
+        val time = readSimpleTime(values) ?: return CapturedCreateCurrentObservation.Unsupported
         val snapshot = try {
             CapturedCreateCurrent(baseline, EventContent(values.getAsString(Events.TITLE) ?: "", time,
                 values.getAsString(Events.DESCRIPTION) ?: "", values.getAsString(Events.EVENT_LOCATION) ?: "",
-                details = EventDetails()), deleted == 1)
-        } catch (_: IllegalArgumentException) { return@operation CapturedCreateCurrentObservation.Unsupported }
+                details = EventDetails()), deleted == 1, acknowledgement = expectedAck)
+        } catch (_: IllegalArgumentException) { return CapturedCreateCurrentObservation.Unsupported }
+        if (writeAck != null && !snapshot.unchanged) return CapturedCreateCurrentObservation.Unresolved
         val checks = arrayListOf(assertion(syncUri(Calendars.CONTENT_URI, account), calendarSelection(scope, account), calendar),
             ContentProviderOperation.newAssertQuery(uri).withSelection(local.sql, local.args)
                 .withValues(values).withExpectedCount(1).build(),
@@ -516,16 +541,55 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
             Attendees.CONTENT_URI to Attendees.EVENT_ID, ExtendedProperties.CONTENT_URI to ExtendedProperties.EVENT_ID)) {
             val absent = resolver.query(syncUri(child, account), arrayOf("_id"), "$column=?", arrayOf(row.toString()), null)
                 ?.use { it.count == 0 } ?: fail(CalendarProjectionFailure.PROVIDER_UNAVAILABLE)
-            if (!absent) return@operation CapturedCreateCurrentObservation.Unsupported
+            if (!absent) return CapturedCreateCurrentObservation.Unsupported
             checks += ContentProviderOperation.newAssertQuery(syncUri(child, account))
                 .withSelection("$column=?", arrayOf(row.toString())).withExpectedCount(0).build()
         }
-        // Every identity, content/flag value and child absence is qualified in one atomic batch.
-        // This snapshot can become stale later; it grants no permission to clear the original row.
+        if (writeAck != null) checks += ContentProviderOperation.newUpdate(uri)
+            .withSelection(local.sql, local.args).withValue(Events.DIRTY, 0)
+            .withValue(Events.SYNC_DATA7, ackMarker).withExpectedCount(1).build()
+        // ACK admits from these current assertions, never from a previously returned snapshot.
+        // Every identity, content/flag value and child absence is qualified in this one batch.
         requirePermissions()
         resolver.applyBatch(CalendarContract.AUTHORITY, checks)
         requirePermissions()
-        CapturedCreateCurrentObservation.Supported(snapshot)
+        return CapturedCreateCurrentObservation.Supported(snapshot)
+    }
+
+    override suspend fun inspectCapturedAcknowledgement(receipt: CapturedCreateAcknowledgementReceipt): AppliedCapturedCreateAcknowledgement? = operation {
+        val baseline = receipt.baseline
+        val expected = capturedAttachmentValues(baseline.receipt)
+        expected.put(Events.SYNC_DATA7, capturedAcknowledgementMarker(receipt))
+        val scope = baseline.scope
+        val account = accountFor(scope.account)
+        val calendar = try { calendarRow(scope, account) } catch (failure: CalendarProjectionException) {
+            if (failure.category == CalendarProjectionFailure.IDENTITY_CONFLICT) return@operation null
+            throw failure
+        } ?: return@operation null
+        val uri = syncUri(Events.CONTENT_URI, account)
+        val local = capturedLocalSelection(baseline.receipt, calendar)
+        val values = attachmentMetadata(uri, local) ?: return@operation null
+        if (expected.keySet().any { values.getAsString(it) != expected.getAsString(it) } ||
+            values.getAsString(Events.SYNC_DATA5) != local.args[1] ||
+            ATTACHMENT_SYNC_COLUMNS.any { it !in expected.keySet() && it != Events.SYNC_DATA5 && values[it] != null })
+            return@operation null
+        val remote = capturedRemoteSelection(baseline.receipt, calendar)
+        val remoteMatches = resolver.query(uri, arrayOf(Events._ID), remote.sql, remote.args, null)?.use {
+            it.count == 1 && it.moveToFirst() && it.getLong(0) == values.getAsLong(Events._ID)
+        } ?: fail(CalendarProjectionFailure.PROVIDER_UNAVAILABLE)
+        if (!remoteMatches) return@operation null
+        // Historical proof ignores later user data, children and dirty/deleted flags.
+        val metadata = ContentValues(values).apply { remove(Events.DIRTY); remove(Events.DELETED) }
+        requirePermissions()
+        resolver.applyBatch(CalendarContract.AUTHORITY, arrayListOf(
+            assertion(syncUri(Calendars.CONTENT_URI, account), calendarSelection(scope, account), calendar),
+            ContentProviderOperation.newAssertQuery(uri).withSelection(local.sql, local.args)
+                .withValues(metadata).withExpectedCount(1).build(),
+            ContentProviderOperation.newAssertQuery(uri).withSelection(remote.sql, remote.args)
+                .withValue(Events._ID, values.getAsLong(Events._ID)).withExpectedCount(1).build(),
+        ))
+        requirePermissions()
+        AppliedCapturedCreateAcknowledgement(receipt)
     }
 
     private fun inspectCapturedAttachmentInternal(receipt: CapturedCreateAttachmentReceipt): AppliedCapturedCreateAttachment? {

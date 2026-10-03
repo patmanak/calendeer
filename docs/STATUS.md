@@ -312,8 +312,19 @@ unsupported data remain intact. An unchanged result is only a current local
 observation, never a durable clean proof. A second snapshot can detect edits
 after the local commit. The existing local-intention guard can suppress later
 incoming projections while preserving remote evidence and conflict; captured
-holds remain active. Original-row acknowledgement and hold release are still
-separate prerequisites for bidirectional operation.
+holds remain active. A separate explicit offline original-row acknowledgement
+now reserves one immutable nonce in import journal v12 before its conditional
+Provider batch. Only an unchanged supported original can be cleaned; the batch
+asserts current identity, content, flags and child absence and changes only the
+dirty flag and acknowledgement marker. Reopened or uncertain work only inspects
+that marker. Historical proof can resume after later edits or tombstones without
+cleaning them, and proven work permits subsequent supported local capture.
+All local capture entries respect the unresolved reservation fence. Interrupted
+admission without a marker remains conservatively blocked, requiring future
+explicit resolution. Different incoming data and captured projection holds stay
+intact. Historical acknowledgement is not current clean content, hold release or
+a current remote version. Hold release remains a separate prerequisite for
+bidirectional operation.
 The application still exposes no writable mirror or event editor. General outgoing
 queue/resolution, automatic Provider capture and conditional Proton UPDATE/DELETE
 guarantees remain unqualified. See

@@ -26,7 +26,7 @@ import org.json.JSONException
 
 /** App-private, backup-excluded durable import queue. Every page and checkpoint commits together. */
 class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
-    SQLiteOpenHelper(context, name, null, 11), SyncStore {
+    SQLiteOpenHelper(context, name, null, 12), SyncStore {
     private val lock = Mutex()
     /** Check the run lease both before its transaction and before durable commit. */
     @Volatile var admitTransaction: (CalendarScope) -> Boolean = { true }
@@ -45,9 +45,10 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
         createLocalEdits(db)
         createProjectionReceipts(db)
         createCapturedBases(db)
+        createCapturedAcknowledgements(db)
     }
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        check(oldVersion in 1..10 && newVersion == 11) { "Explicit import schema migration required" }
+        check(oldVersion in 1..11 && newVersion == 12) { "Explicit import schema migration required" }
         if (oldVersion < 2) createStaging(db)
         if (oldVersion < 3) createDelta(db)
         if (oldVersion < 4) createReconciliation(db)
@@ -69,7 +70,15 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
         }
         if (oldVersion < 9) createProjectionReceipts(db)
         if (oldVersion in 8..9) db.execSQL("ALTER TABLE local_edits ADD COLUMN kind TEXT NOT NULL DEFAULT 'UPDATE' CHECK(kind IN ('UPDATE','DELETE'))")
-        createCapturedBases(db)
+        if (oldVersion < 11) createCapturedBases(db)
+        createCapturedAcknowledgements(db)
+    }
+    private fun createCapturedAcknowledgements(db: SQLiteDatabase) {
+        db.execSQL("""CREATE TABLE captured_create_acknowledgements (
+            scope TEXT NOT NULL, event TEXT NOT NULL, nonce TEXT NOT NULL UNIQUE,
+            protocol INTEGER NOT NULL CHECK(protocol = 1), fingerprint TEXT NOT NULL,
+            state TEXT NOT NULL CHECK(state IN ('UNKNOWN','PROVEN')), PRIMARY KEY(scope,event)
+        )""".trimIndent())
     }
     private fun createCapturedBases(db: SQLiteDatabase) {
         db.execSQL("""CREATE TABLE captured_create_bases (
@@ -443,6 +452,96 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
         baseline
     }
 
+    /** Reserve the only volatile admission for a conditional original-row acknowledgement.
+     * Existing reservations are inspection-only, including after a crash or a different proposed nonce.
+     * No incoming data, sent reference, local intent or Provider row is acknowledged here.
+     */
+    suspend fun reserveCapturedAcknowledgement(proposed: CapturedCreateAcknowledgementReceipt):
+        CapturedCreateAcknowledgementReservation = stagingMutation(proposed.baseline.scope) { db ->
+            requireCapturedAcknowledgementSource(db, proposed.baseline)
+            val existing = readCapturedAcknowledgement(db, proposed.baseline.scope, proposed.baseline.change.eventId)
+            if (existing != null) {
+                check(existing.receipt.baseline == proposed.baseline) { "Captured acknowledgement source is immutable" }
+                return@stagingMutation CapturedCreateAcknowledgementReservation(existing, fresh = false)
+            }
+            db.insertOrThrow("captured_create_acknowledgements", null, ContentValues().apply {
+                put("scope", key(proposed.baseline.scope)); put("event", proposed.baseline.change.eventId.value)
+                put("nonce", proposed.nonce); put("protocol", proposed.protocol)
+                put("fingerprint", proposed.fingerprint()); put("state", CapturedCreateAcknowledgementState.UNKNOWN.name)
+            })
+            CapturedCreateAcknowledgementReservation(CapturedCreateAcknowledgementRecord(proposed,
+                CapturedCreateAcknowledgementState.UNKNOWN), fresh = true)
+        }
+
+    /** Historical proof under the current exact source, never a clean-row or write permission.
+     * Raw malformed/orphaned reservations must throw: they cannot reopen an admission as absence.
+     */
+    suspend fun capturedAcknowledgement(scope: CalendarScope, event: EventId): CapturedCreateAcknowledgementRecord? = access { db ->
+        check(admitTransaction(scope)) { "Inactive import lease" }; requireKnown(db, scope)
+        val record = readCapturedAcknowledgement(db, scope, event)
+        check(admitTransaction(scope)) { "Inactive import lease" }
+        record
+    }
+
+    /** Retain the exact historical Provider batch proof without consuming any import or local work. */
+    suspend fun retainCapturedAcknowledgement(witness: AppliedCapturedCreateAcknowledgement): CapturedCreateAcknowledgementRecord =
+        stagingMutation(witness.receipt.baseline.scope) { db ->
+            val receipt = witness.receipt
+            requireCapturedAcknowledgementSource(db, receipt.baseline)
+            val existing = checkNotNull(readCapturedAcknowledgement(db, receipt.baseline.scope, receipt.baseline.change.eventId)) {
+                "Captured acknowledgement requires its durable reservation"
+            }
+            check(existing.receipt == receipt) { "Captured acknowledgement proof is immutable" }
+            if (existing.state == CapturedCreateAcknowledgementState.UNKNOWN) {
+                check(db.update("captured_create_acknowledgements", ContentValues().apply {
+                    put("state", CapturedCreateAcknowledgementState.PROVEN.name)
+                }, "scope=? AND event=? AND nonce=? AND protocol=? AND fingerprint=? AND state=?",
+                    arrayOf(key(receipt.baseline.scope), receipt.baseline.change.eventId.value, receipt.nonce,
+                        receipt.protocol.toString(), receipt.fingerprint(), CapturedCreateAcknowledgementState.UNKNOWN.name)) == 1) {
+                    "Captured acknowledgement proof was not retained"
+                }
+            }
+            existing.copy(state = CapturedCreateAcknowledgementState.PROVEN)
+        }
+
+    private fun requireCapturedAcknowledgementSource(db: SQLiteDatabase, baseline: CapturedCreateBaseline) {
+        val scope = baseline.scope
+        val event = baseline.change.eventId
+        check(activeProjectionScope(db, scope) && capturedFormatMatches(db, scope, baseline.format) &&
+            readCapturedBase(db, scope, event) == baseline) { "Captured acknowledgement requires identical sent reference" }
+        check(!hasLocalMutation(db, scope, event) && !hasRawEventRow(db, "projection_receipts", scope, event)) {
+            "Captured acknowledgement cannot bypass unresolved local work"
+        }
+    }
+
+    private fun readCapturedAcknowledgement(db: SQLiteDatabase, scope: CalendarScope, event: EventId):
+        CapturedCreateAcknowledgementRecord? = db.rawQuery(
+            "SELECT nonce,protocol,fingerprint,state FROM captured_create_acknowledgements WHERE scope=? AND event=?",
+            arrayOf(key(scope), event.value)).use { row ->
+            if (!row.moveToFirst()) return@use null
+            val baseline = checkNotNull(readCapturedBase(db, scope, event)) { "Captured acknowledgement source is unresolved" }
+            val receipt: CapturedCreateAcknowledgementReceipt
+            val state: CapturedCreateAcknowledgementState
+            try {
+                check(row.getString(1) == "1") { "Captured acknowledgement protocol is malformed" }
+                receipt = CapturedCreateAcknowledgementReceipt(baseline, row.getString(0), row.getInt(1))
+                state = CapturedCreateAcknowledgementState.valueOf(row.getString(3))
+            } catch (_: IllegalArgumentException) {
+                throw IllegalStateException("Captured acknowledgement evidence is malformed")
+            }
+            check(row.getString(2) == receipt.fingerprint()) { "Captured acknowledgement source or fingerprint changed" }
+            CapturedCreateAcknowledgementRecord(receipt, state)
+        }
+
+    private fun requireCapturedAcknowledgementResolved(db: SQLiteDatabase, scope: CalendarScope, event: EventId):
+        CapturedCreateAcknowledgementRecord? {
+        val record = readCapturedAcknowledgement(db, scope, event)
+        check(record == null || record.state == CapturedCreateAcknowledgementState.PROVEN) {
+            "Captured acknowledgement outcome is unresolved"
+        }
+        return record
+    }
+
     /** Retain the first supported local edit/tombstone behind its exact captured sent reference.
      * Only local_edits is changed. Incoming records, raw pending flags, bases and receipts survive.
      * Null means unchanged with no retained local intent; it grants no future clean acknowledgement.
@@ -453,6 +552,10 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
             val link = baseline.receipt.binding.identity
             val scope = baseline.scope
             val event = baseline.change.eventId
+            val acknowledgement = requireCapturedAcknowledgementResolved(db, scope, event)
+            check(acknowledgement?.receipt == snapshot.acknowledgement) {
+                "Captured current acknowledgement source changed"
+            }
             require(mutation != link.captureId && mutation != link.attempt.id && mutation.value != link.localId.value) {
                 "Local change requires a separate mutation identity"
             }
@@ -631,6 +734,7 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
         require(intent.state == LocalEditState.PAUSED) { "Caller cannot declare conflict state" }
         check(isAvailable(db, intent.scope) && db.rawQuery("SELECT enabled FROM calendars WHERE scope=?",
             arrayOf(key(intent.scope))).use { it.moveToFirst() && it.getInt(0) != 0 }) { "Inactive local capture scope" }
+        requireCapturedAcknowledgementResolved(db, intent.scope, intent.base.eventId)
         val previous = readLocalEdit(db, intent.scope, intent.base.eventId)
         if (previous != null) {
             require(previous.copy(state = LocalEditState.PAUSED) == intent) { "Local edit is immutable" }
@@ -657,6 +761,7 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
     suspend fun captureLocalDelete(intent: LocalDeleteIntent): LocalDeleteIntent = stagingMutation(intent.scope) { db ->
         require(intent.state == LocalEditState.PAUSED) { "Caller cannot declare conflict state" }
         check(activeProjectionScope(db, intent.scope)) { "Inactive local capture scope" }
+        requireCapturedAcknowledgementResolved(db, intent.scope, intent.base.eventId)
         val previous = readLocalDelete(db, intent.scope, intent.base.eventId)
         if (previous != null) {
             require(previous.copy(state = LocalEditState.PAUSED) == intent) { "Local deletion is immutable" }

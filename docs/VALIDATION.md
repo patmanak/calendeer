@@ -1145,6 +1145,60 @@ event, for 377 distinct physical cases. No new live submission was made. Host
 checks passed with 131 sync, 274 Proton adapter and 10 app tests, both debug APK
 builds and Android lint. These results retain the boundaries described above.
 
+## Conditional original-row acknowledgement
+
+`CapturedCreateAcknowledgementTest` checks canonical nonce/protocol rules,
+complete provenance fingerprints, strict identity text and redacted diagnostics.
+
+`CapturedCreateAcknowledgementStoreDeviceTest` uses isolated SQL with
+`providerFixture=true`. It checks additive v11-to-v12 migration without invented
+proof, immutable UNKNOWN reservations, competing helpers granting only one fresh
+admission, strict historical proof and promotion to PROVEN. Raw unresolved or
+corrupt evidence fences all three capture paths before replay. Existing local
+intentions, ordinary receipts, source drift, nonce collisions, rollback,
+lease loss and cancellation cannot authorize a new reservation or promotion.
+Records, raw pending flags, deferred evidence, baselines and receipts remain
+intact. Proven evidence permits later local capture, without resetting a conflict.
+
+`CapturedCreateAcknowledgementProviderDeviceTest` uses isolated real Provider
+rows. It requires six assertions and one update limited to DIRTY and the exact
+acknowledgement marker. Changed, unsupported, duplicate, foreign or missing rows
+cannot be cleaned. Race fixtures require proof that the real batch was attempted
+after their setup hook. Historical inspection asserts exact identity and markers
+without reading current content or consuming dirty/deleted flags or children.
+Response-loss fixtures retain proof through later edits, reminders and tombstones;
+current capture then requires that exact acknowledgement marker and a dirty row.
+Malformed identity, marker drift, admission loss and cancellation cannot return
+an unqualified witness.
+
+`CapturedCreateAcknowledgementIntegrationDeviceTest` uses the production owner,
+real journals/Provider and controlled transport. An unwired owner must fail the
+expected acknowledgement result. Qualified unchanged originals can be cleaned
+once without consuming incoming evidence or releasing the captured hold.
+Reopening inspects the first nonce without another write. Lost responses, failed
+private promotion and later edits/tombstones preserve historical recovery and
+subsequent local capture. A proven replay must preserve a retained local intention.
+Admission interrupted before the batch remains UNKNOWN with no automatic retry.
+Missing or corrupted markers cannot be adopted from proven private state.
+Inactive access, incompatible formats and source drift prevent qualification.
+Different remote payloads before and after acknowledgement remain pending and
+held. Fixture data is isolated and removed. Permission loss controls the gate,
+not real grants during the batch. These tests do not establish live captured
+submission, hold release, conflict resolution, writable UI, real power loss or
+simultaneous processes.
+
+The unwired-owner physical fixture failed the expected acknowledgement result.
+The wired build passed 22 acknowledgement SQL, 29 Provider and 25 owner cases.
+One initial owner fixture invoked an asynchronous selection change before its
+disabled precondition had been persisted. After making that precondition explicit
+and awaiting it with a bounded suspension, the corrected case passed. This does
+not establish synchronous admission closure on return from the selection setter.
+The unchanged production build also passed 411 related regressions, including
+migrations and earlier capture recovery, and one read-only inspection of the
+retained legacy live event: 488 distinct physical cases. No new live submission
+was made. Host checks passed with 139 sync, 274 Proton adapter and 10 app tests,
+both debug APK builds and Android lint. These results retain the boundaries above.
+
 ## Anonymous transport probe
 
 `ProtonConnectivityDeviceTest` is skipped unless instrumentation receives

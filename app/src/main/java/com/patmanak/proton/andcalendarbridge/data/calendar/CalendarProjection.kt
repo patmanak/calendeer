@@ -15,6 +15,8 @@ import com.patmanak.proton.andcalendarbridge.sync.CapturedCreateAttachmentReceip
 import com.patmanak.proton.andcalendarbridge.sync.AppliedCapturedCreateAttachment
 import com.patmanak.proton.andcalendarbridge.sync.CapturedCreateBaseline
 import com.patmanak.proton.andcalendarbridge.sync.CapturedCreateCurrentObservation
+import com.patmanak.proton.andcalendarbridge.sync.CapturedCreateAcknowledgementReceipt
+import com.patmanak.proton.andcalendarbridge.sync.AppliedCapturedCreateAcknowledgement
 import com.patmanak.proton.andcalendarbridge.sync.catalog.CalendarSummary
 
 /** Android-layer boundary. A failed apply leaves its durable intent unacknowledged for replay. */
@@ -56,6 +58,20 @@ interface CalendarProjection {
      * never acknowledge Android, infer deletion from absence or release incoming projections.
      */
     suspend fun captureCapturedCreateCurrent(baseline: CapturedCreateBaseline): CapturedCreateCurrentObservation =
+        CapturedCreateCurrentObservation.Unresolved
+    val capturedAcknowledgementProtocol: Int? get() = null
+    /** Conditional atomic acknowledgement of the exact unchanged attached original. Only DIRTY
+     * and the acknowledgement marker can change. A lost response must be recovered by inspection.
+     */
+    suspend fun acknowledgeCapturedCreate(receipt: CapturedCreateAcknowledgementReceipt): AppliedCapturedCreateAcknowledgement? = null
+    /** Historical atomic acknowledgement proof. Later local edits/deletions/children do not
+     * invalidate that history and are never consumed by inspection; this is not current-clean proof.
+     */
+    suspend fun inspectCapturedAcknowledgement(receipt: CapturedCreateAcknowledgementReceipt): AppliedCapturedCreateAcknowledgement? = null
+    /** Capture subsequent dirty content through the exact historical acknowledgement marker.
+     * No new acknowledgement, incoming release, or deletion inference from an absent row.
+     */
+    suspend fun captureAcknowledgedCreateCurrent(receipt: CapturedCreateAcknowledgementReceipt): CapturedCreateCurrentObservation =
         CapturedCreateCurrentObservation.Unresolved
 }
 

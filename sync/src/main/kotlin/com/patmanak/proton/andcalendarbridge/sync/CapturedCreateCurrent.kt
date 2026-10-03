@@ -8,8 +8,10 @@ import java.nio.charset.CodingErrorAction
 /** Supported current local content behind an exact attachment and sent reference.
  * Point-in-time evidence only: never authority to clean Android or release projection later.
  */
-data class CapturedCreateCurrent(val baseline: CapturedCreateBaseline, val content: EventContent, val deleted: Boolean) {
+data class CapturedCreateCurrent(val baseline: CapturedCreateBaseline, val content: EventContent, val deleted: Boolean,
+    val acknowledgement: CapturedCreateAcknowledgementReceipt? = null) {
     init {
+        require(acknowledgement == null || acknowledgement.baseline == baseline)
         require(content.details == EventDetails() && content.recurrence == null && content.colorRgb == null)
         val time = content.time
         if (time is EventTime.Timed) require(time.start.nano == 0 && time.end.nano == 0)
