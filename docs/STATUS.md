@@ -149,15 +149,34 @@ ambiguous, misplaced or backdated metadata is refused. Logical no-ops retain
 both original strings, even when additional metadata would forbid an edit.
 The [metadata source audit](research/TITLE_EDIT_METADATA.md) distinguishes local
 admission choices from differing official client layouts and timestamp rules.
-This function has no production or crypto-preparation caller: both modified
-parts need separately qualified signatures, and personal partition timestamps,
-current access and complete wire preservation remain unresolved. Existing
-title-only crypto fragments retain their original timestamp behavior. No event
-UPDATE is assembled or submitted.
+The plaintext function itself supplies no signatures or eligibility proof.
+Personal partition timestamps, current access and complete wire preservation
+remain unresolved. Existing title-only crypto fragments retain their original
+timestamp behavior. No event UPDATE is assembled or submitted.
 All 15 focused timestamp-policy cases and all 309 Proton-adapter JVM cases
 passed. Build, lint and independent review passed. A targeted EXRULE refusal
 case failed before the legacy recurrence marker was explicitly excluded.
 No device or service operation was performed for this plaintext-only slice.
+
+An internal offline crypto continuation now applies this explicit edit-time
+policy to a frozen, signature-verified shared original. It requires explicitly
+empty personal/attendee partitions, even for no-op titles. The original JSON,
+replacement clear part and replacement encrypted part remain separate ephemeral
+copies. Each part whose plaintext actually changes receives a new Core signature;
+the encrypted part retains the event's original shared session key. Unchanged
+parts retain their exact Data/Signature, including clear data at an unchanged
+instant. A changed clear part must have the selected local writer as its original
+author; an unchanged clear part can retain a different verified local author.
+The legacy encrypted-author check remains in no-ops. All other part metadata is
+copied structurally without semantic qualification. CREATED and SEQUENCE remain
+exact. A no-op does not certify that a subsequent metadata edit is eligible.
+There is no production caller, complete event assembly, persistence, current
+session/access proof, network operation or UPDATE capability in this experiment.
+All 312 Proton-adapter JVM cases and twelve selected native synthetic cases
+passed, including renewal of both signatures, original-key readback, different
+clear authors, and a folded DTSTAMP that needs a new signature even at the same
+instant. Build, lint and independent review passed. No service or Provider data
+was modified by these fixtures.
 
 An internal offline CREATE preparer now reuses Proton's simple-event partition:
 signed clear date metadata and signed encrypted display text. It uses Biweekly

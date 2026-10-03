@@ -2,6 +2,8 @@
 package com.patmanak.proton.andcalendarbridge.protonauth
 
 import com.patmanak.proton.andcalendarbridge.sync.*
+import java.time.Instant
+import java.time.ZoneOffset
 import java.util.Base64
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -26,8 +28,11 @@ object ProtonSharedTitleCryptoProbe {
     suspend fun runText(): String = run(textSignatures = true)
     suspend fun runReencryptedBinary(): String = run(textSignatures = false, reencrypted = true)
     suspend fun runReencryptedText(): String = run(textSignatures = true, reencrypted = true)
+    suspend fun runTimestampedBinary(): String = run(textSignatures = false, timestamped = true)
+    suspend fun runTimestampedText(): String = run(textSignatures = true, timestamped = true)
 
-    private suspend fun run(textSignatures: Boolean, reencrypted: Boolean = false): String = withContext(Dispatchers.IO) {
+    private suspend fun run(textSignatures: Boolean, reencrypted: Boolean = false,
+        timestamped: Boolean = false): String = withContext(Dispatchers.IO) {
         var stage = "GENERATE"
         try {
             val crypto = AndroidCryptoContext()
@@ -79,7 +84,8 @@ object ProtonSharedTitleCryptoProbe {
                     }
                 }
                 val originalTitle = "Original title"
-                val clear = ics(uid, "DTSTART:20261003T100000Z\r\nDTEND:20261003T110000Z\r\n" +
+                val dates = if (timestamped) "CREATED:20261002T090000Z\r\nLAST-MODIFIED:20261003T090000Z\r\nSEQUENCE:0007\r\n" else ""
+                val clear = ics(uid, dates + "DTSTART:20261003T100000Z\r\nDTEND:20261003T110000Z\r\n" +
                     "X-CLEAR;X-PARAM=opaque:keep this  \r\n folded text\t\r\n")
                 val prefix = icsPrefix(uid) + "X-SECRET;X-PARAM=opaque:first\r\n"
                 val suffix = "X-SECRET;X-PARAM=opaque:second  \r\n folded text\t\r\n" +
@@ -106,9 +112,9 @@ object ProtonSharedTitleCryptoProbe {
                         })
                     }
                     // These are deliberately opaque, not validated, authenticated or safe to upload.
-                    put("CalendarEvents", Json.parseToJsonElement("""[{"Type":99,"Data":"opaque-calendar","Extra":[1,null,"x"]}]"""))
-                    put("AttendeesEvents", Json.parseToJsonElement("""[{"Type":99,"Data":"opaque-attendee","Extra":{"Flag":true}}]"""))
-                    put("Notifications", Json.parseToJsonElement("""[{"Type":1,"Trigger":"-PT10M","Opaque":7}]"""))
+                    put("CalendarEvents", if (timestamped) JsonArray(emptyList()) else Json.parseToJsonElement("""[{"Type":99,"Data":"opaque-calendar","Extra":[1,null,"x"]}]"""))
+                    put("AttendeesEvents", if (timestamped) JsonArray(emptyList()) else Json.parseToJsonElement("""[{"Type":99,"Data":"opaque-attendee","Extra":{"Flag":true}}]"""))
+                    put("Notifications", if (timestamped) JsonArray(emptyList()) else Json.parseToJsonElement("""[{"Type":1,"Trigger":"-PT10M","Opaque":7}]"""))
                     putJsonObject("OpaqueMetadata") { put("Value", "untouched"); put("Null", JsonNull) }
                 } }
                 val decoder = ProtonEventDecryptor(crypto) { check(it == user); listOf(address) }
@@ -140,6 +146,9 @@ object ProtonSharedTitleCryptoProbe {
                 val noOp = basis.patchTitle(originalTitle)
                 check(noOp.originalRow == row && noOp.patchedPlaintext.clearShared == clear && noOp.patchedPlaintext.encryptedShared == secret)
 
+                if (timestamped) return@withContext runTimestamped(crypto, addressSecret, calendarSecret,
+                    addressArmored, calendarArmored, addressKey, address, scope, session, bootstrap, row,
+                    originalTitle, newTitle, clear, prefix, suffix, patched, alteredSignature, decoder)
                 if (reencrypted) {
                     val metadata = buildJsonObject { put("ID", calendar); put("Type", 0) }
                     suspend fun prepare(candidate: JsonObject = row, context: JsonObject = bootstrap,
@@ -369,6 +378,198 @@ object ProtonSharedTitleCryptoProbe {
             } finally { addressSecret.fill(0); calendarSecret.fill(0) }
         } catch (cancelled: CancellationException) { throw cancelled }
           catch (_: Exception) { "RESULT=FAILURE STAGE=$stage" }
+    }
+
+    private suspend fun runTimestamped(crypto: AndroidCryptoContext, addressSecret: ByteArray,
+        calendarSecret: ByteArray, addressArmored: String, calendarArmored: String, addressKey: PrivateKey,
+        address: UserAddress, scope: CalendarScope, session: CatalogSession, bootstrap: JsonObject, row: JsonObject,
+        originalTitle: String, newTitle: String, clear: String, prefix: String, suffix: String, patched: String,
+        alteredSignature: String, decoder: ProtonEventDecryptor): String {
+        var stage = "TIMESTAMPED_START"
+        try {
+            val pgp = crypto.pgpCrypto
+            val calendar = scope.calendar.value
+            val uid = row.string("UID")
+            val eventId = EventId(row.string("ID"))
+            val addressId = address.addressId
+            val email = address.email
+            suspend fun open(candidate: JsonObject, expectedTitle: String): ProtonSharedTitleBasis =
+                decoder.openSharedTitle(session, scope, eventId, candidate.revision(bootstrap), uid,
+                    expectedTitle, bootstrap, candidate)
+            val metadata = buildJsonObject { put("ID", calendar); put("Type", 0) }
+            val advanced = Instant.parse("2026-10-03T09:30:00Z")
+            val sameSecond = Instant.parse("2026-10-03T09:00:00Z")
+            suspend fun prepare(candidate: JsonObject = row, context: JsonObject = bootstrap,
+                candidateMetadata: JsonObject = metadata, candidateScope: CalendarScope = scope,
+                expectedId: EventId = eventId, expectedRevision: Revision = candidate.revision(context),
+                expectedUid: String = uid, expectedTitle: String = originalTitle,
+                replacement: String = newTitle, timestamp: Instant = advanced,
+                engine: ProtonEventDecryptor = decoder): ProtonTimestampedSharedTitle =
+                engine.prepareSharedTitleAt(session, candidateScope, expectedId, expectedRevision,
+                    expectedUid, expectedTitle, replacement, candidateMetadata, context, candidate, timestamp)
+            val originalParts = row.array("SharedEvents").map { it as JsonObject }
+            val originalClear = originalParts.single { it.number("Type") == 2L }
+            val originalSecret = originalParts.single { it.number("Type") == 3L }
+            val expectedClear = clear.replace("DTSTAMP:20261003T090000Z", "DTSTAMP:20261003T093000Z")
+                .replace("LAST-MODIFIED:20261003T090000Z", "LAST-MODIFIED:20261003T093000Z")
+            val expectedSecret = patched.replace("DTSTAMP:20261003T090000Z", "DTSTAMP:20261003T093000Z")
+            stage = "TIMESTAMPED_CLEAR_DATES"
+            val prepared = prepare()
+            check(prepared.clearSharedPart.string("Data") == expectedClear)
+            check(prepared.changed && prepared.originalRow == row)
+            check(prepared.originalRow.array("SharedEvents") == row.array("SharedEvents"))
+            check(prepared.originalRow.string("SharedKeyPacket") == row.string("SharedKeyPacket"))
+            for ((before, after) in listOf(originalClear to prepared.clearSharedPart, originalSecret to prepared.encryptedSharedPart)) {
+                check(before.filterKeys { it != "Data" && it != "Signature" } ==
+                    after.filterKeys { it != "Data" && it != "Signature" })
+                check(after.string("Data") != before.string("Data") && after.string("Signature") != before.string("Signature"))
+            }
+            check(expectedClear.contains("CREATED:20261002T090000Z\r\n") && expectedClear.contains("SEQUENCE:0007\r\n"))
+            check(!prepared.toString().contains(uid) && !prepared.toString().contains(newTitle))
+            check(prepared.originalRow !== prepared.originalRow && prepared.clearSharedPart !== prepared.clearSharedPart &&
+                prepared.encryptedSharedPart !== prepared.encryptedSharedPart)
+            stage = "TIMESTAMPED_ORIGINAL_PACKET"
+            val calendarKey = PrivateKey(calendarArmored, true,
+                passphrase = PlainByteArray(calendarSecret).encrypt(crypto.keyStoreCrypto))
+            fun decrypt(part: JsonObject): String = KeyHolderContext(crypto, PrivateKeyRing(crypto, listOf(calendarKey)),
+                PublicKeyRing(emptyList())).use { keys ->
+                val retainedKey = keys.decryptSessionKeyOrNull(Base64.getDecoder().decode(row.string("SharedKeyPacket")))
+                    ?: error("Synthetic packet unavailable")
+                val bytes = retainedKey.use { key ->
+                    keys.decryptDataOrNull(Base64.getDecoder().decode(part.string("Data")), key)
+                        ?: error("Synthetic ciphertext unavailable")
+                }
+                try { String(bytes, Charsets.UTF_8) } finally { bytes.fill(0) }
+            }
+            val reopened = decrypt(prepared.encryptedSharedPart)
+            check(reopened == expectedSecret)
+            check(reopened.startsWith(prefix.replace("DTSTAMP:20261003T090000Z", "DTSTAMP:20261003T093000Z")) && reopened.endsWith(suffix))
+            check(biweekly.Biweekly.parse(reopened).first().events.single().summary.value.replace("\r\n", "\n") == newTitle)
+            stage = "TIMESTAMPED_SIGNATURES"
+            val publicKey = addressKey.publicKey(crypto)
+            for ((plain, before, after) in listOf(Triple(expectedClear, originalClear, prepared.clearSharedPart),
+                Triple(reopened, originalSecret, prepared.encryptedSharedPart))) {
+                check(publicKey.verifyText(crypto, plain, after.string("Signature")))
+                check(!publicKey.verifyData(crypto, plain.toByteArray(Charsets.UTF_8), before.string("Signature")) &&
+                    !publicKey.verifyText(crypto, plain, before.string("Signature")))
+            }
+            stage = "TIMESTAMPED_NATIVE_READBACK"
+            // Local verification fixture only: no transport/request construction or upload.
+            val readbackRow = JsonObject(row + ("SharedEvents" to JsonArray(listOf(prepared.clearSharedPart, prepared.encryptedSharedPart))))
+            val readback = open(candidate = readbackRow, expectedTitle = newTitle)
+            check(readback.originalPlaintext.clearShared == expectedClear && readback.originalPlaintext.encryptedShared == reopened)
+            val decoded = decoder.decode(session, calendar, bootstrap, listOf(readbackRow))
+            check(decoded.deferred.isEmpty() && decoded.changes.single().eventId == eventId)
+            val imported = decoded.changes.single().content
+            check(imported.title == newTitle && imported.time == EventTime.Timed(
+                Instant.parse("2026-10-03T10:00:00Z"), Instant.parse("2026-10-03T11:00:00Z"), ZoneOffset.UTC))
+            check(imported.details == EventDetails() && imported.recurrence == null)
+            val originalDecoded = decoder.decode(session, calendar, bootstrap, listOf(row))
+            check(originalDecoded.deferred.isEmpty() && imported == originalDecoded.changes.single().content.copy(title = newTitle))
+            stage = "TIMESTAMPED_SAME_SECOND"
+            val same = prepare(timestamp = sameSecond)
+            check(same.changed && same.clearSharedPart == originalClear && decrypt(same.encryptedSharedPart) == patched)
+            check(publicKey.verifyText(crypto, patched, same.encryptedSharedPart.string("Signature")))
+            stage = "TIMESTAMPED_NO_OP"
+            val unchanged = prepare(replacement = originalTitle)
+            check(!unchanged.changed && unchanged.originalRow == row && unchanged.clearSharedPart == originalClear &&
+                unchanged.encryptedSharedPart == originalSecret)
+            stage = "TIMESTAMPED_AUTHOR_CASE"
+            val authorCaseRow = changedPart(changedPart(row, 0, "Author", JsonPrimitive(email.uppercase())),
+                1, "Author", JsonPrimitive(email.uppercase()))
+            val authorCase = prepare(candidate = authorCaseRow)
+            check(authorCase.clearSharedPart.string("Author") == email.uppercase() &&
+                authorCase.encryptedSharedPart.string("Author") == email.uppercase())
+            stage = "TIMESTAMPED_DISTINCT_CLEAR_AUTHOR"
+            val otherAddress = address.copy(addressId = AddressId("synthetic-clear-author"), email = "synthetic-clear@example.invalid")
+            val distinctAuthorRow = changedPart(row, 0, "Author", JsonPrimitive(otherAddress.email))
+            val distinctDecoder = ProtonEventDecryptor(crypto) { listOf(address, otherAddress) }
+            refused { prepare(candidate = distinctAuthorRow, engine = distinctDecoder) }
+            val retainedClear = prepare(candidate = distinctAuthorRow, timestamp = sameSecond, engine = distinctDecoder)
+            check(retainedClear.changed && retainedClear.clearSharedPart == distinctAuthorRow.array("SharedEvents")[0])
+            check(decrypt(retainedClear.encryptedSharedPart) == patched)
+            stage = "TIMESTAMPED_FOLDED_SAME_SECOND"
+            // Identical instants can still produce changed plaintext when a selected line was folded.
+            val foldedClear = clear.replace("DTSTAMP:20261003T090000Z\r\n", "DTSTAMP:20261003T\r\n 090000Z\r\n")
+            val foldedSignature = addressKey.signText(crypto, foldedClear)
+            val foldedRow = changedPart(changedPart(row, 0, "Data", JsonPrimitive(foldedClear)),
+                0, "Signature", JsonPrimitive(foldedSignature))
+            val unfolded = prepare(candidate = foldedRow, timestamp = sameSecond)
+            check(unfolded.changed && unfolded.clearSharedPart.string("Data") == clear && decrypt(unfolded.encryptedSharedPart) == patched)
+            check(unfolded.clearSharedPart.string("Signature") != foldedSignature &&
+                publicKey.verifyText(crypto, clear, unfolded.clearSharedPart.string("Signature")))
+            check(!publicKey.verifyText(crypto, clear, foldedSignature))
+            val foldedDistinctAuthor = changedPart(foldedRow, 0, "Author", JsonPrimitive(otherAddress.email))
+            refused { prepare(candidate = foldedDistinctAuthor, timestamp = sameSecond, engine = distinctDecoder) }
+            stage = "TIMESTAMPED_PERSONAL_PARTS"
+            for (field in listOf("CalendarEvents", "AttendeesEvents")) {
+                for (candidate in listOf(JsonObject(row - field), JsonObject(row + (field to JsonNull)),
+                    JsonObject(row + (field to JsonArray(listOf(buildJsonObject { put("Type", 99); put("Data", "opaque") })))))) {
+                    refused { prepare(candidate = candidate) }
+                    refused { prepare(candidate = candidate, replacement = originalTitle) }
+                }
+            }
+            stage = "TIMESTAMPED_TIME_POLICY"
+            refused { prepare(timestamp = sameSecond.minusSeconds(1)) }
+            refused { prepare(timestamp = advanced.plusNanos(1)) }
+            refused { prepare(timestamp = advanced.plusNanos(1), replacement = originalTitle) }
+            stage = "TIMESTAMPED_BINDINGS"
+            refused { prepare(expectedId = EventId("foreign-event")) }
+            refused { prepare(expectedRevision = Revision("foreign-revision")) }
+            refused { prepare(expectedUid = "foreign@calendeer.invalid") }
+            refused { prepare(expectedTitle = "Stale title") }
+            refused { prepare(candidateScope = scope.copy(account = AccountId("foreign-account"))) }
+            refused { prepare(candidateScope = scope.copy(calendar = CalendarId("foreign-calendar"))) }
+            for (index in originalParts.indices) refused { prepare(candidate = changedPart(row, index, "Signature", JsonPrimitive(alteredSignature))) }
+            refused { prepare(candidateMetadata = JsonObject(metadata + ("Type" to JsonPrimitive(1)))) }
+            refused { prepare(candidateMetadata = JsonObject(metadata + ("ID" to JsonPrimitive("foreign-calendar")))) }
+            val member = bootstrap.array("Members").single() as JsonObject
+            for ((field, value) in listOf("Flags" to 0, "Permissions" to 0)) {
+                val blocked = JsonObject(bootstrap + ("Members" to JsonArray(listOf(JsonObject(member + (field to JsonPrimitive(value)))))))
+                refused { prepare(context = blocked) }
+                refused { prepare(context = blocked, replacement = originalTitle) }
+            }
+            stage = "TIMESTAMPED_KEYS"
+            refused(RemoteImportFailure.LOCAL_KEYS) { prepare(engine = ProtonEventDecryptor(crypto) { emptyList() }) }
+            val otherArmored = pgp.generateNewPrivateKey("synthetic-signer", "example.invalid", addressSecret)
+            val unavailablePrimary = PrivateKey(otherArmored, true,
+                passphrase = PlainByteArray("synthetic-wrong-passphrase".toByteArray()).encrypt(crypto.keyStoreCrypto))
+            val secondary = PrivateKey(addressArmored, false,
+                passphrase = PlainByteArray(addressSecret).encrypt(crypto.keyStoreCrypto))
+            val partlyAvailable = address.copy(keys = listOf(
+                UserAddressKey(addressId, 1, 3, active = true, keyId = KeyId("synthetic-unavailable-primary"), privateKey = unavailablePrimary),
+                UserAddressKey(addressId, 2, 1, active = true, keyId = KeyId("synthetic-available-secondary"), privateKey = secondary)))
+            val partlyAvailableDecoder = ProtonEventDecryptor(crypto) { listOf(partlyAvailable) }
+            refused(RemoteImportFailure.LOCAL_KEYS) { prepare(engine = partlyAvailableDecoder) }
+            val signingFree = prepare(replacement = originalTitle, engine = partlyAvailableDecoder)
+            check(!signingFree.changed && signingFree.clearSharedPart == originalClear && signingFree.encryptedSharedPart == originalSecret)
+            stage = "TIMESTAMPED_FROZEN_INPUTS"
+            val mutableMetadata = metadata.toMutableMap()
+            val mutableOpaque = row.obj("OpaqueMetadata").toMutableMap()
+            val mutableParts = row.array("SharedEvents").toMutableList()
+            val mutableRow = row.toMutableMap().apply { put("OpaqueMetadata", JsonObject(mutableOpaque)); put("SharedEvents", JsonArray(mutableParts)) }
+            val mutableMembers = bootstrap.array("Members").toMutableList()
+            val mutableBootstrap = bootstrap.toMutableMap().apply { put("Members", JsonArray(mutableMembers)) }
+            var keyReads = 0
+            val mutatingDecoder = ProtonEventDecryptor(crypto) {
+                keyReads++; mutableMetadata.clear(); mutableOpaque.clear(); mutableParts.clear(); mutableMembers.clear(); mutableBootstrap.clear()
+                listOf(address)
+            }
+            val frozen = prepare(candidate = JsonObject(mutableRow), context = JsonObject(mutableBootstrap),
+                candidateMetadata = JsonObject(mutableMetadata), expectedRevision = row.revision(bootstrap), engine = mutatingDecoder)
+            check(keyReads == 1 && frozen.changed && frozen.originalRow == row && frozen.clearSharedPart.string("Data") == expectedClear)
+            val frozenSecret = frozen.encryptedSharedPart
+            mutableRow.clear()
+            check(frozen.originalRow == row && frozen.encryptedSharedPart == frozenSecret)
+            stage = "TIMESTAMPED_CANCELLATION"
+            val cancelled = CancellationException("Synthetic cancellation")
+            var propagated = false
+            try { prepare(engine = ProtonEventDecryptor(crypto) { throw cancelled }) }
+            catch (actual: CancellationException) { propagated = actual === cancelled }
+            check(propagated)
+            return "RESULT=SUCCESS"
+            } catch (cancelled: CancellationException) { throw cancelled }
+          catch (_: Exception) { return "RESULT=FAILURE STAGE=$stage" }
     }
 
     private suspend fun refused(reason: RemoteImportFailure = RemoteImportFailure.UNSUPPORTED, action: suspend () -> Unit) {

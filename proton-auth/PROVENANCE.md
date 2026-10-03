@@ -71,9 +71,21 @@ SEQUENCE and unrelated raw spans intact. The policy requires a specific plaintex
 layout; it does not copy an upstream save use case or claim universal Proton
 timestamp semantics. The [source audit](../docs/research/TITLE_EDIT_METADATA.md)
 records pinned Android/Web differences and why SEQUENCE is not a conflict token.
-No new dependency or upstream code was copied. Changed clear and encrypted shared
-text needs qualified replacement signatures; this method remains separate from crypto preparation, with
-no production caller, persistent envelope or transport.
+No new dependency or upstream code was copied. The method itself only returns
+plaintext; its offline `prepareSharedTitleAt` caller now reuses the existing Core
+session-key decryption, encryption and text-signing primitives. It requires
+explicitly empty personal/attendee partitions, compares each plaintext separately
+and replaces only Data/Signature in parts that change. The selected primary author
+must match each part being re-signed; an unchanged clear part retains its original
+verified author and signature. The encrypted author check also remains in no-ops,
+as in the legacy path. Original session keys, key packets, JSON and opaque part
+metadata remain separate from the replacement fragments.
+
+`ProtonTimestampedSharedTitle.kt` freezes all three values independently and
+redacts diagnostics. This is local primitive integration, not a copied save use
+case, complete event envelope or accepted timestamp policy for all Proton clients.
+No new dependency or upstream code was copied. There is no production caller,
+persistence, transport, current rights proof or concurrent-write guarantee.
 
 ## Experimental single CREATE submission and inspection
 

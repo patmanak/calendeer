@@ -6,6 +6,7 @@ import com.patmanak.proton.andcalendarbridge.sync.*
 import java.nio.ByteBuffer
 import java.nio.charset.CodingErrorAction
 import java.util.Base64
+import java.time.Instant
 import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.Json
@@ -66,30 +67,64 @@ internal class ProtonEventDecryptor(private val crypto: CryptoContext, private v
     suspend fun prepareSharedTitle(session: CatalogSession, scope: CalendarScope, expectedEventId: EventId,
         expectedRevision: Revision, expectedUid: String, expectedTitle: String, newTitle: String,
         metadata: JsonObject, bootstrap: JsonObject, row: JsonObject): ProtonReencryptedSharedTitle {
+        val prepared = prepareSharedTitleFragments(session, scope, expectedEventId, expectedRevision,
+            expectedUid, expectedTitle, newTitle, metadata, bootstrap, row, timestamp = null)
+        return ProtonReencryptedSharedTitle(prepared.originalRow, prepared.encryptedSharedPart, prepared.changed)
+    }
+
+    /** Offline timestamp policy and crypto only; no clock, current rights proof or upload.
+     * Requires explicitly empty personal/attendee partitions, even for a no-op.
+     * Re-signs only parts whose actual plaintext changes; original JSON remains separate.
+     * A no-op does not certify metadata eligibility for a subsequent changed title.
+     */
+    suspend fun prepareSharedTitleAt(session: CatalogSession, scope: CalendarScope, expectedEventId: EventId,
+        expectedRevision: Revision, expectedUid: String, expectedTitle: String, newTitle: String,
+        metadata: JsonObject, bootstrap: JsonObject, row: JsonObject, timestamp: Instant): ProtonTimestampedSharedTitle =
+        prepareSharedTitleFragments(session, scope, expectedEventId, expectedRevision, expectedUid,
+            expectedTitle, newTitle, metadata, bootstrap, row, timestamp)
+
+    private suspend fun prepareSharedTitleFragments(session: CatalogSession, scope: CalendarScope, expectedEventId: EventId,
+        expectedRevision: Revision, expectedUid: String, expectedTitle: String, newTitle: String,
+        metadata: JsonObject, bootstrap: JsonObject, row: JsonObject, timestamp: Instant?): ProtonTimestampedSharedTitle {
         try {
             val frozenMetadata = snapshot(metadata)
             return withSharedTitle(session, scope, expectedEventId, expectedRevision, expectedUid, expectedTitle,
                 bootstrap, row) { basis, keys, addresses, frozenBootstrap ->
-                val selected = ProtonCreateContextPolicy.select(scope, frozenMetadata, frozenBootstrap, addresses)
                 val original = basis.originalRow
-                val secretPart = original.array("SharedEvents").map { it as JsonObject }.single { it.number("Type") == 3L }
+                // Personal partitions can contain their own DTSTAMP; never silently retain stale dates.
+                if (timestamp != null && (original.array("CalendarEvents").isNotEmpty() ||
+                    original.array("AttendeesEvents").isNotEmpty())) unsupportedEvents()
+                val selected = ProtonCreateContextPolicy.select(scope, frozenMetadata, frozenBootstrap, addresses)
+                val parts = original.array("SharedEvents").map { it as JsonObject }
+                val clearPart = parts.single { it.number("Type") == 2L }
+                val secretPart = parts.single { it.number("Type") == 3L }
+                // Preserve the legacy encrypted-author check, including its no-op contract.
                 if (!selected.address.email.equals(secretPart.string("Author"), ignoreCase = true)) unsupportedEvents()
-                val patched = basis.patchTitle(newTitle).patchedPlaintext
-                if (patched.encryptedShared == basis.originalPlaintext.encryptedShared)
-                    return@withSharedTitle ProtonReencryptedSharedTitle(original, secretPart, changed = false)
+                val patched = if (timestamp == null) basis.patchTitle(newTitle).patchedPlaintext
+                    else ProtonSharedTitlePatcher.patchAt(basis.originalPlaintext, expectedTitle, newTitle, expectedUid, timestamp)
+                val clearChanged = patched.clearShared != basis.originalPlaintext.clearShared
+                val secretChanged = patched.encryptedShared != basis.originalPlaintext.encryptedShared
+                if (!clearChanged && !secretChanged)
+                    return@withSharedTitle ProtonTimestampedSharedTitle(original, clearPart, secretPart, changed = false)
+                // A trusted original author need not be the selected writer if its part is unchanged.
+                if (clearChanged && !selected.address.email.equals(clearPart.string("Author"), ignoreCase = true)) unsupportedEvents()
                 GateCProtectedStorageGuard.requireAvailable(crypto.keyStoreCrypto)
                 if (selected.signingKey.unlockOrNull(crypto)?.use { true } != true) missingLocalKeys()
-                val sessionKey = keys.decryptSessionKeyOrNull(Base64.getDecoder().decode(original.string("SharedKeyPacket")))
-                    ?: missingLocalKeys()
-                val encrypted = sessionKey.use { key ->
-                    val bytes = patched.encryptedShared.toByteArray(Charsets.UTF_8)
-                    try { Base64.getEncoder().encodeToString(crypto.pgpCrypto.encryptData(bytes, key)) }
-                    finally { bytes.fill(0) }
+                val replacementClear = if (!clearChanged) clearPart else JsonObject(clearPart + mapOf(
+                    "Data" to JsonPrimitive(patched.clearShared),
+                    "Signature" to JsonPrimitive(selected.signingKey.signText(crypto, patched.clearShared))))
+                val replacementSecret = if (!secretChanged) secretPart else {
+                    val sessionKey = keys.decryptSessionKeyOrNull(Base64.getDecoder().decode(original.string("SharedKeyPacket")))
+                        ?: missingLocalKeys()
+                    val encrypted = sessionKey.use { key ->
+                        val bytes = patched.encryptedShared.toByteArray(Charsets.UTF_8)
+                        try { Base64.getEncoder().encodeToString(crypto.pgpCrypto.encryptData(bytes, key)) }
+                        finally { bytes.fill(0) }
+                    }
+                    JsonObject(secretPart + mapOf("Data" to JsonPrimitive(encrypted),
+                        "Signature" to JsonPrimitive(selected.signingKey.signText(crypto, patched.encryptedShared))))
                 }
-                val signature = selected.signingKey.signText(crypto, patched.encryptedShared)
-                val replacement = JsonObject(secretPart + mapOf("Data" to JsonPrimitive(encrypted), "Signature" to JsonPrimitive(signature)))
-                // Original signatures stay only on their original parts in the original row.
-                ProtonReencryptedSharedTitle(original, replacement, changed = true)
+                ProtonTimestampedSharedTitle(original, replacementClear, replacementSecret, changed = true)
             }
         } catch (cancelled: CancellationException) { throw cancelled }
           catch (failure: RemoteImportException) { throw failure }

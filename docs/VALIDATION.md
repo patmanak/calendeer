@@ -1477,11 +1477,58 @@ misplaced metadata, negative/nondecimal/overflowing sequence values, recognized
 event-level recurrence/invitation markers, calendar/event METHOD and output byte
 budget overflow. The legacy title-only API retains its earlier behavior.
 These are plaintext policy checks, not event-level rights or service validation.
-The method has no crypto-preparation/production caller. Earlier native crypto
-results do not qualify signatures on the new timestamp-bearing plaintext;
-renewing both signatures and timestamp-bearing personal parts remains untested.
+The plaintext method itself supplies no signatures. Earlier native title-only
+crypto results did not qualify the new timestamp-bearing plaintext. Personal
+partition timestamp handling remains unqualified; the later crypto continuation
+below explicitly excludes those parts.
 The legacy EXRULE marker was initially admitted; a targeted recurrence-refusal
 test failed before adding the explicit exclusion in both shared partitions.
 All 15 focused cases and the 309 Proton-adapter JVM cases then passed. Application
 build, lint (zero errors) and independent source review passed. No device or
 service operation was performed; this slice qualifies only the local text policy.
+
+## Offline timestamped title signatures
+
+`ProtonTimestampedSharedTitleTest` checks independent frozen copies of the original
+row, clear fragment and encrypted fragment, retaining the original key packet and
+original signatures without substituting the replacement parts. Nested mutable
+input collections and getter aliases cannot change another fragment; diagnostics
+redact all three values. These are container tests, not crypto evidence.
+
+Two additional `ProtonSharedTitleCryptoDeviceTest` fixtures begin with binary- or
+text-signed synthetic originals and an explicit edit instant. They compare the
+clear text exactly against changes limited to DTSTAMP/LAST-MODIFIED, and the
+decrypted text against SUMMARY/DTSTAMP changes. CREATED, raw SEQUENCE, all other
+text spans and opaque row/part metadata remain unchanged. New signatures verify,
+old signatures reject the changed text, and the original SharedKeyPacket still
+decrypts the replacement ciphertext. The production opener and page decoder
+read the synthetic replacement parts locally; imported content equals the original
+decoded content with only the expected title changed, including original times,
+description, reminders and recurrence state.
+
+At the original instant, an unchanged clear fragment retains its exact signature.
+A folded DTSTAMP that is rewritten at that same instant does receive a new
+signature: comparisons concern actual text, not just logical date equality.
+A different verified local clear author is admitted only when its part stays
+unchanged. Changed clear authors must match the selected primary writer. Author
+casing is preserved. No-op changes retain both original parts and require no
+primary signing-key unlock, even when a distinct primary is unavailable and a
+secondary can read the original. No-op results do not certify edit eligibility.
+
+Refusals cover missing, null or nonempty personal/attendee arrays (also in no-ops),
+backdates, nanoseconds, stale bindings, altered original signatures, invalid
+calendar/WRITE context and unavailable local keys. Inputs are frozen before the
+single local address read; cancellation propagates. Personal partitions remain
+excluded rather than silently retaining potentially stale DTSTAMP values.
+
+Both new native fixtures first failed on unchanged clear dates with the legacy
+SUMMARY-only crypto preparation. After integration all 312 Proton-adapter JVM
+cases and twelve selected native cases passed on an authorized physical device:
+six shared-title cases and six existing import/preparation regressions. App/test
+APK builds, lint (zero errors) and independent source review passed. The final
+application was installed and reopened after testing. The fixtures use synthetic
+in-memory keys and events, without service or Calendar Provider writes.
+
+This verifies the restricted offline fragments, not an uploadable event envelope,
+current access/session proof, timestamp-bearing personal parts, concurrent-write
+protection or Proton UPDATE acceptance. Production UPDATE/DELETE remain disabled.

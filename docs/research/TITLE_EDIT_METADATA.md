@@ -54,10 +54,25 @@ strings exactly, without metadata rewriting; its explicit instant must still hav
 the supported representation. Other layouts are refused rather than moved or
 rebuilt from the display model. No timestamps are read from a system clock.
 
-This method has no production or crypto-preparation caller. Its output is
-plaintext only; old signatures would not authenticate either modified part.
-Re-signing both parts, confirming their authors, synchronizing timestamp-bearing
-personal partitions, proving current access and preserving the full wire envelope
-require separate qualification. Existing title-only crypto fragments retain their
-earlier timestamp behavior. No event JSON or UPDATE request is assembled, and
-the [conditional-write boundary](CONDITIONAL_WRITES.md) remains unchanged.
+The method returns plaintext only; old signatures do not authenticate modified
+parts. The offline `ProtonEventDecryptor.prepareSharedTitleAt` integration prepares
+separate clear and encrypted fragments using the existing Proton Core primitives.
+It verifies the original signatures and requires explicitly empty CalendarEvents
+and AttendeesEvents, including for no-ops, because personal partitions may carry
+their own DTSTAMP. It never silently drops or rewrites those partitions.
+
+The encrypted-part author must match the selected local primary signer, as in the
+legacy title-only crypto path. A clear part that actually changes must also have
+that author; a clear part whose text remains exact retains its original signature
+and verified author. Thus edits at the same instant do not unnecessarily re-sign
+an unchanged clear part. Both comparisons use actual plaintext, including folding.
+The original shared session key and key packet are retained. Only Data/Signature
+are replaced within a changed fragment, and unknown part metadata remains opaque.
+
+The original JSON and both fragments remain separate ephemeral copies. A no-op
+does not establish metadata eligibility for a subsequent edit. There is no
+production caller, active-session/access proof, persistent envelope or service
+qualification. Synchronizing personal timestamps and preserving a complete wire
+envelope remain unresolved. Existing title-only fragments retain their earlier
+timestamp behavior. No event JSON or UPDATE request is assembled, and the
+[conditional-write boundary](CONDITIONAL_WRITES.md) remains unchanged.
