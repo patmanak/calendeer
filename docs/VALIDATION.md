@@ -1743,3 +1743,42 @@ two new context/crypto fixtures plus eighteen base/journal/shared-title/create/
 import regressions. App/test APK builds, lint (zero errors, twenty existing
 warnings) and independent source review passed. The final application was
 installed and launched after testing.
+
+## Captured local-title preparation and atomic retention
+
+`LocalTitlePreparationCoordinatorDeviceTest` uses isolated real SQL with controlled
+account, permission and preparation ports. Its first retention assertion failed
+against the unsupported stub before implementation. Twenty-three cases then check
+first retention/reopening, historical replay without new preparation or timestamp
+replacement, scope/mutation/profile/time/format gates, session/account/permission
+loss, calendar pause and catalog loss, import/deferred conflicts, cancellation,
+incompatible returned records and owner replacement while preparation is running.
+
+The final insertion transaction also refuses a SQL baseline removed after the
+last account read and preserves an independently inserted first record. Generic
+or future saved formats return HISTORICAL without reinterpretation. Remote
+conflicts conditionally mark only the exact paused owner, without a new imported
+base; an SQL trigger rejects that transition to verify rollback, a sanitized result
+and explicit retry. A cancelled coroutine after port completion retains no capsule.
+The transaction lease closes after failures and cancellation; no dispatch or
+Android acknowledgement is admitted.
+
+The two native `LocalEditPreparationCryptoDeviceTest` fixtures now pass their
+already produced Core preparations through this coordinator and journal, repeat
+as HISTORICAL without another port call, and reopen with a different SQL helper.
+The recovered record then passes fresh Keystore opening, original-key decryption,
+renewed signatures and native readback. These fixtures qualify coordinator-to-SQL
+retention of native crypto evidence; their preparation port returns a controlled
+record, so they do not establish an end-to-end coordinator/service GET journey.
+
+All twenty-three new cases and fifty-five selected physical cases passed:
+twenty-three coordinator, nineteen journal, two native journal/crypto, nine edit
+capture and two native adapter-context regressions. All ten app JVM cases passed.
+App/test APK builds, lint (zero errors, twenty existing warnings) and independent
+source review passed. The final application was installed and launched.
+
+The observed projection base is SQL history, not current Android contents. No
+service or Calendar Provider fixture writes occur. Live port qualification,
+killed-process/automatic resumption and server concurrency remain unqualified.
+Schema 14 and historical opening are unchanged; production UPDATE/DELETE remain
+disabled, and no UI or worker automatically calls this entry.

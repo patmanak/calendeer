@@ -276,9 +276,9 @@ Session identity is rechecked after each stage and after preparation. The shared
 logout mutex serializes cleanup with in-progress work; it does not instantly cancel
 a preparation when logout is requested. Subsequent calls after cleanup are refused.
 
-This is an explicit preparation port, with no application caller, automatic
-capture, journal admission, worker or remote write. Calendar mode, scope generation
-and current intent ownership still belong to the application. Fresh reads are
+This preparation port has the explicit coordinator entry described below, with no
+UI caller, automatic capture, worker or remote write. Calendar mode, scope generation
+and current intent ownership belong to the application. Fresh reads are
 successive observations, not an atomic server snapshot or concurrency guarantee.
 The local sealed format is unchanged; old records are not upgraded by opening.
 Controlled read/session fixtures and native Core crypto test this integration;
@@ -287,6 +287,33 @@ disabled. All thirteen new adapter cases and both new shared-facade cases passed
 with the complete 363 Proton-adapter and 160 sync JVM suites. Twenty selected
 native crypto cases, app/test APK builds, lint (zero errors) and independent source
 review passed. The final application was installed and launched after testing.
+
+`ImportCoordinator.prepareLocalTitle` now loads an already captured SQL intent
+and can retain its first protected preparation through the dedicated adapter port.
+It checks account/session generation, Android permissions, selected scope,
+checkpoint/adapter formats, exact mutation ownership and the title-only profile
+before preparation. The insertion transaction rechecks the active scope, exact
+paused owner, projected SQL baseline, current imported base and absence of deferred
+content. Lease and cancellation checks precede commit. A remote conflict can only
+move the exact paused owner to CONFLICT, without inventing a new base or replacing
+local contents or preparation evidence.
+
+Existing records return an explicit HISTORICAL result without another adapter
+call or timestamp/payload replacement, including older preparation formats. This
+does not requalify their access or crypto, nor adopt them as the current format.
+Conflicted owners remain conflicted and their saved evidence remains inspectable.
+The original journal inspection API and schema 14 are unchanged. No Android row
+is read, acknowledged or modified by this step; the SQL baseline is a historical
+reference, not proof of present Provider contents. No UI/worker invokes this entry
+automatically, and UPDATE/DELETE stay disabled.
+
+All twenty-three new coordinator cases and fifty-five selected physical-device
+cases passed, including nineteen journal regressions, two native crypto/journal
+round-trips through the coordinator, nine capture regressions and two native
+adapter-context regressions. App JVM tests, app/test APK builds, lint (zero errors)
+and independent source review passed. The final application was installed and
+launched without service or Provider fixture writes. Killed-process orchestration,
+live service qualification and concurrent-write guarantees remain separate work.
 
 An internal offline CREATE preparer now reuses Proton's simple-event partition:
 signed clear date metadata and signed encrypted display text. It uses Biweekly

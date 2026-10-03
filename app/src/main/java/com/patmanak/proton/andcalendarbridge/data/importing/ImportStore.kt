@@ -29,6 +29,8 @@ import org.json.JSONArray
 import org.json.JSONException
 
 /** App-private, backup-excluded durable import queue. Every page and checkpoint commits together. */
+enum class LocalTitlePreparationAdmission { ELIGIBLE, STORED, HISTORICAL, INACTIVE, UNQUALIFIED, CONFLICT }
+
 class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
     SQLiteOpenHelper(context, name, null, 14), SyncStore {
     private val lock = Mutex()
@@ -1075,16 +1077,67 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
             }
             check(activeProjectionScope(db, intent.scope)) { "Inactive local preparation scope" }
             require(readPreparationOwner(db, intent.scope, intent.base.eventId) == intent) { "Stale local preparation owner" }
-            db.insertOrThrow("local_edit_preparations", null, ContentValues().apply {
-                put("scope", key(intent.scope)); put("mutation", intent.id.value); put("event", intent.base.eventId.value)
-                put("adapter", intent.format.id); put("version", intent.format.version)
-                put("base", base); put("local", local); put("state", intent.state.name)
-                put("timestamp", frozen.timestamp.toString()); put("prep_adapter", frozen.format.id)
-                put("prep_version", frozen.format.version); put("payload", frozen.protectedPayload)
-            })
-            checkStagingCapacity(db)
+            insertLocalTitlePreparation(db, frozen, base, local)
             true
         }
+    }
+    /** SQL observation only; does not inspect Android or refresh remote access. */
+    suspend fun assessLocalTitlePreparation(intent: LocalEditIntent): LocalTitlePreparationAdmission =
+        stagingMutation(intent.scope) { db -> localTitlePreparationAdmission(db, intent) }
+
+    /** First admission rechecks the owner, checkpoint, baseline and remote in the insertion transaction. */
+    suspend fun retainCurrentLocalTitlePreparation(value: LocalEditPreparation): LocalTitlePreparationAdmission {
+        val frozen = value.copy(intent = LocalEditPreparation.freezeIntent(value.intent))
+        val base = encodeChange(frozen.intent.base).also(::requirePreparationSnapshotBudget)
+        val local = encodeChange(frozen.intent.base.copy(content = frozen.intent.content)).also(::requirePreparationSnapshotBudget)
+        return stagingMutation(frozen.intent.scope) { db ->
+            val admission = localTitlePreparationAdmission(db, frozen.intent)
+            if (admission != LocalTitlePreparationAdmission.ELIGIBLE) return@stagingMutation admission
+            insertLocalTitlePreparation(db, frozen, base, local)
+            LocalTitlePreparationAdmission.STORED
+        }
+    }
+    /** Monotone exact-owner transition after a remote conflict; original snapshots/evidence stay intact. */
+    suspend fun conflictLocalTitlePreparation(intent: LocalEditIntent): LocalTitlePreparationAdmission =
+        stagingMutation(intent.scope) { db ->
+            val admission = localTitlePreparationAdmission(db, intent)
+            if (admission !in listOf(LocalTitlePreparationAdmission.ELIGIBLE, LocalTitlePreparationAdmission.HISTORICAL))
+                return@stagingMutation admission
+            check(db.update("local_edits", ContentValues().apply { put("state", LocalEditState.CONFLICT.name) },
+                "scope=? AND event=? AND mutation=? AND kind='UPDATE'",
+                arrayOf(key(intent.scope), intent.base.eventId.value, intent.id.value)) == 1)
+            LocalTitlePreparationAdmission.CONFLICT
+        }
+    private fun localTitlePreparationAdmission(db: SQLiteDatabase, intent: LocalEditIntent): LocalTitlePreparationAdmission {
+        val target = intent.scope
+        if (!activeProjectionScope(db, target)) return LocalTitlePreparationAdmission.INACTIVE
+        val format = db.rawQuery("SELECT checkpoint FROM calendars WHERE scope=?", arrayOf(key(target))).use {
+            if (!it.moveToFirst() || it.isNull(0)) null else decodeCheckpoint(target, it.getString(0)).format
+        }
+        if (format != intent.format) return LocalTitlePreparationAdmission.UNQUALIFIED
+        val owner = readPreparationOwner(db, target, intent.base.eventId) ?: return LocalTitlePreparationAdmission.UNQUALIFIED
+        if (owner != intent) return if (owner.state == LocalEditState.CONFLICT && owner.copy(state = LocalEditState.PAUSED) == intent)
+            LocalTitlePreparationAdmission.CONFLICT else LocalTitlePreparationAdmission.UNQUALIFIED
+        if (owner.state == LocalEditState.CONFLICT) return LocalTitlePreparationAdmission.CONFLICT
+        if (readBaseline(db, target, intent.base.eventId) != intent.base) return LocalTitlePreparationAdmission.UNQUALIFIED
+        val remote = stagedQuery(db, "SELECT payload FROM records WHERE scope=? AND event=?",
+            arrayOf(key(target), intent.base.eventId.value)).use { if (it.moveToFirst()) decodeChange(it.getString(0)) else null }
+        if (remote != intent.base || hasRawEventRow(db, "deferred_events", target, intent.base.eventId))
+            return LocalTitlePreparationAdmission.CONFLICT
+        // A cache hit is historical evidence, never a fresh crypto/access qualification.
+        if (readLocalEditPreparation(db, target, intent.base.eventId) != null) return LocalTitlePreparationAdmission.HISTORICAL
+        return LocalTitlePreparationAdmission.ELIGIBLE
+    }
+    private fun insertLocalTitlePreparation(db: SQLiteDatabase, value: LocalEditPreparation, base: String, local: String) {
+        val intent = value.intent
+        db.insertOrThrow("local_edit_preparations", null, ContentValues().apply {
+            put("scope", key(intent.scope)); put("mutation", intent.id.value); put("event", intent.base.eventId.value)
+            put("adapter", intent.format.id); put("version", intent.format.version)
+            put("base", base); put("local", local); put("state", intent.state.name)
+            put("timestamp", value.timestamp.toString()); put("prep_adapter", value.format.id)
+            put("prep_version", value.format.version); put("payload", value.protectedPayload)
+        })
+        checkStagingCapacity(db)
     }
     /** Historical inspection only: a frozen PAUSED snapshot never resets the current conflict state. */
     suspend fun localEditPreparation(scope: CalendarScope, eventId: EventId): LocalEditPreparation? =
