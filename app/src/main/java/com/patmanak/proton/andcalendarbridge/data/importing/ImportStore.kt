@@ -1067,6 +1067,38 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
         check(admitTransaction(scope)) { "Inactive import lease" }
         edit
     }
+    /** Bounded metadata index only. No captured contents, preparation payloads or write authority. */
+    suspend fun retainedLocalChanges(query: RetainedLocalChangeQuery): RetainedLocalChangePage =
+        stagingMutation(query.scope) { db ->
+            try {
+                // Bound strings before loading a CursorWindow, including the look-ahead row.
+                val columns = "CASE WHEN typeof(event)='text' AND length(CAST(event AS BLOB)) BETWEEN 1 AND 4096 THEN CAST(event AS BLOB) END, " +
+                    "CASE WHEN typeof(mutation)='text' AND length(CAST(mutation AS BLOB)) BETWEEN 1 AND 4096 THEN CAST(mutation AS BLOB) END, " +
+                    "CASE WHEN typeof(kind)='text' AND length(CAST(kind AS BLOB)) <= 6 THEN kind END, " +
+                    "CASE WHEN typeof(state)='text' AND length(CAST(state AS BLOB)) <= 8 THEN state END"
+                val position = if (query.cursor == null) "" else " AND event COLLATE BINARY > ?"
+                val args = buildList {
+                    add(key(query.scope)); query.cursor?.let { add(it.afterEvent.value) }; add((query.limit + 1).toString())
+                }.toTypedArray()
+                val rows = db.rawQuery("SELECT $columns FROM local_edits WHERE scope=?$position " +
+                    "ORDER BY event COLLATE BINARY LIMIT ?", args).use { row ->
+                    buildList {
+                        while (row.moveToNext()) {
+                            require((0..3).none { row.isNull(it) })
+                            fun identity(column: Int) = Charsets.UTF_8.newDecoder()
+                                .onMalformedInput(CodingErrorAction.REPORT).onUnmappableCharacter(CodingErrorAction.REPORT)
+                                .decode(java.nio.ByteBuffer.wrap(row.getBlob(column))).toString()
+                            add(RetainedLocalChangeRef(EventId(identity(0)), MutationId(identity(1)),
+                                MutationKind.valueOf(row.getString(2)), LocalEditState.valueOf(row.getString(3))))
+                        }
+                    }
+                }
+                RetainedLocalChangePage.fromOrderedMetadata(query, rows)
+            } catch (cancelled: CancellationException) { throw cancelled }
+              catch (failure: SQLiteException) { throw failure }
+              catch (_: Exception) { throw IllegalStateException("Invalid retained change metadata") }
+        }
+
     /** Atomic historical SQL read, including paused/unavailable calendars. No preparation/upload admission. */
     suspend fun inspectLocalEdit(scope: CalendarScope, eventId: EventId, mutationId: MutationId): LocalEditReview? =
         stagingMutation(scope) { db ->

@@ -118,6 +118,38 @@ base. An unresolved receipt for different pending content blocks projection
 instead of being replaced or replayed as stale data. Adapter, generation, lease
 and permission gates apply to preparation and recovery as well as normal import.
 
+## Retained change metadata index
+
+The explicit internal `ImportCoordinator.retainedLocalChanges` entry point
+discovers already retained UPDATE/DELETE intentions without reading captured
+contents or protected preparations. A page contains only the exact event/mutation
+references, kind and retained PAUSED/CONFLICT state. Discovery does not validate
+the captured content, adapter compatibility or current Provider/server state;
+route each reference through its separate exact historical inspection.
+
+Each query binds the account/calendar/generation, accepts 1–50 entries and uses
+a protocol-1 position in the local index. SQLite BINARY event ordering and a
+strict lower boundary avoid repeating the previous page's boundary. The first
+page has no lower boundary. One extra row determines continuation, and every
+selected row, including that extra row, must have valid metadata. SQL checks
+TEXT storage classes and byte bounds before loading identities; the domain
+requires valid UTF-8 identities of at most 4096 bytes without control characters.
+Malformed metadata refuses the whole page without consuming anything or exposing
+its value/cause. Corruption beyond the selected rows remains unknown until read.
+
+This is a current historical index, not a frozen multi-page snapshot. State can
+advance between pages, and an insertion behind the cursor requires restarting
+from the first page. A terminal page only means that query saw no continuation;
+it does not prove there are no later changes. Cursors cannot cross scopes,
+generations or protocol versions. They are in-memory local positions, unrelated
+to Proton's import/change cursors.
+
+Every page repeats account, generation, selection-policy and permission gates
+before/after SQL. Known paused/unavailable calendars remain historically visible;
+session or permission loss discards the result. Cancellation propagates and the
+owner closes its leases. Returned lists are frozen and diagnostics are redacted.
+No schema, UI/worker caller, automatic capture, resolution or dispatch is added.
+
 ## Historical DELETE inspection
 
 Explicit internal `ImportCoordinator.inspectLocalDelete` reads the exact retained

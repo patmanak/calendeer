@@ -467,6 +467,19 @@ existing warnings), synthetic visual inspection and independent source review
 passed. The final app was installed and launched. These counts report already
 captured intentions; automatic detection and outgoing UPDATE/DELETE stay disabled.
 
+An explicit internal metadata index now discovers retained UPDATE/DELETE owners
+in scoped pages of at most fifty entries. It reads only event/mutation references,
+kind and retained state, preserving captured contents and all journals. Cursor
+scope/protocol, strict identity bounds, SQL storage types and look-ahead metadata
+are checked; account/generation/policy/permission gates repeat for each page.
+Discovery is not content qualification or a frozen multi-page snapshot: additions
+behind the cursor need a new traversal. Separate exact historical inspections
+remain authoritative for their own limited purpose. No UI/worker or upload caller
+is connected. See [local capture](LOCAL_EDIT_CAPTURE.md).
+Bounded queries, cursor reopening, corruption refusal and historical access gates
+have passed isolated physical SQL qualification. Existing UPDATE/DELETE inspection
+and metadata-summary regression cases also pass. No service write was performed.
+
 The shared sync endpoint's one-shot transport permit now qualifies a single
 supported CREATE envelope before constructing its body. UPDATE/DELETE, mixed
 operations, overwrite/import, ambiguous JSON and unknown envelope fields are

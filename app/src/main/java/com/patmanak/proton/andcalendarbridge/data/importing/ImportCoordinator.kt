@@ -26,6 +26,14 @@ data class ImportUiState(val selections: List<ImportStore.Selection> = emptyList
     val hasPermission: Boolean = false, val authenticated: Boolean = false, val busy: Boolean = false)
 enum class CreateAssociationResult { INACTIVE, UNRESOLVED, WAITING_IMPORT, WAITING_PROVIDER, ASSOCIATED }
 enum class LocalEditCaptureResult { INACTIVE, UNQUALIFIED, RETAINED, CONFLICT, UNAVAILABLE }
+sealed interface RetainedLocalChangeListing {
+    data class Available(val page: RetainedLocalChangePage) : RetainedLocalChangeListing {
+        override fun toString() = "RetainedLocalChangeListing.Available(REDACTED)"
+    }
+    data object Inactive : RetainedLocalChangeListing
+    data object Unqualified : RetainedLocalChangeListing
+    data object Unavailable : RetainedLocalChangeListing
+}
 sealed interface LocalEditInspection {
     data class Available(val review: LocalEditReview) : LocalEditInspection {
         override fun toString() = "LocalEditInspection.Available(REDACTED)"
@@ -398,6 +406,28 @@ class ImportCoordinator(
             if (captured.state == LocalEditState.CONFLICT) LocalEditCaptureResult.CONFLICT else LocalEditCaptureResult.RETAINED
         } catch (cancelled: CancellationException) { throw cancelled }
           catch (_: Exception) { LocalEditCaptureResult.UNAVAILABLE }
+          finally {
+              store.admitTransaction = { false }
+              projection.admitOperation = { false }
+          }
+    }
+
+    /** Explicit metadata discovery. Each page requires a fresh historical account/permission gate. */
+    suspend fun retainedLocalChanges(query: RetainedLocalChangeQuery): RetainedLocalChangeListing = mutex.withLock {
+        val target = query.scope
+        val expected = generation
+        val policy = createPolicyRevision.get()
+        val active = { authenticated && generation == expected && createPolicyRevision.get() == policy && hasCalendarPermissions() }
+        try {
+            if (!isCurrent(expected, target.account) || !active()) return@withLock RetainedLocalChangeListing.Inactive
+            store.admitTransaction = { it == target && active() }
+            if (store.selections(target.account).none { it.scope == target }) return@withLock RetainedLocalChangeListing.Unqualified
+            val page = store.retainedLocalChanges(query)
+            currentCoroutineContext().ensureActive()
+            if (!isCurrent(expected, target.account) || !active()) return@withLock RetainedLocalChangeListing.Inactive
+            RetainedLocalChangeListing.Available(page)
+        } catch (cancelled: CancellationException) { throw cancelled }
+          catch (_: Exception) { RetainedLocalChangeListing.Unavailable }
           finally {
               store.admitTransaction = { false }
               projection.admitOperation = { false }

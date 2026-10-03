@@ -29,6 +29,34 @@ Keep run-specific outputs, device/account identities, questions and reviewer
 handoffs in ignored local files. Update public acceptance and limitations when
 behavior changes, not for each command run.
 
+## Retained change metadata pagination
+
+`RetainedLocalChangePageTest` covers page/limit/cursor contracts, duplicate refusal,
+strict UTF-8 identity bounds, ownership, frozen lists and redacted diagnostics.
+The domain preserves the store's order; it does not compare opaque event IDs
+using JVM UTF-16 string ordering.
+
+`RetainedLocalChangePageDeviceTest` uses isolated real SQLite stores and controlled
+account/permission ports. It checks fifty-row pages, exact/empty boundaries,
+account/calendar/generation isolation, SQLite BINARY Unicode ordering and bound
+SQL parameters, cursor reopening, mutable traversal, both kinds/states and exact
+routing into the existing historical inspection entries. Unreadable snapshots
+prove discovery does not decode captured contents or grant content qualification.
+First-row/look-ahead corruption, oversized/control identities, malformed UTF-8
+TEXT bytes and non-TEXT SQL storage classes refuse complete pages.
+Session/policy/reconnect/cancellation
+fixtures verify initial/final gates and lease closure. Complete typed SQL snapshots
+compare before/after reads; scheduler counters stay unchanged except when a
+controlled reconnection intentionally schedules normal startup recovery.
+No Provider or service contents are accessed by these fixtures.
+
+The BLOB diagnostic test failed before explicit SQL type checks because the
+store returned a platform conversion exception instead of the constant metadata
+refusal. On the qualified Android device, conversion already failed; no paging
+loop was observed. This distinction avoids claiming a device defect from a
+theoretical SQLite storage-class ordering risk. UPDATE/DELETE submission, automatic
+capture, a UI issue list and a frozen cross-page snapshot remain unqualified.
+
 ## Debug-only read-only event version inspection
 
 `ProtonEventVersionProbeTest` covers descriptive header/number categories,
