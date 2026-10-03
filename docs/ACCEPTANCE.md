@@ -50,6 +50,10 @@ policies. JVM/fake evidence must not be presented as Android or Proton evidence.
   opaque state. Checkpoint invalidation cannot silently discard pending operations.
 - Read-only mode, revoked rights, unsupported data or unresolved conflict prevent
   dispatch. The guards apply in the engine, regardless of UI editability.
+- An adapter with no declared mutation capabilities blocks every queued mutation
+  even when cached access grants all operations. CREATE-only capability cannot
+  admit UPDATE/DELETE against a matching cached base. Capability withdrawal blocks
+  admission; restoration never requeues blocked or uncertain work.
 - Persist an uncertain outcome before sending a mutation. If the response is lost,
   a later trigger does not duplicate the write; require reconciliation.
 - Incomplete pages/coverage never imply remote deletion. Explicit remote deletion

@@ -19,6 +19,15 @@ package com.patmanak.proton.andcalendarbridge.sync
  */
 interface RemoteCalendarAdapter {
     val format: AdapterFormat
+    /**
+     * Qualified technical capabilities of this adapter/format, closed by default. The getter is
+     * local, side-effect-free and performs no IO; return an immutable snapshot for admission.
+     * This ceiling does not grant account/calendar/event rights or establish payload support.
+     * Advertising UPDATE/DELETE requires the conditional-write and preservation guarantees above.
+     * dispatch must still enforce current remote preconditions; this is not a remote rights cache.
+     * Capabilities on a separate experimental submission port do not advertise generic dispatch.
+     */
+    val supportedMutations: Set<MutationKind> get() = emptySet()
     suspend fun fetch(request: PageRequest): RemotePage
     suspend fun dispatch(mutation: Mutation): DispatchResult
 }

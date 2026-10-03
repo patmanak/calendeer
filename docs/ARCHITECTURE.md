@@ -84,7 +84,11 @@ Page absence cannot prove deletion. Overlapping/replayed pages cannot erase
 local pending changes. Pagination stops at a bounded per-run page budget.
 
 Outgoing edits are durable before dispatch. Effective write access requires local
-editable mode, current remote permission and a supported operation. Conflicts,
+editable mode, current remote permission, a supported operation and an explicit
+qualified capability on the current adapter. That technical ceiling defaults to
+empty and is checked before uncertain-outcome admission; it does not replace
+event-specific rights, payload preservation or remote conditional-write checks.
+Restoring capabilities cannot requeue blocked work or resend uncertain work. Conflicts,
 lost permissions and uncertain upload outcomes remain explicit blocked states;
 never blindly replay a create with a lost acknowledgement. A storage generation
 and adapter state version prevent accidental reuse across incompatible adapters.

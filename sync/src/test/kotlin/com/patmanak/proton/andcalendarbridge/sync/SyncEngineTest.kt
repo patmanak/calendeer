@@ -192,6 +192,84 @@ class SyncEngineTest {
         assertEquals(0, adapter.dispatches)
     }
 
+    @Test fun `adapter without qualified mutation capabilities never claims or dispatches work`() = runTest {
+        var calls = 0
+        val unqualified = object : RemoteCalendarAdapter {
+            override val format = this@SyncEngineTest.format
+            override suspend fun fetch(request: PageRequest): RemotePage = error("No read expected")
+            override suspend fun dispatch(mutation: Mutation): DispatchResult {
+                calls++
+                return DispatchResult.Accepted(mutation.target ?: EventId("created"), Revision("r2"))
+            }
+        }
+        for (local in listOf(create(), update(), update().copy(kind = MutationKind.DELETE, content = null))) {
+            store.seed(scope, InMemorySyncStore.State(access = writable,
+                remote = mutableMapOf(EventId("a") to event("a")), mutations = mutableMapOf(local.id to local)))
+            val expected = local.copy(state = MutationState.Blocked(BlockReason.UNSUPPORTED_OPERATION))
+            assertEquals(expected.state, SyncEngine(store, unqualified, serial).dispatchMutation(scope, local.id))
+            assertEquals(expected, store.snapshot(scope).mutations[local.id])
+            assertEquals(0, calls)
+        }
+    }
+
+    @Test fun `create capability cannot admit update or deletion against a matching cached base`() = runTest {
+        adapter.supportedMutations = setOf(MutationKind.CREATE)
+        for (local in listOf(update(), update().copy(kind = MutationKind.DELETE, content = null))) {
+            store.seed(scope, InMemorySyncStore.State(access = writable,
+                remote = mutableMapOf(EventId("a") to event("a")), mutations = mutableMapOf(local.id to local)))
+            store.beforeCommit = { state -> assertFalse(state.mutations.values.any { it.state == MutationState.OutcomeUnknown }) }
+            assertEquals(MutationState.Blocked(BlockReason.UNSUPPORTED_OPERATION), engine().dispatchMutation(scope, local.id))
+            assertEquals(local.copy(state = MutationState.Blocked(BlockReason.UNSUPPORTED_OPERATION)),
+                store.snapshot(scope).mutations[local.id])
+            assertEquals(event("a"), store.snapshot(scope).remote[EventId("a")])
+        }
+        store.beforeCommit = null
+        val local = create()
+        seedMutation(local)
+        adapter.dispatcher = { DispatchResult.Accepted(EventId("created"), Revision("r1")) }
+        assertEquals(MutationState.Acknowledged(EventId("created"), Revision("r1")), engine().dispatchMutation(scope, local.id))
+        assertEquals(1, adapter.dispatches)
+    }
+
+    @Test fun `withdrawn adapter capability blocks admission and restoring it does not replay`() = runTest {
+        val local = create()
+        seedMutation(local)
+        adapter.supportedMutations = emptySet()
+        val expected = MutationState.Blocked(BlockReason.UNSUPPORTED_OPERATION)
+        assertEquals(expected, engine().dispatchMutation(scope, local.id))
+        adapter.supportedMutations = MutationKind.entries.toSet()
+        assertEquals(expected, SyncEngine(store, adapter, AccountSerialExecutor()).dispatchMutation(scope, local.id))
+        assertEquals(local.copy(state = expected), store.snapshot(scope).mutations[local.id])
+        assertEquals(0, adapter.dispatches)
+    }
+
+    @Test fun `capability loss cannot reclassify retained unknown or acknowledged work`() = runTest {
+        adapter.supportedMutations = emptySet()
+        for (state in listOf(MutationState.OutcomeUnknown, MutationState.Acknowledged(EventId("created"), Revision("r1")))) {
+            val local = create(state)
+            seedMutation(local)
+            assertEquals(state, engine().dispatchMutation(scope, local.id))
+            assertEquals(local, store.snapshot(scope).mutations[local.id])
+        }
+        assertEquals(0, adapter.dispatches)
+    }
+
+    @Test fun `capability loss after admission cannot make a lost response resendable`() = runTest {
+        val local = create()
+        seedMutation(local)
+        adapter.dispatcher = {
+            assertEquals(MutationState.OutcomeUnknown, store.snapshot(scope).mutations[local.id]?.state)
+            adapter.supportedMutations = emptySet()
+            throw SimulatedCrash()
+        }
+        failure<SimulatedCrash> { engine().dispatchMutation(scope, local.id) }
+        assertEquals(MutationState.OutcomeUnknown, engine().dispatchMutation(scope, local.id))
+        adapter.supportedMutations = MutationKind.entries.toSet()
+        assertEquals(MutationState.OutcomeUnknown, engine().dispatchMutation(scope, local.id))
+        assertEquals(local.copy(state = MutationState.OutcomeUnknown), store.snapshot(scope).mutations[local.id])
+        assertEquals(1, adapter.dispatches)
+    }
+
     @Test fun `read-only still imports and re-enabling writes does not auto resume blocked intent`() = runTest {
         val local = create()
         seedMutation(local, CalendarAccess())
@@ -381,6 +459,7 @@ class SyncEngineTest {
     }
 
     private class FixtureAdapter(override val format: AdapterFormat) : RemoteCalendarAdapter {
+        override var supportedMutations: Set<MutationKind> = MutationKind.entries.toSet()
         val requests = mutableListOf<PageRequest>()
         var dispatches = 0
         var fetcher: suspend (PageRequest) -> RemotePage = { error("No fixture page") }

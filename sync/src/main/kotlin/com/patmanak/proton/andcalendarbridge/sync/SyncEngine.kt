@@ -76,7 +76,8 @@ class SyncEngine(
                 val reason = when {
                     access.mode != CalendarMode.EDITABLE -> BlockReason.READ_ONLY
                     !access.remoteCanWrite -> BlockReason.REMOTE_PERMISSION
-                    mutation.kind !in access.supportedOperations -> BlockReason.UNSUPPORTED_OPERATION
+                    mutation.kind !in access.supportedOperations ||
+                        mutation.kind !in adapter.supportedMutations -> BlockReason.UNSUPPORTED_OPERATION
                     mutation.target != null && (
                         remote(mutation.target) !is RemoteChange.Upsert ||
                             remote(mutation.target)?.revision != mutation.baseRevision

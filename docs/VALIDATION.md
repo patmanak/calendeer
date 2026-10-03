@@ -1349,3 +1349,20 @@ fixture: the Provider can insert a synthetic attendee even for status zero. If a
 earlier rejected fixture exists, the positive journey verifies its exact consumed
 reservation, missing stamp and absence of raw staging/dispatch evidence before
 admitting a distinct fixture. It never removes the child or rearms that reservation.
+
+## Adapter mutation admission
+
+`SyncEngineTest` checks the adapter's default-empty `supportedMutations` ceiling
+independently of persisted calendar access. A fixture with all access rights and
+matching cached revisions must never dispatch or claim uncertain work through an
+adapter that has declared no qualified mutations. CREATE-only capability refuses
+UPDATE/DELETE while permitting CREATE. Capability withdrawal blocks admission;
+restoration does not resume blocked work. Previously uncertain or acknowledged
+work remains intact, including a response lost after admission and capability loss.
+The default-capability reproduction failed before the engine check was added.
+The five additional tests and all 153 sync JVM cases then passed, along with
+274 Proton-adapter and 10 app JVM cases, the Android application build, lint and
+independent source review. These are controlled engine fixtures, not evidence of
+Proton conditional mutation or Android capture. Current production import adapters
+inherit the empty capability set; the experimental CREATE submission port is a
+separate boundary and does not advertise generic mutation capability.

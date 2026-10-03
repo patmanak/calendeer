@@ -78,6 +78,20 @@ read-only Provider projection have been verified on an authorized physical test
 device. This does not establish every account configuration or calendar app.
 The [initial import boundary](READ_ONLY_IMPORT.md) documents supported fields,
 coverage, offline recovery and limits. Bidirectional editing remains unavailable.
+The generic mutation engine now requires an explicit adapter capability as well as
+calendar access before admitting outgoing work. Adapter capabilities default to
+empty; unsupported queued work is retained as blocked without an uncertain-outcome
+claim or dispatch. Restoring a capability does not resume blocked work, and losing
+one does not reclassify acknowledged or uncertain work. Focused JVM checks passed.
+Current production import adapters advertise no generic mutations; the separate
+experimental CREATE port is unaffected. This gate does not qualify Proton writes.
+The current [conditional-write source audit](research/CONDITIONAL_WRITES.md)
+found no demonstrated expected-base mechanism in the inspected official-client
+request paths. This does not establish a server limitation. UPDATE/DELETE remain
+unavailable pending an authoritative precondition contract or a separately accepted
+conflict strategy. Android editing-source reuse also needs explicit unknown-field
+preservation qualification before constructing update payloads.
+
 An internal offline CREATE preparer now reuses Proton's simple-event partition:
 signed clear date metadata and signed encrypted display text. It uses Biweekly
 and Proton Core primitives, with caller-supplied UID/timestamp and selected keys.
