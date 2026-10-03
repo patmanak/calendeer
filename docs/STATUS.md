@@ -355,6 +355,28 @@ not renewed signatures or current service/Android access. This is a stop after
 commit, not an interrupted transaction, power loss, reboot, simultaneous-process
 ordering or autonomous worker resumption. Production UPDATE/DELETE remain disabled.
 
+`ImportCoordinator.captureAndPrepareLocalTitle` now explicitly connects Android
+capture to protected title preparation under one coordinator mutex. Both stages
+share the original session generation and policy revision; reconnecting or
+pausing/resuming between stages cannot renew that observation. The standalone
+capture and preparation entries remain available. Capture commits the complete
+intent before preparation, so unsupported title-preparation profiles, network failures and
+cancellation preserve the original edit for an explicit retry. Changes beyond
+the qualified title profile are retained without partially preparing their title.
+
+Historical replay preserves the first intent and capsule without another Provider
+capture or preparation call. Later Android edits remain visible and dirty; this
+operation neither acknowledges the Provider row nor claims an atomic snapshot
+across Android, SQL and Proton. No UI, observer or worker calls this entry, and
+production UPDATE/DELETE remain disabled.
+
+Eighteen new physical Provider/coordinator cases and seventy-one selected native
+cases passed, including two native capsule/recovery cases with controlled capture
+and preparation ports. All ten app JVM cases, APK builds, lint (zero errors,
+twenty existing warnings) and independent source review passed. These checks
+submit no Proton writes and do not qualify fresh authenticated preparation from
+a real Android row. See [validation](VALIDATION.md) for the evidence boundary.
+
 An internal offline CREATE preparer now reuses Proton's simple-event partition:
 signed clear date metadata and signed encrypted display text. It uses Biweekly
 and Proton Core primitives, with caller-supplied UID/timestamp and selected keys.

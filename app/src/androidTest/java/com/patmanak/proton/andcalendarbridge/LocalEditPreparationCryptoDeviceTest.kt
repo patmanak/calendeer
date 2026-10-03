@@ -37,7 +37,6 @@ class LocalEditPreparationCryptoDeviceTest {
                     val projection = ProjectionIntent(scope, intent.base)
                     store.transaction(scope) { putRemote(intent.base); putProjection(projection); checkpoint = PageCheckpoint(scope, intent.format) }
                     assertEquals(1, store.acknowledge(projection))
-                    assertEquals(intent, store.captureLocalEdit(intent))
                     val jobs = CoroutineScope(SupervisorJob() + Dispatchers.Default)
                     val schedules = AtomicInteger()
                     var calls = 0
@@ -59,6 +58,10 @@ class LocalEditPreparationCryptoDeviceTest {
                         override fun accountFor(accountId: AccountId) = Account("synthetic-title", "fixture")
                         override suspend fun ensureCalendarState(scope: CalendarScope, summary: CalendarSummary): EnsuredCalendar = error("No Provider writes")
                         override suspend fun apply(intent: ProjectionIntent, seriesUid: String?) = error("No Provider writes")
+                        override suspend fun captureOwnedSimpleEdit(scope: CalendarScope, base: RemoteChange.Upsert): OwnedLocalEditSnapshot {
+                            check(admitOperation() && scope == intent.scope && base == intent.base)
+                            return OwnedLocalEditSnapshot(7, 41, intent.content)
+                        }
                     }
                     val owner = ImportCoordinator(context, store, remote, provider, jobs, scheduler)
                     val prepared = object : CalendarLocalEditPreparationPort {
@@ -71,9 +74,9 @@ class LocalEditPreparationCryptoDeviceTest {
                         owner.authenticationChanged(true)
                         withTimeout(10_000) { while (schedules.get() == 0) delay(10) }
                         assertEquals(LocalTitlePreparationResult.RETAINED,
-                            owner.prepareLocalTitle(scope, intent.base.eventId, intent.id, value.timestamp, prepared))
+                            owner.captureAndPrepareLocalTitle(scope, intent.base.eventId, intent.id, value.timestamp, prepared))
                         assertEquals(LocalTitlePreparationResult.HISTORICAL,
-                            owner.prepareLocalTitle(scope, intent.base.eventId, intent.id, value.timestamp.plusSeconds(60), prepared))
+                            owner.captureAndPrepareLocalTitle(scope, intent.base.eventId, intent.id, value.timestamp.plusSeconds(60), prepared))
                         assertEquals(1, calls)
                     } finally { owner.authenticationChanged(false); jobs.coroutineContext[Job]!!.cancelAndJoin() }
                 }

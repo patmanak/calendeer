@@ -323,32 +323,61 @@ class ImportCoordinator(
           catch (_: Exception) { CreateAssociationResult.UNRESOLVED }
     }
 
-    /** Explicit internal UPDATE snapshot only. No observer, editable calendar, or upload is enabled.
-     * The Provider row remains dirty; retaining an intent does not acknowledge that edit.
+    /** Explicit capture followed by title-only preparation under one session/policy observation.
+     * Capture is durable before preparation. Failure or cancellation keeps that intent; a retry
+     * never substitutes later Provider content. No acknowledgement, dispatch or observer is enabled.
      */
+    suspend fun captureAndPrepareLocalTitle(target: CalendarScope, eventId: EventId, id: MutationId,
+        timestamp: java.time.Instant, port: CalendarLocalEditPreparationPort): LocalTitlePreparationResult =
+        mutex.withLock {
+            val expected = generation
+            val policy = createPolicyRevision.get()
+            try {
+                currentCoroutineContext().ensureActive()
+                when (captureLocalEditLocked(target, eventId, id, expected, policy)) {
+                    LocalEditCaptureResult.RETAINED -> {
+                        currentCoroutineContext().ensureActive()
+                        prepareLocalTitleLocked(target, eventId, id, timestamp, port, expected, policy)
+                    }
+                    LocalEditCaptureResult.INACTIVE -> LocalTitlePreparationResult.INACTIVE
+                    LocalEditCaptureResult.UNQUALIFIED -> LocalTitlePreparationResult.UNQUALIFIED
+                    LocalEditCaptureResult.CONFLICT -> LocalTitlePreparationResult.CONFLICT
+                    LocalEditCaptureResult.UNAVAILABLE -> LocalTitlePreparationResult.UNAVAILABLE
+                }
+            } catch (cancelled: CancellationException) { throw cancelled }
+              catch (_: Exception) { LocalTitlePreparationResult.UNAVAILABLE }
+              finally {
+                store.admitTransaction = { false }
+                projection.admitOperation = { false }
+            }
+        }
+
+    /** Explicit internal UPDATE snapshot only. The dirty Provider row is never acknowledged. */
     suspend fun captureLocalEdit(target: CalendarScope, eventId: EventId, id: MutationId): LocalEditCaptureResult = mutex.withLock {
-        val expected = generation
-        val policy = createPolicyRevision.get()
-        if (!isCurrent(expected, target.account) || !hasCalendarPermissions())
-            return@withLock LocalEditCaptureResult.INACTIVE
+        captureLocalEditLocked(target, eventId, id, generation, createPolicyRevision.get())
+    }
+
+    private suspend fun captureLocalEditLocked(target: CalendarScope, eventId: EventId, id: MutationId,
+        expected: Long, policy: Long): LocalEditCaptureResult {
         val active = { authenticated && generation == expected && createPolicyRevision.get() == policy && hasCalendarPermissions() }
+        if (!isCurrent(expected, target.account) || !active()) return LocalEditCaptureResult.INACTIVE
         store.admitTransaction = { it == target && active() }
         projection.admitOperation = active
-        try {
+        return try {
             val selected = store.selections(target.account).singleOrNull { it.scope == target }
-            if (selected?.enabled != true || !selected.available) return@withLock LocalEditCaptureResult.INACTIVE
+            if (selected?.enabled != true || !selected.available) return LocalEditCaptureResult.INACTIVE
             if (capturedRawHold(target).holds(eventId)) throw CapturedProjectionPending()
             val format = store.transaction(target) { checkpoint?.format }
-            if (format != remote.format) return@withLock LocalEditCaptureResult.UNQUALIFIED
-            if (store.localDelete(target, eventId) != null) return@withLock LocalEditCaptureResult.UNQUALIFIED
+            if (format != remote.format) return LocalEditCaptureResult.UNQUALIFIED
+            if (store.localDelete(target, eventId) != null) return LocalEditCaptureResult.UNQUALIFIED
             val retained = store.localEdit(target, eventId)
             if (retained != null) {
-                if (retained.id != id || retained.format != format) return@withLock LocalEditCaptureResult.UNQUALIFIED
-                return@withLock if (retained.state == LocalEditState.CONFLICT) LocalEditCaptureResult.CONFLICT else LocalEditCaptureResult.RETAINED
+                if (retained.id != id || retained.format != format) return LocalEditCaptureResult.UNQUALIFIED
+                return if (retained.state == LocalEditState.CONFLICT) LocalEditCaptureResult.CONFLICT else LocalEditCaptureResult.RETAINED
             }
-            val base = captureBaseline(expected, target, eventId) ?: return@withLock LocalEditCaptureResult.UNQUALIFIED
-            val snapshot = projection.captureOwnedSimpleEdit(target, base) ?: return@withLock LocalEditCaptureResult.UNQUALIFIED
-            if (!isCurrent(expected, target.account) || !active()) return@withLock LocalEditCaptureResult.INACTIVE
+            val base = captureBaseline(expected, target, eventId) ?: return LocalEditCaptureResult.UNQUALIFIED
+            val snapshot = projection.captureOwnedSimpleEdit(target, base) ?: return LocalEditCaptureResult.UNQUALIFIED
+            if (!isCurrent(expected, target.account) || !active()) return LocalEditCaptureResult.INACTIVE
             val captured = store.captureLocalEdit(LocalEditIntent(id, target, format, base, snapshot.content))
             if (captured.state == LocalEditState.CONFLICT) LocalEditCaptureResult.CONFLICT else LocalEditCaptureResult.RETAINED
         } catch (cancelled: CancellationException) { throw cancelled }
@@ -362,60 +391,62 @@ class ImportCoordinator(
     /** Explicit preparation of a captured title edit; never dispatches or acknowledges Android. */
     suspend fun prepareLocalTitle(target: CalendarScope, eventId: EventId, id: MutationId,
         timestamp: java.time.Instant, port: CalendarLocalEditPreparationPort): LocalTitlePreparationResult =
-        mutex.withLock {
-            val expected = generation
-            val policy = createPolicyRevision.get()
-            val active = { authenticated && generation == expected && createPolicyRevision.get() == policy && hasCalendarPermissions() }
-            if (!isCurrent(expected, target.account) || !active()) return@withLock LocalTitlePreparationResult.INACTIVE
-            store.admitTransaction = { it == target && active() }
-            var captured: LocalEditIntent? = null
-            try {
-                val selected = store.selections(target.account).singleOrNull { it.scope == target }
-                if (selected?.enabled != true || !selected.available) return@withLock LocalTitlePreparationResult.INACTIVE
-                val format = store.transaction(target) { checkpoint?.format }
-                if (format != remote.format) return@withLock LocalTitlePreparationResult.UNQUALIFIED
-                val owner = store.localEdit(target, eventId) ?: return@withLock LocalTitlePreparationResult.UNQUALIFIED
-                if (owner.id != id || owner.format != format) return@withLock LocalTitlePreparationResult.UNQUALIFIED
-                if (owner.state == LocalEditState.CONFLICT) return@withLock LocalTitlePreparationResult.CONFLICT
-                val frozen = try {
-                    require(timestamp.nano == 0 && timestamp.atOffset(java.time.ZoneOffset.UTC).year in 1970..9999)
-                    LocalEditPreparation.freezeIntent(owner)
-                } catch (_: Exception) { return@withLock LocalTitlePreparationResult.UNQUALIFIED }
-                captured = frozen
-                val preparationFormat = port.localTitleFormat ?: return@withLock LocalTitlePreparationResult.UNSUPPORTED
-                val admission = store.assessLocalTitlePreparation(frozen)
-                if (admission != LocalTitlePreparationAdmission.ELIGIBLE) {
-                    if (!isCurrent(expected, target.account) || !active()) return@withLock LocalTitlePreparationResult.INACTIVE
-                    return@withLock titlePreparationResult(admission)
-                }
-                // No store/auth mutex is held while the adapter runs its serialized authenticated reads.
-                val prepared = port.prepareLocalTitle(frozen, timestamp)
-                currentCoroutineContext().ensureActive()
-                if (prepared.intent != frozen || prepared.timestamp != timestamp || prepared.format != preparationFormat ||
-                    port.localTitleFormat != preparationFormat || remote.format != format)
-                    return@withLock LocalTitlePreparationResult.UNQUALIFIED
-                if (!isCurrent(expected, target.account) || !active()) return@withLock LocalTitlePreparationResult.INACTIVE
-                // SQL and lease checks run again in the same transaction as first insertion.
-                store.admitTransaction = { it == target && active() && port.localTitleFormat == preparationFormat && remote.format == format }
-                titlePreparationResult(store.retainCurrentLocalTitlePreparation(prepared))
-            } catch (cancelled: CancellationException) { throw cancelled }
-              catch (failure: LocalEditPreparationException) {
-                  when (failure.reason) {
-                      LocalEditPreparationFailure.CONFLICT -> {
-                          try {
-                              val owner = captured
-                              if (owner == null || !isCurrent(expected, target.account) || !active()) LocalTitlePreparationResult.INACTIVE
-                              else titlePreparationResult(store.conflictLocalTitlePreparation(owner))
-                          } catch (cancelled: CancellationException) { throw cancelled }
-                            catch (_: Exception) { LocalTitlePreparationResult.UNAVAILABLE }
-                      }
-                      LocalEditPreparationFailure.AUTHENTICATION, LocalEditPreparationFailure.PERMISSION -> LocalTitlePreparationResult.INACTIVE
-                      LocalEditPreparationFailure.UNSUPPORTED -> LocalTitlePreparationResult.UNSUPPORTED
-                      else -> LocalTitlePreparationResult.UNAVAILABLE
+        mutex.withLock { prepareLocalTitleLocked(target, eventId, id, timestamp, port, generation, createPolicyRevision.get()) }
+
+    private suspend fun prepareLocalTitleLocked(target: CalendarScope, eventId: EventId, id: MutationId,
+        timestamp: java.time.Instant, port: CalendarLocalEditPreparationPort,
+        expected: Long, policy: Long): LocalTitlePreparationResult {
+        val active = { authenticated && generation == expected && createPolicyRevision.get() == policy && hasCalendarPermissions() }
+        if (!isCurrent(expected, target.account) || !active()) return LocalTitlePreparationResult.INACTIVE
+        store.admitTransaction = { it == target && active() }
+        var captured: LocalEditIntent? = null
+        return try {
+            val selected = store.selections(target.account).singleOrNull { it.scope == target }
+            if (selected?.enabled != true || !selected.available) return LocalTitlePreparationResult.INACTIVE
+            val format = store.transaction(target) { checkpoint?.format }
+            if (format != remote.format) return LocalTitlePreparationResult.UNQUALIFIED
+            val owner = store.localEdit(target, eventId) ?: return LocalTitlePreparationResult.UNQUALIFIED
+            if (owner.id != id || owner.format != format) return LocalTitlePreparationResult.UNQUALIFIED
+            if (owner.state == LocalEditState.CONFLICT) return LocalTitlePreparationResult.CONFLICT
+            val frozen = try {
+                require(timestamp.nano == 0 && timestamp.atOffset(java.time.ZoneOffset.UTC).year in 1970..9999)
+                LocalEditPreparation.freezeIntent(owner)
+            } catch (_: Exception) { return LocalTitlePreparationResult.UNQUALIFIED }
+            captured = frozen
+            val preparationFormat = port.localTitleFormat ?: return LocalTitlePreparationResult.UNSUPPORTED
+            val admission = store.assessLocalTitlePreparation(frozen)
+            if (admission != LocalTitlePreparationAdmission.ELIGIBLE) {
+                if (!isCurrent(expected, target.account) || !active()) return LocalTitlePreparationResult.INACTIVE
+                return titlePreparationResult(admission)
+            }
+            // No store/auth mutex is held while the adapter runs its serialized authenticated reads.
+            val prepared = port.prepareLocalTitle(frozen, timestamp)
+            currentCoroutineContext().ensureActive()
+            if (prepared.intent != frozen || prepared.timestamp != timestamp || prepared.format != preparationFormat ||
+                port.localTitleFormat != preparationFormat || remote.format != format)
+                return LocalTitlePreparationResult.UNQUALIFIED
+            if (!isCurrent(expected, target.account) || !active()) return LocalTitlePreparationResult.INACTIVE
+            // SQL and lease checks run again in the same transaction as first insertion.
+            store.admitTransaction = { it == target && active() && port.localTitleFormat == preparationFormat && remote.format == format }
+            titlePreparationResult(store.retainCurrentLocalTitlePreparation(prepared))
+        } catch (cancelled: CancellationException) { throw cancelled }
+          catch (failure: LocalEditPreparationException) {
+              when (failure.reason) {
+                  LocalEditPreparationFailure.CONFLICT -> {
+                      try {
+                          val owner = captured
+                          if (owner == null || !isCurrent(expected, target.account) || !active()) LocalTitlePreparationResult.INACTIVE
+                          else titlePreparationResult(store.conflictLocalTitlePreparation(owner))
+                      } catch (cancelled: CancellationException) { throw cancelled }
+                        catch (_: Exception) { LocalTitlePreparationResult.UNAVAILABLE }
                   }
-              } catch (_: Exception) { LocalTitlePreparationResult.UNAVAILABLE }
-              finally { store.admitTransaction = { false } }
-        }
+                  LocalEditPreparationFailure.AUTHENTICATION, LocalEditPreparationFailure.PERMISSION -> LocalTitlePreparationResult.INACTIVE
+                  LocalEditPreparationFailure.UNSUPPORTED -> LocalTitlePreparationResult.UNSUPPORTED
+                  else -> LocalTitlePreparationResult.UNAVAILABLE
+              }
+          } catch (_: Exception) { LocalTitlePreparationResult.UNAVAILABLE }
+          finally { store.admitTransaction = { false } }
+    }
 
     private fun titlePreparationResult(admission: LocalTitlePreparationAdmission) = when (admission) {
         LocalTitlePreparationAdmission.STORED -> LocalTitlePreparationResult.RETAINED

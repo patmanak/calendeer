@@ -1870,3 +1870,39 @@ renew access rights. Application startup can still initialize ordinary local
 bookkeeping. This stop occurs after a completed commit, not during a transaction
 or simultaneous-process race. Power-loss/reboot recovery, automatic resumption,
 other event profiles and live UPDATE/DELETE remain unqualified.
+
+## Explicit Android capture and local-title preparation
+
+`LocalTitleCapturePreparationDeviceTest` is opt-in through `providerFixture=true`.
+It uses real isolated Android Calendar Provider rows and SQLite journals with
+synthetic accounts, plus controlled session, remote and preparation ports. It
+submits no Proton request and cleans only its isolated fixtures.
+
+Eighteen cases cover capture and retention, historical replay, later Android edits,
+non-title content, invalid timestamps, clean/no-op/wrong-revision rows, newer
+remote imports before and during preparation, reconnect and pause/resume at the
+capture boundary, missing access, permission loss, network retry, unsupported
+preparation, cancellation after capture and during preparation, and
+account-observation failures.
+Assertions preserve the complete captured intent and dirty Android row, check
+immutable historical evidence and closed admission, and inspect the journal
+through independent helpers after the coordinator releases its lease.
+
+Two existing `LocalEditPreparationCryptoDeviceTest` cases also use the combined
+entry with controlled capture and preparation ports. They transport a capsule
+already produced by native Proton Core primitives, then reopen it through fresh
+SQL/Keystore helpers and verify the original and renewed fragments. This connects
+the orchestration to native protected recovery; it does not qualify a fresh
+authenticated preparation starting from a real Android row.
+
+The feature-absence RED test uses an `UNSUPPORTED` stub and fails the nominal
+Provider case with expected `RETAINED`; it is not evidence of an old defect.
+All seventy-one selected physical cases passed: eighteen combined-entry cases,
+nine capture regressions, twenty-three preparation-owner regressions, two native
+crypto/journal cases and nineteen journal cases. All ten app JVM cases passed.
+App/test APK builds, lint (zero errors, twenty existing warnings) and independent
+source review passed. The application was installed and launched after the run.
+
+The boundary remains explicit and preserves the first durable intent before
+preparation. It does not grant a current Provider-content lease, acknowledge
+Android changes, resolve conflicts automatically or enable UPDATE/DELETE.
