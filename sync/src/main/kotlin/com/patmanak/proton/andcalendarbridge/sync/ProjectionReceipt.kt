@@ -42,7 +42,14 @@ data class ProjectionReceipt(
     companion object {
         fun supports(change: RemoteChange): Boolean {
             val content = (change as? RemoteChange.Upsert)?.content ?: return false
-            if (content.recurrence != null) return false
+            content.recurrence?.let {
+                if (it.isMaster || it.rule != null || it.additionalDates.isNotEmpty() || it.excludedDates.isNotEmpty()) return false
+                when (val original = it.original) {
+                    is RecurrencePoint.AllDay -> if (content.time !is EventTime.AllDay) return false
+                    is RecurrencePoint.Timed -> if (content.time !is EventTime.Timed || original.instant.nano != 0) return false
+                    null -> return false
+                }
+            }
             content.details?.let {
                 if (it.reminders.size > 5 || it.reminders.distinct().size != it.reminders.size ||
                     it.attendees.size > 100 || it.attendees.map { attendee ->

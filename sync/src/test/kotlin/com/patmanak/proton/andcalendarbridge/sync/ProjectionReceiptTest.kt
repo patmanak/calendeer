@@ -43,6 +43,17 @@ class ProjectionReceiptTest {
         }
     }
 
+    @Test fun movedAndCancelledOccurrenceImportsCanHaveHistoricalApplicationReceipts() {
+        val dates = base.content.time as EventTime.AllDay
+        for (cancelled in listOf(false, true)) {
+            val next = base.copy(content = base.content.copy(
+                time = dates.copy(start = dates.start.plusDays(1), endExclusive = dates.endExclusive.plusDays(1)),
+                recurrence = EventRecurrence("fixture-series", original = RecurrencePoint.AllDay(dates.start), cancelled = cancelled)))
+            assertTrue(ProjectionReceipt.supports(next))
+            assertEquals(next, ProjectionReceipt(scope, format, next, nonce, base).snapshot().change)
+        }
+    }
+
     @Test fun incompatibleProtocolForeignBaselineAndMalformedNonceAreRefused() {
         refused { ProjectionReceipt(scope, format, base, nonce, null, protocol = 2) }
         refused { ProjectionReceipt(scope, format, base, "unversioned-proof", null) }
@@ -124,5 +135,33 @@ class ProjectionReceiptTest {
         assertFalse(ProjectionReceipt.supports(next)); refused { receipt.snapshot() }
         people.removeAt(100)
         assertTrue(ProjectionReceipt.supports(next)); assertEquals(100, receipt.snapshot().change.content.details!!.attendees.size)
+    }
+
+    @Test fun exceptionOriginalDateTypeAndSecondPrecisionMustMatchTheProjectionProfile() {
+        val start = Instant.parse("2030-10-27T00:30:00Z")
+        val timed = base.copy(content = base.content.copy(time = EventTime.Timed(start, start.plusSeconds(3600), ZoneId.of("Europe/Paris")),
+            recurrence = EventRecurrence("fixture-series", original = RecurrencePoint.Timed(start))))
+        assertTrue(ProjectionReceipt.supports(timed))
+        refused { timed.copy(content = timed.content.copy(recurrence = timed.content.recurrence!!.copy(
+            original = RecurrencePoint.Timed(start.plusNanos(1))))) }
+        assertFalse(ProjectionReceipt.supports(timed.copy(content = timed.content.copy(recurrence = timed.content.recurrence!!.copy(
+            original = RecurrencePoint.AllDay(LocalDate.of(2030, 10, 27)))))))
+        assertFalse(ProjectionReceipt.supports(base.copy(content = base.content.copy(recurrence = timed.content.recurrence))))
+    }
+
+    @Test fun exceptionListsMutatedAfterConstructionCannotTurnIntoPartialTrackedWrites() {
+        val dates = mutableListOf<RecurrencePoint>()
+        val recurrence = EventRecurrence("fixture-series", additionalDates = dates,
+            original = RecurrencePoint.AllDay(LocalDate.of(2030, 1, 1)))
+        val next = base.copy(content = base.content.copy(recurrence = recurrence))
+        val receipt = ProjectionReceipt(scope, format, next, nonce, null)
+        dates.add(RecurrencePoint.AllDay(LocalDate.of(2030, 1, 2)))
+        assertFalse(ProjectionReceipt.supports(next)); refused { receipt.snapshot() }
+        dates.clear()
+        val exclusions = mutableListOf<RecurrencePoint>()
+        val excluded = next.copy(content = next.content.copy(recurrence = recurrence.copy(excludedDates = exclusions)))
+        val second = ProjectionReceipt(scope, format, excluded, nonce, null)
+        exclusions.add(RecurrencePoint.AllDay(LocalDate.of(2030, 1, 2)))
+        assertFalse(ProjectionReceipt.supports(excluded)); refused { second.snapshot() }
     }
 }

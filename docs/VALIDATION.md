@@ -681,16 +681,21 @@ These layers do not qualify automatic observation, an editable Samsung calendar,
 live conditional UPDATE/DELETE, power-loss recovery or atomicity between Provider
 snapshot and private database commit. See [local capture](LOCAL_EDIT_CAPTURE.md).
 
-## Interrupted simple projection
+## Interrupted projection
 
 `ProjectionReceiptTest` checks the supported simple subset, protocol/nonce
 validation, baseline identity and redacted diagnostics on the JVM.
 Timed/all-day imports with supported reminder, organizer and participant details
-can have historical receipts; recurrence remains refused. Deep snapshots own
+can have historical receipts. Moved/cancelled exceptions qualify with matching
+original/display date types; masters and type-changing exceptions remain refused
+by this receipt profile. Deep snapshots own
 applied and previous-base lists, and revalidate aliases mutated after model
 construction, including participant count and case-insensitive uniqueness.
 The reminder-only and organizer/participant acceptance assertions fail against
 their respective original implementations.
+The occurrence acceptance assertion likewise fails before exception support.
+Exception rule/list mutation after construction is refused. Original timed
+subsecond slots are refused by the display model before receipt qualification.
 `ProjectionReceiptStoreDeviceTest` uses isolated real SQLite for immutable
 preparation/reopen, exact restoration, newer remote/tombstone preservation,
 baseline comparison, incompatible formats, local-intent blocking and transaction
@@ -731,10 +736,23 @@ callbacks mutate list aliases to verify snapshot ownership. Existing
 `EventDetailsProviderDeviceTest` cases qualify the unchanged read-only mapping
 and replacement behavior separately.
 
-All 188 sync and ten app JVM cases passed. Three selected physical suites passed:
-twenty-six recovery, eighteen SQLite and seven existing detail-mapping cases.
-Seven new organizer/participant Provider/owner cases and two new SQLite cases
-extend the earlier reminder qualification. APK builds and lint passed (zero errors, twenty
+Exception fixtures first import a real master, then project the moved/cancelled
+occurrence through the production owner. Timed/all-day lost-ACK reopening must
+preserve exact exception/detail row IDs without another apply, and retain selected
+parent columns and its reminder/participant rows. Cancellation must retain
+`STATUS_CANCELED` with no reminder rows. Later dirty edits/tombstones, newer pending
+occurrences and invalid nonces retain the same recovery safeguards. A vanished
+native parent rejects direct application despite valid SQL preparation. A failed
+atomic batch leaves the previous exception target and parent witness intact.
+Separate SQL reopening and newer-occurrence cases qualify storage only. Existing
+`RecurrenceProviderDeviceTest` and `RecurrenceStoreDeviceTest` qualify unchanged
+mapping/dependency behavior. These checks do not exercise concurrent parent-rule
+mutation; the existing rule lookup precedes the parent assertion batch.
+
+All 191 sync and ten app JVM cases passed. Four selected physical suites passed:
+thirty-two recovery, twenty receipt-store, thirteen recurrence-Provider and nine
+recurrence-store cases. Six new exception Provider/owner cases and two new SQLite
+cases extend the earlier detail qualification. APK builds and lint passed (zero errors, twenty
 existing warnings), followed by independent source/evidence review. These cases
 use isolated fixtures and a controlled remote; no Proton event was changed.
 

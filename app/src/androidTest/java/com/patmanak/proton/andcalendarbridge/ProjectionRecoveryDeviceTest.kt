@@ -38,6 +38,109 @@ import org.junit.runner.RunWith
 /** Isolated production Provider/SQLite/coordinator recovery; controlled remote, no service writes. */
 @RunWith(AndroidJUnit4::class)
 class ProjectionRecoveryDeviceTest {
+    @Test fun movedAndCancelledExceptionsRecoverWithoutRewritingTheirParentOrDetails() = runBlocking {
+        for (allDay in listOf(false, true)) for (cancelled in listOf(false, true)) {
+            withFixture(reminders = true, participants = true, allDay = allDay) { f ->
+                f.coordinator.run(false); f.importMaster()
+                val candidate = f.exception(cancelled)
+                val parent = f.parent(); val parentReminders = f.reminders(f.masterRow!!); val parentPeople = f.attendees(f.masterRow!!)
+                f.projectWithoutAcknowledgement(candidate)
+                val row = f.row(); val reminders = f.reminders(); val people = f.attendees(); val applies = f.applies.get()
+                assertEquals(f.masterRow.toString(), f.field(Events.ORIGINAL_ID))
+                assertEquals(if (cancelled) Events.STATUS_CANCELED.toString() else Events.STATUS_CONFIRMED.toString(), f.field(Events.STATUS))
+                assertEquals(if (cancelled) emptyList<Int>() else listOf(5, 15), reminders.values.map { it.first }.sorted())
+                f.reopen(); assertEquals(ImportRunResult.COMPLETE, f.coordinator.run(false))
+                assertEquals(applies, f.applies.get()); assertEquals(row, f.row()); assertEquals(reminders, f.reminders()); assertEquals(people, f.attendees())
+                assertEquals(if (cancelled) Events.STATUS_CANCELED.toString() else Events.STATUS_CONFIRMED.toString(), f.field(Events.STATUS))
+                assertEquals(f.masterRow.toString(), f.field(Events.ORIGINAL_ID))
+                assertEquals(parent, f.parent()); assertEquals(parentReminders, f.reminders(f.masterRow!!)); assertEquals(parentPeople, f.attendees(f.masterRow!!))
+                assertEquals(candidate, f.store.projectedBaseline(f.target, f.base.eventId))
+                assertTrue(f.store.pending(f.target).isEmpty()); assertNull(f.store.projectionReceipt(f.target, f.base.eventId))
+            }
+        }
+    }
+
+    @Test fun historicalExceptionRecoveryPreservesLaterDirtyEditsAndLocalTombstones() = runBlocking {
+        for (deleted in listOf(false, true)) withFixture(reminders = true) { f ->
+            f.coordinator.run(false); f.importMaster()
+            val candidate = f.exception()
+            f.projectWithoutAcknowledgement(candidate)
+            f.mutate(ContentValues().apply { put(Events.TITLE, "Local occurrence edit"); put(Events.DIRTY, 1); put(Events.DELETED, if (deleted) 1 else 0) })
+            val parent = f.parent(); val reminders = f.reminders(); val row = f.row(); val applies = f.applies.get()
+            f.reopen(); assertEquals(ImportRunResult.COMPLETE, f.coordinator.run(false))
+            assertEquals(applies, f.applies.get()); assertEquals(row, f.row()); assertEquals(reminders, f.reminders()); assertEquals(parent, f.parent())
+            assertEquals("Local occurrence edit", f.field(Events.TITLE)); assertEquals("1", f.field(Events.DIRTY))
+            assertEquals(if (deleted) "1" else "0", f.field(Events.DELETED))
+            assertEquals(candidate, f.store.projectedBaseline(f.target, f.base.eventId)); assertTrue(f.store.pending(f.target).isEmpty())
+            assertEquals(LocalEditCaptureResult.UNQUALIFIED,
+                f.coordinator.captureLocalEdit(f.target, f.base.eventId, MutationId("fixture-occurrence-edit")))
+        }
+    }
+
+    @Test fun olderExceptionProofDoesNotConsumeNewerRemoteContentOrOverwriteADirtyOccurrence() = runBlocking {
+        withFixture { f ->
+            f.coordinator.run(false); f.importMaster()
+            val candidate = f.exception(); f.projectWithoutAcknowledgement(candidate)
+            val newer = candidate.copy(revision = Revision("v3"), content = candidate.content.copy(title = "Newer remote occurrence"))
+            f.queue(newer); f.edit("Local occurrence edit")
+            val parent = f.parent()
+            f.reopen(); f.coordinator.run(false)
+            assertEquals(candidate, f.store.projectedBaseline(f.target, f.base.eventId))
+            assertEquals(listOf(ProjectionIntent(f.target, newer)), f.store.pending(f.target))
+            assertEquals(newer, f.store.transaction(f.target) { remote(f.base.eventId) })
+            assertEquals("Local occurrence edit", f.field(Events.TITLE)); assertEquals("1", f.field(Events.DIRTY)); assertEquals(parent, f.parent())
+        }
+    }
+
+    @Test fun missingOrForeignExceptionNonceCannotQualifyAnInterruptedOccurrence() = runBlocking {
+        for (marker in listOf(null, "calendeer-projection-receipt-v1:${UUID.randomUUID()}")) withFixture { f ->
+            f.coordinator.run(false); f.importMaster()
+            val candidate = f.exception(); f.projectWithoutAcknowledgement(candidate)
+            f.edit("Local occurrence without proof")
+            f.mutate(ContentValues().apply { if (marker == null) putNull(Events.SYNC_DATA3) else put(Events.SYNC_DATA3, marker) })
+            val receipt = f.store.projectionReceipt(f.target, f.base.eventId)!!; val parent = f.parent()
+            assertNull(f.native.inspectProjectionReceipt(receipt))
+            f.reopen(); f.coordinator.run(false)
+            assertEquals(f.base, f.store.projectedBaseline(f.target, f.base.eventId))
+            assertEquals(listOf(ProjectionIntent(f.target, candidate)), f.store.pending(f.target))
+            assertEquals(receipt, f.store.projectionReceipt(f.target, f.base.eventId)); assertEquals(parent, f.parent())
+            assertEquals("Local occurrence without proof", f.field(Events.TITLE)); assertEquals("1", f.field(Events.DIRTY))
+        }
+    }
+
+    @Test fun aDisappearedNativeParentRefusesExceptionApplicationWithoutPromotingTheReceipt() = runBlocking {
+        withFixture { f ->
+            f.coordinator.run(false); f.importMaster()
+            val candidate = f.exception(); f.queue(candidate)
+            val prepared = f.store.prepareProjection(ProjectionIntent(f.target, candidate), f.format)
+            f.removeMaster()
+            try { f.native.applyTracked(prepared); fail("Exception requires its owned native parent") }
+            catch (failure: com.patmanak.proton.andcalendarbridge.data.calendar.CalendarProjectionException) {
+                assertEquals(com.patmanak.proton.andcalendarbridge.data.calendar.CalendarProjectionFailure.IDENTITY_CONFLICT, failure.category)
+            }
+            assertNull(f.native.inspectProjectionReceipt(prepared))
+            assertEquals(f.base.content.title, f.field(Events.TITLE)); assertNull(f.field(Events.ORIGINAL_ID))
+            assertEquals(f.base, f.store.projectedBaseline(f.target, f.base.eventId))
+            assertEquals(listOf(ProjectionIntent(f.target, candidate)), f.store.pending(f.target))
+            assertEquals(prepared, f.store.projectionReceipt(f.target, f.base.eventId))
+        }
+    }
+
+    @Test fun failedExceptionBatchLeavesTheParentAndPreviousProjectionIntact() = runBlocking {
+        withFixture(reminders = true, participants = true) { f ->
+            f.coordinator.run(false); f.importMaster()
+            val candidate = f.exception(); f.queue(candidate)
+            val prepared = f.store.prepareProjection(ProjectionIntent(f.target, candidate), f.format)
+            val parent = f.parent(); val reminders = f.reminders(); val people = f.attendees(); val marker = f.field(Events.SYNC_DATA3)
+            rejectAtomicBatch(f, prepared, expectParticipants = true)
+            assertEquals(parent, f.parent()); assertEquals(reminders, f.reminders()); assertEquals(people, f.attendees())
+            assertEquals(marker, f.field(Events.SYNC_DATA3)); assertNull(f.field(Events.ORIGINAL_ID))
+            assertNull(f.native.inspectProjectionReceipt(prepared))
+            assertEquals(f.base, f.store.projectedBaseline(f.target, f.base.eventId))
+            assertEquals(prepared, f.store.projectionReceipt(f.target, f.base.eventId))
+        }
+    }
+
     @Test fun participantImportsRecoverTimedAndAllDayEventsWithoutRepeatingChildWrites() = runBlocking {
         for (allDay in listOf(false, true)) withFixture(reminders = true, participants = true, allDay = allDay) { f ->
             f.coordinator.run(false)
@@ -620,6 +723,10 @@ class ProjectionRecoveryDeviceTest {
         private var jobs = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         var coordinator = ImportCoordinator(context, store, remote, counted, jobs, scheduler)
         private var calendar = -1L
+        var masterRow: Long? = null
+            private set
+        private val primarySelection get() = if (masterRow == null) "${Events.CALENDAR_ID}=?" else "${Events.CALENDAR_ID}=? AND ${Events._ID}<>?"
+        private val primaryArgs get() = if (masterRow == null) arrayOf(calendar.toString()) else arrayOf(calendar.toString(), masterRow.toString())
         private val uri get() = Events.CONTENT_URI.buildUpon()
             .appendQueryParameter(CalendarContract.CALLER_IS_SYNCADAPTER, "true")
             .appendQueryParameter(CalendarContract.Calendars.ACCOUNT_NAME, native.accountFor(target.account).name)
@@ -654,6 +761,43 @@ class ProjectionRecoveryDeviceTest {
             assertEquals(listOf(ProjectionIntent(target, change)), store.pending(target))
         }
 
+        suspend fun importMaster() {
+            val master = base.copy(eventId = EventId("fixture-master"), content = base.content.copy(title = "Recovery series master",
+                recurrence = EventRecurrence("fixture-series", "FREQ=DAILY;COUNT=3")))
+            queue(master); assertEquals(ImportRunResult.COMPLETE, coordinator.run(false))
+            masterRow = context.contentResolver.query(uri, arrayOf(Events._ID), "${Events.CALENDAR_ID}=? AND ${Events.RRULE}=?",
+                arrayOf(calendar.toString(), "FREQ=DAILY;COUNT=3"), null)!!.use { assertEquals(1, it.count); assertTrue(it.moveToFirst()); it.getLong(0) }
+            assertEquals(master, store.projectedBaseline(target, master.eventId))
+        }
+
+        fun exception(cancelled: Boolean = false): RemoteChange.Upsert {
+            val original = when (val time = base.content.time) {
+                is EventTime.AllDay -> RecurrencePoint.AllDay(time.start)
+                is EventTime.Timed -> RecurrencePoint.Timed(time.start)
+            }
+            val moved = when (val time = latest.content.time) {
+                is EventTime.AllDay -> time.copy(start = time.start.plusDays(1), endExclusive = time.endExclusive.plusDays(1))
+                is EventTime.Timed -> time.copy(start = time.start.plusSeconds(3600), end = time.end.plusSeconds(3600))
+            }
+            return latest.copy(content = latest.content.copy(time = moved,
+                recurrence = EventRecurrence("fixture-series", original = original, cancelled = cancelled)))
+        }
+
+        fun parent(): Map<String, String?> {
+            val columns = arrayOf(Events._ID, Events.TITLE, Events._SYNC_ID, Events.SYNC_DATA1, Events.SYNC_DATA2, Events.SYNC_DATA3,
+                Events.SYNC_DATA4, Events.DTSTART, Events.DTEND, Events.DURATION, Events.RRULE, Events.ALL_DAY, Events.DIRTY, Events.DELETED)
+            return context.contentResolver.query(uri, columns, "${Events.CALENDAR_ID}=? AND ${Events._ID}=?",
+                arrayOf(calendar.toString(), masterRow!!.toString()), null)!!.use { cursor ->
+                assertEquals(1, cursor.count); assertTrue(cursor.moveToFirst())
+                columns.mapIndexed { index, column -> column to if (cursor.isNull(index)) null else cursor.getString(index) }.toMap()
+            }
+        }
+
+        fun removeMaster() {
+            assertEquals(1, context.contentResolver.delete(uri, "${Events.CALENDAR_ID}=? AND ${Events._ID}=?",
+                arrayOf(calendar.toString(), masterRow!!.toString())))
+        }
+
         suspend fun recreateCalendar() {
             calendar = native.ensureCalendar(target, CalendarSummary(target.calendar, "Calendeer projection recovery fixture"))
         }
@@ -668,12 +812,12 @@ class ProjectionRecoveryDeviceTest {
         }
 
         fun row(): Long = context.contentResolver.query(uri, arrayOf(Events._ID),
-            "${Events.CALENDAR_ID}=?", arrayOf(calendar.toString()), null)!!.use {
+            primarySelection, primaryArgs, null)!!.use {
             assertEquals(1, it.count); assertTrue(it.moveToFirst()); it.getLong(0)
         }
 
         fun field(column: String): String? = context.contentResolver.query(uri, arrayOf(column),
-            "${Events.CALENDAR_ID}=?", arrayOf(calendar.toString()), null)!!.use {
+            primarySelection, primaryArgs, null)!!.use {
             assertEquals(1, it.count); assertTrue(it.moveToFirst()); if (it.isNull(0)) null else it.getString(0)
         }
 
@@ -685,20 +829,20 @@ class ProjectionRecoveryDeviceTest {
 
         fun mutate(values: ContentValues) {
             assertEquals(1, context.contentResolver.update(uri, values,
-                "${Events.CALENDAR_ID}=?", arrayOf(calendar.toString())))
+                primarySelection, primaryArgs))
         }
 
         fun rowCount() = context.contentResolver.query(uri, arrayOf(Events._ID),
-            "${Events.CALENDAR_ID}=?", arrayOf(calendar.toString()), null)!!.use { it.count }
+            primarySelection, primaryArgs, null)!!.use { it.count }
 
         private val reminderUri get() = Reminders.CONTENT_URI.buildUpon()
             .appendQueryParameter(CalendarContract.CALLER_IS_SYNCADAPTER, "true")
             .appendQueryParameter(CalendarContract.Calendars.ACCOUNT_NAME, native.accountFor(target.account).name)
             .appendQueryParameter(CalendarContract.Calendars.ACCOUNT_TYPE, native.accountFor(target.account).type).build()
 
-        fun reminders(): Map<Long, Pair<Int, Int>> = context.contentResolver.query(reminderUri,
+        fun reminders(event: Long = row()): Map<Long, Pair<Int, Int>> = context.contentResolver.query(reminderUri,
             arrayOf(Reminders._ID, Reminders.MINUTES, Reminders.METHOD), "${Reminders.EVENT_ID}=?",
-            arrayOf(row().toString()), null)!!.use { cursor ->
+            arrayOf(event.toString()), null)!!.use { cursor ->
             buildMap { while (cursor.moveToNext()) put(cursor.getLong(0), cursor.getInt(1) to cursor.getInt(2)) }
         }
 
@@ -714,10 +858,10 @@ class ProjectionRecoveryDeviceTest {
             .appendQueryParameter(CalendarContract.Calendars.ACCOUNT_NAME, native.accountFor(target.account).name)
             .appendQueryParameter(CalendarContract.Calendars.ACCOUNT_TYPE, native.accountFor(target.account).type).build()
 
-        fun attendees(): Map<Long, ParticipantRow> = context.contentResolver.query(attendeeUri,
+        fun attendees(event: Long = row()): Map<Long, ParticipantRow> = context.contentResolver.query(attendeeUri,
             arrayOf(Attendees._ID, Attendees.ATTENDEE_EMAIL, Attendees.ATTENDEE_NAME, Attendees.ATTENDEE_TYPE,
                 Attendees.ATTENDEE_STATUS, Attendees.ATTENDEE_RELATIONSHIP), "${Attendees.EVENT_ID}=?",
-            arrayOf(row().toString()), null)!!.use { cursor ->
+            arrayOf(event.toString()), null)!!.use { cursor ->
             buildMap { while (cursor.moveToNext()) put(cursor.getLong(0), ParticipantRow(cursor.getString(1), cursor.getString(2),
                 cursor.getInt(3), cursor.getInt(4), cursor.getInt(5))) }
         }

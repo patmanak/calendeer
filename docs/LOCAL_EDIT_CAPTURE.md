@@ -95,13 +95,16 @@ conservatively preserves even an uncaptured or unsupported local edit. Its pendi
 import remains blocked rather than discarding data; user-facing resolution is future
 work, including the final policy for unexpected edits in a read-only mirror.
 
-## Interrupted simple projection
+## Interrupted projection
 
-Before writing a supported simple upsert, the owner persists a receipt. The
+Before writing a supported upsert, the owner persists a receipt. The
 Provider writes its versioned nonce in `SYNC_DATA3` in the same atomic batch as
 the event, organizer metadata and reminder/attendee replacements. Supported simple
 imports include up to five distinct reminders, an organizer and up to 100
-participants with distinct email identities. Recurrence remains excluded.
+participants with distinct email identities. Moved/cancelled recurrence exceptions
+also qualify when their original slot and display dates have the same type and
+second precision. Rule-bearing masters, additional/excluded-date sets and
+display-type-changing exceptions retain ordinary import recovery.
 Receipt contents and previous-base collection data are
 snapshotted before crossing SQL or Provider suspension boundaries.
 Preparation alone does not prove that the write happened. Untracked
@@ -118,8 +121,9 @@ Explicit capture attempts this recovery before reading the Android edit.
 Changed Android reminders, organizer fields and participant rows are preserved by
 historical inspection and restoration; this does not qualify their editing,
 invitation/response dispatch or upload. Those edits remain outside the
-simple local-edit capture profile. Existing null/empty-detail receipts retain
-protocol 1 semantics. Downgrading a receipt beyond an older binary's detail profile
+simple local-edit capture profile. Recurrence editing remains unavailable.
+Existing receipts retain protocol 1 semantics. Downgrading a receipt beyond an
+older binary's event profile
 is not qualified; the older profile refuses it conservatively.
 
 A missing, changed or ambiguous marker cannot qualify recovery. A preparation
@@ -193,12 +197,16 @@ Proton UPDATE/DELETE remain separate work.
 Explicit internal [local CREATE capture](LOCAL_CREATE_CAPTURE.md) has its own
 one-shot identity reservation and permanently paused journal, without dispatch.
 
-Nonce-backed recovery covers simple upserts with absent, empty or supported event
-details. Recurrences, Provider DELETE projections and
+Nonce-backed recovery covers simple upserts and the exception subset above with
+absent, empty or supported event details. Master writes, display-type-changing
+exceptions, Provider DELETE projections and
 legacy rows without receipts retain their conservative
 recovery limits. Neither cache presence, a revision alone nor a numeric row ID
 invents an ACK. The two stores still do not share a transaction, and controlled
 reopening tests do not establish recovery from physical power loss.
+Parent identity and original-date type are asserted with an exception write. The
+existing parent rule lookup occurs before the batch; this does not qualify every
+concurrent parent-rule change. Historical proof is not a present series snapshot.
 
 See [validation](VALIDATION.md) for the distinct domain, SQLite, controlled-owner
 and real Provider fixtures. They do not establish Samsung editing UI behavior or

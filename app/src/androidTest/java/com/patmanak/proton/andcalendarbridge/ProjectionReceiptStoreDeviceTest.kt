@@ -263,6 +263,46 @@ class ProjectionReceiptStoreDeviceTest {
         assertEquals(newer, store.pending(scope).single().change)
         assertNull(store.projectionReceipt(scope, applied.eventId))
     }
+
+    @Test fun exceptionReceiptReopensWithItsOriginalSlotCancellationAndPreviousBase() = fixture { store, name ->
+        store.baseline()
+        val master = original.copy(eventId = EventId("fixture-master"), content = original.content.copy(
+            recurrence = EventRecurrence("fixture-series", "FREQ=DAILY;COUNT=3")))
+        store.queue(master); store.acknowledge(ProjectionIntent(scope, master))
+        val candidate = applied.copy(content = applied.content.copy(recurrence = EventRecurrence("fixture-series",
+            original = RecurrencePoint.AllDay(LocalDate.of(2026, 10, 1)), cancelled = true)))
+        store.queue(candidate)
+        val receipt = store.prepareProjection(ProjectionIntent(scope, candidate), format)
+        store.close()
+        ImportStore(ApplicationProvider.getApplicationContext(), name).use { reopened ->
+            assertEquals(receipt, reopened.projectionReceipt(scope, applied.eventId))
+            assertEquals(original, reopened.projectedBaseline(scope, applied.eventId))
+            assertEquals(candidate, reopened.pending(scope).single().change)
+            assertTrue(reopened.restoreProjection(AppliedProjectionWitness(receipt)))
+            assertEquals(candidate, reopened.projectedBaseline(scope, applied.eventId))
+            assertEquals(master, reopened.projectedBaseline(scope, master.eventId))
+            assertTrue(reopened.pending(scope).isEmpty())
+        }
+    }
+
+    @Test fun restoredExceptionEvidenceLeavesANewerOccurrencePendingAndTheMasterUntouched() = fixture { store, _ ->
+        store.baseline()
+        val master = original.copy(eventId = EventId("fixture-master"), content = original.content.copy(
+            recurrence = EventRecurrence("fixture-series", "FREQ=DAILY;COUNT=3")))
+        store.queue(master); store.acknowledge(ProjectionIntent(scope, master))
+        val candidate = applied.copy(content = applied.content.copy(recurrence = EventRecurrence("fixture-series",
+            original = RecurrencePoint.AllDay(LocalDate.of(2026, 10, 1)))))
+        store.queue(candidate)
+        val receipt = store.prepareProjection(ProjectionIntent(scope, candidate), format)
+        val newer = candidate.copy(revision = Revision("newer"), content = candidate.content.copy(
+            recurrence = candidate.content.recurrence!!.copy(cancelled = true)))
+        store.queue(newer)
+        assertTrue(store.restoreProjection(AppliedProjectionWitness(receipt)))
+        assertEquals(candidate, store.projectedBaseline(scope, applied.eventId))
+        assertEquals(newer, store.pending(scope).single().change)
+        assertEquals(master, store.projectedBaseline(scope, master.eventId))
+        assertNull(store.projectionReceipt(scope, applied.eventId))
+    }
     @Test fun cancellationBeforeCommitRollsBackBaselinePendingAndReceiptConsumption() = fixture { store, _ ->
         store.baseline(); val receipt = store.receipt()
         val child = Job(currentCoroutineContext()[Job]); var calls = 0
