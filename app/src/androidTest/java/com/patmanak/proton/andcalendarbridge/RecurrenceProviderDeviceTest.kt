@@ -38,6 +38,136 @@ class RecurrenceProviderDeviceTest {
         assumeTrue(projection.hasPermissions())
     }
 
+    @Test fun timedOriginalBecomesAllDayAcrossDstWithoutDuplicateNativeOccurrences() = runBlocking {
+        qualifyConversion(originalAllDay = false)
+    }
+
+    @Test fun allDayOriginalBecomesTimedAcrossDstWithoutDuplicateNativeOccurrences() = runBlocking {
+        qualifyConversion(originalAllDay = true)
+    }
+
+    /** Characterizes a known Provider limitation, not correct RFC fold handling. No guard is active yet. */
+    @Test fun ambiguousDstMasterStartCurrentlyLeavesShiftedOriginalInstance() = runBlocking {
+        for (converted in listOf(false, true)) for (cancelled in listOf(false, true)) fixture { scope, _, calendar, _ ->
+            val master = timed("fold-master", "2030-10-27T00:30:00Z", EventRecurrence("fold-series", "FREQ=DAILY;COUNT=3"), "Europe/Paris")
+            projection.apply(ProjectionIntent(scope, master)); val masterId = row(calendar, master.content.title).id
+            val nativeSlots = listOf(
+                Instance(masterId, Instant.parse("2030-10-27T01:30:00Z"), Instant.parse("2030-10-27T02:30:00Z"), false),
+                Instance(masterId, Instant.parse("2030-10-28T01:30:00Z"), Instant.parse("2030-10-28T02:30:00Z"), false),
+                Instance(masterId, Instant.parse("2030-10-29T01:30:00Z"), Instant.parse("2030-10-29T02:30:00Z"), false),
+            )
+            val storedStart = resolver.query(Events.CONTENT_URI, arrayOf(Events.DTSTART), "${Events.CALENDAR_ID}=? AND ${Events._ID}=?",
+                arrayOf(calendar.toString(), masterId.toString()), null)!!.use {
+                assertTrue(it.moveToFirst()); it.getLong(0)
+            }
+            assertEquals(Instant.parse("2030-10-27T00:30:00Z").toEpochMilli(), storedStart)
+            assertEquals(nativeSlots, conversionWindow(calendar))
+            val child = RemoteChange.Upsert(EventId("fold-child"), Revision("v1"), EventContent("fold-child",
+                if (converted) EventTime.AllDay(LocalDate.parse("2030-10-30"), LocalDate.parse("2030-10-31")) else
+                    EventTime.Timed(Instant.parse("2030-10-30T09:00:00Z"), Instant.parse("2030-10-30T10:00:00Z"), ZoneId.of("Europe/Paris")),
+                recurrence = EventRecurrence("fold-series", original = point("2030-10-27T00:30:00Z"), cancelled = cancelled)))
+            tracked(scope, child); val childId = row(calendar, child.content.title).id
+            val moved = if (cancelled) emptyList() else listOf(if (converted)
+                Instance(childId, Instant.parse("2030-10-30T00:00:00Z"), Instant.parse("2030-10-31T00:00:00Z"), true) else
+                Instance(childId, Instant.parse("2030-10-30T09:00:00Z"), Instant.parse("2030-10-30T10:00:00Z"), false))
+            // The shifted first slot incorrectly survives both movement and cancellation.
+            assertEquals(nativeSlots + moved, conversionWindow(calendar))
+        }
+    }
+
+    private suspend fun qualifyConversion(originalAllDay: Boolean) = fixture { scope, _, calendar, _ ->
+        val master = conversionMaster(originalAllDay)
+        projection.apply(ProjectionIntent(scope, master)); val masterId = row(calendar, master.content.title).id
+        assertEquals(originalSlots(masterId, originalAllDay), conversionWindow(calendar)) // Prime native expansion before the exception.
+        val child = conversionChild(originalAllDay); val receipt = tracked(scope, child)
+        val childId = row(calendar, child.content.title).id
+        val remaining = unchangedSlots(masterId, originalAllDay)
+        val moved = convertedSlot(childId, originalAllDay)
+        assertEquals(remaining, instances(calendar, "2030-10-25T00:00:00Z", "2030-10-29T00:00:00Z"))
+        assertEquals(listOf(moved), instances(calendar, "2030-10-30T00:00:00Z", "2030-11-01T00:00:00Z"))
+        assertEquals(remaining + moved, conversionWindow(calendar)); assertEquals(2, count(calendar))
+        assertEquals(masterId, row(calendar, child.content.title).parent)
+        assertEquals(AppliedProjectionWitness(receipt), AndroidCalendarProjection(context).inspectProjectionReceipt(receipt))
+        assertEquals(remaining + moved, conversionWindow(calendar)); assertEquals(childId, row(calendar, child.content.title).id)
+    }
+
+    @Test fun cancelledConvertedOccurrencesStayAbsentAndChildDeletionRestoresOriginalSlots() = runBlocking {
+        for (originalAllDay in listOf(false, true)) fixture { scope, _, calendar, _ ->
+            val master = conversionMaster(originalAllDay)
+            projection.apply(ProjectionIntent(scope, master)); val masterId = row(calendar, master.content.title).id
+            assertEquals(originalSlots(masterId, originalAllDay), conversionWindow(calendar))
+            val child = conversionChild(originalAllDay).let { it.copy(content = it.content.copy(recurrence = it.content.recurrence!!.copy(cancelled = true))) }
+            val receipt = tracked(scope, child)
+            val remaining = unchangedSlots(masterId, originalAllDay)
+            assertEquals(remaining, conversionWindow(calendar))
+            assertEquals(remaining, instances(calendar, "2030-10-25T00:00:00Z", "2030-10-29T00:00:00Z"))
+            assertTrue(instances(calendar, "2030-10-30T00:00:00Z", "2030-11-01T00:00:00Z").isEmpty())
+            assertEquals(AppliedProjectionWitness(receipt), AndroidCalendarProjection(context).inspectProjectionReceipt(receipt))
+            projection.apply(ProjectionIntent(scope, RemoteChange.Deleted(child.eventId, Revision("child-deleted"))))
+            assertEquals(originalSlots(masterId, originalAllDay), conversionWindow(calendar))
+            assertEquals(1, count(calendar)); assertNull(projection.inspectProjectionReceipt(receipt))
+        }
+    }
+
+    @Test fun convertedOccurrenceCanReturnToItsOriginalDateTypeWithoutStaleInstances() = runBlocking {
+        for (originalAllDay in listOf(false, true)) fixture { scope, _, calendar, _ ->
+            val master = conversionMaster(originalAllDay)
+            projection.apply(ProjectionIntent(scope, master)); val masterId = row(calendar, master.content.title).id
+            val child = conversionChild(originalAllDay); val old = tracked(scope, child)
+            val childId = row(calendar, child.content.title).id
+            assertEquals(unchangedSlots(masterId, originalAllDay) + convertedSlot(childId, originalAllDay), conversionWindow(calendar))
+            val reverted = child.copy(revision = Revision("reconverted"), content = child.content.copy(time = if (originalAllDay)
+                EventTime.AllDay(LocalDate.parse("2030-10-31"), LocalDate.parse("2030-11-01")) else
+                EventTime.Timed(Instant.parse("2030-10-31T16:00:00Z"), Instant.parse("2030-10-31T17:00:00Z"), ZoneId.of("Europe/Paris"))))
+            val receipt = tracked(scope, reverted, child)
+            val replacement = if (originalAllDay) Instance(childId, Instant.parse("2030-10-31T00:00:00Z"), Instant.parse("2030-11-01T00:00:00Z"), true)
+                else Instance(childId, Instant.parse("2030-10-31T16:00:00Z"), Instant.parse("2030-10-31T17:00:00Z"), false)
+            assertEquals(unchangedSlots(masterId, originalAllDay) + replacement, conversionWindow(calendar))
+            assertTrue(instances(calendar, "2030-10-30T00:00:00Z", "2030-10-30T23:59:59Z").isEmpty())
+            assertEquals(2, count(calendar)); assertEquals(childId, row(calendar, reverted.content.title).id)
+            assertNull(projection.inspectProjectionReceipt(old))
+            assertEquals(AppliedProjectionWitness(receipt), AndroidCalendarProjection(context).inspectProjectionReceipt(receipt))
+        }
+    }
+
+    private fun conversionMaster(allDay: Boolean) = if (allDay) RemoteChange.Upsert(EventId("converted-master"), Revision("v1"),
+        EventContent("converted-master", EventTime.AllDay(LocalDate.parse("2030-10-26"), LocalDate.parse("2030-10-27")),
+            recurrence = EventRecurrence("converted-series", "FREQ=DAILY;COUNT=3")))
+        else timed("converted-master", "2030-10-26T08:00:00Z", EventRecurrence("converted-series", "FREQ=DAILY;COUNT=3"), "Europe/Paris")
+
+    private fun conversionChild(originalAllDay: Boolean) = RemoteChange.Upsert(EventId("converted-child"), Revision("v1"),
+        EventContent("converted-child", if (originalAllDay) EventTime.Timed(Instant.parse("2030-10-30T09:00:00Z"),
+            Instant.parse("2030-10-30T10:00:00Z"), ZoneId.of("Europe/Paris")) else
+            EventTime.AllDay(LocalDate.parse("2030-10-30"), LocalDate.parse("2030-10-31")), recurrence =
+            EventRecurrence("converted-series", original = if (originalAllDay) RecurrencePoint.AllDay(LocalDate.parse("2030-10-27")) else point("2030-10-27T09:00:00Z"))))
+
+    private suspend fun tracked(scope: CalendarScope, child: RemoteChange.Upsert, previous: RemoteChange.Upsert? = null): ProjectionReceipt {
+        val receipt = ProjectionReceipt(scope, AdapterFormat("converted-instances-fixture", 1), child, UUID.randomUUID().toString(), previous)
+        assertEquals(AppliedProjectionWitness(receipt), projection.applyTracked(receipt))
+        return receipt
+    }
+
+    private fun unchangedSlots(masterId: Long, allDay: Boolean): List<Instance> = if (allDay) listOf(
+        Instance(masterId, Instant.parse("2030-10-26T00:00:00Z"), Instant.parse("2030-10-27T00:00:00Z"), true),
+        Instance(masterId, Instant.parse("2030-10-28T00:00:00Z"), Instant.parse("2030-10-29T00:00:00Z"), true),
+    ) else listOf(
+        Instance(masterId, Instant.parse("2030-10-26T08:00:00Z"), Instant.parse("2030-10-26T09:00:00Z"), false),
+        Instance(masterId, Instant.parse("2030-10-28T09:00:00Z"), Instant.parse("2030-10-28T10:00:00Z"), false),
+    )
+
+    private fun originalSlots(masterId: Long, allDay: Boolean): List<Instance> {
+        val remaining = unchangedSlots(masterId, allDay)
+        val middle = if (allDay) Instance(masterId, Instant.parse("2030-10-27T00:00:00Z"), Instant.parse("2030-10-28T00:00:00Z"), true)
+            else Instance(masterId, Instant.parse("2030-10-27T09:00:00Z"), Instant.parse("2030-10-27T10:00:00Z"), false)
+        return listOf(remaining[0], middle, remaining[1])
+    }
+
+    private fun convertedSlot(childId: Long, originalAllDay: Boolean) = if (originalAllDay)
+        Instance(childId, Instant.parse("2030-10-30T09:00:00Z"), Instant.parse("2030-10-30T10:00:00Z"), false)
+        else Instance(childId, Instant.parse("2030-10-30T00:00:00Z"), Instant.parse("2030-10-31T00:00:00Z"), true)
+
+    private fun conversionWindow(calendar: Long) = instances(calendar, "2030-10-25T00:00:00Z", "2030-11-02T00:00:00Z")
+
     @Test fun ensureReportsRecreationEvenWhenProviderMayReuseCalendarId() = runBlocking {
         fixture { first, _, _, _ ->
             val summary = CalendarSummary(first.calendar, "Recreated recurrence fixture", 0x167D8D)
@@ -268,14 +398,14 @@ class RecurrenceProviderDeviceTest {
             EventTime.Timed(Instant.parse(start), Instant.parse(start).plusSeconds(3600), ZoneId.of(zone)), recurrence = recurrence))
     private fun point(value: String) = RecurrencePoint.Timed(Instant.parse(value))
     private fun july(calendar: Long) = instances(calendar, "2030-07-01T00:00:00Z", "2030-07-05T00:00:00Z")
-    private data class Instance(val event: Long, val start: Instant, val end: Instant)
+    private data class Instance(val event: Long, val start: Instant, val end: Instant, val allDay: Boolean)
     private fun instances(calendar: Long, start: String, end: String): List<Instance> {
         val builder = Instances.CONTENT_URI.buildUpon()
         ContentUris.appendId(builder, Instant.parse(start).toEpochMilli())
         ContentUris.appendId(builder, Instant.parse(end).toEpochMilli())
-        return resolver.query(builder.build(), arrayOf(Instances.EVENT_ID, Instances.BEGIN, Instances.END),
+        return resolver.query(builder.build(), arrayOf(Instances.EVENT_ID, Instances.BEGIN, Instances.END, Events.ALL_DAY),
             "${Events.CALENDAR_ID}=?", arrayOf(calendar.toString()), "${Instances.BEGIN} ASC")!!.use {
-            buildList { while (it.moveToNext()) add(Instance(it.getLong(0), Instant.ofEpochMilli(it.getLong(1)), Instant.ofEpochMilli(it.getLong(2)))) }
+            buildList { while (it.moveToNext()) add(Instance(it.getLong(0), Instant.ofEpochMilli(it.getLong(1)), Instant.ofEpochMilli(it.getLong(2)), it.getInt(3) == 1)) }
         }
     }
     private data class Row(val id: Long, val end: Long?, val duration: String?, val rule: String?, val parent: Long?, val original: Long?)

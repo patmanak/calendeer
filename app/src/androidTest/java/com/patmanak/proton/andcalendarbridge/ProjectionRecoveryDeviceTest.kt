@@ -39,6 +39,37 @@ import org.junit.runner.RunWith
 /** Isolated production Provider/SQLite/coordinator recovery; controlled remote, no service writes. */
 @RunWith(AndroidJUnit4::class)
 class ProjectionRecoveryDeviceTest {
+    @Test fun convertedOccurrenceInstancesStayExactAfterLostAcknowledgementRecovery() = runBlocking {
+        for (allDay in listOf(false, true)) for (cancelled in listOf(false, true)) withFixture(allDay = allDay) { f ->
+            assertEquals(ImportRunResult.COMPLETE, f.coordinator.run(false))
+            f.importMaster(if (allDay) null else EventTime.Timed(Instant.parse("2030-10-27T09:00:00Z"),
+                Instant.parse("2030-10-27T11:00:00Z"), ZoneId.of("Europe/Paris")))
+            assertEquals(4, f.instances().size) // The independent simple fixture and three master slots are cached first.
+            val converted = f.exception(cancelled = cancelled, changeType = true)
+            val candidate = if (allDay) converted else converted.copy(content = converted.content.copy(
+                recurrence = converted.content.recurrence!!.copy(original = RecurrencePoint.Timed(Instant.parse("2030-10-27T09:00:00Z")))))
+            f.projectWithoutAcknowledgement(candidate)
+            val parent = f.masterRow!!; val child = f.row(); val applies = f.applies.get()
+            fun slot(event: Long, start: String, end: String) = Triple(event, Instant.parse(start).toEpochMilli(), Instant.parse(end).toEpochMilli())
+            val remaining = if (allDay) listOf(
+                slot(parent, "2030-10-28T00:00:00Z", "2030-10-29T00:00:00Z"),
+                slot(parent, "2030-10-29T00:00:00Z", "2030-10-30T00:00:00Z"),
+            ) else listOf(
+                slot(parent, "2030-10-28T09:00:00Z", "2030-10-28T11:00:00Z"),
+                slot(parent, "2030-10-29T09:00:00Z", "2030-10-29T11:00:00Z"),
+            )
+            val moved = if (cancelled) emptyList() else listOf(if (allDay)
+                slot(child, "2030-10-28T09:00:00Z", "2030-10-28T10:00:00Z") else
+                slot(child, "2030-10-28T00:00:00Z", "2030-10-29T00:00:00Z"))
+            val expected = (remaining + moved).sortedBy { it.second }
+            assertEquals(expected, f.instances())
+            f.reopen(); assertEquals(ImportRunResult.COMPLETE, f.coordinator.run(false))
+            assertEquals(expected, f.instances()); assertEquals(applies, f.applies.get()); assertEquals(child, f.row())
+            assertEquals(candidate, f.store.projectedBaseline(f.target, f.base.eventId))
+            assertTrue(f.store.pending(f.target).isEmpty()); assertNull(f.store.projectionReceipt(f.target, f.base.eventId))
+        }
+    }
+
     @Test fun recurringMastersRecoverRulesAndDateSetsWithoutRepeatingWrites() = runBlocking {
         for (allDay in listOf(false, true)) for (rdateOnly in listOf(false, true)) {
             withFixture(reminders = true, participants = true, allDay = allDay, master = true, rdateOnly = rdateOnly) { f ->
@@ -995,9 +1026,9 @@ class ProjectionRecoveryDeviceTest {
             assertEquals(listOf(ProjectionIntent(target, change)), store.pending(target).filter { it.change.eventId == base.eventId })
         }
 
-        suspend fun importMaster() {
+        suspend fun importMaster(time: EventTime? = null) {
             val master = base.copy(eventId = EventId("fixture-master"), content = base.content.copy(title = "Recovery series master",
-                recurrence = EventRecurrence("fixture-series", "FREQ=DAILY;COUNT=3")))
+                time = time ?: base.content.time, recurrence = EventRecurrence("fixture-series", "FREQ=DAILY;COUNT=3")))
             queue(master); assertEquals(ImportRunResult.COMPLETE, coordinator.run(false))
             masterRow = context.contentResolver.query(uri, arrayOf(Events._ID), "${Events.CALENDAR_ID}=? AND ${Events.RRULE}=?",
                 arrayOf(calendar.toString(), "FREQ=DAILY;COUNT=3"), null)!!.use { assertEquals(1, it.count); assertTrue(it.moveToFirst()); it.getLong(0) }

@@ -402,6 +402,27 @@ type transitions and scoped cascading deletion. It also checks stable row identi
 replay, ambiguous parent rejection and calendar recreation even when numeric IDs
 are recycled. It requires `providerFixture=true` and cleans its isolated account.
 
+Converted-occurrence fixtures prime the native expansion cache before replacing
+a slot across the Paris daylight-saving boundary. Fixed UTC expectations check
+both timed-to-all-day and all-day-to-timed changes, including native event IDs,
+endpoints and `ALL_DAY`. Disjoint original/destination windows and a combined
+window must expose the replacement exactly once with no original slot left over.
+Cancellation must remove both slots; ordinary child deletion must restore only
+the original series. Reconversion must keep the child ID, invalidate the former
+display slot and refuse the old historical receipt while accepting the new one.
+These are isolated native fixtures, not Proton or calendar-editor tests.
+
+A separate characterization retains a known defect rather than declaring correct
+fold handling: a Paris master stores `2030-10-27T00:30:00Z`, but its first native
+instance begins at `01:30:00Z`. Fixed expectations verify that the shifted master
+slot survives an exception targeting the stored original instant, with matching
+or changed display type, moved or cancelled. No import guard or fix is active.
+Converted-slot qualification uses unambiguous original times and does not close
+this discrepancy.
+The two selected Provider/recovery suites passed all 61 cases on the authorized
+physical target, including this defect characterization. That result qualifies
+the bounded non-ambiguous fixtures; it does not indicate a fix for the fold defect.
+
 `RecurrenceStoreDeviceTest` covers schema 5-to-6 migration, legacy payload stability,
 reopen/rollback/CAS, master ordering, missing or deferred parents, mismatched original
 date types, durable tombstones and eligible-result limits. `RecurrenceCoordinatorDeviceTest`
@@ -761,8 +782,13 @@ match the original slot. A subsequent dirty native display conversion is preserv
 without rewriting event/detail rows. Newer blocked content retains its own
 unapplied preparation after older proof recovery. Separate SQL cases round-trip
 both conversions and cancellation, preserving an inverse display change pending
-against the recovered base with its master untouched. These cases do not qualify
-native instance expansion or calendar-editor behavior for these conversions.
+against the recovered base with its master untouched.
+An additional owner-driven lost-ACK fixture checks native instances for both
+conversions and cancellation against fixed UTC expectations before and after
+reopening. A moved instance can overlap another master occurrence, so exact event
+IDs and endpoints, rather than counts alone, must stay unchanged with no repeated
+tracked apply. This controlled reopening does not qualify arbitrary process
+termination, power loss or calendar-editor behavior.
 
 Master fixtures exercise timed/all-day rule and additional-date-only imports with
 exclusions. Lost-ACK reopening preserves event/detail IDs, bounded native instances

@@ -54,6 +54,19 @@ slot separately from their new start; UID and calendar scope link them to the ma
 Android expands occurrences when a calendar application queries a date range.
 The bridge does not eagerly materialize an infinite series.
 
+On the qualified native Provider, exceptions can change between timed and all-day
+display while retaining the original slot and parent date type. Bounded fixtures
+with unambiguous original local times cover replacements across a daylight-saving
+boundary, cancellation and reconversion after expansion has already been cached.
+This does not establish calendar-editor behavior or every timezone transition.
+
+A known native limitation remains for an ambiguous daylight-saving start: a Paris
+series starting at 02:30 during the repeated hour can expand its first occurrence
+one hour later than the stored instant. An exception referring to the original
+instant then leaves that shifted occurrence visible, for both matching and changed
+display types and for cancellation. No import guard or workaround is active yet;
+these series are not qualified as faithful mirrors.
+
 EXRULE, RDATE periods, RANGE exceptions, floating/unresolved dates, BYSETPOS,
 BYWEEKNO and BYYEARDAY remain deferred. Yearly BYDAY/BYMONTHDAY require BYMONTH.
 These limits prevent accepted RFC syntax from being silently misinterpreted by
