@@ -613,13 +613,17 @@ remain separate.
 
 ### Pure versioned projection reference
 
-`ProjectedEventReferenceTest` adds nine cases for direct and finite representations,
+`ProjectedEventReferenceTest` has 13 cases for direct and finite representations,
 exact spring/autumn instants, canonical field preservation, first/all exclusions,
 unknown details, immutable recurrence/reminder/participant/date snapshots,
 stable equality/hash after caller mutation, invalid aliases, unsupported finite
-profiles, changed exception display types and redacted diagnostics. An initial
-stub failed seven of nine cases before implementation; the final suite passes.
-Run `:sync:test`. All 210 sync cases pass without failures, errors or skips.
+profiles, changed exception display types, redacted diagnostics and historical
+restoration without timezone recalculation. Stored count/start/order/precision
+and bounds are checked; duplicate saved instants from the whole-day Apia gap
+remain intact. An initial reference stub failed seven of nine cases; a later
+historical-restore placeholder failed three of 13 before implementation.
+Run `:sync:test`. All 215 sync cases pass without failures, errors or skips,
+including receipt binding of exact current/previous canonical representations.
 
 The debug calculator fixture delegates to `FiniteDailyRecurrenceProjection` in
 `sync`. Run `:app:testDebugUnitTest --tests '*FiniteDailyRecurrenceExperimentTest'`:
@@ -630,9 +634,42 @@ extraction, without failures or skips. They still persist synthetic date views,
 not the new reference model. The earlier 78-method native regression result
 remains the qualification of the unchanged production Provider/recovery paths.
 The shared calculator/model compile with main sources; only the fixture entry
-point is debug-only. No runtime parser, coordinator, SQL or Provider caller has
-been connected to the new reference. These checks establish neither persisted
-representation decoding nor canonical-rule recovery/activation.
+point is debug-only. SQL preparation/decoding now uses the reference as described
+below; no runtime parser/coordinator selects the finite calculator, and the
+Provider refuses finite metadata. Pure checks alone do not establish native
+canonical-rule recovery or activation.
+
+### Stored projection representations
+
+`ProjectionRepresentationStoreDeviceTest` has six isolated methods for schema
+14-to-15 migration with byte-identical source payloads/nonces, saved-date reloading,
+canonical baseline plus representation retention after acknowledgement, newer
+pending source preservation, complete previous-reference comparison, copied
+metadata refusal, finite-to-legacy direct replacement, malformed/unknown formats,
+untracked acknowledgement refusal and the disabled native finite boundary.
+Saved instants intentionally differ from today's calculation in one fixture to
+prove that reopening does not expand again; structural decoding does not verify
+their original geometry. SQL restore uses synthetic applied witnesses, never a
+claim of a successful finite Provider write.
+
+Two additional `CapturedHandoffStoreDeviceTest` methods refuse unknown/explicit
+metadata on the captured base and on released bases/receipts, retaining complete
+raw table snapshots. Historical six-field handoff receipts cannot discard added
+metadata. All eight new physical methods pass without failures or skips. The
+18 affected storage, migration, native recovery and handoff classes also pass
+all 373 methods without failures or skips. The first regression exposed one
+historical test insertion that supplied eight unnamed values after the receipt
+table gained two columns; naming its historical columns fixed the fixture.
+That method passed independently before the complete regression passed again.
+Run the store class and the two targeted handoff
+methods with `-e providerFixture true` on an authorized physical device.
+
+`:app:testDebugUnitTest` passes all 19 cases, including the nine debug calculator
+cases. Debug app/test compilation, release source compilation and lint pass;
+lint has zero errors and 20 existing warnings. The new schema retains legacy NULL
+metadata and rejects unknown formats without clearing them. Production ordinary
+imports still prepare direct receipts; finite native application, raw-source
+eligibility, downgrade and arbitrary power-loss recovery remain unqualified.
 
 `RecurrenceStoreDeviceTest` covers schema 5-to-6 migration, legacy payload stability,
 reopen/rollback/CAS, master ordering, missing or deferred parents, mismatched original
@@ -2162,7 +2199,7 @@ source review passed. The final application was installed and launched.
 The observed projection base is SQL history, not current Android contents. No
 service or Calendar Provider fixture writes occur. Live port qualification,
 killed-process/automatic resumption and server concurrency remain unqualified.
-Schema 14 and historical opening are unchanged; production UPDATE/DELETE remain
+Preparation journal columns and historical opening are unchanged; production UPDATE/DELETE remain
 disabled, and no UI or worker automatically calls this entry.
 
 ## Retained-session live local-title preparation
@@ -2449,8 +2486,8 @@ temporary device capture were cleaned, and the final app was installed and launc
 The fixtures make no service or Provider event requests. The UI exposes metadata
 only; no event viewer/editor, capture callback, conflict resolver or dispatch is
 added. Counts describe existing journal entries, not every current Android edit
-or present service conflict. CREATE experiment journals are excluded. Schema 14
-and UPDATE/DELETE dispatch restrictions are unchanged.
+or present service conflict. CREATE experiment journals are excluded. Journal
+columns and UPDATE/DELETE dispatch restrictions are unchanged.
 
 ## Read-only inspection of captured DELETE history
 

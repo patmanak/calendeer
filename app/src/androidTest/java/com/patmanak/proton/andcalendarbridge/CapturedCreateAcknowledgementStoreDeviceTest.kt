@@ -465,9 +465,14 @@ class CapturedCreateAcknowledgementStoreDeviceTest {
                 old.version = 11
                 for (table in tables) before[table] = rows(old, table)
             }
-            assertEquals(14, store.writableDatabase.version)
+            assertEquals(15, store.writableDatabase.version)
             store.writableDatabase.rawQuery("PRAGMA synchronous", null).use { assertTrue(it.moveToFirst()); assertEquals(2, it.getInt(0)) }
-            for (table in tables) assertEquals("Migration must preserve $table", before[table], rawRows(store, table))
+            for (table in tables) {
+                val after = rawRows(store, table)
+                val added = when (table) { "projection_bases" -> 1; "projection_receipts" -> 2; else -> 0 }
+                assertTrue(after.all { it.takeLast(added).all { field -> field == null } })
+                assertEquals("Migration must preserve $table", before[table], after.map { it.dropLast(added) })
+            }
             assertTrue(rawRows(store, "captured_create_acknowledgements").isEmpty())
             assertNull(store.capturedAcknowledgement(scope, first.change.eventId)); assertEquals(first, store.capturedBaseline(scope, first.change.eventId))
             assertTrue(store.reserveCapturedAcknowledgement(proposal()).fresh)

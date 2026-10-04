@@ -175,6 +175,9 @@ The calculator has since been extracted into the main `sync` source set;
 `FiniteDailyRecurrenceExperiment` remains a debug-only fixture entry point.
 A pure [versioned reference](../PROJECTION_REPRESENTATION.md) freezes canonical
 event content separately from the generated native view, including exact dates
-in equality. Nine reference cases and the original nine calculator cases pass.
-This model has no persistence or historical reload API and does not enable the
-bounded profile in the Proton parser or Android projection.
+in equality. Historical restoration and schema 15 now retain saved dates without
+recalculating them; 13 reference cases and the original nine calculator cases
+pass. Structural reload preserves duplicates produced by whole-day gaps and
+does not establish their native geometry. The storage path does not enable the
+bounded profile in the Proton parser or Android projection; the latter refuses
+receipts with a current or previous finite representation until integration.

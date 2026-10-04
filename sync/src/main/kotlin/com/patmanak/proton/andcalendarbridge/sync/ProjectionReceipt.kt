@@ -11,11 +11,16 @@ data class ProjectionReceipt(
     val nonce: String,
     val previousBase: RemoteChange.Upsert?,
     val protocol: Int = 1,
+    /** Null retains the historical direct mode, including old constructor/copy behavior. */
+    val representation: ProjectedEventReference? = null,
+    val previousRepresentation: ProjectedEventReference? = null,
 ) {
     init {
         require(protocol == 1 && nonce.matches(Regex("[a-f0-9]{8}(-[a-f0-9]{4}){3}-[a-f0-9]{12}")))
         require(previousBase == null || previousBase.eventId == change.eventId)
         require(supports(change))
+        require(representation == null || representation.canonical == change)
+        require(previousRepresentation == null || previousBase != null && previousRepresentation.canonical == previousBase)
     }
     override fun toString() = "ProjectionReceipt(redacted)"
 

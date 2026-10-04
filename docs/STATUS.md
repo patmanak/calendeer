@@ -309,7 +309,7 @@ Existing records return an explicit HISTORICAL result without another adapter
 call or timestamp/payload replacement, including older preparation formats. This
 does not requalify their access or crypto, nor adopt them as the current format.
 Conflicted owners remain conflicted and their saved evidence remains inspectable.
-The original journal inspection API and schema 14 are unchanged. No Android row
+The original journal inspection API and journal columns are unchanged. No Android row
 is read, acknowledged or modified by this step; the SQL baseline is a historical
 reference, not proof of present Provider contents. No UI/worker invokes this entry
 automatically, and UPDATE/DELETE stay disabled.
@@ -635,17 +635,30 @@ identify historical writes; SQLite recovery binds the complete persisted receipt
 and rejects a copy with canonical rule content in place of the date view. Both
 complete recurrence/recovery device classes pass all 78 methods without skips.
 Their receipts and SQLite baselines concern synthetic date views, not canonical
-RRULE imports. Canonical source eligibility, representation persistence/matching
-and historical receipt recovery still need integrated qualification before
+RRULE imports. Canonical source eligibility and native representation matching
+and recovery still need integrated qualification before
 activation. Production RRULE admission and projection remain unchanged.
 The pure [versioned projection reference](PROJECTION_REPRESENTATION.md) now owns
 canonical event data and a separate direct or finite-date view. Equality includes
 the canonical content, representation and exact dates; collection snapshots
 preserve unknown details and resist caller mutation. The calculator has moved
 into `sync`, with a debug-only fixture entry point and no runtime import callers.
-All 210 sync tests and nine debug calculator tests pass. Persistence, complete
-previous-reference comparison and historical decoding remain separate integration
-work; the model grants no projection or acknowledgement authority.
+Schema 15 now persists explicitly supplied representations separately from
+canonical receipt and baseline content, including the previous applied
+representation. Strict historical decoding reuses saved dates without expansion;
+exact recovery compares both canonical content and metadata, retains the applied
+reference after receipt removal and leaves newer source content pending. Old
+NULL metadata remains direct and payloads/nonces stay unchanged. Unknown metadata
+blocks projection acknowledgement and represented rows cannot enter the historical
+captured-create handoff. The Android mapper refuses finite current/previous
+metadata; ordinary imports still use direct preparation. Native integration and
+raw-source eligibility remain unqualified. The model itself grants no write or
+acknowledgement authority.
+The stored-reference model, migration and recovery checks pass 215 sync and
+19 app unit cases plus all 373 physical methods in the 18 affected storage,
+Provider recovery and handoff classes, with no failures or skips. Successful
+finite SQL acknowledgement fixtures use synthetic witnesses; they do not
+establish a finite Provider write.
 Nonce-backed recovery has passed source review, JVM checks and controlled physical
 SQLite/Provider fixtures, including lost private acknowledgement, reused opaque
 revision and schema migration. These fixtures do not qualify arbitrary power loss.

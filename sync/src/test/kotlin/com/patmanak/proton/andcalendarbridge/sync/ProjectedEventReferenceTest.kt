@@ -138,4 +138,38 @@ class ProjectedEventReferenceTest {
         for (reference in listOf(ProjectedEventReference.direct(change()), ProjectedEventReference.finiteDaily(change())))
             assertEquals("ProjectedEventReference(redacted)", reference.toString())
     }
+
+    @Test fun historicalRestorationKeepsSavedInstantsWithoutRunningTheCurrentPlanner() {
+        val source = change(); val calculated = ProjectedEventReference.finiteDaily(source)
+        val saved = calculated.dates.toMutableList().apply { this[1] = this[1].plusSeconds(3600) }
+        val restored = ProjectedEventReference.restore(source, ProjectionRepresentation.FINITE_DAILY_V1, saved)
+        assertNotEquals(calculated, restored); assertEquals(saved, restored.dates); assertEquals(source, restored.canonical)
+        assertEquals(saved.map { RecurrencePoint.Timed(it) }, restored.nativeChange.content.recurrence!!.additionalDates)
+        val snapshot = saved.toList(); saved.clear(); assertEquals(snapshot, restored.dates)
+        immutable { (restored.dates as MutableList).clear() }
+    }
+
+    @Test fun historicalDirectRestorationDoesNotInventDatesAndRetainsUnknownDetails() {
+        val source = change().let { it.copy(content = it.content.copy(details = null)) }
+        assertEquals(ProjectedEventReference.direct(source), ProjectedEventReference.restore(source, ProjectionRepresentation.DIRECT_V1, emptyList()))
+        refused { ProjectedEventReference.restore(source, ProjectionRepresentation.DIRECT_V1, listOf((source.content.time as EventTime.Timed).start)) }
+    }
+
+    @Test fun storedFiniteShapeRefusesWrongCountStartPrecisionOrderAndBounds() {
+        val source = change(); val dates = ProjectedEventReference.finiteDaily(source).dates
+        for (saved in listOf(emptyList(), dates.dropLast(1), dates + dates.last(),
+            dates.toMutableList().apply { this[0] = this[0].plusSeconds(1) },
+            dates.toMutableList().apply { this[1] = this[1].plusNanos(1) },
+            listOf(dates[0], dates[2], dates[1]), listOf(dates[0], dates[1], Instant.parse("+10000-01-01T00:00:00Z"))))
+            refused { ProjectedEventReference.restore(source, ProjectionRepresentation.FINITE_DAILY_V1, saved) }
+        refused { ProjectedEventReference.restore(change(rule = "FREQ=WEEKLY;COUNT=3"), ProjectionRepresentation.FINITE_DAILY_V1, dates) }
+    }
+
+    @Test fun savedDatesRetainDuplicateInstantsFromTheAlreadyDefinedWholeDayGapPolicy() {
+        val start = Instant.parse("2011-12-29T10:30:00Z")
+        val source = change().let { it.copy(content = it.content.copy(time = EventTime.Timed(start, start.plusSeconds(3600), ZoneId.of("Pacific/Apia")))) }
+        val calculated = ProjectedEventReference.finiteDaily(source)
+        assertEquals(listOf("2011-12-29T10:30:00Z", "2011-12-30T10:30:00Z", "2011-12-30T10:30:00Z").map(Instant::parse), calculated.dates)
+        assertEquals(calculated, ProjectedEventReference.restore(source, ProjectionRepresentation.FINITE_DAILY_V1, calculated.dates))
+    }
 }

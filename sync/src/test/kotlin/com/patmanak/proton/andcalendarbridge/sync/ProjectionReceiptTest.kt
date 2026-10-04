@@ -17,6 +17,20 @@ class ProjectionReceiptTest {
         try { block(); fail("Unsupported receipt must be refused") } catch (_: IllegalArgumentException) { }
     }
 
+    @Test fun representedReceiptsBindCanonicalAndPreviousContentWithoutReplacingThem() {
+        val source = base.copy(content = base.content.copy(time = EventTime.Timed(Instant.parse("2030-10-26T00:30:00Z"),
+            Instant.parse("2030-10-26T01:30:00Z"), ZoneId.of("Europe/Paris")), recurrence = EventRecurrence("fixture-series", "FREQ=DAILY;COUNT=3")))
+        val direct = ProjectedEventReference.direct(source); val finite = ProjectedEventReference.finiteDaily(source)
+        val receipt = ProjectionReceipt(scope, format, source, nonce, source, representation = finite, previousRepresentation = direct)
+        assertEquals(source, receipt.snapshot().change); assertEquals(source, receipt.snapshot().previousBase)
+        assertEquals(finite, receipt.snapshot().representation); assertEquals(direct, receipt.snapshot().previousRepresentation)
+        assertNotEquals(receipt, receipt.copy(representation = direct))
+        refused { receipt.copy(change = source.copy(revision = Revision("changed"))) }
+        refused { receipt.copy(previousBase = null) }
+        refused { receipt.copy(previousRepresentation = ProjectedEventReference.direct(base)) }
+        assertNull(ProjectionReceipt(scope, format, source, nonce, source).representation)
+    }
+
     @Test fun preparationPreservesTheExactPreviousBaseAndNeverExposesItsNonce() {
         val next = base.copy(revision = Revision("opaque-two"))
         val receipt = ProjectionReceipt(scope, format, next, nonce, base)

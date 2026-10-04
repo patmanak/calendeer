@@ -102,6 +102,27 @@ class CapturedHandoffStoreDeviceTest {
         catch (_: ClassCastException) { }
     }
 
+    @Test fun representedCapturedBaseCannotBeAdoptedByHistoricalHandoffAdmission() = fixture {
+        prove()
+        for (metadata in listOf("{\"id\":\"future\",\"version\":1,\"dates\":[]}", "{\"id\":\"direct\",\"version\":1,\"dates\":[]}")) {
+            raw { db -> db.execSQL("UPDATE projection_bases SET representation=?", arrayOf(metadata)) }
+            val before = snapshot()
+            reject { store.reserveCapturedHandoff(handoff()) }
+            unchanged(before)
+        }
+    }
+
+    @Test fun representedReleasedBaseAndReceiptCannotLoseMetadataThroughSixFieldHandoffRecovery() = fixture {
+        val frame = release(); val plan = plan(frame)
+        for (table in listOf("projection_bases", "projection_receipts")) {
+            raw { db -> db.execSQL("UPDATE $table SET representation=?", arrayOf("{\"id\":\"direct\",\"version\":1,\"dates\":[]}")) }
+            val before = snapshot()
+            reject { store.restoreCapturedHandoffProjection(AppliedCapturedHandoffProjection(plan)) }
+            unchanged(before)
+            raw { db -> db.execSQL("UPDATE $table SET representation=NULL") }
+        }
+    }
+
     @Test fun reservationRequiresProvenExactAcknowledgement() = fixture {
         val before = snapshot(); reject { store.reserveCapturedHandoff(handoff()) }; unchanged(before)
         store.reserveCapturedAcknowledgement(acknowledgement)
@@ -211,7 +232,7 @@ class CapturedHandoffStoreDeviceTest {
     }
 
     @Test fun rawOutstandingOrdinaryProofBlocksReservation() = fixture {
-        prove(); raw { it.execSQL("INSERT INTO projection_receipts VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        prove(); raw { it.execSQL("INSERT INTO projection_receipts (scope, event, nonce, payload, adapter, version, previous_base, protocol) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             arrayOf(scopeKey(), original.change.eventId.value, UUID(0, 701).toString(), "unreadable", format.id, 1, null, 1)) }
         val before = snapshot(); reject { store.reserveCapturedHandoff(handoff()) }; unchanged(before)
     }
@@ -412,7 +433,7 @@ class CapturedHandoffStoreDeviceTest {
     @Test fun reopeningRetainsRoleCurrentReferenceWaitingAndHistoricalReceipt() = fixture {
         val (frame, _) = advanced(); val plan = plan(frame, incoming(2)); store.waitCapturedHandoff(frame); val before = snapshot()
         store.close(); ImportStore(context, name).use { reopened ->
-            assertEquals(14, reopened.writableDatabase.version)
+            assertEquals(15, reopened.writableDatabase.version)
             assertEquals(frame, reopened.capturedHandoff(scope, frame.eventId)!!.frame)
             assertTrue(reopened.capturedHandoff(scope, frame.eventId)!!.waiting)
             assertEquals(plan, reopened.capturedHandoffProjection(frame))
@@ -429,7 +450,7 @@ class CapturedHandoffStoreDeviceTest {
             it.execSQL("DROP TABLE captured_create_handoffs"); it.version = 12
         }
         ImportStore(context, name).use { migrated ->
-            assertEquals(14, migrated.writableDatabase.version); assertNull(migrated.capturedHandoff(scope, original.change.eventId))
+            assertEquals(15, migrated.writableDatabase.version); assertNull(migrated.capturedHandoff(scope, original.change.eventId))
             assertEquals(original, migrated.capturedBaseline(scope, original.change.eventId))
             assertEquals(acknowledgement, migrated.capturedAcknowledgement(scope, original.change.eventId)!!.receipt)
             assertTrue(migrated.writableDatabase.rawQuery("SELECT * FROM captured_create_handoffs", null).use { !it.moveToFirst() })

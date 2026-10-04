@@ -358,8 +358,13 @@ class CapturedCreateBaselineStoreDeviceTest {
                 old.version = 10
                 for (table in tables) before[table] = rows(old, table)
             }
-            assertEquals(14, store.writableDatabase.version)
-            for (table in tables) assertEquals("Migration must preserve $table", before[table], rows(store.writableDatabase, table))
+            assertEquals(15, store.writableDatabase.version)
+            for (table in tables) {
+                val after = rows(store.writableDatabase, table)
+                val added = when (table) { "projection_bases" -> 1; "projection_receipts" -> 2; else -> 0 }
+                assertTrue(after.all { it.takeLast(added).all { field -> field == null } })
+                assertEquals("Migration must preserve $table", before[table], after.map { it.dropLast(added) })
+            }
             store.writableDatabase.rawQuery("SELECT count(*) FROM captured_create_bases", null).use {
                 assertTrue(it.moveToFirst()); assertEquals(0, it.getInt(0))
             }

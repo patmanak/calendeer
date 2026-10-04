@@ -33,6 +33,7 @@ data class CapturedCreateHandoffFrame(
         require(base.eventId == receipt.eventId && supportsCapturedHandoff(base))
         if (lastProjection == null) require(base == receipt.acknowledgement.baseline.change)
         else {
+            require(lastProjection.representation == null && lastProjection.previousRepresentation == null)
             require(lastProjection.scope == receipt.scope && lastProjection.format == receipt.format && lastProjection.change == base)
             require(lastProjection.previousBase?.let(::supportsCapturedHandoff) == true)
             require(lastProjection.nonce !in listOf(receipt.nonce, receipt.acknowledgement.nonce,
@@ -55,6 +56,7 @@ data class CapturedCreateHandoffRecord(val frame: CapturedCreateHandoffFrame,
 /** Conditional incoming projection; never admission to ordinary projection or insertion. */
 data class CapturedHandoffProjection(val frame: CapturedCreateHandoffFrame, val receipt: ProjectionReceipt) {
     init {
+        require(receipt.representation == null && receipt.previousRepresentation == null)
         require(receipt.scope == frame.scope && receipt.format == frame.format && receipt.previousBase == frame.base)
         require(receipt.change.eventId == frame.eventId && supportsCapturedHandoff(receipt.change))
         require(receipt.nonce !in listOf(frame.receipt.nonce, frame.receipt.acknowledgement.nonce,

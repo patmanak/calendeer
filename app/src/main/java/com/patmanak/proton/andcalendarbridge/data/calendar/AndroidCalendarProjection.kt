@@ -303,7 +303,13 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
         }
     }
 
-    private fun snapshotReceipt(receipt: ProjectionReceipt): ProjectionReceipt = try { receipt.snapshot() }
+    private fun snapshotReceipt(receipt: ProjectionReceipt): ProjectionReceipt = try {
+        // Persisted finite views are not connected to this mapper yet. Never apply
+        // their canonical RRULE or mistake a historical marker for their geometry.
+        require(receipt.representation?.representation != com.patmanak.proton.andcalendarbridge.sync.ProjectionRepresentation.FINITE_DAILY_V1 &&
+            receipt.previousRepresentation?.representation != com.patmanak.proton.andcalendarbridge.sync.ProjectionRepresentation.FINITE_DAILY_V1)
+        receipt.snapshot()
+    }
         catch (cancelled: CancellationException) { throw cancelled }
         catch (_: Exception) { fail(CalendarProjectionFailure.PROVIDER_REJECTED) }
 

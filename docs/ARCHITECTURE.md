@@ -102,11 +102,13 @@ will be integrated only with a persistent production repository and usable adapt
 
 The pure [projection reference](PROJECTION_REPRESENTATION.md) separates canonical
 event data from a direct or bounded finite-date view. Its creation factories own
-immutable snapshots; it is not yet connected to receipts, SQL or Android imports.
-Durable integration must retain the applied representation after acknowledgement
-and compare the complete previous reference during recovery. Saved dates must
-not be recalculated with a newer timezone database. Existing receipt protocols
-and production recurrence admission remain unchanged.
+immutable snapshots. Schema 15 connects explicitly supplied references to receipt
+preparation and the applied SQL baseline; complete-reference recovery retains
+saved dates after acknowledgement without recalculating with a newer timezone
+database. Ordinary imports still prepare historical direct projections, and the
+Android mapper refuses finite metadata until native integration is qualified.
+Receipt protocol 1, canonical event encoding and production recurrence admission
+remain unchanged.
 
 ## Experimental CREATE association
 
