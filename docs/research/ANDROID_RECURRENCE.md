@@ -111,14 +111,44 @@ Qualification must reapply the complete intended temporal/recurrence payload,
 check already-expanded windows and linked exceptions, and preserve native IDs.
 The existing production mapper supplies these fields; this audit adds no repair.
 
-## Next bounded experiment
+## Finite daily representation experiment
 
-The proposed next slice is an isolated representation experiment for a small,
-finite simple daily rule with an unambiguous start. It would derive each local
-date independently from the original nominal start, resolve fold/gap offsets,
-and project the resulting complete set as native UTC RDATE without RRULE.
-The canonical domain data must retain the original rule, timezone, exclusions,
-source and exception identities. No production activation is established here.
+A debug-only prototype now derives each local date independently from the
+original nominal start, chooses the first offset during a fold or the preceding
+offset during a gap, and produces a separate complete RDATE recurrence view.
+The existing native mapper can project that synthetic view in UTC without RRULE.
+There is no production caller or change to the parser/native admission guards.
+The prototype snapshots the original rule and exclusions separately and does not
+rewrite the canonical input event, timezone or exception identity.
+
+Its provisional experiment bounds are an unambiguous resolved timed start,
+exact uppercase `FREQ=DAILY;COUNT=1..32`, optional `INTERVAL=1..366`, at most
+366 nominal days from first to last date, no additional RDATE inputs, and at most
+32 timed EXDATE inputs. Duration is 1 second through 7 days; timestamps have whole
+seconds, and every nominal date and native start/end/exclusion stays in years
+1 through 9999. Other selectors, infinite rules, all-day masters and ambiguous
+starts are refused. Dates and recurrence lists are owned immutable snapshots.
+These bounds do not establish support for every admitted timezone or Provider cost.
+
+The experiment's source is an already resolved domain instant. It cannot recover
+an original nominal DTSTART that an upstream parser has already normalized out
+of a gap. Source-level eligibility and original local-field preservation need
+separate qualification before any production integration.
+
+Nine focused JVM cases pass, including independent fold/gap arithmetic, a
+half-hour gap, interval/count boundaries, exclusions, year overflow, refusal and
+snapshot isolation. The initial placeholder failed six positive cases; review
+then exposed and reproduced year-boundary and input-list alias defects before
+their correction. Android fixtures have been implemented for exact instances,
+exceptions, cached replacement, dirty/deleted protection and lost-ACK reopening;
+physical qualification is pending.
+
+Those fixtures deliberately persist and authenticate the synthetic RDATE view.
+They do not establish that a canonical RRULE import can use that representation
+while keeping its durable canonical baseline and historical receipts. A copied
+receipt for the canonical rule must not authenticate the date view. Versioned
+representation selection, parser eligibility, ordinary matching and recovery
+must be integrated and tested together before activation.
 
 Acceptance must cover exact starts/ends, original-slot exclusions, moved and
 cancelled exceptions, conversion of exception display types, cached expansion,

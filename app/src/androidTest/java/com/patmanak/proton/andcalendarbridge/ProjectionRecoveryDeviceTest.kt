@@ -23,6 +23,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import com.patmanak.proton.andcalendarbridge.data.calendar.AndroidCalendarProjection
 import com.patmanak.proton.andcalendarbridge.data.calendar.CalendarProjection
 import com.patmanak.proton.andcalendarbridge.data.importing.*
+import com.patmanak.proton.andcalendarbridge.experiments.FiniteDailyRecurrenceExperiment
 import com.patmanak.proton.andcalendarbridge.sync.*
 import com.patmanak.proton.andcalendarbridge.sync.catalog.CalendarSummary
 import java.time.Instant
@@ -39,6 +40,41 @@ import org.junit.runner.RunWith
 /** Isolated production Provider/SQLite/coordinator recovery; controlled remote, no service writes. */
 @RunWith(AndroidJUnit4::class)
 class ProjectionRecoveryDeviceTest {
+    /** Recovery proves the synthetic date view only; the canonical RRULE is not stored as its base. */
+    @Test fun finiteDailyDateViewRecoversLostAcknowledgementWithoutClaimingCanonicalRuleProof() = runBlocking {
+        for (spring in listOf(false, true)) for (dirty in listOf(false, true)) withFixture(reminders = true, participants = true) { f ->
+            assertEquals(ImportRunResult.COMPLETE, f.coordinator.run(false))
+            val starts = if (spring) listOf("2030-03-30T01:30:00Z", "2030-03-31T01:30:00Z", "2030-04-01T00:30:00Z") else
+                listOf("2030-10-26T00:30:00Z", "2030-10-27T00:30:00Z", "2030-10-28T01:30:00Z")
+            val canonical = f.latest.copy(content = f.latest.content.copy(time = EventTime.Timed(Instant.parse(starts[0]),
+                Instant.parse(starts[0]).plusSeconds(7200), ZoneId.of("Europe/Paris")),
+                recurrence = EventRecurrence("finite-recovery-series", "FREQ=DAILY;COUNT=3")))
+            val schedule = FiniteDailyRecurrenceExperiment.plan(canonical.content.time, canonical.content.recurrence!!)
+            val view = canonical.copy(content = canonical.content.copy(recurrence = schedule.native))
+            f.projectWithoutAcknowledgement(view)
+            val row = f.row(); val applies = f.applies.get()
+            val expected = starts.map { Triple(row, Instant.parse(it).toEpochMilli(), Instant.parse(it).plusSeconds(7200).toEpochMilli()) }
+            val from = if (spring) "2030-03-29T00:00:00Z" else "2030-10-25T00:00:00Z"
+            val until = if (spring) "2030-04-08T00:00:00Z" else "2030-11-02T00:00:00Z"
+            assertEquals(expected, f.instances(from, until)); assertNull(f.field(Events.RRULE)); assertEquals("UTC", f.field(Events.EVENT_TIMEZONE))
+            val reminders = f.reminders(); val people = f.attendees()
+            val receipt = f.store.projectionReceipt(f.target, f.base.eventId)!!
+            assertEquals(view, receipt.change)
+            assertEquals(AppliedProjectionWitness(receipt), f.native.inspectProjectionReceipt(receipt))
+            assertNull("A native date-view proof must not authenticate its canonical rule", f.native.inspectProjectionReceipt(receipt.copy(change = canonical)))
+            if (dirty) f.edit("Later local finite-date edit")
+            f.reopen(); assertEquals(ImportRunResult.COMPLETE, f.coordinator.run(false))
+            assertEquals(view, f.store.projectedBaseline(f.target, f.base.eventId))
+            assertNotEquals(canonical, f.store.projectedBaseline(f.target, f.base.eventId))
+            assertEquals("FREQ=DAILY;COUNT=3", canonical.content.recurrence!!.rule)
+            assertEquals(row, f.row()); assertEquals(applies, f.applies.get()); assertEquals(expected, f.instances(from, until))
+            assertEquals(reminders, f.reminders()); assertEquals(people, f.attendees())
+            assertEquals(if (dirty) "Later local finite-date edit" else view.content.title, f.field(Events.TITLE))
+            assertEquals(if (dirty) "1" else "0", f.field(Events.DIRTY))
+            assertNull(f.store.projectionReceipt(f.target, f.base.eventId)); assertTrue(f.store.pending(f.target).isEmpty())
+        }
+    }
+
     @Test fun laterDailyRuleRefusalRetainsItsPreparationAndBaselineAcrossReopening() = runBlocking {
         for (start in listOf("2030-10-26T00:30:00Z", "2030-03-30T01:30:00Z")) withFixture(reminders = true, participants = true) { f ->
             assertEquals(ImportRunResult.COMPLETE, f.coordinator.run(false))
@@ -1192,10 +1228,10 @@ class ProjectionRecoveryDeviceTest {
                 additionalDates = listOf(fixturePoint(base.content.time is EventTime.AllDay, 4), fixturePoint(base.content.time is EventTime.AllDay, 6)),
                 excludedDates = listOf(fixturePoint(base.content.time is EventTime.AllDay, 2)))))
 
-        fun instances(): List<Triple<Long, Long, Long>> {
+        fun instances(from: String = "2030-10-26T00:00:00Z", until: String = "2030-11-05T00:00:00Z"): List<Triple<Long, Long, Long>> {
             val builder = CalendarContract.Instances.CONTENT_URI.buildUpon()
-            ContentUris.appendId(builder, Instant.parse("2030-10-26T00:00:00Z").toEpochMilli())
-            ContentUris.appendId(builder, Instant.parse("2030-11-05T00:00:00Z").toEpochMilli())
+            ContentUris.appendId(builder, Instant.parse(from).toEpochMilli())
+            ContentUris.appendId(builder, Instant.parse(until).toEpochMilli())
             return context.contentResolver.query(builder.build(), arrayOf(CalendarContract.Instances.EVENT_ID,
                 CalendarContract.Instances.BEGIN, CalendarContract.Instances.END), "${Events.CALENDAR_ID}=?",
                 arrayOf(calendar.toString()), "${CalendarContract.Instances.BEGIN} ASC")!!.use { cursor ->

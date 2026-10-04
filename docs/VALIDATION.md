@@ -560,6 +560,45 @@ installation, Provider/calendar access or Proton transport is needed for replay.
 The audit changes documentation only; application builds and the previously
 qualified production test suites were not rerun for that documentation change.
 
+### Debug-only finite daily recurrence experiment
+
+`FiniteDailyRecurrenceExperimentTest` has nine JVM cases for independent Paris
+fold/gap dates, a half-hour gap, exact COUNT and interval behavior, unchanged
+exclusions, experiment bounds, malformed/unsupported inputs and immutable output.
+Run `:app:testDebugUnitTest --tests '*FiniteDailyRecurrenceExperimentTest'`.
+The initial placeholder failed six positive cases. Two review findings also failed
+before correction: a generated local year outside the bound despite a valid UTC
+year, and aliasing a caller's empty additions list in the canonical snapshot.
+The final nine cases have no failures, errors or skips.
+
+Three additional `RecurrenceProviderDeviceTest` methods check projected synthetic
+date views: exact starts/one-hour duration and EXDATE (including first/all slots
+and a different fold instant); moved/cancelled timed/all-day exceptions and
+reconversion after expansion; cached COUNT=3-to-4 replacement retaining parent
+and child IDs; and ordinary/tracked dirty or deleted replacement refusals retaining
+the previous receipt. The temporal source and canonical rule stay separate.
+
+`finiteDailyDateViewRecoversLostAcknowledgementWithoutClaimingCanonicalRuleProof`
+in `ProjectionRecoveryDeviceTest` uses the production SQLite/Provider/coordinator
+with a controlled remote, a synthetic date-view input and a lost private ACK.
+It checks two-hour instance duration, reminders/participants, reopening without
+a repeated write, and preservation of a subsequent dirty local title. Its baseline
+is explicitly the RDATE view; inspection of the same receipt copied to its
+canonical RRULE must fail. This is not canonical RRULE storage/recovery support.
+The fixture's original autumn query defaults remain unchanged; this test supplies
+spring/autumn windows explicitly.
+
+Native tests are opt-in via `providerFixture=true` and require an authorized
+physical target. The four new methods and the modified classes' regression suites
+are currently NOT RUN. APK/test compilation and lint pass with zero errors and
+20 existing warnings. `:app:compileReleaseSources` also passes; the experiment is
+absent from compiled release classes and its unit tests belong to `testDebug`.
+This is source compilation, not release APK or distribution qualification.
+There are no new production callers, adapter capabilities,
+schema changes or enabled RRULE materialization. No Proton transport or calendar
+editor is part of these fixtures; broader timezone/OEM/UI and cost qualification
+remain separate.
+
 `RecurrenceStoreDeviceTest` covers schema 5-to-6 migration, legacy payload stability,
 reopen/rollback/CAS, master ordering, missing or deferred parents, mismatched original
 date types, durable tombstones and eligible-result limits. `RecurrenceCoordinatorDeviceTest`

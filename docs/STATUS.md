@@ -626,9 +626,15 @@ GregorianCalendar-based expander, local-key loss of repeated-hour instants and
 the DTSTART requirement for cache updates. Ten isolated source-replay cases on
 an Android runtime reproduce the relevant mechanisms; a desktop spring-rule
 replay differs, confirming that host arithmetic does not qualify Android.
-The audit proposes a finite daily-rule experiment using explicit native UTC dates,
-with canonical rule/zone and recovery identity preserved. That representation is
-not enabled for RRULE masters; current admission guards remain unchanged.
+A debug-only finite daily-rule prototype now derives independent nominal dates
+and a separate explicit recurrence view for the existing native UTC mapper.
+It preserves its canonical rule snapshot and admits at most 32 occurrences within
+366 days, with other limits described in the audit. Nine focused JVM cases pass;
+physical qualification of the new instance/exception/recovery fixtures is pending.
+Their receipts and SQLite baselines concern synthetic date views, not canonical
+RRULE imports. Canonical source eligibility, representation persistence/matching
+and historical receipt recovery still need integrated qualification before
+activation. Production RRULE admission and projection remain unchanged.
 Nonce-backed recovery has passed source review, JVM checks and controlled physical
 SQLite/Provider fixtures, including lost private acknowledgement, reused opaque
 revision and schema migration. These fixtures do not qualify arbitrary power loss.

@@ -13,6 +13,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import com.patmanak.proton.andcalendarbridge.data.calendar.AndroidCalendarProjection
 import com.patmanak.proton.andcalendarbridge.data.calendar.CalendarProjectionException
 import com.patmanak.proton.andcalendarbridge.data.calendar.CalendarProjectionFailure
+import com.patmanak.proton.andcalendarbridge.experiments.FiniteDailyRecurrenceExperiment
 import com.patmanak.proton.andcalendarbridge.sync.*
 import com.patmanak.proton.andcalendarbridge.sync.catalog.CalendarSummary
 import java.time.Instant
@@ -53,6 +54,120 @@ class RecurrenceProviderDeviceTest {
     @Test fun laterGapCurrentlyDriftsTheFollowingRuleOccurrence() = runBlocking {
         characterizeLaterTransition(spring = true)
     }
+
+    /** Canonical RRULE is kept separately; only an explicit synthetic date view is projected. */
+    @Test fun finiteDailyDateViewsKeepExactDstStartsDurationAndExclusions() = runBlocking {
+        for (spring in listOf(false, true)) {
+            val starts = finiteDailyStarts(spring)
+            val choices = listOf(emptyList<String>()) + starts.map { listOf(it) } + listOf(starts) +
+                listOf(listOf(if (spring) "2030-03-31T00:30:00Z" else "2030-10-27T01:30:00Z"))
+            for (excluded in choices) fixture { scope, _, calendar, _ ->
+                val source = timed("finite-daily-master", starts[0], EventRecurrence("finite-daily-series", "FREQ=DAILY;COUNT=3",
+                    excludedDates = excluded.map(::point)), "Europe/Paris")
+                val view = experimentalDateView(source)
+                val receipt = tracked(scope, view); val parent = row(calendar, source.content.title).id
+                assertEquals(expectedHourlySlots(parent, starts.filter { it !in excluded }), finiteDailyWindow(calendar, spring))
+                assertEquals("FREQ=DAILY;COUNT=3", source.content.recurrence!!.rule)
+                assertEquals(source.content.time, view.content.time)
+                assertNull(row(calendar, source.content.title).rule)
+                resolver.query(Events.CONTENT_URI, arrayOf(Events.DTSTART, Events.EVENT_TIMEZONE, Events.EVENT_END_TIMEZONE),
+                    "${Events._ID}=?", arrayOf(parent.toString()), null)!!.use {
+                    assertTrue(it.moveToFirst()); assertEquals(Instant.parse(starts[0]).toEpochMilli(), it.getLong(0))
+                    assertEquals("UTC", it.getString(1)); assertEquals("UTC", it.getString(2))
+                }
+                assertEquals(AppliedProjectionWitness(receipt), AndroidCalendarProjection(context).inspectProjectionReceipt(receipt))
+                projection.apply(ProjectionIntent(scope, view))
+                assertEquals(parent, row(calendar, source.content.title).id); assertEquals(1, count(calendar))
+                assertEquals(expectedHourlySlots(parent, starts.filter { it !in excluded }), finiteDailyWindow(calendar, spring))
+            }
+        }
+    }
+
+    @Test fun finiteDailyDateViewsKeepMovedCancelledAndConvertedOriginsAcrossCachedReplacement() = runBlocking {
+        for (spring in listOf(false, true)) for (allDay in listOf(false, true)) for (cancelled in listOf(false, true)) fixture { scope, _, calendar, _ ->
+            val starts = finiteDailyStarts(spring)
+            val source = timed("finite-daily-master", starts[0], EventRecurrence("finite-daily-series", "FREQ=DAILY;COUNT=3"), "Europe/Paris")
+            val view = experimentalDateView(source)
+            tracked(scope, view); val parent = row(calendar, source.content.title).id
+            assertEquals(expectedHourlySlots(parent, starts), finiteDailyWindow(calendar, spring)) // Expand before edits.
+            val movedDate = if (spring) "2030-04-04" else "2030-10-30"
+            fun child(displayAllDay: Boolean, isCancelled: Boolean, revision: String) =
+                timed("finite-daily-child", "${movedDate}T09:00:00Z", EventRecurrence("finite-daily-series",
+                    original = point(starts[1]), cancelled = isCancelled), "Europe/Paris").let {
+                    it.copy(revision = Revision(revision), content = if (displayAllDay) it.content.copy(
+                        time = EventTime.AllDay(LocalDate.parse(movedDate), LocalDate.parse(movedDate).plusDays(1))) else it.content)
+                }
+            var previous: RemoteChange.Upsert? = null
+            var childId: Long? = null
+            for ((index, display) in listOf(allDay, !allDay, allDay).withIndex()) {
+                val candidate = child(display, cancelled, "child-$index")
+                val receipt = tracked(scope, candidate, previous)
+                val id = row(calendar, candidate.content.title).id
+                if (childId != null) assertEquals(childId, id) else childId = id
+                val moved = if (cancelled) emptyList() else listOf(if (display)
+                    Instance(id, Instant.parse("${movedDate}T00:00:00Z"), Instant.parse("${movedDate}T00:00:00Z").plusSeconds(86400), true) else
+                    Instance(id, Instant.parse("${movedDate}T09:00:00Z"), Instant.parse("${movedDate}T10:00:00Z"), false))
+                assertEquals(expectedHourlySlots(parent, starts.filter { it != starts[1] }) + moved, finiteDailyWindow(calendar, spring))
+                assertEquals(parent, row(calendar, candidate.content.title).parent)
+                assertEquals(Instant.parse(starts[1]).toEpochMilli(), row(calendar, candidate.content.title).original)
+                assertEquals(AppliedProjectionWitness(receipt), AndroidCalendarProjection(context).inspectProjectionReceipt(receipt))
+                previous = candidate
+            }
+            val fourth = if (spring) "2030-04-02T00:30:00Z" else "2030-10-29T01:30:00Z"
+            val replacement = experimentalDateView(source.copy(revision = Revision("v2"), content = source.content.copy(
+                recurrence = source.content.recurrence!!.copy(rule = "FREQ=DAILY;COUNT=4"))))
+            val receipt = tracked(scope, replacement, view)
+            assertEquals(parent, row(calendar, source.content.title).id)
+            assertEquals(childId, row(calendar, "finite-daily-child").id); assertEquals(2, count(calendar))
+            val finalMoved = if (cancelled) emptyList() else listOf(if (allDay)
+                Instance(childId!!, Instant.parse("${movedDate}T00:00:00Z"), Instant.parse("${movedDate}T00:00:00Z").plusSeconds(86400), true) else
+                Instance(childId!!, Instant.parse("${movedDate}T09:00:00Z"), Instant.parse("${movedDate}T10:00:00Z"), false))
+            assertEquals(expectedHourlySlots(parent, (starts + fourth).filter { it != starts[1] }) + finalMoved, finiteDailyWindow(calendar, spring))
+            assertEquals(AppliedProjectionWitness(receipt), AndroidCalendarProjection(context).inspectProjectionReceipt(receipt))
+            projection.apply(ProjectionIntent(scope, RemoteChange.Deleted(previous!!.eventId, Revision("removed"))))
+            assertEquals(expectedHourlySlots(parent, starts + fourth), finiteDailyWindow(calendar, spring))
+        }
+    }
+
+    @Test fun finiteDailyDateViewsRefuseDirtyOrDeletedReplacementAndPreserveOldProofs() = runBlocking {
+        for (spring in listOf(false, true)) for (deleted in listOf(false, true)) fixture { scope, _, calendar, _ ->
+            val starts = finiteDailyStarts(spring)
+            val source = timed("finite-daily-master", starts[0], EventRecurrence("finite-daily-series", "FREQ=DAILY;COUNT=3"), "Europe/Paris")
+            val view = experimentalDateView(source); val receipt = tracked(scope, view)
+            val parent = row(calendar, source.content.title).id
+            assertEquals(expectedHourlySlots(parent, starts), finiteDailyWindow(calendar, spring))
+            seedNativeTimezone(scope, parent, "UTC", dirty = 1, deleted = if (deleted) 1 else 0)
+            val before = finiteDailyWindow(calendar, spring)
+            val replacement = experimentalDateView(source.copy(revision = Revision("v2"), content = source.content.copy(
+                recurrence = source.content.recurrence!!.copy(rule = "FREQ=DAILY;COUNT=4"))))
+            for (trackedWrite in listOf(false, true)) {
+                val next = ProjectionReceipt(scope, receipt.format, replacement, UUID.randomUUID().toString(), view)
+                try {
+                    if (trackedWrite) projection.applyTracked(next) else projection.apply(ProjectionIntent(scope, replacement))
+                    fail("Dirty or deleted date view was replaced")
+                } catch (failure: CalendarProjectionException) { assertEquals(CalendarProjectionFailure.PROVIDER_REJECTED, failure.category) }
+                assertNull(projection.inspectProjectionReceipt(next))
+                assertEquals(AppliedProjectionWitness(receipt), projection.inspectProjectionReceipt(receipt))
+                assertEquals(parent, row(calendar, source.content.title).id); assertEquals(1, count(calendar))
+                assertEquals(before, finiteDailyWindow(calendar, spring))
+            }
+        }
+    }
+
+    private fun experimentalDateView(source: RemoteChange.Upsert): RemoteChange.Upsert {
+        val schedule = FiniteDailyRecurrenceExperiment.plan(source.content.time, source.content.recurrence!!)
+        assertEquals(source.content.recurrence, schedule.canonical)
+        // This synthetic view's receipts are NOT receipts of the canonical RRULE source.
+        return source.copy(content = source.content.copy(recurrence = schedule.native))
+    }
+
+    private fun finiteDailyStarts(spring: Boolean) = if (spring)
+        listOf("2030-03-30T01:30:00Z", "2030-03-31T01:30:00Z", "2030-04-01T00:30:00Z") else
+        listOf("2030-10-26T00:30:00Z", "2030-10-27T00:30:00Z", "2030-10-28T01:30:00Z")
+
+    private fun finiteDailyWindow(calendar: Long, spring: Boolean) = if (spring)
+        instances(calendar, "2030-03-29T00:00:00Z", "2030-04-08T00:00:00Z") else
+        instances(calendar, "2030-10-25T00:00:00Z", "2030-11-02T00:00:00Z")
 
     // RFC 5545 3.3.5/3.3.10 with verified erratum 4271: gaps use the preceding offset and count.
     // Explicit defect characterization, not a guarantee of correct transition handling.
