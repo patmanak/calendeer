@@ -31,6 +31,18 @@ class ProjectionReceiptTest {
         assertEquals(reminders, ProjectionReceipt(scope, format, reminders, nonce, base).change)
     }
 
+    @Test fun simpleOrganizerAndParticipantImportsCanHaveHistoricalApplicationReceipts() {
+        val organizer = EventPerson("organizer@example.test", "Fixture organizer")
+        val guest = EventAttendee(EventPerson("guest@example.test", "Fixture guest"),
+            AttendanceRole.OPTIONAL, AttendanceStatus.TENTATIVE)
+        for (details in listOf(EventDetails(organizer = organizer), EventDetails(attendees = listOf(guest)),
+            EventDetails(listOf(EventReminder(15)), organizer, listOf(guest)))) {
+            val next = base.copy(content = base.content.copy(details = details))
+            assertTrue(ProjectionReceipt.supports(next))
+            assertEquals(next, ProjectionReceipt(scope, format, next, nonce, base).snapshot().change)
+        }
+    }
+
     @Test fun incompatibleProtocolForeignBaselineAndMalformedNonceAreRefused() {
         refused { ProjectionReceipt(scope, format, base, nonce, null, protocol = 2) }
         refused { ProjectionReceipt(scope, format, base, "unversioned-proof", null) }
@@ -39,15 +51,8 @@ class ProjectionReceiptTest {
 
     @Test fun unsupportedEventDataCannotBecomeARecoverableSimpleWrite() {
         val recurring = base.copy(content = base.content.copy(recurrence = EventRecurrence("fixture-uid", "FREQ=DAILY")))
-        val organized = base.copy(content = base.content.copy(details = EventDetails(
-            reminders = listOf(EventReminder(10)), organizer = EventPerson("organizer@example.test"))))
-        val attended = base.copy(content = base.content.copy(details = EventDetails(
-            attendees = listOf(EventAttendee(EventPerson("attendee@example.test"), AttendanceRole.REQUIRED,
-                AttendanceStatus.NEEDS_ACTION)))))
-        assertFalse(ProjectionReceipt.supports(recurring)); assertFalse(ProjectionReceipt.supports(organized))
-        assertFalse(ProjectionReceipt.supports(attended))
+        assertFalse(ProjectionReceipt.supports(recurring))
         refused { ProjectionReceipt(scope, format, recurring, nonce, null) }
-        refused { ProjectionReceipt(scope, format, organized, nonce, null) }
         assertFalse(ProjectionReceipt.supports(RemoteChange.Deleted(base.eventId, Revision("gone"))))
     }
 
@@ -92,5 +97,32 @@ class ProjectionReceiptTest {
         assertFalse(ProjectionReceipt.supports(next)); refused { receipt.snapshot() }
         reminders.removeAt(5)
         assertTrue(ProjectionReceipt.supports(next)); assertEquals(5, receipt.snapshot().change.content.details!!.reminders.size)
+    }
+
+    @Test fun participantSnapshotOwnsTheAppliedListAndRetainsTheOrganizerExactlyOnce() {
+        val organizer = EventPerson("organizer@example.test", "Fixture organizer")
+        val people = mutableListOf(EventAttendee(organizer, AttendanceRole.REQUIRED, AttendanceStatus.ACCEPTED))
+        val next = base.copy(content = base.content.copy(details = EventDetails(organizer = organizer, attendees = people)))
+        val frozen = ProjectionReceipt(scope, format, next, nonce, base).snapshot()
+        people.clear()
+        assertEquals(organizer, frozen.change.content.details!!.organizer)
+        assertEquals(listOf(EventAttendee(organizer, AttendanceRole.REQUIRED, AttendanceStatus.ACCEPTED)),
+            frozen.change.content.details!!.attendees)
+        try { (frozen.change.content.details!!.attendees as MutableList).clear(); fail("Snapshot must be immutable") }
+        catch (_: UnsupportedOperationException) { }
+    }
+
+    @Test fun mutatedParticipantListsAreBoundedAndCaseInsensitiveDuplicatesAreRefused() {
+        fun guest(index: Int) = EventAttendee(EventPerson("guest$index@example.test"),
+            AttendanceRole.NONE, AttendanceStatus.UNKNOWN)
+        val people = mutableListOf(guest(0))
+        val next = base.copy(content = base.content.copy(details = EventDetails(attendees = people)))
+        val receipt = ProjectionReceipt(scope, format, next, nonce, null)
+        people.add(guest(0).copy(person = EventPerson("GUEST0@EXAMPLE.TEST")))
+        assertFalse(ProjectionReceipt.supports(next)); refused { receipt.snapshot() }
+        people.clear(); people.addAll((0..100).map(::guest))
+        assertFalse(ProjectionReceipt.supports(next)); refused { receipt.snapshot() }
+        people.removeAt(100)
+        assertTrue(ProjectionReceipt.supports(next)); assertEquals(100, receipt.snapshot().change.content.details!!.attendees.size)
     }
 }

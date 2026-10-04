@@ -160,8 +160,7 @@ class ProjectionReceiptStoreDeviceTest {
             Revision("unmapped"), format, DeferredEventReason.UNSUPPORTED_CONTENT, "sealed-fixture")) }
         refused { store.prepareProjection(ProjectionIntent(scope, applied), format) }
         store.transaction(scope) { (this as StagedSyncTransaction).clearDeferred(applied.eventId) }
-        val detailed = applied.copy(content = applied.content.copy(details = EventDetails(
-            organizer = EventPerson("organizer@example.test"))))
+        val detailed = applied.copy(content = applied.content.copy(recurrence = EventRecurrence("fixture-uid", "FREQ=DAILY")))
         store.queue(detailed); refused { store.prepareProjection(ProjectionIntent(scope, detailed), format) }
         val gone = RemoteChange.Deleted(applied.eventId, Revision("gone"))
         store.queue(gone); refused { store.prepareProjection(ProjectionIntent(scope, gone), format) }
@@ -220,6 +219,45 @@ class ProjectionReceiptStoreDeviceTest {
         val aliased = receipt.copy(change = candidate)
         store.admitTransaction = { reminders.clear(); true }
         assertTrue(store.restoreProjection(AppliedProjectionWitness(aliased)))
+        store.admitTransaction = { true }
+        assertEquals(receipt.change, store.projectedBaseline(scope, applied.eventId))
+        assertEquals(newer, store.pending(scope).single().change)
+        assertNull(store.projectionReceipt(scope, applied.eventId))
+    }
+
+    @Test fun participantPreparationOwnsItsInputBeforeStorageAndReopensWithoutInventingAnAck() = fixture { store, name ->
+        store.baseline()
+        val organizer = EventPerson("organizer@example.test")
+        val people = mutableListOf(EventAttendee(organizer, AttendanceRole.REQUIRED, AttendanceStatus.ACCEPTED))
+        val candidate = applied.copy(content = applied.content.copy(details = EventDetails(organizer = organizer, attendees = people)))
+        val expected = candidate.copy(content = candidate.content.copy(details = candidate.content.details!!.copy(attendees = people.toList())))
+        store.queue(candidate)
+        store.admitTransaction = { people.clear(); true }
+        val receipt = store.prepareProjection(ProjectionIntent(scope, candidate), format)
+        store.admitTransaction = { true }
+        assertEquals(expected, receipt.change)
+        store.close()
+        ImportStore(ApplicationProvider.getApplicationContext(), name).use { reopened ->
+            assertEquals(receipt, reopened.projectionReceipt(scope, applied.eventId))
+            assertEquals(original, reopened.projectedBaseline(scope, applied.eventId))
+            assertEquals(expected, reopened.pending(scope).single().change)
+            assertTrue(reopened.restoreProjection(AppliedProjectionWitness(receipt)))
+            assertEquals(expected, reopened.projectedBaseline(scope, applied.eventId))
+            assertTrue(reopened.pending(scope).isEmpty())
+        }
+    }
+
+    @Test fun participantRestorationOwnsItsWitnessAndPreservesNewerPendingDetails() = fixture { store, _ ->
+        store.baseline()
+        val people = mutableListOf(EventAttendee(EventPerson("guest@example.test"), AttendanceRole.OPTIONAL, AttendanceStatus.TENTATIVE))
+        val candidate = applied.copy(content = applied.content.copy(details = EventDetails(attendees = people)))
+        store.queue(candidate)
+        val receipt = store.prepareProjection(ProjectionIntent(scope, candidate), format)
+        val newer = candidate.copy(revision = Revision("newer"), content = candidate.content.copy(details = EventDetails(
+            organizer = EventPerson("new-organizer@example.test"))))
+        store.queue(newer)
+        store.admitTransaction = { people.clear(); true }
+        assertTrue(store.restoreProjection(AppliedProjectionWitness(receipt.copy(change = candidate))))
         store.admitTransaction = { true }
         assertEquals(receipt.change, store.projectedBaseline(scope, applied.eventId))
         assertEquals(newer, store.pending(scope).single().change)

@@ -685,18 +685,22 @@ snapshot and private database commit. See [local capture](LOCAL_EDIT_CAPTURE.md)
 
 `ProjectionReceiptTest` checks the supported simple subset, protocol/nonce
 validation, baseline identity and redacted diagnostics on the JVM.
-Reminder-only timed/all-day imports are supported; organizer, attendee and
-recurrence profiles remain refused. Deep snapshots own applied and previous-base
-lists, and revalidate aliases mutated after model construction. The reminder-only
-acceptance assertion fails against the original implementation.
+Timed/all-day imports with supported reminder, organizer and participant details
+can have historical receipts; recurrence remains refused. Deep snapshots own
+applied and previous-base lists, and revalidate aliases mutated after model
+construction, including participant count and case-insensitive uniqueness.
+The reminder-only and organizer/participant acceptance assertions fail against
+their respective original implementations.
 `ProjectionReceiptStoreDeviceTest` uses isolated real SQLite for immutable
 preparation/reopen, exact restoration, newer remote/tombstone preservation,
 baseline comparison, incompatible formats, local-intent blocking and transaction
 rollback on lease loss, cancellation or injected failure. Its independent schema
 8 fixture must migrate without inventing receipts or losing retained work.
-Reminder preparations and restoration witnesses are frozen before the first SQL
+Detail preparations and restoration witnesses are frozen before the first SQL
 lease callback; alias mutations there must not change the durable snapshot.
-Reopening and newer pending reminder contents remain independently covered.
+Reopening and newer pending reminder/participant contents remain independently
+covered. A fabricated application witness here tests only SQL mechanics; the
+Provider fixtures below supply real historical evidence.
 
 With `-e providerFixture true`, `ProjectionRecoveryDeviceTest` joins the production
 owner, real Provider and real SQLite with a controlled read-only remote. It aborts
@@ -716,16 +720,28 @@ real Provider batch must roll back the event, nonce and reminder replacements
 together. Alias mutations at Provider admission exercise both tracked application
 and historical inspection snapshot ownership.
 
-All 185 sync and ten app JVM cases passed. Both selected physical suites passed:
-nineteen recovery and sixteen SQLite cases, including eight new Provider/owner
-cases and two new SQLite cases. APK builds and lint passed (zero errors, twenty
+Organizer/participant fixtures cover timed/all-day lost acknowledgements with
+exact attendee row IDs and no repeated tracked apply. An organizer already present
+as a participant must not add another row; organizer-only and participant-only
+profiles recover independently. Changed local organizer metadata, guest names and
+responses stay dirty and unqualified for local-edit capture. Newer imports and
+missing/foreign proofs remain unacknowledged. Whole-batch failure must roll back
+organizer metadata, attendee/reminder rows and nonce together. Provider admission
+callbacks mutate list aliases to verify snapshot ownership. Existing
+`EventDetailsProviderDeviceTest` cases qualify the unchanged read-only mapping
+and replacement behavior separately.
+
+All 188 sync and ten app JVM cases passed. Three selected physical suites passed:
+twenty-six recovery, eighteen SQLite and seven existing detail-mapping cases.
+Seven new organizer/participant Provider/owner cases and two new SQLite cases
+extend the earlier reminder qualification. APK builds and lint passed (zero errors, twenty
 existing warnings), followed by independent source/evidence review. These cases
 use isolated fixtures and a controlled remote; no Proton event was changed.
 
 These controlled fixtures establish neither a live Proton UPDATE nor arbitrary
 power-loss, Samsung editing/alert delivery or cross-store atomicity. They clean up
-only isolated local fixture data. Reminder editing/upload and downgrade of a new
-reminder-bearing receipt to an older binary are not qualified.
+only isolated local fixture data. Detail editing/upload, invitation/response
+dispatch and downgrade beyond an older binary's profile are not qualified.
 
 ## Internal local DELETE capture
 

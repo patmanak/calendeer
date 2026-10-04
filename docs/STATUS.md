@@ -480,17 +480,20 @@ Bounded queries, cursor reopening, corruption refusal and historical access gate
 have passed isolated physical SQL qualification. Existing UPDATE/DELETE inspection
 and metadata-summary regression cases also pass. No service write was performed.
 
-Read-only imports of simple events with reminder-only details now retain historical
+Read-only imports of simple events with supported details now retain historical
 atomic projection receipts. After a lost private acknowledgement, the exact nonce
-can restore the applied base without rewriting the Android event or its reminders.
-Later dirty reminder changes and newer pending remote content stay intact. Applied
-and previous-base lists are frozen before SQL/Provider suspension. Organizer,
-attendee, recurrence and Provider DELETE recovery remain excluded; this enables
-neither reminder editing nor outgoing UPDATE/DELETE. Protocol 1 and the SQL schema
-remain unchanged; downgrade of reminder-bearing receipts is not qualified.
-All 185 sync/ten app JVM cases and thirty-five selected physical Provider/SQLite
-cases passed, including timed/all-day lost-ACK reopening, exact reminder row
-preservation, refused proofs and whole-batch rollback. APK builds, lint (zero errors,
+can restore the applied base without rewriting the Android event or its children.
+Reminders, organizer metadata and up to 100 distinct participants are covered.
+Later dirty detail changes and newer pending remote content stay intact. Applied
+and previous-base lists are frozen before SQL/Provider suspension; participant
+bounds and case-insensitive uniqueness are rechecked after possible alias mutation.
+Recurrence and Provider DELETE recovery remain excluded. This enables neither
+detail editing, invitations/responses nor outgoing UPDATE/DELETE. Protocol 1 and
+the SQL schema remain unchanged; downgrade beyond an older detail profile is not
+qualified. All 188 sync/ten app JVM cases and fifty-one selected physical
+Provider/SQLite cases passed, including timed/all-day lost-ACK reopening, exact
+child row preservation, organizer deduplication, refused proofs and whole-batch
+rollback. The existing read-only detail mapping also passed. APK builds, lint (zero errors,
 twenty existing warnings) and independent review passed. The final app was installed
 and launched. No Proton fixture was modified; controlled reopening does not qualify
 physical power loss or Samsung alert delivery. See [local capture](LOCAL_EDIT_CAPTURE.md).

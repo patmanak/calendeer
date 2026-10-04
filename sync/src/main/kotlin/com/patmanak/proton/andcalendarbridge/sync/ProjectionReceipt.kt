@@ -44,8 +44,10 @@ data class ProjectionReceipt(
             val content = (change as? RemoteChange.Upsert)?.content ?: return false
             if (content.recurrence != null) return false
             content.details?.let {
-                if (it.organizer != null || it.attendees.isNotEmpty() || it.reminders.size > 5 ||
-                    it.reminders.distinct().size != it.reminders.size) return false
+                if (it.reminders.size > 5 || it.reminders.distinct().size != it.reminders.size ||
+                    it.attendees.size > 100 || it.attendees.map { attendee ->
+                        attendee.person.email.lowercase(java.util.Locale.ROOT)
+                    }.distinct().size != it.attendees.size) return false
             }
             return when (val time = content.time) {
                 is EventTime.AllDay -> true

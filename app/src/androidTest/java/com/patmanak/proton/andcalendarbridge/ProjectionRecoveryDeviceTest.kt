@@ -15,6 +15,7 @@ import android.net.Uri
 import android.provider.CalendarContract
 import android.provider.CalendarContract.Events
 import android.provider.CalendarContract.Reminders
+import android.provider.CalendarContract.Attendees
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -37,6 +38,133 @@ import org.junit.runner.RunWith
 /** Isolated production Provider/SQLite/coordinator recovery; controlled remote, no service writes. */
 @RunWith(AndroidJUnit4::class)
 class ProjectionRecoveryDeviceTest {
+    @Test fun participantImportsRecoverTimedAndAllDayEventsWithoutRepeatingChildWrites() = runBlocking {
+        for (allDay in listOf(false, true)) withFixture(reminders = true, participants = true, allDay = allDay) { f ->
+            f.coordinator.run(false)
+            val row = f.row()
+            f.projectLatestWithoutAcknowledgement()
+            val people = f.attendees(); val reminders = f.reminders(); val applies = f.applies.get()
+            assertEquals(2, people.size)
+            assertEquals(1, people.values.count { it.email == "organizer-v2@example.test" })
+            assertEquals(Attendees.RELATIONSHIP_ORGANIZER,
+                people.values.single { it.email == "organizer-v2@example.test" }.relationship)
+            assertEquals(Attendees.ATTENDEE_STATUS_ACCEPTED,
+                people.values.single { it.email == "organizer-v2@example.test" }.status)
+            assertEquals(Attendees.TYPE_OPTIONAL, people.values.single { it.email == "guest@example.test" }.role)
+            assertEquals("organizer-v2@example.test", f.field(Events.ORGANIZER))
+            for (column in listOf(Events.IS_ORGANIZER, Events.GUESTS_CAN_MODIFY, Events.GUESTS_CAN_INVITE_OTHERS))
+                assertEquals("0", f.field(column))
+            f.reopen(); assertEquals(ImportRunResult.COMPLETE, f.coordinator.run(false))
+            assertEquals(applies, f.applies.get()); assertEquals(row, f.row())
+            assertEquals(people, f.attendees()); assertEquals(reminders, f.reminders())
+            assertEquals(f.latest, f.store.projectedBaseline(f.target, f.base.eventId))
+            assertTrue(f.store.pending(f.target).isEmpty()); assertNull(f.store.projectionReceipt(f.target, f.base.eventId))
+        }
+    }
+
+    @Test fun organizerOnlyAndParticipantOnlyImportsRecoverTheirExactNativeDetails() = runBlocking {
+        val guest = EventAttendee(EventPerson("guest@example.test"), AttendanceRole.RESOURCE, AttendanceStatus.DECLINED)
+        for (details in listOf(EventDetails(organizer = EventPerson("organizer-only@example.test")),
+            EventDetails(attendees = listOf(guest)))) withFixture { f ->
+            f.coordinator.run(false)
+            val candidate = f.latest.copy(content = f.latest.content.copy(details = details))
+            f.projectWithoutAcknowledgement(candidate)
+            val people = f.attendees(); val row = f.row(); val applies = f.applies.get()
+            assertEquals(1, people.size); assertEquals(details.organizer?.email, f.field(Events.ORGANIZER))
+            f.reopen(); assertEquals(ImportRunResult.COMPLETE, f.coordinator.run(false))
+            assertEquals(applies, f.applies.get()); assertEquals(row, f.row()); assertEquals(people, f.attendees())
+            assertEquals(candidate, f.store.projectedBaseline(f.target, f.base.eventId))
+            assertTrue(f.store.pending(f.target).isEmpty())
+        }
+    }
+
+    @Test fun historicalParticipantReceiptPreservesLaterDirtyOrganizerAndResponseChanges() = runBlocking {
+        withFixture(reminders = true, participants = true) { f ->
+            f.coordinator.run(false); f.projectLatestWithoutAcknowledgement()
+            val row = f.row(); val applies = f.applies.get()
+            f.editParticipant()
+            val people = f.attendees(); val reminders = f.reminders(); val marker = f.field(Events.SYNC_DATA3)
+            f.reopen(); assertEquals(ImportRunResult.COMPLETE, f.coordinator.run(false))
+            assertEquals(applies, f.applies.get()); assertEquals(row, f.row())
+            assertEquals(people, f.attendees()); assertEquals(reminders, f.reminders())
+            assertEquals("local-organizer@example.test", f.field(Events.ORGANIZER))
+            assertEquals(marker, f.field(Events.SYNC_DATA3)); assertEquals("1", f.field(Events.DIRTY))
+            assertEquals(f.latest, f.store.projectedBaseline(f.target, f.base.eventId))
+            assertTrue(f.store.pending(f.target).isEmpty())
+            assertEquals(LocalEditCaptureResult.UNQUALIFIED,
+                f.coordinator.captureLocalEdit(f.target, f.base.eventId, MutationId("fixture-participant-edit")))
+            f.store.admitTransaction = { it == f.target }
+            assertNull(f.store.localEdit(f.target, f.base.eventId)); assertEquals(people, f.attendees())
+        }
+    }
+
+    @Test fun recoveredParticipantBaselineDoesNotConsumeANewerImportOrOverwriteDirtyDetails() = runBlocking {
+        withFixture(participants = true) { f ->
+            f.coordinator.run(false); f.projectLatestWithoutAcknowledgement()
+            val newer = f.latest.copy(revision = Revision("v3"), content = f.latest.content.copy(details = EventDetails()))
+            f.queue(newer); f.editParticipant()
+            val people = f.attendees()
+            f.reopen(); f.coordinator.run(false)
+            assertEquals(f.latest, f.store.projectedBaseline(f.target, f.base.eventId))
+            assertEquals(listOf(ProjectionIntent(f.target, newer)), f.store.pending(f.target))
+            assertEquals(newer, f.store.transaction(f.target) { remote(f.base.eventId) })
+            assertEquals(people, f.attendees()); assertEquals("1", f.field(Events.DIRTY))
+            assertEquals("local-organizer@example.test", f.field(Events.ORGANIZER))
+        }
+    }
+
+    @Test fun missingOrForeignParticipantNonceKeepsPendingEvidenceAndDirtyChildren() = runBlocking {
+        for (marker in listOf(null, "calendeer-projection-receipt-v1:${UUID.randomUUID()}")) {
+            withFixture(participants = true) { f ->
+                f.coordinator.run(false); f.projectLatestWithoutAcknowledgement(); f.editParticipant()
+                f.mutate(ContentValues().apply { if (marker == null) putNull(Events.SYNC_DATA3) else put(Events.SYNC_DATA3, marker) })
+                val people = f.attendees(); val receipt = f.store.projectionReceipt(f.target, f.base.eventId)!!
+                assertNull(f.native.inspectProjectionReceipt(receipt))
+                f.reopen(); f.coordinator.run(false)
+                assertEquals(f.base, f.store.projectedBaseline(f.target, f.base.eventId))
+                assertEquals(listOf(ProjectionIntent(f.target, f.latest)), f.store.pending(f.target))
+                assertEquals(receipt, f.store.projectionReceipt(f.target, f.base.eventId))
+                assertEquals(people, f.attendees()); assertEquals("1", f.field(Events.DIRTY)); assertEquals(1, f.rowCount())
+            }
+        }
+    }
+
+    @Test fun participantApplyAndInspectionOwnListsBeforeProviderAdmission() = runBlocking {
+        withFixture(participants = true) { f ->
+            f.coordinator.run(false); f.queue(f.latest)
+            val prepared = f.store.prepareProjection(ProjectionIntent(f.target, f.latest), f.format)
+            val people = prepared.change.content.details!!.attendees.toMutableList()
+            val alias = prepared.copy(change = prepared.change.copy(content = prepared.change.content.copy(
+                details = prepared.change.content.details!!.copy(attendees = people))))
+            f.native.admitOperation = { people.clear(); true }
+            assertEquals(prepared, f.native.applyTracked(alias).receipt)
+            val rows = f.attendees()
+            assertEquals(2, rows.size); assertEquals("organizer-v2@example.test", f.field(Events.ORGANIZER))
+            people.addAll(prepared.change.content.details!!.attendees)
+            val inspected = f.native.inspectProjectionReceipt(alias)!!
+            assertEquals(prepared, inspected.receipt); assertEquals(rows, f.attendees())
+            f.native.admitOperation = { true }
+            assertTrue(f.store.restoreProjection(inspected))
+            assertEquals(f.latest, f.store.projectedBaseline(f.target, f.base.eventId))
+        }
+    }
+
+    @Test fun participantBatchFailureRollsBackOrganizerChildrenAndNonceAtomically() = runBlocking {
+        withFixture(reminders = true, participants = true) { f ->
+            f.coordinator.run(false); f.queue(f.latest)
+            val receipt = f.store.prepareProjection(ProjectionIntent(f.target, f.latest), f.format)
+            val people = f.attendees(); val reminders = f.reminders(); val marker = f.field(Events.SYNC_DATA3)
+            rejectAtomicBatch(f, receipt, expectParticipants = true)
+            assertEquals(people, f.attendees()); assertEquals(reminders, f.reminders())
+            assertEquals("organizer-v1@example.test", f.field(Events.ORGANIZER))
+            assertEquals(marker, f.field(Events.SYNC_DATA3)); assertEquals(f.base.content.title, f.field(Events.TITLE))
+            assertNull(f.native.inspectProjectionReceipt(receipt))
+            assertEquals(receipt, f.store.projectionReceipt(f.target, f.base.eventId))
+            assertEquals(f.base, f.store.projectedBaseline(f.target, f.base.eventId))
+            assertEquals(listOf(ProjectionIntent(f.target, f.latest)), f.store.pending(f.target))
+        }
+    }
+
     @Test fun reminderImportReopensAfterLostAckWithoutReapplyingOrDuplicatingReminderRows() = runBlocking {
         withFixture(reminders = true) { f ->
             f.coordinator.run(false)
@@ -161,33 +289,7 @@ class ProjectionRecoveryDeviceTest {
             f.coordinator.run(false); f.queue(f.latest)
             val receipt = f.store.prepareProjection(ProjectionIntent(f.target, f.latest), f.format)
             val rows = f.reminders(); val marker = f.field(Events.SYNC_DATA3)
-            val real = f.context.contentResolver
-            var injected = false
-            val provider = object : ContentProvider() {
-                override fun onCreate() = true
-                override fun getType(uri: Uri): String? = null
-                override fun insert(uri: Uri, values: ContentValues?): Uri? = error("Expected atomic batch")
-                override fun update(uri: Uri, values: ContentValues?, selection: String?, args: Array<out String>?): Int = error("Expected atomic batch")
-                override fun delete(uri: Uri, selection: String?, args: Array<out String>?): Int = error("Expected atomic batch")
-                override fun query(uri: Uri, columns: Array<out String>?, selection: String?, args: Array<out String>?, order: String?): Cursor? =
-                    real.query(uri, columns, selection, args, order)
-                override fun applyBatch(operations: ArrayList<ContentProviderOperation>): Array<ContentProviderResult> {
-                    assertTrue(operations.any { it.uri.path == Reminders.CONTENT_URI.path && it.isInsert })
-                    injected = true
-                    val failing = ArrayList(operations)
-                    failing += ContentProviderOperation.newAssertQuery(Events.CONTENT_URI)
-                        .withSelection("${Events._ID}=?", arrayOf("-1")).withExpectedCount(1).build()
-                    return real.applyBatch(CalendarContract.AUTHORITY, failing)
-                }
-            }
-            val wrappedResolver = ContentResolver.wrap(provider)
-            val wrappedContext = object : ContextWrapper(f.context) {
-                override fun getApplicationContext(): Context = this
-                override fun getContentResolver() = wrappedResolver
-            }
-            try { AndroidCalendarProjection(wrappedContext).applyTracked(receipt); fail("Injected assertion must reject the batch") }
-            catch (_: com.patmanak.proton.andcalendarbridge.data.calendar.CalendarProjectionException) { }
-            assertTrue(injected)
+            rejectAtomicBatch(f, receipt)
             assertEquals(rows, f.reminders()); assertEquals(marker, f.field(Events.SYNC_DATA3))
             assertEquals(f.base.content.title, f.field(Events.TITLE)); assertEquals("0", f.field(Events.DIRTY))
             assertNull(f.native.inspectProjectionReceipt(receipt))
@@ -445,7 +547,38 @@ class ProjectionRecoveryDeviceTest {
         }
     }
 
-    private class Fixture(val context: Context, reminders: Boolean = false, allDay: Boolean = false) {
+    private suspend fun rejectAtomicBatch(f: Fixture, receipt: ProjectionReceipt, expectParticipants: Boolean = false) {
+        val real = f.context.contentResolver
+        var injected = false
+        val provider = object : ContentProvider() {
+            override fun onCreate() = true
+            override fun getType(uri: Uri): String? = null
+            override fun insert(uri: Uri, values: ContentValues?): Uri? = error("Expected atomic batch")
+            override fun update(uri: Uri, values: ContentValues?, selection: String?, args: Array<out String>?): Int = error("Expected atomic batch")
+            override fun delete(uri: Uri, selection: String?, args: Array<out String>?): Int = error("Expected atomic batch")
+            override fun query(uri: Uri, columns: Array<out String>?, selection: String?, args: Array<out String>?, order: String?): Cursor? =
+                real.query(uri, columns, selection, args, order)
+            override fun applyBatch(operations: ArrayList<ContentProviderOperation>): Array<ContentProviderResult> {
+                assertTrue(operations.any { it.uri.path == Reminders.CONTENT_URI.path && it.isInsert })
+                if (expectParticipants) assertTrue(operations.any { it.uri.path == Attendees.CONTENT_URI.path && it.isInsert })
+                injected = true
+                val failing = ArrayList(operations)
+                failing += ContentProviderOperation.newAssertQuery(Events.CONTENT_URI)
+                    .withSelection("${Events._ID}=?", arrayOf("-1")).withExpectedCount(1).build()
+                return real.applyBatch(CalendarContract.AUTHORITY, failing)
+            }
+        }
+        val wrappedResolver = ContentResolver.wrap(provider)
+        val wrappedContext = object : ContextWrapper(f.context) {
+            override fun getApplicationContext(): Context = this
+            override fun getContentResolver() = wrappedResolver
+        }
+        try { AndroidCalendarProjection(wrappedContext).applyTracked(receipt); fail("Injected assertion must reject the batch") }
+        catch (_: com.patmanak.proton.andcalendarbridge.data.calendar.CalendarProjectionException) { }
+        assertTrue(injected)
+    }
+
+    private class Fixture(val context: Context, reminders: Boolean = false, allDay: Boolean = false, participants: Boolean = false) {
         private val token = UUID.randomUUID().toString()
         val target = CalendarScope(AccountId("projection-recovery-$token"), CalendarId("fixture"), 0)
         private val name = "projection-recovery-$token.db"
@@ -454,9 +587,16 @@ class ProjectionRecoveryDeviceTest {
         val base = RemoteChange.Upsert(EventId("fixture"), Revision("v1"), EventContent("Recovery base v1",
             if (allDay) EventTime.AllDay(LocalDate.of(2030, 10, 27), LocalDate.of(2030, 10, 28))
             else EventTime.Timed(Instant.parse("2030-10-27T00:30:00Z"), Instant.parse("2030-10-27T02:30:00Z"),
-                ZoneId.of("Europe/Paris")), details = EventDetails(if (reminders) listOf(EventReminder(10), EventReminder(30)) else emptyList())))
+                ZoneId.of("Europe/Paris")), details = EventDetails(if (reminders) listOf(EventReminder(10), EventReminder(30)) else emptyList(),
+                organizer = if (participants) EventPerson("organizer-v1@example.test", "Organizer v1") else null,
+                attendees = if (participants) listOf(EventAttendee(EventPerson("guest@example.test", "Guest"),
+                    AttendanceRole.REQUIRED, AttendanceStatus.NEEDS_ACTION)) else emptyList())))
         val latest = base.copy(revision = Revision("v2"), content = base.content.copy(title = "Recovery base v2",
-            details = EventDetails(if (reminders) listOf(EventReminder(5), EventReminder(15)) else emptyList())))
+            details = EventDetails(if (reminders) listOf(EventReminder(5), EventReminder(15)) else emptyList(),
+                organizer = if (participants) EventPerson("organizer-v2@example.test", "Organizer v2") else null,
+                attendees = if (participants) listOf(
+                    EventAttendee(EventPerson("organizer-v2@example.test", "Organizer v2"), AttendanceRole.REQUIRED, AttendanceStatus.ACCEPTED),
+                    EventAttendee(EventPerson("guest@example.test", "Guest"), AttendanceRole.OPTIONAL, AttendanceStatus.TENTATIVE)) else emptyList())))
         val applies = AtomicInteger()
         private val counted = object : CalendarProjection by native {
             override suspend fun applyTracked(receipt: ProjectionReceipt): AppliedProjectionWitness {
@@ -504,12 +644,14 @@ class ProjectionRecoveryDeviceTest {
             putRemote(change); putProjection(ProjectionIntent(target, change))
         }
 
-        suspend fun projectLatestWithoutAcknowledgement() {
-            queue(latest); ackFailure(true)
+        suspend fun projectLatestWithoutAcknowledgement() = projectWithoutAcknowledgement(latest)
+
+        suspend fun projectWithoutAcknowledgement(change: RemoteChange.Upsert) {
+            queue(change); ackFailure(true)
             try { coordinator.run(false) } finally { ackFailure(false) }
-            assertEquals(latest.content.title, field(Events.TITLE))
+            assertEquals(change.content.title, field(Events.TITLE))
             assertEquals(base, store.projectedBaseline(target, base.eventId))
-            assertEquals(listOf(ProjectionIntent(target, latest)), store.pending(target))
+            assertEquals(listOf(ProjectionIntent(target, change)), store.pending(target))
         }
 
         suspend fun recreateCalendar() {
@@ -567,6 +709,27 @@ class ProjectionRecoveryDeviceTest {
             mutate(ContentValues().apply { put(Events.DIRTY, 1) })
         }
 
+        private val attendeeUri get() = Attendees.CONTENT_URI.buildUpon()
+            .appendQueryParameter(CalendarContract.CALLER_IS_SYNCADAPTER, "true")
+            .appendQueryParameter(CalendarContract.Calendars.ACCOUNT_NAME, native.accountFor(target.account).name)
+            .appendQueryParameter(CalendarContract.Calendars.ACCOUNT_TYPE, native.accountFor(target.account).type).build()
+
+        fun attendees(): Map<Long, ParticipantRow> = context.contentResolver.query(attendeeUri,
+            arrayOf(Attendees._ID, Attendees.ATTENDEE_EMAIL, Attendees.ATTENDEE_NAME, Attendees.ATTENDEE_TYPE,
+                Attendees.ATTENDEE_STATUS, Attendees.ATTENDEE_RELATIONSHIP), "${Attendees.EVENT_ID}=?",
+            arrayOf(row().toString()), null)!!.use { cursor ->
+            buildMap { while (cursor.moveToNext()) put(cursor.getLong(0), ParticipantRow(cursor.getString(1), cursor.getString(2),
+                cursor.getInt(3), cursor.getInt(4), cursor.getInt(5))) }
+        }
+
+        fun editParticipant() {
+            val guest = attendees().entries.single { it.value.email == "guest@example.test" }.key
+            assertEquals(1, context.contentResolver.update(attendeeUri, ContentValues().apply {
+                put(Attendees.ATTENDEE_NAME, "Local guest"); put(Attendees.ATTENDEE_STATUS, Attendees.ATTENDEE_STATUS_DECLINED)
+            }, "${Attendees.EVENT_ID}=? AND ${Attendees._ID}=?", arrayOf(row().toString(), guest.toString())))
+            mutate(ContentValues().apply { put(Events.ORGANIZER, "local-organizer@example.test"); put(Events.DIRTY, 1) })
+        }
+
         fun duplicate() {
             val columns = arrayOf(Events._SYNC_ID, Events.SYNC_DATA1, Events.SYNC_DATA2, Events.SYNC_DATA3,
                 Events.SYNC_DATA4, Events.EVENT_TIMEZONE, Events.EVENT_END_TIMEZONE, Events.DTSTART, Events.DTEND)
@@ -600,9 +763,12 @@ class ProjectionRecoveryDeviceTest {
         }
     }
 
-    private suspend fun withFixture(reminders: Boolean = false, allDay: Boolean = false, test: suspend (Fixture) -> Unit) {
+    private data class ParticipantRow(val email: String, val name: String, val role: Int, val status: Int, val relationship: Int)
+
+    private suspend fun withFixture(reminders: Boolean = false, allDay: Boolean = false, participants: Boolean = false,
+        test: suspend (Fixture) -> Unit) {
         assumeTrue(InstrumentationRegistry.getArguments().getString("providerFixture") == "true")
-        val fixture = Fixture(ApplicationProvider.getApplicationContext(), reminders, allDay)
+        val fixture = Fixture(ApplicationProvider.getApplicationContext(), reminders, allDay, participants)
         assumeTrue(fixture.native.hasPermissions())
         try { fixture.initialize(); test(fixture) } finally { fixture.close() }
     }
