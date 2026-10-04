@@ -46,6 +46,79 @@ class RecurrenceProviderDeviceTest {
         qualifyConversion(originalAllDay = true)
     }
 
+    @Test fun laterFoldCurrentlyShiftsAnOccurrenceDespiteAnUnambiguousRuleStart() = runBlocking {
+        characterizeLaterTransition(spring = false)
+    }
+
+    @Test fun laterGapCurrentlyDriftsTheFollowingRuleOccurrence() = runBlocking {
+        characterizeLaterTransition(spring = true)
+    }
+
+    // RFC 5545 3.3.5/3.3.10 with verified erratum 4271: gaps use the preceding offset and count.
+    // Explicit defect characterization, not a guarantee of correct transition handling.
+    private suspend fun characterizeLaterTransition(spring: Boolean) {
+        val starts = if (spring) listOf("2030-03-30T01:30:00Z", "2030-03-31T01:30:00Z", "2030-04-01T00:30:00Z") else
+            listOf("2030-10-26T00:30:00Z", "2030-10-27T00:30:00Z", "2030-10-28T01:30:00Z")
+        val from = if (spring) "2030-03-29T00:00:00Z" else "2030-10-25T00:00:00Z"
+        val until = if (spring) "2030-04-06T00:00:00Z" else "2030-11-02T00:00:00Z"
+        val observedStarts = if (spring) listOf("2030-03-30T01:30:00Z", "2030-03-31T01:30:00Z", "2030-04-01T01:30:00Z") else
+            listOf("2030-10-26T00:30:00Z", "2030-10-27T01:30:00Z", "2030-10-28T01:30:00Z")
+        fixture { scope, _, calendar, _ ->
+            val master = timed("later-transition-master", starts[0], EventRecurrence("later-transition-series", "FREQ=DAILY;COUNT=3"), "Europe/Paris")
+            val receipt = tracked(scope, master); val parent = row(calendar, master.content.title).id
+            val observed = expectedHourlySlots(parent, observedStarts)
+            assertNotEquals(expectedHourlySlots(parent, starts), instances(calendar, from, until))
+            assertEquals(observed, instances(calendar, from, until))
+            val stored = resolver.query(Events.CONTENT_URI, arrayOf(Events.DTSTART), "${Events.CALENDAR_ID}=? AND ${Events._ID}=?",
+                arrayOf(calendar.toString(), parent.toString()), null)!!.use { assertTrue(it.moveToFirst()); it.getLong(0) }
+            assertEquals(Instant.parse(starts[0]).toEpochMilli(), stored)
+            assertEquals(AppliedProjectionWitness(receipt), AndroidCalendarProjection(context).inspectProjectionReceipt(receipt))
+            assertEquals(observed, instances(calendar, from, until)); assertEquals(1, count(calendar))
+        }
+    }
+
+    @Test fun explicitUtcDateSetsCurrentlyLoseFoldInstantsUnderParisButRemainExactInUtc() = runBlocking {
+        val schedules = listOf(
+            listOf("2030-10-26T00:30:00Z", "2030-10-27T00:30:00Z", "2030-10-27T01:30:00Z", "2030-10-28T01:30:00Z"),
+            listOf("2030-10-27T00:30:00Z", "2030-10-27T01:30:00Z", "2030-10-28T01:30:00Z"),
+            listOf("2030-10-27T00:30:00Z", "2030-10-28T01:30:00Z"), // No later fold slot is requested.
+            listOf("2030-10-27T01:30:00Z", "2030-10-28T01:30:00Z"),
+            listOf("2030-03-30T01:30:00Z", "2030-03-31T00:30:00Z", "2030-03-31T01:30:00Z", "2030-04-01T00:30:00Z"),
+        )
+        val observedParis = listOf(
+            listOf("2030-10-26T00:30:00Z", "2030-10-27T01:30:00Z", "2030-10-28T01:30:00Z"),
+            listOf("2030-10-27T01:30:00Z", "2030-10-28T01:30:00Z"),
+            listOf("2030-10-27T01:30:00Z", "2030-10-28T01:30:00Z"),
+            schedules[3], schedules[4],
+        )
+        for (zone in listOf("Europe/Paris", "UTC")) for ((index, starts) in schedules.withIndex()) fixture { scope, _, calendar, _ ->
+            val master = timed("explicit-transition", starts[0], EventRecurrence("explicit-transition-series",
+                additionalDates = starts.drop(1).map(::point)), zone)
+            val receipt = tracked(scope, master); val parent = row(calendar, master.content.title).id
+            val spring = starts[0].startsWith("2030-03")
+            val from = if (spring) "2030-03-29T00:00:00Z" else "2030-10-25T00:00:00Z"
+            val until = if (spring) "2030-04-06T00:00:00Z" else "2030-11-02T00:00:00Z"
+            assertNull(row(calendar, master.content.title).rule)
+            resolver.query(Events.CONTENT_URI, arrayOf(Events.DTSTART, Events.RDATE, Events.EVENT_TIMEZONE),
+                "${Events.CALENDAR_ID}=? AND ${Events._ID}=?", arrayOf(calendar.toString(), parent.toString()), null)!!.use {
+                assertTrue(it.moveToFirst()); assertEquals(Instant.parse(starts[0]).toEpochMilli(), it.getLong(0))
+                assertEquals(starts.joinToString(",") { date -> date.replace("-", "").replace(":", "") }, it.getString(1))
+                assertEquals(zone, it.getString(2))
+            }
+            val observed = expectedHourlySlots(parent, if (zone == "UTC") starts else observedParis[index])
+            if (zone == "Europe/Paris" && index < 3) {
+                assertNotEquals(expectedHourlySlots(parent, starts), instances(calendar, from, until))
+            }
+            assertEquals(observed, instances(calendar, from, until))
+            assertEquals(AppliedProjectionWitness(receipt), AndroidCalendarProjection(context).inspectProjectionReceipt(receipt))
+            assertEquals(observed, instances(calendar, from, until)); assertEquals(1, count(calendar))
+        }
+    }
+
+    private fun expectedHourlySlots(parent: Long, starts: List<String>) = starts.map {
+        Instance(parent, Instant.parse(it), Instant.parse(it).plusSeconds(3600), false)
+    }
+
     @Test fun ambiguousRuleStartsRefuseOrdinaryAndTrackedWritesWithoutChangingRows() = runBlocking {
         for (start in listOf("2030-10-27T00:30:00Z", "2030-10-27T01:30:00Z")) for (existing in listOf(false, true))
             fixture { scope, _, calendar, _ ->

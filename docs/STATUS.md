@@ -606,7 +606,11 @@ their sealed source retained. Android refuses new master writes and exception
 writes against an ambiguous RRULE parent, preserving existing rows, preparations
 and baselines. Parent start/zone/rule/type are reasserted in the exception batch.
 Historical receipt inspection is unchanged. Existing incorrect copies are not
-automatically repaired; calendar-editor behavior and general timezone-transition
+automatically repaired. Native characterization also exposes a later repeated-hour
+shift and post-gap drift for daily Paris 02:30 rules starting at an unambiguous
+time, plus loss of distinct explicit UTC RDATE instants under the Paris timezone.
+The existing start guard does not contain these additional defects. They require
+a separate mapping strategy; calendar-editor behavior and general transition
 correctness remain unqualified.
 Nonce-backed recovery has passed source review, JVM checks and controlled physical
 SQLite/Provider fixtures, including lost private acknowledgement, reused opaque

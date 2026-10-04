@@ -433,12 +433,47 @@ previous baseline and native details. A historical proof remains valid when its
 previously non-ambiguous native row becomes ambiguous. Receipts whose own historical
 payload already had an ambiguous start are not directly exercised here.
 The parent's start/zone/rule/type are reasserted in the exception batch, but no new
-fixture injects a change between that read and the batch. General fold/gap behavior,
-repair of older copies and RDATE-only transition behavior remain unqualified.
+fixture injects a change between that read and the batch. General fold/gap behavior
+and repair of older copies remain unqualified.
 All 39 selected parser/staged JVM cases and 64 Provider/recovery cases passed,
 without skipped tests; native qualification used the authorized physical target.
 The native total includes the explicit legacy defect characterization, not a fix
 to Android's expansion behavior.
+
+Later-transition characterization measures daily Paris 02:30 rules with an
+unambiguous start and `COUNT=3`. The autumn expectation is October 26 `00:30Z`,
+October 27 `00:30Z`, October 28 `01:30Z`; native expansion chooses `01:30Z` on
+October 27. The spring expectation is March 30 `01:30Z`, March 31 `01:30Z`, April 1
+`00:30Z`; native expansion instead retains `01:30Z` on April 1, drifting to 03:30
+local time. Dates are in 2030 and each duration is one absolute hour. Expectations
+follow [RFC 5545 sections 3.3.5 and 3.3.10](https://www.rfc-editor.org/rfc/rfc5545)
+with [verified erratum 4271, reproduced in the informative inline rendering](https://www.rfc-editor.org/rfc/inline-errata/rfc5545.html):
+the repeated hour selects the first occurrence; a nonexistent local occurrence
+uses the preceding offset and consumes the count. It is not skipped.
+Initial semantic assertions failed before any moved/cancelled child was applied;
+those child scenarios are not qualified by this experiment.
+
+Five explicit UTC RDATE-only sets are measured under both `Europe/Paris` and
+`UTC`. Under Paris, the three sets requesting the early October 27 instant fail:
+it shifts to `01:30Z`, merging with the late instant when both were requested and
+creating the late instant even when only the early one was requested. A late-only
+set and the spring boundary set remain exact. Under UTC, all five sets remain
+exact, including both repeated-hour instants. Assertions retain the full stored
+`DTSTART`, literal UTC `RDATE` list and timezone, native event ID, absolute one-hour
+endpoints, timed display and one master row. Repeated expansion queries and fresh
+receipt inspection retain the observed results.
+
+The final 23 recurrence tests pass without skips, including three new explicit
+defect characterizations. The initial semantic run failed those three tests; a
+separate diagnostic measured all ten timezone/set combinations before fixing
+the characterization expectations to the observed behavior. Passing these tests
+does not fix the defects. The UTC comparison constructs UTC domain fixtures; it
+does not establish a production mapping that retains the original Paris domain
+timezone. Exclusions, moved/cancelled RDATE children, owner/SQLite lost-ACK recovery,
+dirty-row migration, calendar-editor behavior and live Proton are not qualified
+by these new fixtures. APK/test compilation and lint pass with zero errors and
+20 existing warnings. No production mapping or admission policy is changed.
+Historical receipts establish an applied batch, not correct native expansion.
 
 `RecurrenceStoreDeviceTest` covers schema 5-to-6 migration, legacy payload stability,
 reopen/rollback/CAS, master ordering, missing or deferred parents, mismatched original

@@ -71,8 +71,13 @@ tracked master writes of this profile, and new exception writes against an alrea
 ambiguous RRULE parent. It reasserts the inspected parent start, zone, rule and type
 in the exception transaction. Refusals preserve existing rows and pending work.
 Older visible copies are not removed or repaired automatically. This contains the
-measured defect; it does not correct Android expansion or qualify ambiguous later
-occurrences, nonexistent local times or RDATE-only transition behavior.
+measured start defect; it does not correct Android expansion. Further native
+characterization exposes defects even with an unambiguous start: a daily Paris
+02:30 rule chooses the later repeated-hour instant in autumn, and drifts to 03:30
+after the spring gap. A Paris RDATE-only set can shift the early repeated-hour
+instant and merge it with the later one despite explicitly serialized UTC dates.
+These profiles are not covered by the ambiguous-start guard and remain unsafe.
+General transition handling and automatic repair remain unqualified.
 
 EXRULE, RDATE periods, RANGE exceptions, floating/unresolved dates, BYSETPOS,
 BYWEEKNO and BYYEARDAY remain deferred. Yearly BYDAY/BYMONTHDAY require BYMONTH.
