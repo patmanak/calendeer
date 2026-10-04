@@ -534,6 +534,32 @@ All 48 selected JVM tests and 74 native tests pass without skips: 6 risk-policy,
 and 46 owner/SQLite recovery cases. APK/test compilation and lint pass with
 zero errors and 20 existing warnings. No live Proton write is part of these tests.
 
+### Android recurrence source replay
+
+The [pinned source audit](research/ANDROID_RECURRENCE.md) records the inspected
+processor, time implementation, libcore and Provider paths. To reproduce its
+arithmetic independently, compile the unchanged pinned `RecurrenceProcessor`,
+`Time`, `EventRecurrence` and `DateException` with a minimal recurrence carrier
+whose fields have the upstream types. Supply already-parsed rules and explicit
+epoch arrays. This deliberately excludes upstream serialization and Provider
+caching; it is not a replacement for the instrumentation fixtures above.
+
+Run the same synthetic inputs on the host and, after compiling to DEX, on an
+authorized Android runtime. Compare epoch starts, not formatted local strings.
+Cover safe daily times, later fold/gap, ambiguous DTSTART, both passages in an
+explicit date set, exclusion of only one passage, native Paris versus UTC, and
+explicit `BYHOUR=2` on spring/autumn rules. Keep source artifacts and execution
+logs private and remove the temporary device artifact after the journey.
+Changing process-local defaults does not require changing the device timezone.
+
+Ten Android source-replay cases match the audit's exact arithmetic expectations.
+Nine host cases match; the simple spring rule differs on OpenJDK 21 and its failed
+comparison is retained. These are source-characterization results, including
+incorrect iCalendar outcomes, not ten new production-correctness tests. No app
+installation, Provider/calendar access or Proton transport is needed for replay.
+The audit changes documentation only; application builds and the previously
+qualified production test suites were not rerun for that documentation change.
+
 `RecurrenceStoreDeviceTest` covers schema 5-to-6 migration, legacy payload stability,
 reopen/rollback/CAS, master ordering, missing or deferred parents, mismatched original
 date types, durable tombstones and eligible-result limits. `RecurrenceCoordinatorDeviceTest`

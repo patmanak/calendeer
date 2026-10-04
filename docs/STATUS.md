@@ -621,6 +621,14 @@ tombstones remain untouched. Historical receipt recovery preserves older rows
 without repairing their timezone. RRULEs and exception display timezones are
 unchanged; calendar-editor behavior and general transition correctness remain
 unqualified.
+The [Android source audit](research/ANDROID_RECURRENCE.md) now traces the modern
+GregorianCalendar-based expander, local-key loss of repeated-hour instants and
+the DTSTART requirement for cache updates. Ten isolated source-replay cases on
+an Android runtime reproduce the relevant mechanisms; a desktop spring-rule
+replay differs, confirming that host arithmetic does not qualify Android.
+The audit proposes a finite daily-rule experiment using explicit native UTC dates,
+with canonical rule/zone and recovery identity preserved. That representation is
+not enabled for RRULE masters; current admission guards remain unchanged.
 Nonce-backed recovery has passed source review, JVM checks and controlled physical
 SQLite/Provider fixtures, including lost private acknowledgement, reused opaque
 revision and schema migration. These fixtures do not qualify arbitrary power loss.
