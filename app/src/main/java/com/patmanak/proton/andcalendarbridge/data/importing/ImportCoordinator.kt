@@ -1476,6 +1476,7 @@ class ImportCoordinator(
     /** A marker proves the historical write, not that the current Provider content is unchanged. */
     private suspend fun recoverProjection(expected: Long, receipt: ProjectionReceipt): Boolean {
         requireProjectionAvailable(receipt.scope, receipt.change.eventId)
+        store.requireDirectProjection(receipt.scope, receipt.change.eventId)
         if (receipt.format != remote.format || receipt.protocol != projection.projectionReceiptProtocol) return false
         val witness = projection.inspectProjectionReceipt(receipt) ?: return false
         check(witness.receipt == receipt) { "Projection witness differs" }
@@ -1491,7 +1492,9 @@ class ImportCoordinator(
             return
         }
         requireProjectionAvailable(intent.scope, intent.change.eventId)
+        store.requireDirectProjection(intent.scope, intent.change.eventId)
         val outstanding = store.projectionReceipt(intent.scope, intent.change.eventId)
+        var representation: ProjectedEventReference? = null
         if (outstanding != null) {
             val recovered = recoverProjection(expected, outstanding)
             if (recovered && outstanding.change == intent.change) return
@@ -1499,16 +1502,20 @@ class ImportCoordinator(
                 outstanding.protocol != projection.projectionReceiptProtocol)) {
                 throw CalendarProjectionException(CalendarProjectionFailure.PROVIDER_REJECTED)
             }
+            if (!recovered) representation = outstanding.representation
         }
         requireProjectionAvailable(intent.scope, intent.change.eventId)
         if (projection.projectionReceiptProtocol == 1 && ProjectionReceipt.supports(intent.change)) {
-            val prepared = store.prepareProjection(intent, remote.format)
+            // Preserve an existing explicit direct preparation rather than substituting NULL.
+            val prepared = store.prepareProjection(intent, remote.format, representation)
+            store.requireDirectProjection(intent.scope, intent.change.eventId)
             val witness = projection.applyTracked(prepared)
             check(witness.receipt == prepared) { "Projection witness differs" }
             if (!isCurrent(expected, intent.scope.account)) throw CancellationException("Inactive projection acknowledgement")
             requireProjectionAvailable(intent.scope, intent.change.eventId)
             check(store.restoreProjection(witness)) { "Projection acknowledgement remains unresolved" }
         } else {
+            store.requireDirectProjection(intent.scope, intent.change.eventId)
             projection.apply(intent, if (intent.change is RemoteChange.Deleted)
                 store.deletedSeriesUid(intent.scope, intent.change.eventId) else null)
             requireProjectionAvailable(intent.scope, intent.change.eventId)

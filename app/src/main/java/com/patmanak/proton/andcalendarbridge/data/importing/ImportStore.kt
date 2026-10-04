@@ -464,6 +464,27 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
         reference
     }
 
+    /** Admission observation only, never a lease across SQL and Provider transactions.
+     * Ordinary projection cannot inspect or replace a saved finite representation.
+     * Decode every current/previous tag before granting the observation; unknown
+     * metadata remains untouched. Legacy NULL and explicit direct are both known.
+     */
+    suspend fun requireDirectProjection(scope: CalendarScope, eventId: EventId): Unit = access { db ->
+        check(admitTransaction(scope)) { "Inactive import lease" }
+        db.beginTransactionNonExclusive()
+        try {
+            requireKnown(db, scope)
+            check(activeProjectionScope(db, scope)) { "Inactive projection scope" }
+            val base = readProjectionBase(db, scope, eventId)
+            val receipt = readProjectionReceipt(db, scope, eventId)
+            check(listOf(base?.representation, receipt?.representation, receipt?.previousRepresentation).all {
+                it == null || it.representation == ProjectionRepresentation.DIRECT_V1
+            }) { "Represented projection requires dedicated admission" }
+            check(admitTransaction(scope)) { "Inactive import lease" }
+            db.setTransactionSuccessful()
+        } finally { db.endTransaction() }
+    }
+
     /** Seed the first sent reference behind exact original-row metadata proof, never a Provider ACK.
      * Existing generic bases cannot be adopted. Exact replay preserves later local intentions and
      * all different/deferred incoming evidence; neither absent records nor new remote data are invented.

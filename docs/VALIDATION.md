@@ -671,6 +671,39 @@ metadata and rejects unknown formats without clearing them. Production ordinary
 imports still prepare direct receipts; finite native application, raw-source
 eligibility, downgrade and arbitrary power-loss recovery remain unqualified.
 
+### Direct projection admission before native operations
+
+Seven additional `ProjectionRecoveryDeviceTest` methods exercise the production
+coordinator/store and isolated real Calendar Provider rows. Finite SQL baselines
+are seeded with synthetic witnesses while the native event stays direct; these
+fixtures qualify refusal, never a finite native write. They cover tracked and
+protocol-less update/delete, restart, finite current-only and previous-only
+receipt tags, malformed baseline/receipt metadata, metadata introduced by an
+AFTER INSERT preparation trigger, legacy/explicit direct baselines, explicit
+direct preparation and lost-acknowledgement recovery, and refusal of an untracked
+fallback when a tracked direct receipt remains outstanding.
+
+Before correction, five of seven methods failed: an ordinary apply was reached
+before finite or malformed baseline acknowledgement failed, finite receipts
+reached historical inspection, metadata introduced during preparation reached
+tracked apply, and an unapplied explicit direct receipt could not resume. All
+seven methods now pass without failures or skips. Provider rows, flags, instances,
+reminders and participants are compared where applicable; raw projection/record
+snapshots and pending work survive the refused runs and reopening. Operation
+counters establish refusal before native event apply or historical inspection,
+not the absence of calendar setup or other normal startup reads.
+
+The admission reads all metadata in one SQL transaction and checks scope/lease
+admission. Its return is an observation, not a lease across independent SQL and
+Provider transactions. These fixtures do not qualify a concurrent finite writer,
+finite native recovery, live Proton source eligibility or other OEMs. Debug
+app/test builds, release source compilation, all 19 app unit cases and lint pass;
+lint retains zero errors and 20 existing warnings.
+The 15 affected storage, recovery, recurrence, import, capture and handoff classes
+also pass all 197 physical methods without failures or skips. This includes the
+seven new methods and existing direct import/recovery and specialized handoff
+paths. No service requests are part of these isolated fixtures.
+
 `RecurrenceStoreDeviceTest` covers schema 5-to-6 migration, legacy payload stability,
 reopen/rollback/CAS, master ordering, missing or deferred parents, mismatched original
 date types, durable tombstones and eligible-result limits. `RecurrenceCoordinatorDeviceTest`

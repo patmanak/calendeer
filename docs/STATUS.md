@@ -659,6 +659,16 @@ The stored-reference model, migration and recovery checks pass 215 sync and
 Provider recovery and handoff classes, with no failures or skips. Successful
 finite SQL acknowledgement fixtures use synthetic witnesses; they do not
 establish a finite Provider write.
+Ordinary projection now admits only known direct baseline/current/previous
+representations before historical inspection or event writes. A transactional
+metadata check runs again after preparation, preventing a native DELETE or UPDATE
+from occurring before a later SQL refusal. Unsupported metadata and pending work
+remain intact with the existing error status. Explicit direct preparations can
+apply or recover with their exact metadata; protocol-less ports cannot bypass
+tracked acknowledgement. All 197 physical methods in the 15 affected regression
+classes pass, including the seven new methods; all 19 app unit cases also pass.
+This is an admission observation, not a cross-store lease; finite native
+application remains disabled.
 Nonce-backed recovery has passed source review, JVM checks and controlled physical
 SQLite/Provider fixtures, including lost private acknowledgement, reused opaque
 revision and schema migration. These fixtures do not qualify arbitrary power loss.

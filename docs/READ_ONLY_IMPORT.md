@@ -274,6 +274,15 @@ local variant with its original projected base and latest remote evidence, but
 does not enable editing or send an upload. Unsupported edits and user-facing
 resolution remain future work; see [local capture](LOCAL_EDIT_CAPTURE.md).
 
+Ordinary projection validates the saved baseline and current/previous receipt
+representations before inspecting history or writing event data. Finite or
+unreadable metadata keeps the work blocked, including deletion, without changing
+the event first and discovering the limitation during SQL acknowledgement.
+Preparation is checked again immediately before application. Legacy and explicit
+direct representations remain supported, with exact receipt metadata preserved.
+This SQL observation does not replace atomic Provider preconditions or activate
+finite recurrence projection; see [representations](PROJECTION_REPRESENTATION.md).
+
 Enabling projection requires both Android calendar permissions. The UI explains
 why Android write access is necessary for a read-only Proton mirror, and offers
 an explicit request and application-settings shortcut. Permission checks run on

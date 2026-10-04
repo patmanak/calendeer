@@ -40,6 +40,152 @@ import org.junit.runner.RunWith
 /** Isolated production Provider/SQLite/coordinator recovery; controlled remote, no service writes. */
 @RunWith(AndroidJUnit4::class)
 class ProjectionRecoveryDeviceTest {
+    /** Synthetic SQL acknowledgement seeds metadata only; the native event remains direct. */
+    @Test fun finiteBaselineBlocksOrdinaryWritesBeforeProviderAccessAcrossReopening() = runBlocking {
+        for (tracked in listOf(false, true)) for (deleted in listOf(true, false))
+            withFixture(reminders = true, participants = true) { f ->
+                assertEquals(ImportRunResult.COMPLETE, f.coordinator.run(false))
+                f.receiptProtocol = if (tracked) 1 else null
+                val finite = f.finiteCanonical()
+                f.queue(finite)
+                val prepared = f.store.prepareProjection(ProjectionIntent(f.target, finite), f.format, ProjectedEventReference.finiteDaily(finite))
+                assertTrue(f.store.restoreProjection(AppliedProjectionWitness(prepared)))
+                val pending: RemoteChange = if (deleted) RemoteChange.Deleted(f.base.eventId, Revision("deleted")) else f.latest
+                f.store.transaction(f.target) { putRemote(pending); putProjection(ProjectionIntent(f.target, pending)) }
+                val raw = f.projectionRows(); val slots = f.instances(); val native = f.eventSnapshot()
+                val reminders = f.reminders(); val people = f.attendees()
+                val calls = f.projectionCalls()
+                repeat(2) { attempt ->
+                    if (attempt != 0) f.reopen()
+                    assertEquals(ImportRunResult.COMPLETE, f.coordinator.run(false))
+                    assertEquals("ERROR", f.store.selections(f.target.account).single().status)
+                    assertEquals("Ordinary event writes must be refused before Provider calls", calls, f.projectionCalls())
+                    assertEquals(native, f.eventSnapshot()); assertEquals(slots, f.instances())
+                    assertEquals(reminders, f.reminders()); assertEquals(people, f.attendees())
+                    assertEquals(raw, f.projectionRows())
+                    assertEquals(listOf(ProjectionIntent(f.target, pending)), f.store.pending(f.target))
+                }
+            }
+    }
+
+    @Test fun finiteCurrentAndPreviousPreparationsBlockHistoricalInspectionAndReplacement() = runBlocking {
+        for (previous in listOf(false, true)) withFixture(reminders = true, participants = true) { f ->
+            f.coordinator.run(false)
+            val finite = f.finiteCanonical()
+            f.queue(finite)
+            val finiteReceipt = f.store.prepareProjection(ProjectionIntent(f.target, finite), f.format, ProjectedEventReference.finiteDaily(finite))
+            if (previous) {
+                assertTrue(f.store.restoreProjection(AppliedProjectionWitness(finiteReceipt)))
+                f.queue(f.latest); f.store.prepareProjection(ProjectionIntent(f.target, f.latest), f.format)
+                // Isolate previous-only metadata: the current baseline is now admissible direct.
+                assertEquals(1, f.store.writableDatabase.update("projection_bases", ContentValues().apply { putNull("representation") },
+                    "event=?", arrayOf(f.base.eventId.value)))
+            }
+            val receipt = f.store.projectionReceipt(f.target, f.base.eventId)!!
+            assertEquals(previous, receipt.previousRepresentation != null)
+            val raw = f.projectionRows(); val native = f.eventSnapshot(); val calls = f.projectionCalls()
+            repeat(2) { attempt ->
+                if (attempt != 0) f.reopen()
+                f.coordinator.run(false)
+                assertEquals("No historical inspection is admitted for unsupported finite receipts", calls, f.projectionCalls())
+                assertEquals(native, f.eventSnapshot()); assertEquals(raw, f.projectionRows())
+                assertEquals(receipt, f.store.projectionReceipt(f.target, f.base.eventId))
+                assertEquals("ERROR", f.store.selections(f.target.account).single().status)
+            }
+        }
+    }
+
+    @Test fun malformedBaselineAndReceiptMetadataBlockBeforeProviderCallsWithoutRewritingEvidence() = runBlocking {
+        for (table in listOf("projection_bases", "projection_receipts")) for (deleted in listOf(false, true)) withFixture { f ->
+            f.coordinator.run(false)
+            if (table == "projection_receipts") {
+                f.queue(f.latest); f.store.prepareProjection(ProjectionIntent(f.target, f.latest), f.format)
+            }
+            assertEquals(1, f.store.writableDatabase.update(table, ContentValues().apply { put("representation", "{unknown}") },
+                "event=?", arrayOf(f.base.eventId.value)))
+            val pending: RemoteChange = if (deleted) RemoteChange.Deleted(f.base.eventId, Revision("deleted")) else f.latest
+            f.store.transaction(f.target) { putRemote(pending); putProjection(ProjectionIntent(f.target, pending)) }
+            val raw = f.projectionRows(); val native = f.eventSnapshot(); val calls = f.projectionCalls()
+            repeat(2) { attempt ->
+                if (attempt != 0) f.reopen()
+                f.coordinator.run(false)
+                assertEquals(calls, f.projectionCalls()); assertEquals(native, f.eventSnapshot())
+                assertEquals(raw, f.projectionRows()); assertEquals(listOf(ProjectionIntent(f.target, pending)), f.store.pending(f.target))
+                assertEquals("ERROR", f.store.selections(f.target.account).single().status)
+            }
+        }
+    }
+
+    @Test fun legacyAndExplicitDirectBaselinesStillDrainOrdinaryUpdateAndDelete() = runBlocking {
+        for (explicit in listOf(false, true)) for (tracked in listOf(false, true)) withFixture { f ->
+            f.coordinator.run(false)
+            if (explicit) {
+                f.queue(f.base)
+                val receipt = f.store.prepareProjection(ProjectionIntent(f.target, f.base), f.format, ProjectedEventReference.direct(f.base))
+                assertTrue(f.store.restoreProjection(f.native.applyTracked(receipt)))
+            }
+            f.receiptProtocol = if (tracked) 1 else null
+            f.queue(f.latest); assertEquals(ImportRunResult.COMPLETE, f.coordinator.run(false))
+            assertEquals(f.latest.content.title, f.field(Events.TITLE)); assertTrue(f.store.pending(f.target).isEmpty())
+            val deleted = RemoteChange.Deleted(f.base.eventId, Revision("deleted"))
+            f.store.transaction(f.target) { putRemote(deleted); putProjection(ProjectionIntent(f.target, deleted)) }
+            assertEquals(ImportRunResult.COMPLETE, f.coordinator.run(false)); assertEquals(0, f.rowCount())
+            assertNull(f.store.projectedBaseline(f.target, f.base.eventId)); assertTrue(f.store.pending(f.target).isEmpty())
+        }
+    }
+
+    @Test fun explicitDirectPreparationsApplyOrRecoverWithoutLosingTheirMetadata() = runBlocking {
+        for (alreadyApplied in listOf(false, true)) withFixture(reminders = true, participants = true) { f ->
+            f.coordinator.run(false); f.queue(f.latest)
+            val reference = ProjectedEventReference.direct(f.latest)
+            val receipt = f.store.prepareProjection(ProjectionIntent(f.target, f.latest), f.format, reference)
+            if (alreadyApplied) f.native.applyTracked(receipt)
+            val calls = f.projectionCalls(); val row = f.row()
+            f.reopen(); assertEquals(ImportRunResult.COMPLETE, f.coordinator.run(false))
+            assertEquals(f.latest, f.store.projectedBaseline(f.target, f.base.eventId))
+            assertEquals(reference, f.store.projectedReference(f.target, f.base.eventId))
+            assertNull(f.store.projectionReceipt(f.target, f.base.eventId)); assertTrue(f.store.pending(f.target).isEmpty())
+            assertEquals(row, f.row()); assertEquals(f.latest.content.title, f.field(Events.TITLE))
+            assertEquals(calls[0] + if (alreadyApplied) 0 else 1, f.projectionCalls()[0])
+            assertEquals(calls[1], f.projectionCalls()[1])
+        }
+    }
+
+    @Test fun metadataIntroducedByPreparationIsRejectedBeforeTrackedApply() = runBlocking {
+        withFixture(reminders = true, participants = true) { f ->
+            f.coordinator.run(false); f.queue(f.latest)
+            f.store.writableDatabase.execSQL("CREATE TRIGGER fixture_unknown_representation AFTER INSERT ON projection_receipts " +
+                "BEGIN UPDATE projection_receipts SET representation='{unknown}' WHERE scope=NEW.scope AND event=NEW.event; END")
+            val native = f.eventSnapshot(); val calls = f.projectionCalls()
+            f.coordinator.run(false)
+            assertEquals("Preparation must be rechecked before any tracked Provider write", calls, f.projectionCalls())
+            assertEquals(native, f.eventSnapshot()); assertEquals(listOf(ProjectionIntent(f.target, f.latest)), f.store.pending(f.target))
+            val raw = f.projectionRows()
+            assertEquals("{unknown}", f.store.readableDatabase.rawQuery("SELECT representation FROM projection_receipts", null).use {
+                assertTrue(it.moveToFirst()); it.getString(0)
+            })
+            f.reopen(); f.coordinator.run(false)
+            assertEquals(calls, f.projectionCalls()); assertEquals(native, f.eventSnapshot()); assertEquals(raw, f.projectionRows())
+        }
+    }
+
+    @Test fun explicitDirectReceiptCannotFallBackToUntrackedProjection() = runBlocking {
+        withFixture { f ->
+            f.coordinator.run(false); f.queue(f.latest)
+            val receipt = f.store.prepareProjection(ProjectionIntent(f.target, f.latest), f.format, ProjectedEventReference.direct(f.latest))
+            f.receiptProtocol = null
+            val native = f.eventSnapshot(); val raw = f.projectionRows(); val calls = f.projectionCalls()
+            repeat(2) { attempt ->
+                if (attempt != 0) f.reopen()
+                f.coordinator.run(false)
+                assertEquals(calls, f.projectionCalls()); assertEquals(native, f.eventSnapshot()); assertEquals(raw, f.projectionRows())
+                assertEquals(receipt, f.store.projectionReceipt(f.target, f.base.eventId))
+                assertEquals(listOf(ProjectionIntent(f.target, f.latest)), f.store.pending(f.target))
+                assertEquals("ERROR", f.store.selections(f.target.account).single().status)
+            }
+        }
+    }
+
     /** Recovery proves the synthetic date view only; the canonical RRULE is not stored as its base. */
     @Test fun finiteDailyDateViewRecoversLostAcknowledgementWithoutClaimingCanonicalRuleProof() = runBlocking {
         for (spring in listOf(false, true)) for (dirty in listOf(false, true)) withFixture(reminders = true, participants = true) { f ->
@@ -1077,7 +1223,17 @@ class ProjectionRecoveryDeviceTest {
                     EventAttendee(EventPerson("organizer-v2@example.test", "Organizer v2"), AttendanceRole.REQUIRED, AttendanceStatus.ACCEPTED),
                     EventAttendee(EventPerson("guest@example.test", "Guest"), AttendanceRole.OPTIONAL, AttendanceStatus.TENTATIVE)) else emptyList())))
         val applies = AtomicInteger()
+        private val ordinaryApplies = AtomicInteger()
+        private val inspections = AtomicInteger()
+        var receiptProtocol: Int? = 1
         private val counted = object : CalendarProjection by native {
+            override val projectionReceiptProtocol get() = receiptProtocol
+            override suspend fun apply(intent: ProjectionIntent, seriesUid: String?) {
+                ordinaryApplies.incrementAndGet(); native.apply(intent, seriesUid)
+            }
+            override suspend fun inspectProjectionReceipt(receipt: ProjectionReceipt): AppliedProjectionWitness? {
+                inspections.incrementAndGet(); return native.inspectProjectionReceipt(receipt)
+            }
             override suspend fun applyTracked(receipt: ProjectionReceipt): AppliedProjectionWitness {
                 applies.incrementAndGet(); return native.applyTracked(receipt)
             }
@@ -1110,6 +1266,25 @@ class ProjectionRecoveryDeviceTest {
             .appendQueryParameter(CalendarContract.CALLER_IS_SYNCADAPTER, "true")
             .appendQueryParameter(CalendarContract.Calendars.ACCOUNT_NAME, native.accountFor(target.account).name)
             .appendQueryParameter(CalendarContract.Calendars.ACCOUNT_TYPE, native.accountFor(target.account).type).build()
+
+        fun finiteCanonical() = base.copy(revision = Revision("finite"), content = base.content.copy(
+            time = EventTime.Timed(Instant.parse("2030-10-26T00:30:00Z"), Instant.parse("2030-10-26T02:30:00Z"), ZoneId.of("Europe/Paris")),
+            recurrence = EventRecurrence("admission-fixture-series", "FREQ=DAILY;COUNT=3")))
+
+        fun projectionCalls() = listOf(applies.get(), ordinaryApplies.get(), inspections.get())
+
+        fun eventSnapshot(): List<Map<String, String?>> = context.contentResolver.query(uri, null,
+            "${Events.CALENDAR_ID}=?", arrayOf(calendar.toString()), "${Events._ID}")!!.use { cursor ->
+            buildList { while (cursor.moveToNext()) add(cursor.columnNames.mapIndexed { index, column ->
+                column to if (cursor.isNull(index)) null else cursor.getString(index)
+            }.toMap()) }
+        }
+
+        fun projectionRows(): Map<String, List<List<String?>>> = listOf("projection_bases", "projection_receipts", "records").associateWith { table ->
+            store.readableDatabase.rawQuery("SELECT * FROM $table ORDER BY scope,event", null).use { cursor ->
+                buildList { while (cursor.moveToNext()) add((0 until cursor.columnCount).map { if (cursor.isNull(it)) null else cursor.getString(it) }) }
+            }
+        }
 
         suspend fun initialize() {
             val summary = CalendarSummary(target.calendar, "Calendeer projection recovery fixture")

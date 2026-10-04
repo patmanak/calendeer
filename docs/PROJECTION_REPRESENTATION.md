@@ -83,6 +83,15 @@ The current Android mapper refuses receipts with a current or previous finite
 representation before applying or inspecting them. The storage tests use synthetic
 applied witnesses; they do not qualify an actual finite native write or its recovery.
 
+The ordinary coordinator now checks the baseline and both receipt representations
+in one SQL transaction before historical inspection and again before tracked or
+untracked event writes. Finite or unreadable metadata blocks the operation before
+Android event rows are modified, including remote deletion. Preparation is rechecked before
+native application; an existing explicit direct receipt retains its exact metadata
+rather than being replaced by NULL. The observation is not a lease across the SQL
+and Provider transactions. Finite application still requires dedicated native
+comparison and atomic write preconditions before activation.
+
 Migration keeps existing canonical encodings and old preparations unchanged.
 Rows without representation metadata remain in the historical direct mode;
 they are not silently replanned or repaired. Unknown/malformed representation
