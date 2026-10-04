@@ -608,7 +608,12 @@ and baselines. Parent start/zone/rule/type are reasserted in the exception batch
 Historical receipt inspection is unchanged. Existing incorrect copies are not
 automatically repaired. Native characterization also exposes a later repeated-hour
 shift and post-gap drift for daily Paris 02:30 rules starting at an unambiguous
-time. The existing start guard does not contain these rule defects. Timed
+time. Shared parser/native admission now also defers simple daily rules with
+`COUNT` from 1 through 4096 whose exact rule-generated local occurrences reach a
+repeated or nonexistent hour. This bounded scan permits optional `INTERVAL`, ignores exclusions
+conservatively and leaves selectors, `UNTIL`, unbounded or larger-count profiles
+unqualified. New exceptions against an older affected parent are refused, while
+historical proofs, existing rows and private pending work are preserved. Timed
 RDATE-only masters now expand in native UTC to preserve distinct explicit
 instants and exclusions; their original timezone remains in the domain and import
 baseline. Clean reapplication keeps parent/child IDs, while dirty rows and

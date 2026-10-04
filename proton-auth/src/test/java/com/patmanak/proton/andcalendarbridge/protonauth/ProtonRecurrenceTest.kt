@@ -7,6 +7,18 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class ProtonRecurrenceTest {
+    @Test fun laterDailyFoldAndGapAreDeferredEvenWhenTheStartIsUnambiguous() {
+        for (date in listOf("20301026", "20300330")) refuses(
+            "DTSTART;TZID=Europe/Paris:${date}T023000\nDTEND;TZID=Europe/Paris:${date}T033000\nRRULE:FREQ=DAILY;COUNT=3")
+    }
+
+    @Test fun shortOrSkippedTransitionRulesAndOrdinaryHoursRemainAdmitted() {
+        for (date in listOf("20301026", "20300330")) for (rule in listOf("FREQ=DAILY;COUNT=1", "FREQ=DAILY;COUNT=2;INTERVAL=2"))
+            assertNotNull(parse("DTSTART;TZID=Europe/Paris:${date}T023000\nDTEND;TZID=Europe/Paris:${date}T033000\nRRULE:$rule").recurrence)
+        assertNotNull(parse("DTSTART;TZID=Europe/Paris:20300330T100000\nDTEND;TZID=Europe/Paris:20300330T110000\nRRULE:FREQ=DAILY;COUNT=4096").recurrence)
+        refuses("DTSTART;TZID=Europe/Paris:20300330T023000\nDTEND;TZID=Europe/Paris:20300330T033000\nRRULE:FREQ=DAILY;COUNT=3\nEXDATE:20300331T013000Z")
+    }
+
     @Test fun ambiguousNamedZoneRuleStartIsDeferredRatherThanShifted() {
         refuses("DTSTART;TZID=Europe/Paris:20301027T023000\nDTEND;TZID=Europe/Paris:20301027T033000\nRRULE:FREQ=DAILY;COUNT=3")
     }
@@ -18,6 +30,10 @@ class ProtonRecurrenceTest {
         try { ProtonICalendar.parse(listOf(good, bad, rule)); fail("Final ambiguous start must be deferred") }
         catch (failure: RemoteImportException) { assertEquals(RemoteImportFailure.UNSUPPORTED, failure.reason) }
         assertEquals(Instant.parse("2030-10-27T09:00:00Z"), (ProtonICalendar.parse(listOf(bad, good, rule)).time as EventTime.Timed).start)
+        val later = ics("DTSTART;TZID=Europe/Paris:20301026T023000\nDTEND;TZID=Europe/Paris:20301026T033000")
+        try { ProtonICalendar.parse(listOf(good, later, rule)); fail("Merged rule reaches a later ambiguous occurrence") }
+        catch (failure: RemoteImportException) { assertEquals(RemoteImportFailure.UNSUPPORTED, failure.reason) }
+        assertEquals(Instant.parse("2030-10-27T09:00:00Z"), (ProtonICalendar.parse(listOf(later, good, rule)).time as EventTime.Timed).start)
     }
 
     @Test fun unambiguousBoundaryTimesAndUtcRulesRemainAdmitted() {

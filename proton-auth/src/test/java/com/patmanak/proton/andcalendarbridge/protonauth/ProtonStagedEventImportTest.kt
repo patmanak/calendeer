@@ -26,7 +26,15 @@ class ProtonStagedEventImportTest {
 
     /** Real parser/admission and receipt handling, controlled plaintext decoder; no crypto claim. */
     @Test fun ambiguousRuleIsRetainedWithoutBlockingValidRowsAndOfflineRetry() = runTest {
-        val bad = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:fold-fixture\r\nDTSTART;TZID=Europe/Paris:20301027T023000\r\nDTEND;TZID=Europe/Paris:20301027T033000\r\nRRULE:FREQ=DAILY;COUNT=3\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
+        qualifyDeferredRule("20301027")
+    }
+
+    @Test fun laterDailyTransitionsRetainTheirSourceAcrossOfflineReplayAndRetry() = runTest {
+        for (date in listOf("20301026", "20300330")) qualifyDeferredRule(date)
+    }
+
+    private suspend fun qualifyDeferredRule(date: String) {
+        val bad = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:fold-fixture\r\nDTSTART;TZID=Europe/Paris:${date}T023000\r\nDTEND;TZID=Europe/Paris:${date}T033000\r\nRRULE:FREQ=DAILY;COUNT=3\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
         val good = bad.replace("T023000", "T100000").replace("T033000", "T110000")
         val rows = listOf("first" to good, "ambiguous" to bad, "last" to good).map { (id, content) ->
             buildJsonObject { row(id).forEach { (key, value) -> put(key, value) }; put("SyntheticICalendar", content) }
@@ -51,7 +59,7 @@ class ProtonStagedEventImportTest {
         val issue = decoded.deferred.single()
         assertEquals(EventId("ambiguous"), issue.eventId); assertEquals(rows[1].revision(), issue.revision)
         assertEquals(DeferredEventReason.UNSUPPORTED_CONTENT, issue.reason)
-        assertTrue(protector.open(issue.protectedPayload).contains("20301027T023000"))
+        assertTrue(protector.open(issue.protectedPayload).contains("${date}T023000"))
         remote.forbidNetwork = true
         assertNull(restarted().retryDeferred(scope, issue))
         val replay = restarted().decode(receipt)

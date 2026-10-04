@@ -732,3 +732,9 @@ Local admission also defers RRULE masters whose final merged timed start has
 multiple valid offsets in its named zone. Native fixtures showed Android choosing
 a different instant during a repeated hour. This restriction preserves the sealed
 source; it neither rewrites signed timestamps nor copies Proton's UI expander.
+The project-owned `RecurringLocalTimeRisk` policy adds a bounded scan for simple
+daily rules with `COUNT` up to 4096 and optional `INTERVAL`, without selectors or
+`UNTIL`. It detects repeated/nonexistent local slots using Java time zone rules,
+retaining unsupported source rather than normalizing signed occurrence instants.
+The same policy guards Android admission; it is not an upstream recurrence
+expander or proof that other rule profiles are compatible.

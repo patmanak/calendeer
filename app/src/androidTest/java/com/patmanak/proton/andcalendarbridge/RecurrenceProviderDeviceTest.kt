@@ -65,7 +65,11 @@ class RecurrenceProviderDeviceTest {
             listOf("2030-10-26T00:30:00Z", "2030-10-27T01:30:00Z", "2030-10-28T01:30:00Z")
         fixture { scope, _, calendar, _ ->
             val master = timed("later-transition-master", starts[0], EventRecurrence("later-transition-series", "FREQ=DAILY;COUNT=3"), "Europe/Paris")
-            val receipt = tracked(scope, master); val parent = row(calendar, master.content.title).id
+            // Seed legacy state explicitly; current admission must refuse this profile.
+            val admitted = master.copy(content = master.content.copy(time = EventTime.Timed(Instant.parse(starts[0]).plusSeconds(28800),
+                Instant.parse(starts[0]).plusSeconds(32400), ZoneId.of("Europe/Paris"))))
+            val receipt = tracked(scope, admitted); val parent = row(calendar, master.content.title).id
+            seedLegacyRuleStart(scope, parent, starts[0])
             val observed = expectedHourlySlots(parent, observedStarts)
             assertNotEquals(expectedHourlySlots(parent, starts), instances(calendar, from, until))
             assertEquals(observed, instances(calendar, from, until))
@@ -225,6 +229,49 @@ class RecurrenceProviderDeviceTest {
         resolver.query(uri, columns, "${Events._ID}=?", arrayOf(id.toString()), null)!!.use {
             assertTrue(it.moveToFirst())
             columns.forEachIndexed { index, column -> assertEquals(column, values.getAsString(column), it.getString(index)) }
+        }
+    }
+
+    @Test fun laterDailyTransitionMastersRefuseNewAndReplacementWrites() = runBlocking {
+        for (start in listOf("2030-10-26T00:30:00Z", "2030-03-30T01:30:00Z")) for (existing in listOf(false, true)) fixture { scope, _, calendar, _ ->
+            val candidate = timed("daily-risk", start, EventRecurrence("daily-risk-series", "FREQ=DAILY;COUNT=3"), "Europe/Paris")
+            val safe = candidate.copy(content = candidate.content.copy(time = EventTime.Timed(Instant.parse(start).plusSeconds(28800),
+                Instant.parse(start).plusSeconds(32400), ZoneId.of("Europe/Paris"))))
+            val historical = if (existing) tracked(scope, safe) else null
+            val from = Instant.parse(start).minusSeconds(86400).toString(); val until = Instant.parse(start).plusSeconds(7 * 86400).toString()
+            val before = instances(calendar, from, until); val rows = count(calendar)
+            val receipt = ProjectionReceipt(scope, AdapterFormat("daily-risk-fixture", 1), candidate, UUID.randomUUID().toString(), if (existing) safe else null)
+            for (trackedWrite in listOf(false, true)) {
+                try { if (trackedWrite) projection.applyTracked(receipt) else projection.apply(ProjectionIntent(scope, candidate)); fail("Later unsafe rule slot was admitted") }
+                catch (failure: CalendarProjectionException) { assertEquals(CalendarProjectionFailure.PROVIDER_REJECTED, failure.category) }
+                assertEquals(rows, count(calendar)); assertEquals(before, instances(calendar, from, until))
+                assertNull(projection.inspectProjectionReceipt(receipt))
+                if (historical != null) assertEquals(AppliedProjectionWitness(historical), projection.inspectProjectionReceipt(historical))
+            }
+        }
+    }
+
+    @Test fun legacyDailyTransitionParentsRefuseMovedAndCancelledExceptions() = runBlocking {
+        for ((start, original) in listOf("2030-10-26T00:30:00Z" to "2030-10-27T00:30:00Z", "2030-03-30T01:30:00Z" to "2030-03-31T01:30:00Z"))
+            for (existing in listOf(false, true)) for (cancelled in listOf(false, true)) for (allDay in listOf(false, true)) fixture { scope, _, calendar, _ ->
+            val safe = timed("legacy-daily", Instant.parse(start).plusSeconds(28800).toString(), EventRecurrence("legacy-daily-series", "FREQ=DAILY;COUNT=3"), "Europe/Paris")
+            val historical = tracked(scope, safe); val parent = row(calendar, safe.content.title).id
+            val destination = Instant.parse(start).plusSeconds(4 * 86400).atZone(java.time.ZoneOffset.UTC).toLocalDate()
+            val initial = timed("daily-child", "${destination}T09:00:00Z", EventRecurrence("legacy-daily-series", original = point(original)), "Europe/Paris")
+            if (existing) tracked(scope, initial)
+            seedLegacyRuleStart(scope, parent, start)
+            val candidate = initial.copy(revision = Revision("replacement"), content = initial.content.copy(recurrence = initial.content.recurrence!!.copy(cancelled = cancelled),
+                time = if (allDay) EventTime.AllDay(destination, destination.plusDays(1)) else initial.content.time))
+            val receipt = ProjectionReceipt(scope, AdapterFormat("daily-risk-fixture", 1), candidate, UUID.randomUUID().toString(), if (existing) initial else null)
+            val from = Instant.parse(start).minusSeconds(86400).toString(); val until = Instant.parse(start).plusSeconds(7 * 86400).toString()
+            val before = instances(calendar, from, until); val rows = count(calendar)
+            for (trackedWrite in listOf(false, true)) {
+                try { if (trackedWrite) projection.applyTracked(receipt) else projection.apply(ProjectionIntent(scope, candidate)); fail("Unsafe legacy parent accepted an exception") }
+                catch (failure: CalendarProjectionException) { assertEquals(CalendarProjectionFailure.PROVIDER_REJECTED, failure.category) }
+                assertEquals(rows, count(calendar)); assertEquals(before, instances(calendar, from, until))
+                assertEquals(parent, row(calendar, safe.content.title).id)
+                assertEquals(AppliedProjectionWitness(historical), projection.inspectProjectionReceipt(historical)); assertNull(projection.inspectProjectionReceipt(receipt))
+            }
         }
     }
 

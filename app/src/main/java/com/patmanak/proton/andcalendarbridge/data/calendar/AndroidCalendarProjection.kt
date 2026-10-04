@@ -25,6 +25,7 @@ import com.patmanak.proton.andcalendarbridge.sync.EventId
 import com.patmanak.proton.andcalendarbridge.sync.Revision
 import com.patmanak.proton.andcalendarbridge.sync.CalendarScope
 import com.patmanak.proton.andcalendarbridge.sync.EventTime
+import com.patmanak.proton.andcalendarbridge.sync.RecurringLocalTimeRisk
 import com.patmanak.proton.andcalendarbridge.sync.ProjectionIntent
 import com.patmanak.proton.andcalendarbridge.sync.ProjectionReceipt
 import com.patmanak.proton.andcalendarbridge.sync.AppliedProjectionWitness
@@ -185,7 +186,7 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
         when (val change = intent.change) {
             is RemoteChange.Upsert -> {
                 val recurrence = change.content.recurrence
-                if (recurrence?.rule != null && ambiguousRuleStart(change.content.time)) fail(CalendarProjectionFailure.PROVIDER_REJECTED)
+                if (unsupportedRuleTime(change.content.time, recurrence?.rule)) fail(CalendarProjectionFailure.PROVIDER_REJECTED)
                 val seriesId = recurrence?.let { digest("series-v1", calendarSyncId(intent.scope), it.uid) }
                 val ownSyncId = if (recurrence?.isMaster == true) seriesId!! else remoteId
                 val syncIdentity = Selection("${Events.CALENDAR_ID}=? AND ${Events._SYNC_ID}=?",
@@ -216,7 +217,7 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
                         val start = parentValues.getAsLong(Events.DTSTART) ?: fail(CalendarProjectionFailure.PROVIDER_REJECTED)
                         val zone = try { ZoneId.of(parentValues.getAsString(Events.EVENT_TIMEZONE)) }
                         catch (_: Exception) { fail(CalendarProjectionFailure.PROVIDER_REJECTED) }
-                        if (zone.rules.getValidOffsets(Instant.ofEpochMilli(start).atZone(zone).toLocalDateTime()).size > 1)
+                        if (RecurringLocalTimeRisk.detected(Instant.ofEpochMilli(start), zone, parentValues.getAsString(Events.RRULE)))
                             fail(CalendarProjectionFailure.PROVIDER_REJECTED)
                     }
                     operations += assertion(uri, parentIdentity, parentId)
@@ -1039,8 +1040,8 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
         }
     }
 
-    private fun ambiguousRuleStart(time: EventTime): Boolean = time is EventTime.Timed &&
-        time.zone.rules.getValidOffsets(time.start.atZone(time.zone).toLocalDateTime()).size > 1
+    private fun unsupportedRuleTime(time: EventTime, rule: String?): Boolean = time is EventTime.Timed &&
+        RecurringLocalTimeRisk.detected(time.start, time.zone, rule)
 
     private fun recurrenceInstant(point: RecurrencePoint): Long = when (point) {
         is RecurrencePoint.AllDay -> point.date.atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli()

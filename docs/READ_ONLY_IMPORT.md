@@ -77,8 +77,18 @@ characterization exposes defects even with an unambiguous start: a daily Paris
 after the spring gap. The former Paris representation of an RDATE-only set can
 shift the early repeated-hour instant and merge it with the later one despite
 explicitly serialized UTC dates.
-The daily rule defects are not covered by the ambiguous-start guard and remain
-unsafe. General rule transition handling and automatic repair remain unqualified.
+Simple finite daily rules now have an additional admission guard: `COUNT` must be
+1 through 4096, with optional `INTERVAL` and no other fields. It checks every
+rule-generated occurrence derived from the original local start. RDATE additions
+to a rule are outside this check. A repeated or nonexistent local
+slot defers the source and refuses new native master/exception writes, including
+exceptions against an older affected parent. Exclusions do not bypass this check:
+removing a gap occurrence cannot establish that later expansion will not drift.
+Refusals preserve existing rows, pending work and historical proofs. This contains
+the measured finite daily profile without changing Android's expander. Rules with
+selectors, `UNTIL`, no `COUNT` or larger counts remain outside this added scan;
+absence of a detected risk does not qualify those profiles. General rule transition
+handling and automatic repair remain unqualified.
 
 Timed RDATE-only masters now use UTC for both native timezone columns, preserving
 their explicit absolute dates and exclusions. The original timezone stays in the

@@ -14,6 +14,7 @@ import com.patmanak.proton.andcalendarbridge.sync.EventContent
 import com.patmanak.proton.andcalendarbridge.sync.EventRecurrence
 import com.patmanak.proton.andcalendarbridge.sync.EventTime
 import com.patmanak.proton.andcalendarbridge.sync.RecurrencePoint
+import com.patmanak.proton.andcalendarbridge.sync.RecurringLocalTimeRisk
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.ZoneOffset
@@ -76,10 +77,9 @@ internal object ProtonICalendar {
                 EventTime.Timed(start.value.toInstant(), end.value.toInstant(), zone)
             }
             val recurrence = recurrence(calendar, event, uid, time is EventTime.AllDay)
-            // Native RRULE expansion can choose a different fold from the signed original instant.
+            // Native RRULE expansion can shift fold slots or drift after a gap.
             // Retain the sealed source as unsupported instead of shifting DTSTART/RECURRENCE-ID.
-            if (recurrence?.rule != null && time is EventTime.Timed &&
-                time.zone.rules.getValidOffsets(time.start.atZone(time.zone).toLocalDateTime()).size > 1) unsupportedEvents()
+            if (time is EventTime.Timed && RecurringLocalTimeRisk.detected(time.start, time.zone, recurrence?.rule)) unsupportedEvents()
             return EventContent(event.summary?.value ?: "", time, event.description?.value ?: "", event.location?.value ?: "",
                 recurrence = recurrence,
                 details = row?.let { ProtonEventDetails.parse(event, it, bootstrap, time is EventTime.AllDay) })

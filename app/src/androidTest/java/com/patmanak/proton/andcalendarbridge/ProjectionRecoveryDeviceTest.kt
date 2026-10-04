@@ -39,6 +39,23 @@ import org.junit.runner.RunWith
 /** Isolated production Provider/SQLite/coordinator recovery; controlled remote, no service writes. */
 @RunWith(AndroidJUnit4::class)
 class ProjectionRecoveryDeviceTest {
+    @Test fun laterDailyRuleRefusalRetainsItsPreparationAndBaselineAcrossReopening() = runBlocking {
+        for (start in listOf("2030-10-26T00:30:00Z", "2030-03-30T01:30:00Z")) withFixture(reminders = true, participants = true) { f ->
+            assertEquals(ImportRunResult.COMPLETE, f.coordinator.run(false))
+            val candidate = f.latest.copy(content = f.latest.content.copy(time = EventTime.Timed(Instant.parse(start), Instant.parse(start).plusSeconds(3600), ZoneId.of("Europe/Paris")),
+                recurrence = EventRecurrence("daily-risk-series", "FREQ=DAILY;COUNT=3")))
+            val before = f.instances(); val row = f.row(); val reminders = f.reminders(); val people = f.attendees()
+            f.queue(candidate); f.coordinator.run(false)
+            val receipt = f.store.projectionReceipt(f.target, f.base.eventId)!!
+            assertNull(f.native.inspectProjectionReceipt(receipt))
+            f.reopen(); f.coordinator.run(false)
+            assertEquals(receipt, f.store.projectionReceipt(f.target, f.base.eventId))
+            assertEquals(f.base, f.store.projectedBaseline(f.target, f.base.eventId))
+            assertEquals(listOf(ProjectionIntent(f.target, candidate)), f.store.pending(f.target))
+            assertEquals(before, f.instances()); assertEquals(row, f.row()); assertEquals(reminders, f.reminders()); assertEquals(people, f.attendees())
+        }
+    }
+
     @Test fun explicitUtcProjectionRecoveryRetainsParisBaselineAndDoesNotRepairHistoricalLegacyRows() = runBlocking {
         for (legacy in listOf(false, true)) for (dirty in listOf(false, true)) withFixture(master = true, rdateOnly = true) { f ->
             assertEquals(ImportRunResult.COMPLETE, f.coordinator.run(false))

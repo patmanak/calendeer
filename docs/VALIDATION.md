@@ -506,6 +506,34 @@ All 71 selected native cases pass without skips: 26 recurrence projection and
 characterizations, not fixes for those rules. APK/test compilation and lint pass
 with zero errors and 20 existing warnings.
 
+`RecurringLocalTimeRiskTest` checks the bounded daily admission policy separately
+from native expansion. It detects later Paris fold/gap slots while admitting
+ordinary hours, fixed offsets, COUNT=1, a last slot before the transition and an
+interval skipping it. Tests distinguish the 4096 limit from unscanned larger or
+complex profiles, preserve the initial ambiguity check for every rule, and exercise
+field ordering, duplicate-field nonqualification, long arithmetic and date overflow.
+Each candidate derives from the original local start, not a normalized predecessor.
+This detector is not a recurrence validator; a false result does not establish
+native compatibility for profiles outside the scan.
+RDATE additions to an RRULE are not expanded or qualified by this detector.
+
+Parser fixtures reject final merged daily profiles reaching later fold/gap slots,
+including a gap excluded by EXDATE, while safe short/interval profiles remain
+admitted. The staged decoder joins this parser to controlled plaintext fixtures:
+surrounding valid records proceed, the sealed unsupported source is retained, and
+offline replay/retry makes no network calls. It does not qualify cryptography.
+Native fixtures refuse ordinary/tracked insertions and replacements of affected
+masters and moved/cancelled exceptions against legacy parents, with timed/all-day
+display and existing/new children. Row identity/counts, cached instances and
+historical proofs remain intact. Owner/SQLite reopening retains the refused
+intention, preparation and previous baseline without rewriting native details.
+Later fold/gap characterization explicitly seeds legacy rows, bypassing admission;
+it still demonstrates the underlying Android defects rather than their repair.
+All 48 selected JVM tests and 74 native tests pass without skips: 6 risk-policy,
+20 parser, 15 staged and 7 iCalendar JVM cases; 28 native recurrence projection
+and 46 owner/SQLite recovery cases. APK/test compilation and lint pass with
+zero errors and 20 existing warnings. No live Proton write is part of these tests.
+
 `RecurrenceStoreDeviceTest` covers schema 5-to-6 migration, legacy payload stability,
 reopen/rollback/CAS, master ordering, missing or deferred parents, mismatched original
 date types, durable tombstones and eligible-result limits. `RecurrenceCoordinatorDeviceTest`
