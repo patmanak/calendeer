@@ -98,6 +98,16 @@ serialized engine per account; durable state survives process death. Local-only
 processing is distinct from network work. WorkManager and provider registration
 will be integrated only with a persistent production repository and usable adapter.
 
+## Versioned recurrence projection model
+
+The pure [projection reference](PROJECTION_REPRESENTATION.md) separates canonical
+event data from a direct or bounded finite-date view. Its creation factories own
+immutable snapshots; it is not yet connected to receipts, SQL or Android imports.
+Durable integration must retain the applied representation after acknowledgement
+and compare the complete previous reference during recovery. Saved dates must
+not be recalculated with a newer timezone database. Existing receipt protocols
+and production recurrence admission remain unchanged.
+
 ## Experimental CREATE association
 
 The experimental simple CREATE path keeps three separate facts: durable admission

@@ -602,13 +602,37 @@ and 47 recovery methods, 78 total, without failures or skips. Run with
 `ProjectionRecoveryDeviceTest`; the fixtures use isolated Provider/SQLite data
 and a controlled remote, without Proton service writes.
 APK/test compilation and lint pass with zero errors and
-20 existing warnings. `:app:compileReleaseSources` also passes; the experiment is
-absent from compiled release classes and its unit tests belong to `testDebug`.
+20 existing warnings. `:app:compileReleaseSources` also passes; the fixture entry
+point remains debug-only and its unit tests belong to `testDebug`. The extracted
+pure calculator is now in the main `sync` source set, as described below.
 This is source compilation, not release APK or distribution qualification.
 There are no new production callers, adapter capabilities,
 schema changes or enabled RRULE materialization. No Proton transport or calendar
 editor is part of these fixtures; broader timezone/OEM/UI and cost qualification
 remain separate.
+
+### Pure versioned projection reference
+
+`ProjectedEventReferenceTest` adds nine cases for direct and finite representations,
+exact spring/autumn instants, canonical field preservation, first/all exclusions,
+unknown details, immutable recurrence/reminder/participant/date snapshots,
+stable equality/hash after caller mutation, invalid aliases, unsupported finite
+profiles, changed exception display types and redacted diagnostics. An initial
+stub failed seven of nine cases before implementation; the final suite passes.
+Run `:sync:test`. All 210 sync cases pass without failures, errors or skips.
+
+The debug calculator fixture delegates to `FiniteDailyRecurrenceProjection` in
+`sync`. Run `:app:testDebugUnitTest --tests '*FiniteDailyRecurrenceExperimentTest'`:
+all nine cases pass after extraction. Debug app/test APK builds, release source
+compilation and lint pass; lint retains zero errors and 20 existing warnings.
+The four targeted physical recurrence/recovery methods also pass again after
+extraction, without failures or skips. They still persist synthetic date views,
+not the new reference model. The earlier 78-method native regression result
+remains the qualification of the unchanged production Provider/recovery paths.
+The shared calculator/model compile with main sources; only the fixture entry
+point is debug-only. No runtime parser, coordinator, SQL or Provider caller has
+been connected to the new reference. These checks establish neither persisted
+representation decoding nor canonical-rule recovery/activation.
 
 `RecurrenceStoreDeviceTest` covers schema 5-to-6 migration, legacy payload stability,
 reopen/rollback/CAS, master ordering, missing or deferred parents, mismatched original

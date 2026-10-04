@@ -9,7 +9,7 @@ import java.time.ZoneId
 import org.junit.Assert.*
 import org.junit.Test
 
-/** Lives in testDebug because the experiment must be absent from release source sets. */
+/** Lives in testDebug because its fixture entry point is absent from release source sets. */
 class FiniteDailyRecurrenceExperimentTest {
     private fun time(start: String, zone: String = "Europe/Paris") = EventTime.Timed(Instant.parse(start),
         Instant.parse(start).plusSeconds(3600), ZoneId.of(zone))

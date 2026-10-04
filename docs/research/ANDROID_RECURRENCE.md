@@ -113,11 +113,11 @@ The existing production mapper supplies these fields; this audit adds no repair.
 
 ## Finite daily representation experiment
 
-A debug-only prototype now derives each local date independently from the
+A bounded prototype derives each local date independently from the
 original nominal start, chooses the first offset during a fold or the preceding
 offset during a gap, and produces a separate complete RDATE recurrence view.
 The existing native mapper can project that synthetic view in UTC without RRULE.
-There is no production caller or change to the parser/native admission guards.
+There is no runtime import caller or change to the parser/native admission guards.
 The prototype snapshots the original rule and exclusions separately and does not
 rewrite the canonical input event, timezone or exception identity.
 
@@ -170,3 +170,11 @@ after a transition. Synthesizing corrective exceptions would require separate
 source/native original-slot mappings. Infinite or complex rules require a
 durable horizon-renewal design and remain outside this experiment. Current
 admission guards and unsupported-source preservation remain in force.
+
+The calculator has since been extracted into the main `sync` source set;
+`FiniteDailyRecurrenceExperiment` remains a debug-only fixture entry point.
+A pure [versioned reference](../PROJECTION_REPRESENTATION.md) freezes canonical
+event content separately from the generated native view, including exact dates
+in equality. Nine reference cases and the original nine calculator cases pass.
+This model has no persistence or historical reload API and does not enable the
+bounded profile in the Proton parser or Android projection.
