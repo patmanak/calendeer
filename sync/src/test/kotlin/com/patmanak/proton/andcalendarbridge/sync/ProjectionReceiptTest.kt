@@ -180,16 +180,29 @@ class ProjectionReceiptTest {
         assertTrue(ProjectionReceipt.supports(next)); assertEquals(100, receipt.snapshot().change.content.details!!.attendees.size)
     }
 
-    @Test fun exceptionOriginalDateTypeAndSecondPrecisionMustMatchTheProjectionProfile() {
+    @Test fun exceptionOriginalSlotRetainsSecondPrecision() {
         val start = Instant.parse("2030-10-27T00:30:00Z")
         val timed = base.copy(content = base.content.copy(time = EventTime.Timed(start, start.plusSeconds(3600), ZoneId.of("Europe/Paris")),
             recurrence = EventRecurrence("fixture-series", original = RecurrencePoint.Timed(start))))
         assertTrue(ProjectionReceipt.supports(timed))
         refused { timed.copy(content = timed.content.copy(recurrence = timed.content.recurrence!!.copy(
             original = RecurrencePoint.Timed(start.plusNanos(1))))) }
-        assertFalse(ProjectionReceipt.supports(timed.copy(content = timed.content.copy(recurrence = timed.content.recurrence!!.copy(
-            original = RecurrencePoint.AllDay(LocalDate.of(2030, 10, 27)))))))
-        assertFalse(ProjectionReceipt.supports(base.copy(content = base.content.copy(recurrence = timed.content.recurrence))))
+    }
+
+    @Test fun typeChangingExceptionsCanRecoverTheirExactOriginalSlotAndDisplayTime() {
+        val start = Instant.parse("2030-10-27T00:30:00Z")
+        val timed = EventTime.Timed(start.plusSeconds(3600), start.plusSeconds(7200), ZoneId.of("Europe/Paris"))
+        for (cancelled in listOf(false, true)) for ((original, display) in listOf(
+            RecurrencePoint.Timed(start) to base.content.time,
+            RecurrencePoint.AllDay(LocalDate.of(2030, 10, 27)) to timed)) {
+            val candidate = base.copy(content = base.content.copy(time = display,
+                recurrence = EventRecurrence("fixture-series", original = original, cancelled = cancelled)))
+            assertTrue(ProjectionReceipt.supports(candidate))
+            val snapshot = ProjectionReceipt(scope, format, candidate, nonce, base).snapshot()
+            assertEquals(original, snapshot.change.content.recurrence!!.original)
+            assertEquals(display, snapshot.change.content.time); assertEquals(cancelled, snapshot.change.content.recurrence!!.cancelled)
+            assertEquals(base, snapshot.previousBase)
+        }
     }
 
     @Test fun exceptionListsMutatedAfterConstructionCannotTurnIntoPartialTrackedWrites() {

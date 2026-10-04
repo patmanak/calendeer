@@ -686,15 +686,15 @@ snapshot and private database commit. See [local capture](LOCAL_EDIT_CAPTURE.md)
 `ProjectionReceiptTest` checks the supported import subset, protocol/nonce
 validation, baseline identity and redacted diagnostics on the JVM.
 Timed/all-day imports with supported reminder, organizer and participant details
-can have historical receipts. Moved/cancelled exceptions qualify with matching
-original/display date types. Already supported masters qualify with rule-based or
-additional-date-only sets and exclusions; type-changing exceptions remain refused
-by this receipt profile. Deep snapshots own
+can have historical receipts. Moved/cancelled exceptions qualify with matching or
+different original/display date types. Already supported masters qualify with rule-based or
+additional-date-only sets and exclusions. Deep snapshots own
 applied and previous-base lists, and revalidate aliases mutated after model
 construction, including participant count and case-insensitive uniqueness.
 The reminder-only and organizer/participant acceptance assertions fail against
 their respective original implementations.
 The occurrence acceptance assertion likewise fails before exception support.
+The type-changing acceptance assertion fails before removing the same-type receipt restriction.
 Exception rule/list mutation after construction is refused. Original timed
 subsecond slots are refused by the display model before receipt qualification.
 The master acceptance assertion fails before master support. Aliased master date
@@ -753,6 +753,17 @@ Separate SQL reopening and newer-occurrence cases qualify storage only. Existing
 mapping/dependency behavior. These checks do not exercise concurrent parent-rule
 mutation; the existing rule lookup precedes the parent assertion batch.
 
+The exception recovery matrix also covers both timed-to-all-day and all-day-to-timed
+display changes. Before and after reopening, the original timestamp/date type and
+parent ID remain distinct from the current display type and endpoints. A parent
+changed to match only the display type still refuses application: its type must
+match the original slot. A subsequent dirty native display conversion is preserved
+without rewriting event/detail rows. Newer blocked content retains its own
+unapplied preparation after older proof recovery. Separate SQL cases round-trip
+both conversions and cancellation, preserving an inverse display change pending
+against the recovered base with its master untouched. These cases do not qualify
+native instance expansion or calendar-editor behavior for these conversions.
+
 Master fixtures exercise timed/all-day rule and additional-date-only imports with
 exclusions. Lost-ACK reopening preserves event/detail IDs, bounded native instances
 and tracked-apply counts. Later local rule removal and tombstones remain intact;
@@ -772,10 +783,10 @@ Date-list aliases at SQL/Provider admission cannot change the prepared or histor
 snapshot. Separate SQLite cases cover reopened sets and newer master content with
 a retained child. These cases add no recurrence rules or editable capability.
 
-All 194 sync and ten app JVM cases passed. Four selected physical suites passed:
-forty recovery, twenty-two receipt-store, thirteen recurrence-Provider and nine
-recurrence-store cases. Eight master Provider/storage recovery cases and two SQLite
-cases extend the earlier occurrence qualification. APK builds and lint passed (zero errors, twenty
+All 195 sync and ten app JVM cases passed. Four selected physical suites passed:
+forty-two recovery, twenty-four receipt-store, thirteen recurrence-Provider and nine
+recurrence-store cases. The expanded exception matrix, two native boundary cases
+and two SQLite cases extend the earlier series qualification. APK builds and lint passed (zero errors, twenty
 existing warnings), followed by independent source/evidence review. These cases
 use isolated fixtures and a controlled remote; no Proton event was changed.
 

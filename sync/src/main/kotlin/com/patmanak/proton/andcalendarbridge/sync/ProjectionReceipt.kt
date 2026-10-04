@@ -54,9 +54,10 @@ data class ProjectionReceipt(
                     }
                 } else {
                     if (it.rule != null || it.additionalDates.isNotEmpty() || it.excludedDates.isNotEmpty()) return false
+                    // The original slot belongs to the master; the exception can change its display type.
                     when (val original = it.original) {
-                        is RecurrencePoint.AllDay -> if (content.time !is EventTime.AllDay) return false
-                        is RecurrencePoint.Timed -> if (content.time !is EventTime.Timed || original.instant.nano != 0) return false
+                        is RecurrencePoint.AllDay -> Unit
+                        is RecurrencePoint.Timed -> if (original.instant.nano != 0) return false
                         null -> return false
                     }
                 }

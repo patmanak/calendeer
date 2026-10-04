@@ -102,11 +102,11 @@ Provider writes its versioned nonce in `SYNC_DATA3` in the same atomic batch as
 the event, organizer metadata and reminder/attendee replacements. Supported simple
 imports include up to five distinct reminders, an organizer and up to 100
 participants with distinct email identities. Moved/cancelled recurrence exceptions
-also qualify when their original slot and display dates have the same type and
-second precision. Already supported recurring masters also qualify, including
+also qualify when changing between timed and all-day display. The original slot
+retains the master's date type; timed originals and displays retain second precision.
+Already supported recurring masters also qualify, including
 rule-based and additional-date-only sets with exclusions. Mutable date lists are
 revalidated for bounds, date type and whole-second precision before preparation.
-Display-type-changing exceptions retain ordinary import recovery.
 Receipt contents and previous-base collection data are
 snapshotted before crossing SQL or Provider suspension boundaries.
 Preparation alone does not prove that the write happened. Untracked
@@ -205,8 +205,7 @@ Explicit internal [local CREATE capture](LOCAL_CREATE_CAPTURE.md) has its own
 one-shot identity reservation and permanently paused journal, without dispatch.
 
 Nonce-backed recovery covers simple upserts, supported masters and the exception
-subset above with absent, empty or supported event details. Display-type-changing
-exceptions, Provider DELETE projections and
+subset above with absent, empty or supported event details. Provider DELETE projections and
 legacy rows without receipts retain their conservative
 recovery limits. Neither cache presence, a revision alone nor a numeric row ID
 invents an ACK. The two stores still do not share a transaction, and controlled

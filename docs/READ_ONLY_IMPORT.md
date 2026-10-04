@@ -167,7 +167,8 @@ after interruption between the provider write and acknowledgement. Simple upsert
 and supported recurrence masters/exceptions also retain a preparation and write its nonce
 with the event; exact marker inspection
 can restore the projected base after a lost ACK while preserving subsequent dirty
-or deleted flags. Newer pending remote evidence is not consumed by an older receipt.
+or deleted flags. Exceptions retain their original slot separately when display
+changes between timed and all-day dates. Newer pending remote evidence is not consumed by an older receipt.
 See [local capture](LOCAL_EDIT_CAPTURE.md) for the subset and refusal rules.
 Rebuilding a missing mirror requeues cached records. A fresh traversal reprojects
 known supported clean records; dirty/deleted local rows remain protected and can

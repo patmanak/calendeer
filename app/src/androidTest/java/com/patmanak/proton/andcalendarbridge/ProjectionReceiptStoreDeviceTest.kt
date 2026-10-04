@@ -11,6 +11,8 @@ import com.patmanak.proton.andcalendarbridge.data.importing.ImportStore
 import com.patmanak.proton.andcalendarbridge.sync.*
 import com.patmanak.proton.andcalendarbridge.sync.catalog.CalendarSummary
 import java.time.LocalDate
+import java.time.Instant
+import java.time.ZoneId
 import java.util.UUID
 import kotlinx.coroutines.*
 import org.json.JSONArray
@@ -50,6 +52,52 @@ class ProjectionReceiptStoreDeviceTest {
         catch (_: IllegalArgumentException) { }
         catch (_: IllegalStateException) { }
         catch (_: SQLiteException) { }
+    }
+
+    private fun convertedException(originalAllDay: Boolean, cancelled: Boolean = false): RemoteChange.Upsert =
+        applied.copy(content = applied.content.copy(time = if (originalAllDay) EventTime.Timed(
+            Instant.parse("2026-10-02T10:00:00Z"), Instant.parse("2026-10-02T11:00:00Z"), ZoneId.of("UTC")) else original.content.time,
+            recurrence = EventRecurrence("fixture-type-change-series", original = if (originalAllDay)
+                RecurrencePoint.AllDay(LocalDate.of(2026, 10, 1)) else RecurrencePoint.Timed(Instant.parse("2026-10-01T10:00:00Z")),
+                cancelled = cancelled)))
+
+    private fun masterFor(candidate: RemoteChange.Upsert): RemoteChange.Upsert {
+        val time = when (val point = candidate.content.recurrence!!.original!!) {
+            is RecurrencePoint.AllDay -> EventTime.AllDay(point.date, point.date.plusDays(1))
+            is RecurrencePoint.Timed -> EventTime.Timed(point.instant, point.instant.plusSeconds(3600), ZoneId.of("UTC"))
+        }
+        return original.copy(eventId = EventId("fixture-type-master"), content = original.content.copy(time = time,
+            recurrence = EventRecurrence(candidate.content.recurrence!!.uid, "FREQ=DAILY;COUNT=3")))
+    }
+
+    @Test fun typeChangingOccurrenceReceiptsReopenWithOriginalAndDisplayDatesDistinct() {
+        for (originalAllDay in listOf(false, true)) for (cancelled in listOf(false, true)) fixture { store, name ->
+            store.baseline(); val candidate = convertedException(originalAllDay, cancelled); val master = masterFor(candidate)
+            store.queue(master); store.acknowledge(ProjectionIntent(scope, master)); store.queue(candidate)
+            val receipt = store.prepareProjection(ProjectionIntent(scope, candidate), format)
+            store.close()
+            ImportStore(ApplicationProvider.getApplicationContext(), name).use { reopened ->
+                assertEquals(receipt, reopened.projectionReceipt(scope, candidate.eventId)); assertEquals(original, receipt.previousBase)
+                assertEquals(original, reopened.projectedBaseline(scope, candidate.eventId))
+                assertTrue(reopened.restoreProjection(AppliedProjectionWitness(receipt)))
+                assertEquals(candidate, reopened.projectedBaseline(scope, candidate.eventId))
+                assertEquals(master, reopened.projectedBaseline(scope, master.eventId))
+                assertTrue(reopened.pending(scope).isEmpty()); assertNull(reopened.projectionReceipt(scope, candidate.eventId))
+            }
+        }
+    }
+
+    @Test fun olderConvertedOccurrenceProofPreservesANewerDisplayConversionAndItsMaster() {
+        for (originalAllDay in listOf(false, true)) fixture { store, _ ->
+            store.baseline(); val candidate = convertedException(originalAllDay); val master = masterFor(candidate)
+            store.queue(master); store.acknowledge(ProjectionIntent(scope, master)); store.queue(candidate)
+            val receipt = store.prepareProjection(ProjectionIntent(scope, candidate), format)
+            val newer = candidate.copy(revision = Revision("newer"), content = candidate.content.copy(time = master.content.time))
+            store.queue(newer); assertTrue(store.restoreProjection(AppliedProjectionWitness(receipt)))
+            assertEquals(candidate, store.projectedBaseline(scope, candidate.eventId))
+            assertEquals(newer, store.pending(scope).single().change); assertEquals(master, store.projectedBaseline(scope, master.eventId))
+            assertNull(store.projectionReceipt(scope, candidate.eventId))
+        }
     }
 
     @Test fun masterRuleAndDateSetReceiptsReopenWithFrozenCollectionsAndPreviousBase() = fixture { store, name ->
@@ -203,9 +251,12 @@ class ProjectionReceiptStoreDeviceTest {
             Revision("unmapped"), format, DeferredEventReason.UNSUPPORTED_CONTENT, "sealed-fixture")) }
         refused { store.prepareProjection(ProjectionIntent(scope, applied), format) }
         store.transaction(scope) { (this as StagedSyncTransaction).clearDeferred(applied.eventId) }
+        val dates = mutableListOf<RecurrencePoint>()
         val detailed = applied.copy(content = applied.content.copy(recurrence = EventRecurrence("fixture-uid",
-            original = RecurrencePoint.Timed(java.time.Instant.parse("2026-10-01T00:00:00Z")))))
-        store.queue(detailed); refused { store.prepareProjection(ProjectionIntent(scope, detailed), format) }
+            additionalDates = dates, original = RecurrencePoint.AllDay(LocalDate.of(2026, 10, 1)))))
+        store.queue(detailed)
+        dates.add(RecurrencePoint.AllDay(LocalDate.of(2026, 10, 2)))
+        refused { store.prepareProjection(ProjectionIntent(scope, detailed), format) }
         val gone = RemoteChange.Deleted(applied.eventId, Revision("gone"))
         store.queue(gone); refused { store.prepareProjection(ProjectionIntent(scope, gone), format) }
         assertNull(store.projectionReceipt(scope, applied.eventId))

@@ -480,28 +480,25 @@ Bounded queries, cursor reopening, corruption refusal and historical access gate
 have passed isolated physical SQL qualification. Existing UPDATE/DELETE inspection
 and metadata-summary regression cases also pass. No service write was performed.
 
-Read-only imports of simple events and supported recurrence exceptions now retain
+Read-only imports of simple events, supported masters and recurrence exceptions retain
 historical atomic projection receipts. After a lost private acknowledgement, the exact nonce
 can restore the applied base without rewriting the Android event or its children.
 Reminders, organizer metadata and up to 100 distinct participants are covered.
 Later dirty detail changes and newer pending remote content stay intact. Applied
 and previous-base lists are frozen before SQL/Provider suspension; participant
 bounds and case-insensitive uniqueness are rechecked after possible alias mutation.
-Moved/cancelled exceptions qualify when original and display dates retain the
-same type. Recovery preserves cancellation without recreating reminder rows,
-along with selected parent metadata and its existing details. Master writes,
-display-type-changing exceptions and Provider DELETE remain outside this receipt
-profile. The existing parent-rule lookup precedes the batch, so this does not
+Moved/cancelled exceptions qualify with distinct original and display date types.
+Recovery preserves cancellation without recreating reminder rows, along with
+selected parent metadata and its existing details. Master proof binds the unique
+series and event identities; normally requeued exceptions are processed separately.
+Provider DELETE remains outside this receipt profile. The existing parent-rule lookup precedes the batch, so this does not
 qualify every concurrent parent change. This enables neither
 detail editing, invitations/responses nor outgoing UPDATE/DELETE. Protocol 1 and
 the SQL schema remain unchanged; downgrade beyond an older event profile is not
-qualified. All 191 sync/ten app JVM cases and seventy-four selected physical
-Provider/SQLite cases passed, including timed/all-day lost-ACK reopening, exact
+qualified. Domain and controlled physical Provider/SQLite cases cover lost-ACK reopening, exact
 child row preservation, organizer deduplication, refused proofs and whole-batch
-rollback. The existing recurrence mapping and SQL dependency regressions also
-passed. APK builds, lint (zero errors,
-twenty existing warnings) and independent review passed. The final app was installed
-and launched. No Proton fixture was modified; controlled reopening does not qualify
+rollback. Recurrence mapping and SQL dependency regressions cover the unchanged
+import path. No Proton fixture was modified; controlled reopening does not qualify
 physical power loss or Samsung alert delivery. See [local capture](LOCAL_EDIT_CAPTURE.md).
 
 The shared sync endpoint's one-shot transport permit now qualifies a single
@@ -594,8 +591,11 @@ does not invent receipts for legacy rows. Supported recurring masters now have
 historical receipts as well. Proof binds the distinct remote-event and series
 identities uniquely in the same assertion batch, preserving subsequent dirty
 rules, local tombstones and linked exceptions without rewriting the series.
-Display-type-changing exceptions and deletions retain their previous conservative
-recovery limits; the two stores remain separate.
+Exceptions changing between timed and all-day display also qualify for historical
+recovery, preserving their original slot, native parent and subsequent local display
+edits. Application still asserts the parent's original-date type, independently of
+the exception's display type. Deletions retain their previous conservative recovery
+limits; the two stores remain separate.
 Nonce-backed recovery has passed source review, JVM checks and controlled physical
 SQLite/Provider fixtures, including lost private acknowledgement, reused opaque
 revision and schema migration. These fixtures do not qualify arbitrary power loss.
