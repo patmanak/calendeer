@@ -1007,6 +1007,14 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
         change.content.recurrence?.let { recurrence ->
             if (recurrence.isMaster) {
                 putNull(Events.DTEND)
+                // Explicit timed dates are absolute instants. Expanding them in a named
+                // zone can merge the two occurrences of a repeated hour. Keep the domain
+                // timezone in the import store/receipt, but expand this finite set in UTC.
+                // RRULEs retain their zone because they describe recurring local times.
+                if (recurrence.rule == null && change.content.time is EventTime.Timed) {
+                    put(Events.EVENT_TIMEZONE, "UTC")
+                    put(Events.EVENT_END_TIMEZONE, "UTC")
+                }
                 put(Events.DURATION, when (val time = change.content.time) {
                     is EventTime.AllDay -> "P${ChronoUnit.DAYS.between(time.start, time.endExclusive)}D"
                     is EventTime.Timed -> "PT${Duration.between(time.start, time.end).seconds}S"

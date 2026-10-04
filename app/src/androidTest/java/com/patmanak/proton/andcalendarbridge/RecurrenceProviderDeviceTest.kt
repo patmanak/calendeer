@@ -77,7 +77,7 @@ class RecurrenceProviderDeviceTest {
         }
     }
 
-    @Test fun explicitUtcDateSetsCurrentlyLoseFoldInstantsUnderParisButRemainExactInUtc() = runBlocking {
+    @Test fun legacyParisDateSetsLoseFoldInstantsWhileUtcExpansionRemainsExact() = runBlocking {
         val schedules = listOf(
             listOf("2030-10-26T00:30:00Z", "2030-10-27T00:30:00Z", "2030-10-27T01:30:00Z", "2030-10-28T01:30:00Z"),
             listOf("2030-10-27T00:30:00Z", "2030-10-27T01:30:00Z", "2030-10-28T01:30:00Z"),
@@ -95,6 +95,8 @@ class RecurrenceProviderDeviceTest {
             val master = timed("explicit-transition", starts[0], EventRecurrence("explicit-transition-series",
                 additionalDates = starts.drop(1).map(::point)), zone)
             val receipt = tracked(scope, master); val parent = row(calendar, master.content.title).id
+            // Deliberately bypass the current mapper to characterize the old native row.
+            if (zone == "Europe/Paris") seedNativeTimezone(scope, parent, zone)
             val spring = starts[0].startsWith("2030-03")
             val from = if (spring) "2030-03-29T00:00:00Z" else "2030-10-25T00:00:00Z"
             val until = if (spring) "2030-04-06T00:00:00Z" else "2030-11-02T00:00:00Z"
@@ -112,6 +114,117 @@ class RecurrenceProviderDeviceTest {
             assertEquals(observed, instances(calendar, from, until))
             assertEquals(AppliedProjectionWitness(receipt), AndroidCalendarProjection(context).inspectProjectionReceipt(receipt))
             assertEquals(observed, instances(calendar, from, until)); assertEquals(1, count(calendar))
+        }
+    }
+
+    @Test fun parisExplicitDatesKeepBothFoldInstantsAndTheirOriginalDomainTimezone() = runBlocking {
+        val schedules = listOf(
+            listOf("2030-10-26T00:30:00Z", "2030-10-27T00:30:00Z", "2030-10-27T01:30:00Z", "2030-10-28T01:30:00Z"),
+            listOf("2030-10-27T00:30:00Z", "2030-10-27T01:30:00Z", "2030-10-28T01:30:00Z"),
+            listOf("2030-10-27T00:30:00Z", "2030-10-28T01:30:00Z"),
+            listOf("2030-10-27T01:30:00Z", "2030-10-28T01:30:00Z"),
+            listOf("2030-03-30T01:30:00Z", "2030-03-31T00:30:00Z", "2030-03-31T01:30:00Z", "2030-04-01T00:30:00Z"),
+        )
+        for (starts in schedules) for (excluded in listOf<String?>(null) + starts) fixture { scope, _, calendar, _ ->
+            val master = timed("utc-projection", starts[0], EventRecurrence("utc-series", additionalDates = starts.drop(1).map(::point),
+                excludedDates = excluded?.let { listOf(point(it)) } ?: emptyList()), "Europe/Paris")
+            val receipt = tracked(scope, master); val parent = row(calendar, master.content.title).id
+            val from = if (starts[0].startsWith("2030-03")) "2030-03-29T00:00:00Z" else "2030-10-25T00:00:00Z"
+            val until = if (starts[0].startsWith("2030-03")) "2030-04-06T00:00:00Z" else "2030-11-02T00:00:00Z"
+            val expected = expectedHourlySlots(parent, starts.filter { it != excluded })
+            assertEquals(expected, instances(calendar, from, until))
+            assertEquals(ZoneId.of("Europe/Paris"), (receipt.change.content.time as EventTime.Timed).zone)
+            resolver.query(Events.CONTENT_URI, arrayOf(Events.EVENT_TIMEZONE, Events.EVENT_END_TIMEZONE),
+                "${Events._ID}=?", arrayOf(parent.toString()), null)!!.use {
+                assertTrue(it.moveToFirst()); assertEquals("UTC", it.getString(0)); assertEquals("UTC", it.getString(1))
+            }
+            assertEquals(AppliedProjectionWitness(receipt), AndroidCalendarProjection(context).inspectProjectionReceipt(receipt))
+            projection.apply(ProjectionIntent(scope, master))
+            assertEquals(parent, row(calendar, master.content.title).id); assertEquals(1, count(calendar))
+            assertEquals(expected, instances(calendar, from, until))
+        }
+    }
+
+    @Test fun explicitFoldExceptionsKeepDistinctOriginsAcrossMovesCancellationAndReplay() = runBlocking {
+        val starts = listOf("2030-10-27T00:30:00Z", "2030-10-27T01:30:00Z", "2030-10-28T01:30:00Z")
+        for (original in starts.take(2)) for (allDay in listOf(false, true)) for (cancelled in listOf(false, true)) fixture { scope, _, calendar, _ ->
+            val master = timed("explicit-master", starts[0], EventRecurrence("explicit-series", additionalDates = starts.drop(1).map(::point)), "Europe/Paris")
+            tracked(scope, master); val parent = row(calendar, master.content.title).id
+            assertEquals(expectedHourlySlots(parent, starts), conversionWindow(calendar))
+            val child = timed("explicit-child", "2030-10-30T09:00:00Z", EventRecurrence("explicit-series", original = point(original), cancelled = cancelled), "Europe/Paris")
+                .let { if (allDay) it.copy(content = it.content.copy(time = EventTime.AllDay(LocalDate.parse("2030-10-30"), LocalDate.parse("2030-10-31")))) else it }
+            val receipt = tracked(scope, child); val id = row(calendar, child.content.title).id
+            val remaining = expectedHourlySlots(parent, starts.filter { it != original })
+            val moved = if (cancelled) emptyList() else listOf(if (allDay)
+                Instance(id, Instant.parse("2030-10-30T00:00:00Z"), Instant.parse("2030-10-31T00:00:00Z"), true) else
+                Instance(id, Instant.parse("2030-10-30T09:00:00Z"), Instant.parse("2030-10-30T10:00:00Z"), false))
+            val expected = remaining + moved
+            assertEquals(remaining, instances(calendar, "2030-10-25T00:00:00Z", "2030-10-29T00:00:00Z"))
+            assertEquals(moved, instances(calendar, "2030-10-30T00:00:00Z", "2030-11-02T00:00:00Z"))
+            assertEquals(expected, conversionWindow(calendar))
+            assertEquals(parent, row(calendar, child.content.title).parent)
+            assertEquals(Instant.parse(original).toEpochMilli(), row(calendar, child.content.title).original)
+            assertEquals(AppliedProjectionWitness(receipt), AndroidCalendarProjection(context).inspectProjectionReceipt(receipt))
+            projection.apply(ProjectionIntent(scope, child)); projection.apply(ProjectionIntent(scope, master))
+            assertEquals(id, row(calendar, child.content.title).id); assertEquals(parent, row(calendar, master.content.title).id)
+            assertEquals(expected, conversionWindow(calendar)); assertEquals(2, count(calendar))
+            projection.apply(ProjectionIntent(scope, RemoteChange.Deleted(child.eventId, Revision("removed"))))
+            assertEquals(expectedHourlySlots(parent, starts), conversionWindow(calendar)); assertEquals(1, count(calendar))
+        }
+    }
+
+    @Test fun legacyExplicitMastersAdoptUtcOnlyWhenCleanAndKeepLinkedChildIdentity() = runBlocking {
+        for (state in listOf("clean", "dirty", "deleted")) fixture { scope, _, calendar, _ ->
+            val master = timed("legacy-explicit", "2030-10-27T00:30:00Z", EventRecurrence("legacy-explicit-series",
+                additionalDates = listOf(point("2030-10-27T01:30:00Z"), point("2030-10-28T01:30:00Z"))), "Europe/Paris")
+            val receipt = tracked(scope, master); val parent = row(calendar, master.content.title).id
+            val child = timed("legacy-child", "2030-10-30T09:00:00Z", EventRecurrence("legacy-explicit-series", original = point("2030-10-27T01:30:00Z")), "Europe/Paris")
+            tracked(scope, child); val id = row(calendar, child.content.title).id
+            seedNativeTimezone(scope, parent, "Europe/Paris", if (state == "clean") 0 else 1, if (state == "deleted") 1 else 0)
+            val before = conversionWindow(calendar)
+            if (state != "deleted") assertEquals(expectedHourlySlots(parent, listOf("2030-10-28T01:30:00Z")) +
+                Instance(id, Instant.parse("2030-10-30T09:00:00Z"), Instant.parse("2030-10-30T10:00:00Z"), false), before)
+            assertEquals(AppliedProjectionWitness(receipt), AndroidCalendarProjection(context).inspectProjectionReceipt(receipt))
+            if (state == "clean") {
+                projection.apply(ProjectionIntent(scope, master))
+                assertEquals(expectedHourlySlots(parent, listOf("2030-10-27T00:30:00Z", "2030-10-28T01:30:00Z")) +
+                    Instance(id, Instant.parse("2030-10-30T09:00:00Z"), Instant.parse("2030-10-30T10:00:00Z"), false), conversionWindow(calendar))
+            } else {
+                try { projection.apply(ProjectionIntent(scope, master)); fail("Dirty legacy master must not be rewritten") }
+                catch (failure: CalendarProjectionException) { assertEquals(CalendarProjectionFailure.PROVIDER_REJECTED, failure.category) }
+                assertEquals(before, conversionWindow(calendar))
+            }
+            assertEquals(parent, row(calendar, master.content.title).id); assertEquals(id, row(calendar, child.content.title).id)
+            assertEquals(parent, row(calendar, child.content.title).parent); assertEquals(2, count(calendar))
+            resolver.query(Events.CONTENT_URI, arrayOf(Events.EVENT_TIMEZONE, Events.EVENT_END_TIMEZONE, Events.DIRTY, Events.DELETED),
+                "${Events._ID}=?", arrayOf(parent.toString()), null)!!.use {
+                assertTrue(it.moveToFirst()); val expectedZone = if (state == "clean") "UTC" else "Europe/Paris"
+                assertEquals(expectedZone, it.getString(0)); assertEquals(expectedZone, it.getString(1))
+                assertEquals(if (state == "clean") 0 else 1, it.getInt(2)); assertEquals(if (state == "deleted") 1 else 0, it.getInt(3))
+            }
+            if (state == "clean") assertNull(projection.inspectProjectionReceipt(receipt))
+            else assertEquals(AppliedProjectionWitness(receipt), projection.inspectProjectionReceipt(receipt))
+        }
+    }
+
+    private fun seedNativeTimezone(scope: CalendarScope, id: Long, zone: String, dirty: Int = 0, deleted: Int = 0) {
+        val account = projection.accountFor(scope.account)
+        val uri = Events.CONTENT_URI.buildUpon().appendQueryParameter(CalendarContract.CALLER_IS_SYNCADAPTER, "true")
+            .appendQueryParameter(Events.ACCOUNT_NAME, account.name).appendQueryParameter(Events.ACCOUNT_TYPE, account.type).build()
+        // A timezone-only update can leave cached UTC expansion intact. Seed the
+        // complete time/date representation, as an old mapper would have written it.
+        val values = resolver.query(uri, arrayOf(Events.DTSTART, Events.DTEND, Events.DURATION, Events.RRULE,
+            Events.RDATE, Events.EXDATE, Events.ALL_DAY), "${Events._ID}=?", arrayOf(id.toString()), null)!!.use {
+            assertTrue(it.moveToFirst()); ContentValues().apply { android.database.DatabaseUtils.cursorRowToContentValues(it, this) }
+        }
+        assertEquals(1, resolver.update(uri, values.apply {
+            put(Events.EVENT_TIMEZONE, zone); put(Events.EVENT_END_TIMEZONE, zone)
+            put(Events.DIRTY, dirty); put(Events.DELETED, deleted)
+        }, "${Events._ID}=?", arrayOf(id.toString())))
+        val columns = values.keySet().toTypedArray()
+        resolver.query(uri, columns, "${Events._ID}=?", arrayOf(id.toString()), null)!!.use {
+            assertTrue(it.moveToFirst())
+            columns.forEachIndexed { index, column -> assertEquals(column, values.getAsString(column), it.getString(index)) }
         }
     }
 

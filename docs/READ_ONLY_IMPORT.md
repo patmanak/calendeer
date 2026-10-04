@@ -74,10 +74,19 @@ Older visible copies are not removed or repaired automatically. This contains th
 measured start defect; it does not correct Android expansion. Further native
 characterization exposes defects even with an unambiguous start: a daily Paris
 02:30 rule chooses the later repeated-hour instant in autumn, and drifts to 03:30
-after the spring gap. A Paris RDATE-only set can shift the early repeated-hour
-instant and merge it with the later one despite explicitly serialized UTC dates.
-These profiles are not covered by the ambiguous-start guard and remain unsafe.
-General transition handling and automatic repair remain unqualified.
+after the spring gap. The former Paris representation of an RDATE-only set can
+shift the early repeated-hour instant and merge it with the later one despite
+explicitly serialized UTC dates.
+The daily rule defects are not covered by the ambiguous-start guard and remain
+unsafe. General rule transition handling and automatic repair remain unqualified.
+
+Timed RDATE-only masters now use UTC for both native timezone columns, preserving
+their explicit absolute dates and exclusions. The original timezone stays in the
+domain/import store and historical receipt; Android sees the master timezone as
+UTC. RRULEs retain their local timezone, and exception display timezones are
+unchanged. Clean master reapplication adopts this representation while retaining
+parent and linked child identities. Dirty rows and tombstones are refused, and
+historical receipt recovery does not rewrite or repair older Paris representations.
 
 EXRULE, RDATE periods, RANGE exceptions, floating/unresolved dates, BYSETPOS,
 BYWEEKNO and BYYEARDAY remain deferred. Yearly BYDAY/BYMONTHDAY require BYMONTH.

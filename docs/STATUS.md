@@ -608,10 +608,14 @@ and baselines. Parent start/zone/rule/type are reasserted in the exception batch
 Historical receipt inspection is unchanged. Existing incorrect copies are not
 automatically repaired. Native characterization also exposes a later repeated-hour
 shift and post-gap drift for daily Paris 02:30 rules starting at an unambiguous
-time, plus loss of distinct explicit UTC RDATE instants under the Paris timezone.
-The existing start guard does not contain these additional defects. They require
-a separate mapping strategy; calendar-editor behavior and general transition
-correctness remain unqualified.
+time. The existing start guard does not contain these rule defects. Timed
+RDATE-only masters now expand in native UTC to preserve distinct explicit
+instants and exclusions; their original timezone remains in the domain and import
+baseline. Clean reapplication keeps parent/child IDs, while dirty rows and
+tombstones remain untouched. Historical receipt recovery preserves older rows
+without repairing their timezone. RRULEs and exception display timezones are
+unchanged; calendar-editor behavior and general transition correctness remain
+unqualified.
 Nonce-backed recovery has passed source review, JVM checks and controlled physical
 SQLite/Provider fixtures, including lost private acknowledgement, reused opaque
 revision and schema migration. These fixtures do not qualify arbitrary power loss.

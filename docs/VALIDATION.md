@@ -471,9 +471,40 @@ does not fix the defects. The UTC comparison constructs UTC domain fixtures; it
 does not establish a production mapping that retains the original Paris domain
 timezone. Exclusions, moved/cancelled RDATE children, owner/SQLite lost-ACK recovery,
 dirty-row migration, calendar-editor behavior and live Proton are not qualified
-by these new fixtures. APK/test compilation and lint pass with zero errors and
-20 existing warnings. No production mapping or admission policy is changed.
+by those initial characterization fixtures. APK/test compilation and lint pass
+with zero errors and 20 existing warnings. That initial characterization changed no production mapping
+or admission policy. The legacy Paris comparison now explicitly seeds the old
+native timezone, bypassing the current RDATE-only mapper.
 Historical receipts establish an applied batch, not correct native expansion.
+
+Timed RDATE-only master projection now uses native UTC while the domain event and
+receipt retain the original Paris timezone. A physical semantic assertion failed
+before this change because the early repeated-hour slot disappeared. The same
+assertion now requires both original instants with exact event IDs and endpoints.
+Five Paris date sets exercise no exclusion and each individual date exclusion,
+including either branch of the repeated hour and exclusion of DTSTART. Replay
+retains one master row and its ID. Both native timezone columns must equal UTC.
+
+Exceptions targeting either repeated-hour instant are moved or cancelled with
+timed or all-day display. Tests prime expansion, query separate origin/destination
+and combined windows, reapply child and master without duplication, retain parent
+and child IDs, and restore the exact original set after ordinary child deletion.
+Legacy clean master reapplication with a linked child adopts UTC without changing
+those identities; dirty and deleted masters refuse reapplication and retain their
+Paris timezone, flags, cached instances and historical proof.
+
+Owner/SQLite lost-ACK fixtures retain the Paris domain baseline and recover a new
+UTC projection without repeating a write or overwriting a later local title edit.
+The same controlled reopening recovers a seeded legacy Paris receipt without
+repairing its incorrect expansion: historical proof remains distinct from native
+fidelity. Rule-based expansion is unchanged, including the separately characterized
+later fold/gap defects. No live Proton or calendar-editor behavior is established
+by these isolated fixtures.
+
+All 71 selected native cases pass without skips: 26 recurrence projection and
+45 owner/SQLite recovery tests. This includes the unchanged rule defect
+characterizations, not fixes for those rules. APK/test compilation and lint pass
+with zero errors and 20 existing warnings.
 
 `RecurrenceStoreDeviceTest` covers schema 5-to-6 migration, legacy payload stability,
 reopen/rollback/CAS, master ordering, missing or deferred parents, mismatched original

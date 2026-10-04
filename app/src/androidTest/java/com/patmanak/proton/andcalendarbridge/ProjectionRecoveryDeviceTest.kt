@@ -39,6 +39,40 @@ import org.junit.runner.RunWith
 /** Isolated production Provider/SQLite/coordinator recovery; controlled remote, no service writes. */
 @RunWith(AndroidJUnit4::class)
 class ProjectionRecoveryDeviceTest {
+    @Test fun explicitUtcProjectionRecoveryRetainsParisBaselineAndDoesNotRepairHistoricalLegacyRows() = runBlocking {
+        for (legacy in listOf(false, true)) for (dirty in listOf(false, true)) withFixture(master = true, rdateOnly = true) { f ->
+            assertEquals(ImportRunResult.COMPLETE, f.coordinator.run(false))
+            val starts = listOf("2030-10-27T00:30:00Z", "2030-10-27T01:30:00Z", "2030-10-28T01:30:00Z")
+            val candidate = f.latest.copy(content = f.latest.content.copy(time = EventTime.Timed(Instant.parse(starts[0]),
+                Instant.parse(starts[0]).plusSeconds(7200), ZoneId.of("Europe/Paris")), recurrence = EventRecurrence("fixture-primary-series",
+                additionalDates = starts.drop(1).map { RecurrencePoint.Timed(Instant.parse(it)) })))
+            f.projectWithoutAcknowledgement(candidate)
+            val row = f.row(); val applies = f.applies.get()
+            assertEquals("UTC", f.field(Events.EVENT_TIMEZONE)); assertEquals("UTC", f.field(Events.EVENT_END_TIMEZONE))
+            fun slots(values: List<String>) = values.map { Triple(row, Instant.parse(it).toEpochMilli(), Instant.parse(it).plusSeconds(7200).toEpochMilli()) }
+            assertEquals(slots(starts), f.instances())
+            val receipt = f.store.projectionReceipt(f.target, f.base.eventId)!!
+            assertEquals(candidate, receipt.change)
+            if (legacy) f.mutate(ContentValues().apply {
+                put(Events.EVENT_TIMEZONE, "Europe/Paris"); put(Events.EVENT_END_TIMEZONE, "Europe/Paris")
+                put(Events.DTSTART, Instant.parse(starts[0]).toEpochMilli()); putNull(Events.DTEND)
+                put(Events.DURATION, "PT7200S"); putNull(Events.RRULE); putNull(Events.EXDATE); put(Events.ALL_DAY, 0)
+                put(Events.RDATE, "20301027T003000Z,20301027T013000Z,20301028T013000Z")
+            })
+            if (dirty) f.edit("Later local explicit-date edit")
+            val observed = if (legacy) slots(starts.drop(1)) else slots(starts)
+            assertEquals(observed, f.instances())
+            f.reopen(); assertEquals(ImportRunResult.COMPLETE, f.coordinator.run(false))
+            assertEquals(candidate, f.store.projectedBaseline(f.target, f.base.eventId))
+            assertEquals(ZoneId.of("Europe/Paris"), (candidate.content.time as EventTime.Timed).zone)
+            assertEquals(row, f.row()); assertEquals(applies, f.applies.get()); assertEquals(observed, f.instances())
+            assertEquals(if (legacy) "Europe/Paris" else "UTC", f.field(Events.EVENT_TIMEZONE))
+            assertEquals(if (dirty) "Later local explicit-date edit" else candidate.content.title, f.field(Events.TITLE))
+            assertEquals(if (dirty) "1" else "0", f.field(Events.DIRTY))
+            assertTrue(f.store.pending(f.target).isEmpty()); assertNull(f.store.projectionReceipt(f.target, f.base.eventId))
+        }
+    }
+
     @Test fun ambiguousRuleRefusalRetainsItsPreparationAndBaselineAfterReopening() = runBlocking {
         withFixture(reminders = true, participants = true) { f ->
             assertEquals(ImportRunResult.COMPLETE, f.coordinator.run(false))
