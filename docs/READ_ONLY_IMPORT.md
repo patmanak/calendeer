@@ -64,8 +64,15 @@ A known native limitation remains for an ambiguous daylight-saving start: a Pari
 series starting at 02:30 during the repeated hour can expand its first occurrence
 one hour later than the stored instant. An exception referring to the original
 instant then leaves that shifted occurrence visible, for both matching and changed
-display types and for cancellation. No import guard or workaround is active yet;
-these series are not qualified as faithful mirrors.
+display types and for cancellation. New Proton RRULE masters with ambiguous timed
+starts are now deferred, retaining the sealed source for later processing while
+other supported records continue. The native boundary also refuses ordinary or
+tracked master writes of this profile, and new exception writes against an already
+ambiguous RRULE parent. It reasserts the inspected parent start, zone, rule and type
+in the exception transaction. Refusals preserve existing rows and pending work.
+Older visible copies are not removed or repaired automatically. This contains the
+measured defect; it does not correct Android expansion or qualify ambiguous later
+occurrences, nonexistent local times or RDATE-only transition behavior.
 
 EXRULE, RDATE periods, RANGE exceptions, floating/unresolved dates, BYSETPOS,
 BYWEEKNO and BYYEARDAY remain deferred. Yearly BYDAY/BYMONTHDAY require BYMONTH.

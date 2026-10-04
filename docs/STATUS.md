@@ -601,8 +601,13 @@ times across a daylight-saving boundary, cancellation, reconversion and lost-ACK
 reopening without repeated writes. A known ambiguous-start defect remains: the
 native Provider can shift a recurring first slot by one hour during the repeated
 hour, leaving it visible after movement or cancellation at the stored original
-instant. There is no active import guard or workaround. Calendar-editor behavior
-and general timezone-transition correctness remain unqualified.
+instant. New Proton RRULE masters with ambiguous timed starts are deferred with
+their sealed source retained. Android refuses new master writes and exception
+writes against an ambiguous RRULE parent, preserving existing rows, preparations
+and baselines. Parent start/zone/rule/type are reasserted in the exception batch.
+Historical receipt inspection is unchanged. Existing incorrect copies are not
+automatically repaired; calendar-editor behavior and general timezone-transition
+correctness remain unqualified.
 Nonce-backed recovery has passed source review, JVM checks and controlled physical
 SQLite/Provider fixtures, including lost private acknowledgement, reused opaque
 revision and schema migration. These fixtures do not qualify arbitrary power loss.

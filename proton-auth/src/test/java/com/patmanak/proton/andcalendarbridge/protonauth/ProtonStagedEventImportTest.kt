@@ -24,6 +24,43 @@ class ProtonStagedEventImportTest {
     private val clock = Clock.fixed(Instant.parse("2026-09-26T10:00:00Z"), ZoneOffset.UTC)
     private val protector = TestEventProtector()
 
+    /** Real parser/admission and receipt handling, controlled plaintext decoder; no crypto claim. */
+    @Test fun ambiguousRuleIsRetainedWithoutBlockingValidRowsAndOfflineRetry() = runTest {
+        val bad = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:fold-fixture\r\nDTSTART;TZID=Europe/Paris:20301027T023000\r\nDTEND;TZID=Europe/Paris:20301027T033000\r\nRRULE:FREQ=DAILY;COUNT=3\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
+        val good = bad.replace("T023000", "T100000").replace("T033000", "T110000")
+        val rows = listOf("first" to good, "ambiguous" to bad, "last" to good).map { (id, content) ->
+            buildJsonObject { row(id).forEach { (key, value) -> put(key, value) }; put("SyntheticICalendar", content) }
+        }
+        val remote = Network(rows)
+        val decoder = object : EventImportDecoder {
+            override suspend fun decode(session: CatalogSession, calendar: String, bootstrap: JsonObject, rows: List<JsonObject>): EventDecodeResult {
+                val changes = mutableListOf<RemoteChange.Upsert>(); val deferred = mutableListOf<DeferredEventContent>()
+                for (row in rows) try {
+                    changes += RemoteChange.Upsert(EventId(row.string("ID")), row.revision(), ProtonICalendar.parse(listOf(row.string("SyntheticICalendar"))))
+                } catch (failure: RemoteImportException) {
+                    if (failure.reason != RemoteImportFailure.UNSUPPORTED) throw failure
+                    deferred += DeferredEventContent(EventId(row.string("ID")), row.revision(), DeferredEventReason.UNSUPPORTED_CONTENT)
+                }
+                return EventDecodeResult(changes, deferred)
+            }
+        }
+        fun restarted() = ProtonEventImportAdapter(CatalogSessionSource { session }, remote, decoder, protector, clock) { ZoneOffset.UTC }
+        val adapter = restarted(); val receipt = adapter.receive(request)
+        val decoded = adapter.decode(receipt)
+        assertEquals(listOf("first", "last"), decoded.page.changes.map { it.eventId.value }); assertNotNull(decoded.page.nextCursor)
+        val issue = decoded.deferred.single()
+        assertEquals(EventId("ambiguous"), issue.eventId); assertEquals(rows[1].revision(), issue.revision)
+        assertEquals(DeferredEventReason.UNSUPPORTED_CONTENT, issue.reason)
+        assertTrue(protector.open(issue.protectedPayload).contains("20301027T023000"))
+        remote.forbidNetwork = true
+        assertNull(restarted().retryDeferred(scope, issue))
+        val replay = restarted().decode(receipt)
+        assertEquals(decoded.page, replay.page)
+        assertEquals(issue.copy(protectedPayload = replay.deferred.single().protectedPayload), replay.deferred.single())
+        assertEquals(protector.open(issue.protectedPayload), protector.open(replay.deferred.single().protectedPayload))
+        assertEquals(1, remote.pageCalls); assertEquals(1, remote.bootstrapCalls)
+    }
+
     @Test fun receiptExposesFrozenCoverageBeforeDecodeAndKeepsItAfterOfflineRestart() = runTest {
         val remote = Network(listOf(row("first")))
         val decoder = Decoder()

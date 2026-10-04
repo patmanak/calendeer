@@ -46,27 +46,85 @@ class RecurrenceProviderDeviceTest {
         qualifyConversion(originalAllDay = true)
     }
 
-    /** Characterizes a known Provider limitation, not correct RFC fold handling. No guard is active yet. */
+    @Test fun ambiguousRuleStartsRefuseOrdinaryAndTrackedWritesWithoutChangingRows() = runBlocking {
+        for (start in listOf("2030-10-27T00:30:00Z", "2030-10-27T01:30:00Z")) for (existing in listOf(false, true))
+            fixture { scope, _, calendar, _ ->
+                val good = conversionMaster(false)
+                val historical = if (existing) tracked(scope, good) else null
+                if (existing) tracked(scope, conversionChild(false))
+                val before = conversionWindow(calendar); val rows = count(calendar)
+                val bad = good.copy(revision = Revision("ambiguous"), content = good.content.copy(
+                    time = EventTime.Timed(Instant.parse(start), Instant.parse(start).plusSeconds(3600), ZoneId.of("Europe/Paris"))))
+                val receipt = ProjectionReceipt(scope, AdapterFormat("fold-guard-fixture", 1), bad, UUID.randomUUID().toString(), if (existing) good else null)
+                for (trackedWrite in listOf(false, true)) {
+                    try {
+                        if (trackedWrite) projection.applyTracked(receipt) else projection.apply(ProjectionIntent(scope, bad))
+                        fail("Ambiguous rule start must not reach the Provider")
+                    } catch (failure: CalendarProjectionException) { assertEquals(CalendarProjectionFailure.PROVIDER_REJECTED, failure.category) }
+                    assertEquals(rows, count(calendar)); assertEquals(before, conversionWindow(calendar))
+                    assertNull(projection.inspectProjectionReceipt(receipt))
+                    if (historical != null) assertEquals(AppliedProjectionWitness(historical), projection.inspectProjectionReceipt(historical))
+                }
+            }
+    }
+
+    @Test fun exceptionsAgainstALegacyAmbiguousRuleMasterRefuseNewWrites() = runBlocking {
+        for (start in listOf("2030-10-27T00:30:00Z", "2030-10-27T01:30:00Z")) for (cancelled in listOf(false, true))
+            for (existing in listOf(false, true)) fixture { scope, _, calendar, _ ->
+            val historical = tracked(scope, conversionMaster(false)); val parent = row(calendar, "converted-master").id
+            tracked(scope, conversionChild(false))
+            seedLegacyRuleStart(scope, parent, start)
+            val before = conversionWindow(calendar)
+            val previous = conversionChild(false)
+            val child = previous.copy(eventId = if (existing) previous.eventId else EventId("new-child"), revision = Revision("new"),
+                content = previous.content.copy(title = "new-child", recurrence = previous.content.recurrence!!.copy(cancelled = cancelled)))
+            val receipt = ProjectionReceipt(scope, AdapterFormat("fold-guard-fixture", 1), child, UUID.randomUUID().toString(), if (existing) previous else null)
+            for (trackedWrite in listOf(false, true)) {
+                try {
+                    if (trackedWrite) projection.applyTracked(receipt) else projection.apply(ProjectionIntent(scope, child))
+                    fail("Legacy ambiguous parent must not accept a new exception")
+                } catch (failure: CalendarProjectionException) { assertEquals(CalendarProjectionFailure.PROVIDER_REJECTED, failure.category) }
+                assertEquals(2, count(calendar)); assertEquals(before, conversionWindow(calendar))
+                assertNull(projection.inspectProjectionReceipt(receipt))
+                assertEquals(AppliedProjectionWitness(historical), projection.inspectProjectionReceipt(historical))
+            }
+        }
+    }
+
+    private fun seedLegacyRuleStart(scope: CalendarScope, parent: Long, start: String) {
+        val account = projection.accountFor(scope.account)
+        val uri = Events.CONTENT_URI.buildUpon().appendQueryParameter(CalendarContract.CALLER_IS_SYNCADAPTER, "true")
+            .appendQueryParameter(CalendarContract.Calendars.ACCOUNT_NAME, account.name)
+            .appendQueryParameter(CalendarContract.Calendars.ACCOUNT_TYPE, account.type).build()
+        assertEquals(1, resolver.update(uri, ContentValues().apply {
+            put(Events.DTSTART, Instant.parse(start).toEpochMilli()); putNull(Events.DTEND)
+            put(Events.DURATION, "PT3600S"); put(Events.RRULE, "FREQ=DAILY;COUNT=3")
+            put(Events.EVENT_TIMEZONE, "Europe/Paris"); put(Events.EVENT_END_TIMEZONE, "Europe/Paris"); put(Events.ALL_DAY, 0)
+        },
+            "${Events._ID}=?", arrayOf(parent.toString())))
+    }
+
+    /** Raw legacy state characterizes the Provider defect; the production admission guards are bypassed deliberately. */
     @Test fun ambiguousDstMasterStartCurrentlyLeavesShiftedOriginalInstance() = runBlocking {
         for (converted in listOf(false, true)) for (cancelled in listOf(false, true)) fixture { scope, _, calendar, _ ->
             val master = timed("fold-master", "2030-10-27T00:30:00Z", EventRecurrence("fold-series", "FREQ=DAILY;COUNT=3"), "Europe/Paris")
-            projection.apply(ProjectionIntent(scope, master)); val masterId = row(calendar, master.content.title).id
+            val admitted = master.copy(content = master.content.copy(time = EventTime.Timed(Instant.parse("2030-10-26T08:00:00Z"),
+                Instant.parse("2030-10-26T09:00:00Z"), ZoneId.of("Europe/Paris"))))
+            projection.apply(ProjectionIntent(scope, admitted)); val masterId = row(calendar, master.content.title).id
             val nativeSlots = listOf(
                 Instance(masterId, Instant.parse("2030-10-27T01:30:00Z"), Instant.parse("2030-10-27T02:30:00Z"), false),
                 Instance(masterId, Instant.parse("2030-10-28T01:30:00Z"), Instant.parse("2030-10-28T02:30:00Z"), false),
                 Instance(masterId, Instant.parse("2030-10-29T01:30:00Z"), Instant.parse("2030-10-29T02:30:00Z"), false),
             )
-            val storedStart = resolver.query(Events.CONTENT_URI, arrayOf(Events.DTSTART), "${Events.CALENDAR_ID}=? AND ${Events._ID}=?",
-                arrayOf(calendar.toString(), masterId.toString()), null)!!.use {
-                assertTrue(it.moveToFirst()); it.getLong(0)
-            }
-            assertEquals(Instant.parse("2030-10-27T00:30:00Z").toEpochMilli(), storedStart)
-            assertEquals(nativeSlots, conversionWindow(calendar))
             val child = RemoteChange.Upsert(EventId("fold-child"), Revision("v1"), EventContent("fold-child",
                 if (converted) EventTime.AllDay(LocalDate.parse("2030-10-30"), LocalDate.parse("2030-10-31")) else
                     EventTime.Timed(Instant.parse("2030-10-30T09:00:00Z"), Instant.parse("2030-10-30T10:00:00Z"), ZoneId.of("Europe/Paris")),
                 recurrence = EventRecurrence("fold-series", original = point("2030-10-27T00:30:00Z"), cancelled = cancelled)))
             tracked(scope, child); val childId = row(calendar, child.content.title).id
+            seedLegacyRuleStart(scope, masterId, "2030-10-27T00:30:00Z")
+            val storedStart = resolver.query(Events.CONTENT_URI, arrayOf(Events.DTSTART), "${Events.CALENDAR_ID}=? AND ${Events._ID}=?",
+                arrayOf(calendar.toString(), masterId.toString()), null)!!.use { assertTrue(it.moveToFirst()); it.getLong(0) }
+            assertEquals(Instant.parse("2030-10-27T00:30:00Z").toEpochMilli(), storedStart)
             val moved = if (cancelled) emptyList() else listOf(if (converted)
                 Instance(childId, Instant.parse("2030-10-30T00:00:00Z"), Instant.parse("2030-10-31T00:00:00Z"), true) else
                 Instance(childId, Instant.parse("2030-10-30T09:00:00Z"), Instant.parse("2030-10-30T10:00:00Z"), false))

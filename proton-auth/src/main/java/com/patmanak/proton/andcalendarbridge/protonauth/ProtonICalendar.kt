@@ -75,8 +75,13 @@ internal object ProtonICalendar {
                 calendar.timezoneInfo.getTimezone(end)?.timeZone?.id?.let(ZoneId::of)
                 EventTime.Timed(start.value.toInstant(), end.value.toInstant(), zone)
             }
+            val recurrence = recurrence(calendar, event, uid, time is EventTime.AllDay)
+            // Native RRULE expansion can choose a different fold from the signed original instant.
+            // Retain the sealed source as unsupported instead of shifting DTSTART/RECURRENCE-ID.
+            if (recurrence?.rule != null && time is EventTime.Timed &&
+                time.zone.rules.getValidOffsets(time.start.atZone(time.zone).toLocalDateTime()).size > 1) unsupportedEvents()
             return EventContent(event.summary?.value ?: "", time, event.description?.value ?: "", event.location?.value ?: "",
-                recurrence = recurrence(calendar, event, uid, time is EventTime.AllDay),
+                recurrence = recurrence,
                 details = row?.let { ProtonEventDetails.parse(event, it, bootstrap, time is EventTime.AllDay) })
         } catch (failure: com.patmanak.proton.andcalendarbridge.sync.RemoteImportException) { throw failure }
           catch (_: Exception) { unsupportedEvents() }

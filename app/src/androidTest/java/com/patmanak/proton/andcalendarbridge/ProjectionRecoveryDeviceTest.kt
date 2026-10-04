@@ -39,6 +39,26 @@ import org.junit.runner.RunWith
 /** Isolated production Provider/SQLite/coordinator recovery; controlled remote, no service writes. */
 @RunWith(AndroidJUnit4::class)
 class ProjectionRecoveryDeviceTest {
+    @Test fun ambiguousRuleRefusalRetainsItsPreparationAndBaselineAfterReopening() = runBlocking {
+        withFixture(reminders = true, participants = true) { f ->
+            assertEquals(ImportRunResult.COMPLETE, f.coordinator.run(false))
+            val candidate = f.latest.copy(content = f.latest.content.copy(recurrence = EventRecurrence("ambiguous-series", "FREQ=DAILY;COUNT=3")))
+            val before = f.instances(); val row = f.row(); val reminders = f.reminders(); val people = f.attendees()
+            f.queue(candidate); f.coordinator.run(false)
+            val prepared = f.store.projectionReceipt(f.target, f.base.eventId)
+            assertNotNull("Rejected write must retain its preparation", prepared)
+            val receipt = prepared!!
+            assertNull(f.native.inspectProjectionReceipt(receipt))
+            assertEquals(f.base, f.store.projectedBaseline(f.target, f.base.eventId))
+            assertEquals(listOf(ProjectionIntent(f.target, candidate)), f.store.pending(f.target))
+            assertEquals(before, f.instances()); assertEquals(row, f.row()); assertEquals(reminders, f.reminders()); assertEquals(people, f.attendees())
+            f.reopen(); f.coordinator.run(false)
+            assertEquals(receipt, f.store.projectionReceipt(f.target, f.base.eventId))
+            assertEquals(f.base, f.store.projectedBaseline(f.target, f.base.eventId)); assertEquals(candidate, f.store.pending(f.target).single().change)
+            assertEquals(before, f.instances()); assertEquals(row, f.row()); assertEquals(reminders, f.reminders()); assertEquals(people, f.attendees())
+        }
+    }
+
     @Test fun convertedOccurrenceInstancesStayExactAfterLostAcknowledgementRecovery() = runBlocking {
         for (allDay in listOf(false, true)) for (cancelled in listOf(false, true)) withFixture(allDay = allDay) { f ->
             assertEquals(ImportRunResult.COMPLETE, f.coordinator.run(false))
@@ -250,7 +270,7 @@ class ProjectionRecoveryDeviceTest {
 
     @Test fun movedAndCancelledExceptionsRecoverWithoutRewritingTheirParentOrDetails() = runBlocking {
         for (allDay in listOf(false, true)) for (cancelled in listOf(false, true)) for (changeType in listOf(false, true)) {
-            withFixture(reminders = true, participants = true, allDay = allDay) { f ->
+            withFixture(nonAmbiguousStart = true, reminders = true, participants = true, allDay = allDay) { f ->
                 f.coordinator.run(false); f.importMaster()
                 val candidate = f.exception(cancelled, changeType)
                 val parent = f.parent(); val parentReminders = f.reminders(f.masterRow!!); val parentPeople = f.attendees(f.masterRow!!)
@@ -274,7 +294,7 @@ class ProjectionRecoveryDeviceTest {
 
     @Test fun historicalExceptionRecoveryPreservesLaterDirtyEditsAndLocalTombstones() = runBlocking {
         for (allDay in listOf(false, true)) for (changeType in listOf(false, true)) for (deleted in listOf(false, true))
-            withFixture(reminders = true, allDay = allDay) { f ->
+            withFixture(nonAmbiguousStart = true, reminders = true, allDay = allDay) { f ->
             f.coordinator.run(false); f.importMaster()
             val candidate = f.exception(changeType = changeType)
             f.projectWithoutAcknowledgement(candidate)
@@ -292,7 +312,7 @@ class ProjectionRecoveryDeviceTest {
     }
 
     @Test fun olderExceptionProofDoesNotConsumeNewerRemoteContentOrOverwriteADirtyOccurrence() = runBlocking {
-        for (allDay in listOf(false, true)) for (changeType in listOf(false, true)) withFixture(allDay = allDay) { f ->
+        for (allDay in listOf(false, true)) for (changeType in listOf(false, true)) withFixture(nonAmbiguousStart = true, allDay = allDay) { f ->
             f.coordinator.run(false); f.importMaster()
             val candidate = f.exception(changeType = changeType); f.projectWithoutAcknowledgement(candidate)
             val historical = f.store.projectionReceipt(f.target, f.base.eventId)!!; val applies = f.applies.get()
@@ -313,7 +333,7 @@ class ProjectionRecoveryDeviceTest {
 
     @Test fun missingOrForeignExceptionNonceCannotQualifyAnInterruptedOccurrence() = runBlocking {
         for (allDay in listOf(false, true)) for (changeType in listOf(false, true))
-            for (marker in listOf(null, "calendeer-projection-receipt-v1:${UUID.randomUUID()}")) withFixture(allDay = allDay) { f ->
+            for (marker in listOf(null, "calendeer-projection-receipt-v1:${UUID.randomUUID()}")) withFixture(nonAmbiguousStart = true, allDay = allDay) { f ->
             f.coordinator.run(false); f.importMaster()
             val candidate = f.exception(changeType = changeType); f.projectWithoutAcknowledgement(candidate)
             f.edit("Local occurrence without proof")
@@ -329,7 +349,7 @@ class ProjectionRecoveryDeviceTest {
     }
 
     @Test fun aDisappearedNativeParentRefusesExceptionApplicationWithoutPromotingTheReceipt() = runBlocking {
-        for (allDay in listOf(false, true)) for (changeType in listOf(false, true)) withFixture(allDay = allDay) { f ->
+        for (allDay in listOf(false, true)) for (changeType in listOf(false, true)) withFixture(nonAmbiguousStart = true, allDay = allDay) { f ->
             f.coordinator.run(false); f.importMaster()
             val candidate = f.exception(changeType = changeType); f.queue(candidate)
             val prepared = f.store.prepareProjection(ProjectionIntent(f.target, candidate), f.format)
@@ -348,7 +368,7 @@ class ProjectionRecoveryDeviceTest {
 
     @Test fun failedExceptionBatchLeavesTheParentAndPreviousProjectionIntact() = runBlocking {
         for (allDay in listOf(false, true)) for (changeType in listOf(false, true))
-            withFixture(reminders = true, participants = true, allDay = allDay) { f ->
+            withFixture(nonAmbiguousStart = true, reminders = true, participants = true, allDay = allDay) { f ->
             f.coordinator.run(false); f.importMaster()
             val candidate = f.exception(changeType = changeType); f.queue(candidate)
             val prepared = f.store.prepareProjection(ProjectionIntent(f.target, candidate), f.format)
@@ -363,7 +383,7 @@ class ProjectionRecoveryDeviceTest {
     }
 
     @Test fun changedDisplayTypeDoesNotReplaceTheRequiredParentSlotType() = runBlocking {
-        for (allDay in listOf(false, true)) withFixture(allDay = allDay) { f ->
+        for (allDay in listOf(false, true)) withFixture(nonAmbiguousStart = true, allDay = allDay) { f ->
             f.coordinator.run(false); f.importMaster()
             val candidate = f.exception(changeType = true)
             f.queue(candidate); val receipt = f.store.prepareProjection(ProjectionIntent(f.target, candidate), f.format)
@@ -382,7 +402,7 @@ class ProjectionRecoveryDeviceTest {
     }
 
     @Test fun historicalTypeChangeProofPreservesASubsequentNativeDisplayConversion() = runBlocking {
-        for (allDay in listOf(false, true)) withFixture(reminders = true, participants = true, allDay = allDay) { f ->
+        for (allDay in listOf(false, true)) withFixture(nonAmbiguousStart = true, reminders = true, participants = true, allDay = allDay) { f ->
             f.coordinator.run(false); f.importMaster()
             val candidate = f.exception(changeType = true); f.projectWithoutAcknowledgement(candidate)
             f.changeDisplay(f.base.content.time)
@@ -941,7 +961,7 @@ class ProjectionRecoveryDeviceTest {
     }
 
     private class Fixture(val context: Context, reminders: Boolean = false, allDay: Boolean = false, participants: Boolean = false,
-        master: Boolean = false, rdateOnly: Boolean = false) {
+        master: Boolean = false, rdateOnly: Boolean = false, val nonAmbiguousStart: Boolean = false) {
         private val token = UUID.randomUUID().toString()
         val target = CalendarScope(AccountId("projection-recovery-$token"), CalendarId("fixture"), 0)
         private val name = "projection-recovery-$token.db"
@@ -949,7 +969,7 @@ class ProjectionRecoveryDeviceTest {
         val format = AdapterFormat("projection-recovery-fixture", 1)
         val base = RemoteChange.Upsert(EventId("fixture"), Revision("v1"), EventContent("Recovery base v1",
             if (allDay) EventTime.AllDay(LocalDate.of(2030, 10, 27), LocalDate.of(2030, 10, 28))
-            else EventTime.Timed(Instant.parse("2030-10-27T00:30:00Z"), Instant.parse("2030-10-27T02:30:00Z"),
+            else EventTime.Timed(Instant.parse(if (nonAmbiguousStart) "2030-10-27T09:00:00Z" else "2030-10-27T00:30:00Z"), Instant.parse(if (nonAmbiguousStart) "2030-10-27T11:00:00Z" else "2030-10-27T02:30:00Z"),
                 ZoneId.of("Europe/Paris")), recurrence = if (master) EventRecurrence("fixture-primary-series",
                     if (rdateOnly) null else "FREQ=DAILY;COUNT=3", listOf(fixturePoint(allDay, 4)), listOf(fixturePoint(allDay, 1))) else null,
                 details = EventDetails(if (reminders) listOf(EventReminder(10), EventReminder(30)) else emptyList(),
@@ -1114,7 +1134,7 @@ class ProjectionRecoveryDeviceTest {
 
         private fun fixturePoint(allDay: Boolean, days: Long): RecurrencePoint = if (allDay)
             RecurrencePoint.AllDay(LocalDate.of(2030, 10, 27).plusDays(days))
-        else RecurrencePoint.Timed(Instant.parse("2030-10-27T00:30:00Z").atZone(ZoneId.of("Europe/Paris")).plusDays(days).toInstant())
+        else RecurrencePoint.Timed(Instant.parse(if (nonAmbiguousStart) "2030-10-27T09:00:00Z" else "2030-10-27T00:30:00Z").atZone(ZoneId.of("Europe/Paris")).plusDays(days).toInstant())
 
         fun changedMaster(): RemoteChange.Upsert = latest.copy(content = latest.content.copy(
             recurrence = latest.content.recurrence!!.copy(rule = latest.content.recurrence!!.rule?.let { "FREQ=DAILY;COUNT=4" },
@@ -1281,10 +1301,10 @@ class ProjectionRecoveryDeviceTest {
     private data class ParticipantRow(val email: String, val name: String, val role: Int, val status: Int, val relationship: Int)
 
     private suspend fun withFixture(reminders: Boolean = false, allDay: Boolean = false, participants: Boolean = false,
-        master: Boolean = false, rdateOnly: Boolean = false,
+        master: Boolean = false, rdateOnly: Boolean = false, nonAmbiguousStart: Boolean = master,
         test: suspend (Fixture) -> Unit) {
         assumeTrue(InstrumentationRegistry.getArguments().getString("providerFixture") == "true")
-        val fixture = Fixture(ApplicationProvider.getApplicationContext(), reminders, allDay, participants, master, rdateOnly)
+        val fixture = Fixture(ApplicationProvider.getApplicationContext(), reminders, allDay, participants, master, rdateOnly, nonAmbiguousStart)
         assumeTrue(fixture.native.hasPermissions())
         try { fixture.initialize(); test(fixture) } finally { fixture.close() }
     }

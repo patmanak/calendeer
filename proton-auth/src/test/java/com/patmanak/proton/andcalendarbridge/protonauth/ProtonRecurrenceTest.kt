@@ -7,6 +7,39 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class ProtonRecurrenceTest {
+    @Test fun ambiguousNamedZoneRuleStartIsDeferredRatherThanShifted() {
+        refuses("DTSTART;TZID=Europe/Paris:20301027T023000\nDTEND;TZID=Europe/Paris:20301027T033000\nRRULE:FREQ=DAILY;COUNT=3")
+    }
+
+    @Test fun finalMergedStartAndRuleDetermineAmbiguity() {
+        val bad = ics("DTSTART;TZID=Europe/Paris:20301027T023000\nDTEND;TZID=Europe/Paris:20301027T033000")
+        val good = ics("DTSTART;TZID=Europe/Paris:20301027T100000\nDTEND;TZID=Europe/Paris:20301027T110000")
+        val rule = ics("RRULE:FREQ=DAILY;COUNT=3")
+        try { ProtonICalendar.parse(listOf(good, bad, rule)); fail("Final ambiguous start must be deferred") }
+        catch (failure: RemoteImportException) { assertEquals(RemoteImportFailure.UNSUPPORTED, failure.reason) }
+        assertEquals(Instant.parse("2030-10-27T09:00:00Z"), (ProtonICalendar.parse(listOf(bad, good, rule)).time as EventTime.Timed).start)
+    }
+
+    @Test fun unambiguousBoundaryTimesAndUtcRulesRemainAdmitted() {
+        for (hour in listOf("015900", "030000")) assertNotNull(parse(
+            "DTSTART;TZID=Europe/Paris:20301027T$hour\nDTEND;TZID=Europe/Paris:20301027T040000\nRRULE:FREQ=DAILY;COUNT=3").recurrence)
+        for (hour in listOf("003000", "013000")) assertEquals(Instant.parse("2030-10-27T${hour.substring(0, 2)}:30:00Z"),
+            (parse("DTSTART:20301027T${hour}Z\nDTEND:20301027T033000Z\nRRULE:FREQ=DAILY;COUNT=3").time as EventTime.Timed).start)
+        assertTrue(parse("DTSTART;VALUE=DATE:20301027\nDTEND;VALUE=DATE:20301028\nRRULE:FREQ=DAILY;COUNT=3").time is EventTime.AllDay)
+    }
+
+    @Test fun ambiguousDisplayWithoutRuleDoesNotBecomeAnUnsupportedMaster() {
+        val dates = "DTSTART;TZID=Europe/Paris:20301027T023000\nDTEND;TZID=Europe/Paris:20301027T033000"
+        assertNull(parse(dates).recurrence)
+        assertFalse(parse("$dates\nRECURRENCE-ID:20301026T003000Z").recurrence!!.isMaster)
+        assertNull(parse("$dates\nRDATE:20301028T013000Z").recurrence!!.rule)
+    }
+
+    private fun refuses(properties: String) {
+        try { parse(properties); fail("Ambiguous rule start must be deferred") }
+        catch (failure: RemoteImportException) { assertEquals(RemoteImportFailure.UNSUPPORTED, failure.reason) }
+    }
+
     @Test fun weeklyRuleKeepsWallTimeZoneAndCanonicalRfc() {
         val event = parse("DTSTART;TZID=Europe/Paris:20261018T100000\nDTEND;TZID=Europe/Paris:20261018T110000\nRRULE:FREQ=WEEKLY;COUNT=4;BYDAY=SU")
         val time = event.time as EventTime.Timed

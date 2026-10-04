@@ -412,16 +412,33 @@ the original series. Reconversion must keep the child ID, invalidate the former
 display slot and refuse the old historical receipt while accepting the new one.
 These are isolated native fixtures, not Proton or calendar-editor tests.
 
-A separate characterization retains a known defect rather than declaring correct
-fold handling: a Paris master stores `2030-10-27T00:30:00Z`, but its first native
+A separate characterization seeds native legacy state directly, bypassing the
+production admission guards. It retains a known defect rather than declaring
+correct fold handling: a Paris master stores `2030-10-27T00:30:00Z`, but its first native
 instance begins at `01:30:00Z`. Fixed expectations verify that the shifted master
 slot survives an exception targeting the stored original instant, with matching
-or changed display type, moved or cancelled. No import guard or fix is active.
+or changed display type, moved or cancelled. Android expansion is not fixed.
 Converted-slot qualification uses unambiguous original times and does not close
 this discrepancy.
-The two selected Provider/recovery suites passed all 61 cases on the authorized
-physical target, including this defect characterization. That result qualifies
-the bounded non-ambiguous fixtures; it does not indicate a fix for the fold defect.
+`ProtonRecurrenceTest` rejects an ambiguous final merged RRULE start and admits
+unambiguous boundary times, UTC, all-day and unchanged profiles without a rule.
+`ProtonStagedEventImportTest` joins the real parser to controlled plaintext decoding
+and receipt handling: valid surrounding rows proceed, the unsupported source is
+retained and offline replay/retry uses no network. This is not cryptographic evidence.
+Native admission fixtures reject both fold instants on master insertion/replacement,
+ordinary and tracked, without changing cached instances or historical proofs.
+New and replacement moved/cancelled exceptions also refuse a seeded ambiguous
+legacy parent. Owner/SQLite reopening retains the rejected preparation, intention,
+previous baseline and native details. A historical proof remains valid when its
+previously non-ambiguous native row becomes ambiguous. Receipts whose own historical
+payload already had an ambiguous start are not directly exercised here.
+The parent's start/zone/rule/type are reasserted in the exception batch, but no new
+fixture injects a change between that read and the batch. General fold/gap behavior,
+repair of older copies and RDATE-only transition behavior remain unqualified.
+All 39 selected parser/staged JVM cases and 64 Provider/recovery cases passed,
+without skipped tests; native qualification used the authorized physical target.
+The native total includes the explicit legacy defect characterization, not a fix
+to Android's expansion behavior.
 
 `RecurrenceStoreDeviceTest` covers schema 5-to-6 migration, legacy payload stability,
 reopen/rollback/CAS, master ordering, missing or deferred parents, mismatched original
@@ -771,8 +788,9 @@ native parent rejects direct application despite valid SQL preparation. A failed
 atomic batch leaves the previous exception target and parent witness intact.
 Separate SQL reopening and newer-occurrence cases qualify storage only. Existing
 `RecurrenceProviderDeviceTest` and `RecurrenceStoreDeviceTest` qualify unchanged
-mapping/dependency behavior. These checks do not exercise concurrent parent-rule
-mutation; the existing rule lookup precedes the parent assertion batch.
+mapping/dependency behavior. These checks do not inject concurrent parent-rule
+mutation. The lookup precedes the batch, which now reasserts its observed
+start, zone, rule and date type before an exception write.
 
 The exception recovery matrix also covers both timed-to-all-day and all-day-to-timed
 display changes. Before and after reopening, the original timestamp/date type and

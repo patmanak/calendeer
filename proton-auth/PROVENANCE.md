@@ -727,3 +727,8 @@ deferred evidence instead of being projected with selectors silently ignored.
 Yearly rules with `BYDAY` or `BYMONTHDAY` also require an explicit `BYMONTH` in
 this slice: the native processor's month-based day selection does not establish
 correct year-wide semantics. Rules outside that boundary remain deferred.
+
+Local admission also defers RRULE masters whose final merged timed start has
+multiple valid offsets in its named zone. Native fixtures showed Android choosing
+a different instant during a repeated hour. This restriction preserves the sealed
+source; it neither rewrites signed timestamps nor copies Proton's UI expander.

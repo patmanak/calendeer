@@ -185,6 +185,7 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
         when (val change = intent.change) {
             is RemoteChange.Upsert -> {
                 val recurrence = change.content.recurrence
+                if (recurrence?.rule != null && ambiguousRuleStart(change.content.time)) fail(CalendarProjectionFailure.PROVIDER_REJECTED)
                 val seriesId = recurrence?.let { digest("series-v1", calendarSyncId(intent.scope), it.uid) }
                 val ownSyncId = if (recurrence?.isMaster == true) seriesId!! else remoteId
                 val syncIdentity = Selection("${Events.CALENDAR_ID}=? AND ${Events._SYNC_ID}=?",
@@ -200,17 +201,29 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
                     refuseCapturedMarkers(uri, parentIdentity)
                     if (masterSyncId(uri, parentId) != seriesId) fail(CalendarProjectionFailure.IDENTITY_CONFLICT)
                     val originalAllDay = if (recurrence.original is RecurrencePoint.AllDay) 1 else 0
-                    val parentAllDay = resolver.query(uri, arrayOf(Events.ALL_DAY),
+                    val parentValues = resolver.query(uri, arrayOf(Events.ALL_DAY, Events.DTSTART, Events.EVENT_TIMEZONE, Events.RRULE),
                         "${Events._ID}=?", arrayOf(parentId.toString()), null)?.use {
                         if (!it.moveToFirst()) fail(CalendarProjectionFailure.IDENTITY_CONFLICT)
-                        it.getInt(0)
+                        ContentValues().apply {
+                            put(Events.ALL_DAY, it.getInt(0))
+                            if (it.isNull(1)) putNull(Events.DTSTART) else put(Events.DTSTART, it.getLong(1))
+                            if (it.isNull(2)) putNull(Events.EVENT_TIMEZONE) else put(Events.EVENT_TIMEZONE, it.getString(2))
+                            if (it.isNull(3)) putNull(Events.RRULE) else put(Events.RRULE, it.getString(3))
+                        }
                     } ?: fail(CalendarProjectionFailure.PROVIDER_UNAVAILABLE)
-                    if (parentAllDay != originalAllDay) fail(CalendarProjectionFailure.IDENTITY_CONFLICT)
+                    if (parentValues.getAsInteger(Events.ALL_DAY) != originalAllDay) fail(CalendarProjectionFailure.IDENTITY_CONFLICT)
+                    if (originalAllDay == 0 && parentValues.getAsString(Events.RRULE) != null) {
+                        val start = parentValues.getAsLong(Events.DTSTART) ?: fail(CalendarProjectionFailure.PROVIDER_REJECTED)
+                        val zone = try { ZoneId.of(parentValues.getAsString(Events.EVENT_TIMEZONE)) }
+                        catch (_: Exception) { fail(CalendarProjectionFailure.PROVIDER_REJECTED) }
+                        if (zone.rules.getValidOffsets(Instant.ofEpochMilli(start).atZone(zone).toLocalDateTime()).size > 1)
+                            fail(CalendarProjectionFailure.PROVIDER_REJECTED)
+                    }
                     operations += assertion(uri, parentIdentity, parentId)
-                    // Recheck the slot's type in the same transaction as the exception write.
+                    // Recheck the exact parent time/rule admitted above in the exception transaction.
                     operations += ContentProviderOperation.newAssertQuery(uri)
                         .withSelection(parentIdentity.sql, parentIdentity.args).withExpectedCount(1)
-                        .withValue(Events.ALL_DAY, originalAllDay)
+                        .withValues(parentValues)
                         .withValue(Events.SYNC_DATA5, null).withValue(Events.SYNC_DATA6, null).withValue(Events.SYNC_DATA7, null).build()
                     parentId
                 } else null
@@ -1017,6 +1030,9 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
             }
         }
     }
+
+    private fun ambiguousRuleStart(time: EventTime): Boolean = time is EventTime.Timed &&
+        time.zone.rules.getValidOffsets(time.start.atZone(time.zone).toLocalDateTime()).size > 1
 
     private fun recurrenceInstant(point: RecurrencePoint): Long = when (point) {
         is RecurrencePoint.AllDay -> point.date.atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli()
