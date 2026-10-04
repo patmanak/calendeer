@@ -590,8 +590,12 @@ overwriting a subsequent dirty edit or clearing deletion flags. Baseline compari
 exact pending consumption and receipt removal share one private transaction;
 newer remote evidence remains pending. Missing or ambiguous proof blocks unsafe
 recovery, including different content reusing the old opaque revision. Migration
-does not invent receipts for legacy rows. Complex projections and deletions retain
-their previous conservative recovery limits; the two stores remain separate.
+does not invent receipts for legacy rows. Supported recurring masters now have
+historical receipts as well. Proof binds the distinct remote-event and series
+identities uniquely in the same assertion batch, preserving subsequent dirty
+rules, local tombstones and linked exceptions without rewriting the series.
+Display-type-changing exceptions and deletions retain their previous conservative
+recovery limits; the two stores remain separate.
 Nonce-backed recovery has passed source review, JVM checks and controlled physical
 SQLite/Provider fixtures, including lost private acknowledgement, reused opaque
 revision and schema migration. These fixtures do not qualify arbitrary power loss.

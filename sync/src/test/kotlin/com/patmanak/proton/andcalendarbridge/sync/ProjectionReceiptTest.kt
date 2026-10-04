@@ -60,11 +60,54 @@ class ProjectionReceiptTest {
         refused { ProjectionReceipt(scope, format, base, nonce, base.copy(eventId = EventId("foreign"))) }
     }
 
-    @Test fun unsupportedEventDataCannotBecomeARecoverableSimpleWrite() {
-        val recurring = base.copy(content = base.content.copy(recurrence = EventRecurrence("fixture-uid", "FREQ=DAILY")))
-        assertFalse(ProjectionReceipt.supports(recurring))
-        refused { ProjectionReceipt(scope, format, recurring, nonce, null) }
+    @Test fun recurringMastersCanHaveHistoricalApplicationReceipts() {
+        val date = (base.content.time as EventTime.AllDay).start
+        for (rule in listOf("FREQ=DAILY;COUNT=3", null)) {
+            val recurring = base.copy(content = base.content.copy(recurrence = EventRecurrence("fixture-uid", rule,
+                listOf(RecurrencePoint.AllDay(date.plusDays(4))), listOf(RecurrencePoint.AllDay(date.plusDays(1))))))
+            assertTrue(ProjectionReceipt.supports(recurring))
+            assertEquals(recurring, ProjectionReceipt(scope, format, recurring, nonce, base).snapshot().change)
+        }
+    }
+
+    @Test fun deletionCannotBecomeARecoverableEventWrite() {
         assertFalse(ProjectionReceipt.supports(RemoteChange.Deleted(base.eventId, Revision("gone"))))
+    }
+
+    @Test fun masterDateListsAreRevalidatedAndFrozenBeforeCrossingBoundaries() {
+        val point = RecurrencePoint.AllDay(LocalDate.of(2030, 1, 3))
+        val additions = mutableListOf<RecurrencePoint>(point)
+        val exclusions = mutableListOf<RecurrencePoint>(point)
+        val candidate = base.copy(content = base.content.copy(recurrence = EventRecurrence("fixture-uid",
+            additionalDates = additions, excludedDates = exclusions)))
+        val receipt = ProjectionReceipt(scope, format, candidate, nonce, base)
+        val frozen = receipt.snapshot()
+        additions.clear()
+        assertFalse(ProjectionReceipt.supports(candidate)); refused { receipt.snapshot() }
+        assertEquals(listOf(point), frozen.change.content.recurrence!!.additionalDates)
+        additions.add(RecurrencePoint.Timed(Instant.parse("2030-01-03T00:00:00Z")))
+        assertFalse(ProjectionReceipt.supports(candidate)); refused { receipt.snapshot() }
+        additions.clear(); additions.add(point)
+        exclusions.add(RecurrencePoint.Timed(Instant.parse("2030-01-04T00:00:00Z")))
+        assertFalse(ProjectionReceipt.supports(candidate)); refused { receipt.snapshot() }
+        exclusions.clear(); exclusions.addAll(List(513) { point })
+        assertFalse(ProjectionReceipt.supports(candidate)); refused { receipt.snapshot() }
+        exclusions.clear(); exclusions.add(point)
+        additions.addAll(List(512) { point })
+        assertFalse(ProjectionReceipt.supports(candidate)); refused { receipt.snapshot() }
+        try { (frozen.change.content.recurrence!!.excludedDates as MutableList).clear(); fail("Snapshot must be immutable") }
+        catch (_: UnsupportedOperationException) { }
+    }
+
+    @Test fun timedMasterListsRetainWholeSecondPrecisionAfterAliasedMutation() {
+        val start = Instant.parse("2030-10-27T00:30:00Z")
+        val additions = mutableListOf<RecurrencePoint>(RecurrencePoint.Timed(start.plusSeconds(86400)))
+        val candidate = base.copy(content = base.content.copy(time = EventTime.Timed(start, start.plusSeconds(3600), ZoneId.of("Europe/Paris")),
+            recurrence = EventRecurrence("fixture-uid", "FREQ=DAILY;COUNT=3", additionalDates = additions)))
+        val receipt = ProjectionReceipt(scope, format, candidate, nonce, null)
+        assertTrue(ProjectionReceipt.supports(candidate))
+        additions.add(RecurrencePoint.Timed(start.plusNanos(1)))
+        assertFalse(ProjectionReceipt.supports(candidate)); refused { receipt.snapshot() }
     }
 
     @Test fun secondPrecisionIsRequiredAndUnknownDetailsRemainUnknown() {

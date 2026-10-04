@@ -43,11 +43,22 @@ data class ProjectionReceipt(
         fun supports(change: RemoteChange): Boolean {
             val content = (change as? RemoteChange.Upsert)?.content ?: return false
             content.recurrence?.let {
-                if (it.isMaster || it.rule != null || it.additionalDates.isNotEmpty() || it.excludedDates.isNotEmpty()) return false
-                when (val original = it.original) {
-                    is RecurrencePoint.AllDay -> if (content.time !is EventTime.AllDay) return false
-                    is RecurrencePoint.Timed -> if (content.time !is EventTime.Timed || original.instant.nano != 0) return false
-                    null -> return false
+                if (it.isMaster) {
+                    if (it.cancelled || it.rule == null && it.additionalDates.isEmpty() ||
+                        it.additionalDates.size > 512 || it.excludedDates.size > 512) return false
+                    for (point in it.additionalDates + it.excludedDates) {
+                        when (point) {
+                            is RecurrencePoint.AllDay -> if (content.time !is EventTime.AllDay) return false
+                            is RecurrencePoint.Timed -> if (content.time !is EventTime.Timed || point.instant.nano != 0) return false
+                        }
+                    }
+                } else {
+                    if (it.rule != null || it.additionalDates.isNotEmpty() || it.excludedDates.isNotEmpty()) return false
+                    when (val original = it.original) {
+                        is RecurrencePoint.AllDay -> if (content.time !is EventTime.AllDay) return false
+                        is RecurrencePoint.Timed -> if (content.time !is EventTime.Timed || original.instant.nano != 0) return false
+                        null -> return false
+                    }
                 }
             }
             content.details?.let {

@@ -683,11 +683,12 @@ snapshot and private database commit. See [local capture](LOCAL_EDIT_CAPTURE.md)
 
 ## Interrupted projection
 
-`ProjectionReceiptTest` checks the supported simple subset, protocol/nonce
+`ProjectionReceiptTest` checks the supported import subset, protocol/nonce
 validation, baseline identity and redacted diagnostics on the JVM.
 Timed/all-day imports with supported reminder, organizer and participant details
 can have historical receipts. Moved/cancelled exceptions qualify with matching
-original/display date types; masters and type-changing exceptions remain refused
+original/display date types. Already supported masters qualify with rule-based or
+additional-date-only sets and exclusions; type-changing exceptions remain refused
 by this receipt profile. Deep snapshots own
 applied and previous-base lists, and revalidate aliases mutated after model
 construction, including participant count and case-insensitive uniqueness.
@@ -696,6 +697,9 @@ their respective original implementations.
 The occurrence acceptance assertion likewise fails before exception support.
 Exception rule/list mutation after construction is refused. Original timed
 subsecond slots are refused by the display model before receipt qualification.
+The master acceptance assertion fails before master support. Aliased master date
+lists must still obey size/type/precision bounds and an additional-date-only set
+must not become empty before snapshot ownership.
 `ProjectionReceiptStoreDeviceTest` uses isolated real SQLite for immutable
 preparation/reopen, exact restoration, newer remote/tombstone preservation,
 baseline comparison, incompatible formats, local-intent blocking and transaction
@@ -749,10 +753,29 @@ Separate SQL reopening and newer-occurrence cases qualify storage only. Existing
 mapping/dependency behavior. These checks do not exercise concurrent parent-rule
 mutation; the existing rule lookup precedes the parent assertion batch.
 
-All 191 sync and ten app JVM cases passed. Four selected physical suites passed:
-thirty-two recovery, twenty receipt-store, thirteen recurrence-Provider and nine
-recurrence-store cases. Six new exception Provider/owner cases and two new SQLite
-cases extend the earlier detail qualification. APK builds and lint passed (zero errors, twenty
+Master fixtures exercise timed/all-day rule and additional-date-only imports with
+exclusions. Lost-ACK reopening preserves event/detail IDs, bounded native instances
+and tracked-apply counts. Later local rule removal and tombstones remain intact;
+an older proof leaves newer rules pending. Missing/foreign nonces and foreign
+series identities refuse recovery. Duplicate series identities are tested both
+before inspection and when inserted immediately before the atomic proof assertions.
+Linked exception columns and detail rows stay unchanged during historical master
+proof/restoration. This isolated step uses a fresh Provider inspector and direct
+store restoration, separately from the owner-driven lost-ACK cases above.
+A normal master change still requeues its exceptions; a separate
+drain then applies that existing obligation without rewriting the recovered master.
+Newer blocked content can acquire its own preparation after the old proof is consumed.
+A final failing assertion rolls back a master-to-simple transition and its exception
+removal together, including child detail rows. Changing an established series UID is
+refused by storage before preparation; successful transitions are not qualified here.
+Date-list aliases at SQL/Provider admission cannot change the prepared or historical
+snapshot. Separate SQLite cases cover reopened sets and newer master content with
+a retained child. These cases add no recurrence rules or editable capability.
+
+All 194 sync and ten app JVM cases passed. Four selected physical suites passed:
+forty recovery, twenty-two receipt-store, thirteen recurrence-Provider and nine
+recurrence-store cases. Eight master Provider/storage recovery cases and two SQLite
+cases extend the earlier occurrence qualification. APK builds and lint passed (zero errors, twenty
 existing warnings), followed by independent source/evidence review. These cases
 use isolated fixtures and a controlled remote; no Proton event was changed.
 

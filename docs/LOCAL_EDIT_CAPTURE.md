@@ -36,7 +36,7 @@ Import schema 10 separates four facts:
 - `local_edits`: immutable scoped ID, adapter format/version, original base and
   captured supported content, with kind `UPDATE` or `DELETE` and state `PAUSED`
   or `CONFLICT`;
-- `projection_receipts`: an immutable preparation for a supported simple upsert,
+- `projection_receipts`: an immutable preparation for a supported upsert,
   with the exact payload, adapter format, previous base and a random protocol nonce.
 
 Acknowledgement compares the exact still-pending payload and absence of a local
@@ -103,8 +103,10 @@ the event, organizer metadata and reminder/attendee replacements. Supported simp
 imports include up to five distinct reminders, an organizer and up to 100
 participants with distinct email identities. Moved/cancelled recurrence exceptions
 also qualify when their original slot and display dates have the same type and
-second precision. Rule-bearing masters, additional/excluded-date sets and
-display-type-changing exceptions retain ordinary import recovery.
+second precision. Already supported recurring masters also qualify, including
+rule-based and additional-date-only sets with exclusions. Mutable date lists are
+revalidated for bounds, date type and whole-second precision before preparation.
+Display-type-changing exceptions retain ordinary import recovery.
 Receipt contents and previous-base collection data are
 snapshotted before crossing SQL or Provider suspension boundaries.
 Preparation alone does not prove that the write happened. Untracked
@@ -112,7 +114,12 @@ projections clear this marker; migration creates no receipts for old rows.
 
 After an interrupted acknowledgement, an assertion-only Provider inspection
 requires unique scoped ownership, the exact event identity, revision and nonce.
-It qualifies a historical write even if the row is now dirty or locally deleted;
+For a master, both its remote-event identity and its separate series identity must
+resolve uniquely to the same owned row, with both assertions in the proof batch.
+Current rules and linked exceptions are not substituted for historical evidence.
+Proof/restoration does not rewrite linked exceptions. Ordinary master changes
+still requeue those children for separate projection through the existing dependency path.
+The inspection qualifies a historical write even if the row is now dirty or locally deleted;
 it never changes content or clears either flag. In one private transaction, the
 qualified receipt restores its projected base only if the previous base still
 matches, consumes only the exact pending payload, and removes the receipt. Newer
@@ -197,8 +204,8 @@ Proton UPDATE/DELETE remain separate work.
 Explicit internal [local CREATE capture](LOCAL_CREATE_CAPTURE.md) has its own
 one-shot identity reservation and permanently paused journal, without dispatch.
 
-Nonce-backed recovery covers simple upserts and the exception subset above with
-absent, empty or supported event details. Master writes, display-type-changing
+Nonce-backed recovery covers simple upserts, supported masters and the exception
+subset above with absent, empty or supported event details. Display-type-changing
 exceptions, Provider DELETE projections and
 legacy rows without receipts retain their conservative
 recovery limits. Neither cache presence, a revision alone nor a numeric row ID

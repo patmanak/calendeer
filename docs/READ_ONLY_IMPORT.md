@@ -164,7 +164,7 @@ Projection acknowledgements
 match the expected record, so an old acknowledgement cannot consume a newer edit.
 Provider identities and atomic assertion/write batches make clean replay idempotent
 after interruption between the provider write and acknowledgement. Simple upserts
-and supported recurrence exceptions also retain a preparation and write its nonce
+and supported recurrence masters/exceptions also retain a preparation and write its nonce
 with the event; exact marker inspection
 can restore the projected base after a lost ACK while preserving subsequent dirty
 or deleted flags. Newer pending remote evidence is not consumed by an older receipt.

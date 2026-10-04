@@ -7,6 +7,7 @@ import android.content.ContentProvider
 import android.content.ContentProviderOperation
 import android.content.ContentProviderResult
 import android.content.ContentResolver
+import android.content.ContentUris
 import android.content.Context
 import android.content.ContextWrapper
 import android.database.Cursor
@@ -38,6 +39,184 @@ import org.junit.runner.RunWith
 /** Isolated production Provider/SQLite/coordinator recovery; controlled remote, no service writes. */
 @RunWith(AndroidJUnit4::class)
 class ProjectionRecoveryDeviceTest {
+    @Test fun recurringMastersRecoverRulesAndDateSetsWithoutRepeatingWrites() = runBlocking {
+        for (allDay in listOf(false, true)) for (rdateOnly in listOf(false, true)) {
+            withFixture(reminders = true, participants = true, allDay = allDay, master = true, rdateOnly = rdateOnly) { f ->
+                assertEquals(ImportRunResult.COMPLETE, f.coordinator.run(false))
+                val row = f.row(); val candidate = f.changedMaster()
+                f.projectWithoutAcknowledgement(candidate)
+                assertNotEquals(f.field(Events.SYNC_DATA4), f.field(Events._SYNC_ID))
+                assertNull(f.field(Events.DTEND)); assertNotNull(f.field(Events.DURATION))
+                assertEquals(candidate.content.recurrence!!.rule, f.field(Events.RRULE))
+                assertNotNull(f.field(Events.RDATE)); assertNotNull(f.field(Events.EXDATE))
+                val times = f.instances(); assertEquals(if (rdateOnly) 3 else 5, times.size)
+                val reminders = f.reminders(); val people = f.attendees(); val applies = f.applies.get()
+                f.reopen(); assertEquals(ImportRunResult.COMPLETE, f.coordinator.run(false))
+                assertEquals(row, f.row()); assertEquals(applies, f.applies.get())
+                assertEquals(times, f.instances()); assertEquals(reminders, f.reminders()); assertEquals(people, f.attendees())
+                assertEquals(candidate, f.store.projectedBaseline(f.target, f.base.eventId))
+                assertTrue(f.store.pending(f.target).isEmpty()); assertNull(f.store.projectionReceipt(f.target, f.base.eventId))
+            }
+        }
+    }
+
+    @Test fun historicalMasterRecoveryPreservesLaterRuleRemovalAndLocalTombstones() = runBlocking {
+        for (deleted in listOf(false, true)) withFixture(master = true, reminders = true, participants = true) { f ->
+            f.coordinator.run(false); val candidate = f.changedMaster(); f.projectWithoutAcknowledgement(candidate)
+            f.mutate(ContentValues().apply {
+                put(Events.TITLE, "Locally changed series"); put(Events.DIRTY, 1); put(Events.DELETED, if (deleted) 1 else 0)
+                putNull(Events.RRULE); putNull(Events.RDATE); putNull(Events.EXDATE); putNull(Events.DURATION)
+                put(Events.DTEND, (f.base.content.time as EventTime.Timed).end.toEpochMilli())
+            })
+            val row = f.row(); val reminders = f.reminders(); val people = f.attendees(); val applies = f.applies.get()
+            f.reopen(); assertEquals(ImportRunResult.COMPLETE, f.coordinator.run(false))
+            assertEquals(candidate, f.store.projectedBaseline(f.target, f.base.eventId)); assertEquals(row, f.row())
+            assertEquals("Locally changed series", f.field(Events.TITLE)); assertNull(f.field(Events.RRULE)); assertNull(f.field(Events.RDATE))
+            assertEquals("1", f.field(Events.DIRTY)); assertEquals(if (deleted) "1" else "0", f.field(Events.DELETED))
+            assertEquals(reminders, f.reminders()); assertEquals(people, f.attendees()); assertEquals(applies, f.applies.get())
+            assertTrue(f.store.pending(f.target).isEmpty()); assertNull(f.store.projectionReceipt(f.target, f.base.eventId))
+            assertEquals(LocalEditCaptureResult.UNQUALIFIED, f.coordinator.captureLocalEdit(f.target, f.base.eventId, MutationId("fixture-master-edit")))
+        }
+    }
+
+    @Test fun olderMasterProofLeavesNewerRemoteRulesPendingAndLocalContentUntouched() = runBlocking {
+        withFixture(master = true) { f ->
+            f.coordinator.run(false); val candidate = f.changedMaster(); f.projectWithoutAcknowledgement(candidate)
+            val newer = candidate.copy(revision = Revision("v3"), content = candidate.content.copy(
+                recurrence = candidate.content.recurrence!!.copy(rule = "FREQ=WEEKLY;COUNT=4")))
+            f.queue(newer); f.edit("Later local series edit")
+            val applies = f.applies.get(); f.reopen(); f.coordinator.run(false)
+            assertEquals(candidate, f.store.projectedBaseline(f.target, f.base.eventId))
+            assertEquals(listOf(ProjectionIntent(f.target, newer)), f.store.pending(f.target))
+            val newerReceipt = f.store.projectionReceipt(f.target, f.base.eventId)!!
+            assertEquals(newer, newerReceipt.change); assertEquals(candidate, newerReceipt.previousBase)
+            assertNull(f.native.inspectProjectionReceipt(newerReceipt)); assertEquals(applies + 1, f.applies.get())
+            assertEquals("Later local series edit", f.field(Events.TITLE)); assertEquals("1", f.field(Events.DIRTY))
+        }
+    }
+
+    @Test fun missingNonceOrForeignSeriesIdentityCannotAcknowledgeAMasterImport() = runBlocking {
+        for (failure in listOf("missing", "foreign-nonce", "foreign-series")) withFixture(master = true) { f ->
+            f.coordinator.run(false); val candidate = f.changedMaster(); f.projectWithoutAcknowledgement(candidate)
+            f.mutate(ContentValues().apply {
+                put(Events.DIRTY, 1)
+                when (failure) {
+                    "missing" -> putNull(Events.SYNC_DATA3)
+                    "foreign-nonce" -> put(Events.SYNC_DATA3, "calendeer-projection-receipt-v1:${UUID.randomUUID()}")
+                    else -> put(Events._SYNC_ID, "foreign-series-fixture")
+                }
+            })
+            val receipt = f.store.projectionReceipt(f.target, f.base.eventId)!!
+            assertNull(f.native.inspectProjectionReceipt(receipt))
+            f.reopen(); f.coordinator.run(false)
+            assertEquals(f.base, f.store.projectedBaseline(f.target, f.base.eventId))
+            assertEquals(receipt, f.store.projectionReceipt(f.target, f.base.eventId))
+            assertEquals(listOf(ProjectionIntent(f.target, candidate)), f.store.pending(f.target)); assertEquals("1", f.field(Events.DIRTY))
+        }
+    }
+
+    @Test fun duplicateSeriesInsertedAtProofTimeRefusesHistoricalAcknowledgement() = runBlocking {
+        withFixture(master = true) { f ->
+            f.coordinator.run(false); val candidate = f.changedMaster(); f.projectWithoutAcknowledgement(candidate)
+            val receipt = f.store.projectionReceipt(f.target, f.base.eventId)!!
+            val real = f.context.contentResolver; var collision: Long? = null
+            val provider = object : ContentProvider() {
+                override fun onCreate() = true
+                override fun getType(uri: Uri): String? = null
+                override fun insert(uri: Uri, values: ContentValues?): Uri? = error("Proof must not insert")
+                override fun update(uri: Uri, values: ContentValues?, selection: String?, args: Array<out String>?): Int = error("Proof must not update")
+                override fun delete(uri: Uri, selection: String?, args: Array<out String>?): Int = error("Proof must not delete")
+                override fun query(uri: Uri, columns: Array<out String>?, selection: String?, args: Array<out String>?, order: String?): Cursor? =
+                    real.query(uri, columns, selection, args, order)
+                override fun applyBatch(operations: ArrayList<ContentProviderOperation>): Array<ContentProviderResult> {
+                    assertTrue(operations.all { it.isAssertQuery }); collision = f.insertSeriesCollision()
+                    return real.applyBatch(CalendarContract.AUTHORITY, operations)
+                }
+            }
+            val resolver = ContentResolver.wrap(provider)
+            val context = object : ContextWrapper(f.context) {
+                override fun getApplicationContext(): Context = this
+                override fun getContentResolver() = resolver
+            }
+            try {
+                var refused = false
+                try { refused = AndroidCalendarProjection(context).inspectProjectionReceipt(receipt) == null }
+                catch (_: com.patmanak.proton.andcalendarbridge.data.calendar.CalendarProjectionException) { refused = true }
+                assertTrue(refused); assertNotNull(collision)
+                // The second lookup also refuses a duplicate that already exists before inspection.
+                try { assertNull(f.native.inspectProjectionReceipt(receipt)) }
+                catch (_: com.patmanak.proton.andcalendarbridge.data.calendar.CalendarProjectionException) { }
+                assertEquals(f.base, f.store.projectedBaseline(f.target, f.base.eventId))
+                assertEquals(receipt, f.store.projectionReceipt(f.target, f.base.eventId))
+            } finally { collision?.let { f.removeRow(it) } }
+            assertEquals(candidate.content.title, f.field(Events.TITLE))
+        }
+    }
+
+    @Test fun recoveringMasterImportsDoesNotRewriteLinkedExceptions() = runBlocking {
+        withFixture(master = true, reminders = true, participants = true) { f ->
+            f.coordinator.run(false); val child = f.importLinkedException()
+            val snapshot = f.linkedException(); val reminders = f.reminders(f.occurrenceRow!!); val people = f.attendees(f.occurrenceRow!!)
+            val candidate = f.changedMaster(); f.projectWithoutAcknowledgement(candidate)
+            val applies = f.applies.get(); f.reopen()
+            val receipt = f.store.projectionReceipt(f.target, f.base.eventId)!!
+            // Inspect this isolated boundary directly; the previous owner's Provider lease is closed.
+            val inspector = AndroidCalendarProjection(f.context)
+            assertTrue(f.store.restoreProjection(inspector.inspectProjectionReceipt(receipt)!!))
+            assertEquals(snapshot, f.linkedException()); assertEquals(reminders, f.reminders(f.occurrenceRow!!))
+            assertEquals(people, f.attendees(f.occurrenceRow!!)); assertEquals(child, f.store.projectedBaseline(f.target, child.eventId))
+            assertEquals(applies, f.applies.get()); assertEquals(candidate, f.store.projectedBaseline(f.target, f.base.eventId))
+            assertEquals(listOf(ProjectionIntent(f.target, child)), f.store.pending(f.target))
+            assertEquals(ImportRunResult.COMPLETE, f.coordinator.run(false))
+            assertEquals(applies + 1, f.applies.get()); assertEquals(candidate, f.store.projectedBaseline(f.target, f.base.eventId))
+            assertEquals(child, f.store.projectedBaseline(f.target, child.eventId)); assertTrue(f.store.pending(f.target).isEmpty())
+        }
+    }
+
+    @Test fun failedMasterToSimpleTransitionRollsBackExceptionRemovalAndAllDetails() = runBlocking {
+        withFixture(master = true, reminders = true, participants = true) { f ->
+            f.coordinator.run(false); f.importLinkedException()
+            val child = f.linkedException(); val reminders = f.reminders(); val people = f.attendees(); val marker = f.field(Events.SYNC_DATA3)
+            val childReminders = f.reminders(f.occurrenceRow!!); val childPeople = f.attendees(f.occurrenceRow!!)
+            val foreign = f.changedMaster().let { it.copy(content = it.content.copy(recurrence = it.content.recurrence!!.copy(uid = "replacement-series"))) }
+            try { f.queue(foreign); fail("Existing series identity must remain immutable") }
+            catch (_: IllegalArgumentException) { }
+            assertTrue(f.store.pending(f.target).isEmpty()); assertNull(f.store.projectionReceipt(f.target, f.base.eventId))
+            val candidate = f.latest.copy(content = f.latest.content.copy(recurrence = null))
+            f.queue(candidate); val receipt = f.store.prepareProjection(ProjectionIntent(f.target, candidate), f.format)
+            rejectAtomicBatch(f, receipt, expectParticipants = true)
+            assertEquals(child, f.linkedException()); assertEquals(reminders, f.reminders()); assertEquals(people, f.attendees())
+            assertEquals(childReminders, f.reminders(f.occurrenceRow!!)); assertEquals(childPeople, f.attendees(f.occurrenceRow!!))
+            assertEquals(f.base.content.title, f.field(Events.TITLE)); assertEquals(marker, f.field(Events.SYNC_DATA3))
+            assertNull(f.native.inspectProjectionReceipt(receipt)); assertEquals(f.base, f.store.projectedBaseline(f.target, f.base.eventId))
+            assertEquals(receipt, f.store.projectionReceipt(f.target, f.base.eventId))
+        }
+    }
+
+    @Test fun masterDateAliasesCannotChangePreparedOrAppliedEvidenceAtAdmission() = runBlocking {
+        withFixture(master = true) { f ->
+            f.coordinator.run(false); val candidate = f.changedMaster()
+            val additions = candidate.content.recurrence!!.additionalDates.toMutableList()
+            val exclusions = candidate.content.recurrence!!.excludedDates.toMutableList()
+            val alias = candidate.copy(content = candidate.content.copy(recurrence = candidate.content.recurrence!!.copy(
+                additionalDates = additions, excludedDates = exclusions)))
+            f.queue(alias); val receipt = f.store.prepareProjection(ProjectionIntent(f.target, alias), f.format)
+            val prepared = receipt.copy(change = alias)
+            f.native.admitOperation = { additions.clear(); exclusions.clear(); true }
+            assertEquals(receipt, f.native.applyTracked(prepared).receipt)
+            f.native.admitOperation = { true }; assertNotNull(f.field(Events.RDATE)); assertNotNull(f.field(Events.EXDATE))
+            val inspectedAdditions = receipt.change.content.recurrence!!.additionalDates.toMutableList()
+            val inspectedExclusions = receipt.change.content.recurrence!!.excludedDates.toMutableList()
+            val inspection = receipt.copy(change = receipt.change.copy(content = receipt.change.content.copy(
+                recurrence = receipt.change.content.recurrence!!.copy(additionalDates = inspectedAdditions, excludedDates = inspectedExclusions))))
+            f.native.admitOperation = { inspectedAdditions.clear(); inspectedExclusions.clear(); true }
+            assertEquals(receipt, f.native.inspectProjectionReceipt(inspection)!!.receipt)
+            f.native.admitOperation = { true }
+            assertTrue(f.store.restoreProjection(AppliedProjectionWitness(receipt)))
+            assertEquals(candidate, f.store.projectedBaseline(f.target, f.base.eventId))
+        }
+    }
+
     @Test fun movedAndCancelledExceptionsRecoverWithoutRewritingTheirParentOrDetails() = runBlocking {
         for (allDay in listOf(false, true)) for (cancelled in listOf(false, true)) {
             withFixture(reminders = true, participants = true, allDay = allDay) { f ->
@@ -681,7 +860,8 @@ class ProjectionRecoveryDeviceTest {
         assertTrue(injected)
     }
 
-    private class Fixture(val context: Context, reminders: Boolean = false, allDay: Boolean = false, participants: Boolean = false) {
+    private class Fixture(val context: Context, reminders: Boolean = false, allDay: Boolean = false, participants: Boolean = false,
+        master: Boolean = false, rdateOnly: Boolean = false) {
         private val token = UUID.randomUUID().toString()
         val target = CalendarScope(AccountId("projection-recovery-$token"), CalendarId("fixture"), 0)
         private val name = "projection-recovery-$token.db"
@@ -690,7 +870,9 @@ class ProjectionRecoveryDeviceTest {
         val base = RemoteChange.Upsert(EventId("fixture"), Revision("v1"), EventContent("Recovery base v1",
             if (allDay) EventTime.AllDay(LocalDate.of(2030, 10, 27), LocalDate.of(2030, 10, 28))
             else EventTime.Timed(Instant.parse("2030-10-27T00:30:00Z"), Instant.parse("2030-10-27T02:30:00Z"),
-                ZoneId.of("Europe/Paris")), details = EventDetails(if (reminders) listOf(EventReminder(10), EventReminder(30)) else emptyList(),
+                ZoneId.of("Europe/Paris")), recurrence = if (master) EventRecurrence("fixture-primary-series",
+                    if (rdateOnly) null else "FREQ=DAILY;COUNT=3", listOf(fixturePoint(allDay, 4)), listOf(fixturePoint(allDay, 1))) else null,
+                details = EventDetails(if (reminders) listOf(EventReminder(10), EventReminder(30)) else emptyList(),
                 organizer = if (participants) EventPerson("organizer-v1@example.test", "Organizer v1") else null,
                 attendees = if (participants) listOf(EventAttendee(EventPerson("guest@example.test", "Guest"),
                     AttendanceRole.REQUIRED, AttendanceStatus.NEEDS_ACTION)) else emptyList())))
@@ -725,8 +907,11 @@ class ProjectionRecoveryDeviceTest {
         private var calendar = -1L
         var masterRow: Long? = null
             private set
-        private val primarySelection get() = if (masterRow == null) "${Events.CALENDAR_ID}=?" else "${Events.CALENDAR_ID}=? AND ${Events._ID}<>?"
-        private val primaryArgs get() = if (masterRow == null) arrayOf(calendar.toString()) else arrayOf(calendar.toString(), masterRow.toString())
+        var occurrenceRow: Long? = null
+            private set
+        private val secondaryRow get() = masterRow ?: occurrenceRow
+        private val primarySelection get() = if (secondaryRow == null) "${Events.CALENDAR_ID}=?" else "${Events.CALENDAR_ID}=? AND ${Events._ID}<>?"
+        private val primaryArgs get() = if (secondaryRow == null) arrayOf(calendar.toString()) else arrayOf(calendar.toString(), secondaryRow.toString())
         private val uri get() = Events.CONTENT_URI.buildUpon()
             .appendQueryParameter(CalendarContract.CALLER_IS_SYNCADAPTER, "true")
             .appendQueryParameter(CalendarContract.Calendars.ACCOUNT_NAME, native.accountFor(target.account).name)
@@ -758,7 +943,7 @@ class ProjectionRecoveryDeviceTest {
             try { coordinator.run(false) } finally { ackFailure(false) }
             assertEquals(change.content.title, field(Events.TITLE))
             assertEquals(base, store.projectedBaseline(target, base.eventId))
-            assertEquals(listOf(ProjectionIntent(target, change)), store.pending(target))
+            assertEquals(listOf(ProjectionIntent(target, change)), store.pending(target).filter { it.change.eventId == base.eventId })
         }
 
         suspend fun importMaster() {
@@ -797,6 +982,63 @@ class ProjectionRecoveryDeviceTest {
             assertEquals(1, context.contentResolver.delete(uri, "${Events.CALENDAR_ID}=? AND ${Events._ID}=?",
                 arrayOf(calendar.toString(), masterRow!!.toString())))
         }
+
+        private fun fixturePoint(allDay: Boolean, days: Long): RecurrencePoint = if (allDay)
+            RecurrencePoint.AllDay(LocalDate.of(2030, 10, 27).plusDays(days))
+        else RecurrencePoint.Timed(Instant.parse("2030-10-27T00:30:00Z").atZone(ZoneId.of("Europe/Paris")).plusDays(days).toInstant())
+
+        fun changedMaster(): RemoteChange.Upsert = latest.copy(content = latest.content.copy(
+            recurrence = latest.content.recurrence!!.copy(rule = latest.content.recurrence!!.rule?.let { "FREQ=DAILY;COUNT=4" },
+                additionalDates = listOf(fixturePoint(base.content.time is EventTime.AllDay, 4), fixturePoint(base.content.time is EventTime.AllDay, 6)),
+                excludedDates = listOf(fixturePoint(base.content.time is EventTime.AllDay, 2)))))
+
+        fun instances(): List<Triple<Long, Long, Long>> {
+            val builder = CalendarContract.Instances.CONTENT_URI.buildUpon()
+            ContentUris.appendId(builder, Instant.parse("2030-10-26T00:00:00Z").toEpochMilli())
+            ContentUris.appendId(builder, Instant.parse("2030-11-05T00:00:00Z").toEpochMilli())
+            return context.contentResolver.query(builder.build(), arrayOf(CalendarContract.Instances.EVENT_ID,
+                CalendarContract.Instances.BEGIN, CalendarContract.Instances.END), "${Events.CALENDAR_ID}=?",
+                arrayOf(calendar.toString()), "${CalendarContract.Instances.BEGIN} ASC")!!.use { cursor ->
+                buildList { while (cursor.moveToNext()) add(Triple(cursor.getLong(0), cursor.getLong(1), cursor.getLong(2))) }
+            }
+        }
+
+        suspend fun importLinkedException(): RemoteChange.Upsert {
+            val parent = row()
+            val child = latest.copy(eventId = EventId("fixture-linked-occurrence"), content = latest.content.copy(
+                title = "Linked occurrence", recurrence = EventRecurrence(base.content.recurrence!!.uid,
+                    original = fixturePoint(base.content.time is EventTime.AllDay, 0))))
+            queue(child); assertEquals(ImportRunResult.COMPLETE, coordinator.run(false))
+            occurrenceRow = context.contentResolver.query(uri, arrayOf(Events._ID),
+                "${Events.CALENDAR_ID}=? AND ${Events.ORIGINAL_ID}=?", arrayOf(calendar.toString(), parent.toString()), null)!!.use {
+                assertEquals(1, it.count); assertTrue(it.moveToFirst()); it.getLong(0)
+            }
+            return child
+        }
+
+        fun linkedException(): Map<String, String?> {
+            val columns = arrayOf(Events._ID, Events.TITLE, Events._SYNC_ID, Events.SYNC_DATA1, Events.SYNC_DATA2, Events.SYNC_DATA3,
+                Events.SYNC_DATA4, Events.ORIGINAL_ID, Events.ORIGINAL_SYNC_ID, Events.ORIGINAL_INSTANCE_TIME,
+                Events.DTSTART, Events.DTEND, Events.STATUS, Events.DIRTY, Events.DELETED)
+            return context.contentResolver.query(uri, columns, "${Events._ID}=?", arrayOf(occurrenceRow!!.toString()), null)!!.use {
+                assertEquals(1, it.count); assertTrue(it.moveToFirst())
+                columns.mapIndexed { index, column -> column to if (it.isNull(index)) null else it.getString(index) }.toMap()
+            }
+        }
+
+        fun insertSeriesCollision(): Long {
+            val columns = arrayOf(Events._SYNC_ID, Events.SYNC_DATA1, Events.SYNC_DATA2, Events.SYNC_DATA3,
+                Events.EVENT_TIMEZONE, Events.EVENT_END_TIMEZONE, Events.DTSTART, Events.DURATION, Events.RRULE,
+                Events.RDATE, Events.EXDATE, Events.ALL_DAY)
+            val values = context.contentResolver.query(uri, columns, primarySelection, primaryArgs, null)!!.use {
+                assertEquals(1, it.count); assertTrue(it.moveToFirst()); ContentValues().apply {
+                    columns.forEachIndexed { index, column -> if (it.isNull(index)) putNull(column) else put(column, it.getString(index)) }
+                }
+            }.apply { put(Events.CALENDAR_ID, calendar); put(Events.TITLE, "Series identity collision"); put(Events.SYNC_DATA4, "collision-fixture") }
+            return ContentUris.parseId(context.contentResolver.insert(uri, values)!!)
+        }
+
+        fun removeRow(id: Long) { assertEquals(1, context.contentResolver.delete(uri, "${Events._ID}=?", arrayOf(id.toString()))) }
 
         suspend fun recreateCalendar() {
             calendar = native.ensureCalendar(target, CalendarSummary(target.calendar, "Calendeer projection recovery fixture"))
@@ -910,9 +1152,10 @@ class ProjectionRecoveryDeviceTest {
     private data class ParticipantRow(val email: String, val name: String, val role: Int, val status: Int, val relationship: Int)
 
     private suspend fun withFixture(reminders: Boolean = false, allDay: Boolean = false, participants: Boolean = false,
+        master: Boolean = false, rdateOnly: Boolean = false,
         test: suspend (Fixture) -> Unit) {
         assumeTrue(InstrumentationRegistry.getArguments().getString("providerFixture") == "true")
-        val fixture = Fixture(ApplicationProvider.getApplicationContext(), reminders, allDay, participants)
+        val fixture = Fixture(ApplicationProvider.getApplicationContext(), reminders, allDay, participants, master, rdateOnly)
         assumeTrue(fixture.native.hasPermissions())
         try { fixture.initialize(); test(fixture) } finally { fixture.close() }
     }

@@ -52,6 +52,49 @@ class ProjectionReceiptStoreDeviceTest {
         catch (_: SQLiteException) { }
     }
 
+    @Test fun masterRuleAndDateSetReceiptsReopenWithFrozenCollectionsAndPreviousBase() = fixture { store, name ->
+        store.baseline()
+        val additions = mutableListOf<RecurrencePoint>(RecurrencePoint.AllDay(LocalDate.of(2026, 10, 5)))
+        val exclusions = mutableListOf<RecurrencePoint>(RecurrencePoint.AllDay(LocalDate.of(2026, 10, 2)))
+        val candidate = applied.copy(content = applied.content.copy(recurrence = EventRecurrence("fixture-series",
+            "FREQ=DAILY;COUNT=3", additions, exclusions)))
+        store.queue(candidate)
+        store.admitTransaction = { additions.clear(); exclusions.clear(); true }
+        val receipt = store.prepareProjection(ProjectionIntent(scope, candidate), format)
+        store.admitTransaction = { true }
+        assertEquals(1, receipt.change.content.recurrence!!.additionalDates.size)
+        assertEquals(1, receipt.change.content.recurrence!!.excludedDates.size)
+        store.close()
+        ImportStore(ApplicationProvider.getApplicationContext(), name).use { reopened ->
+            assertEquals(receipt, reopened.projectionReceipt(scope, applied.eventId))
+            assertEquals(original, reopened.projectedBaseline(scope, applied.eventId))
+            assertTrue(reopened.restoreProjection(AppliedProjectionWitness(receipt)))
+            assertEquals(receipt.change, reopened.projectedBaseline(scope, applied.eventId))
+            assertTrue(reopened.pending(scope).isEmpty()); assertNull(reopened.projectionReceipt(scope, applied.eventId))
+        }
+    }
+
+    @Test fun olderMasterReceiptPreservesNewerDateSetsAndTheLinkedOccurrence() = fixture { store, _ ->
+        val first = original.copy(content = original.content.copy(recurrence = EventRecurrence("fixture-series",
+            additionalDates = listOf(RecurrencePoint.AllDay(LocalDate.of(2026, 10, 3))))))
+        store.queue(first); store.acknowledge(ProjectionIntent(scope, first))
+        val child = original.copy(eventId = EventId("fixture-child"), content = original.content.copy(recurrence =
+            EventRecurrence("fixture-series", original = RecurrencePoint.AllDay(LocalDate.of(2026, 10, 1)))))
+        store.queue(child); store.acknowledge(ProjectionIntent(scope, child))
+        val candidate = applied.copy(content = applied.content.copy(recurrence = first.content.recurrence!!.copy(
+            additionalDates = listOf(RecurrencePoint.AllDay(LocalDate.of(2026, 10, 4))))))
+        store.queue(candidate); val receipt = store.prepareProjection(ProjectionIntent(scope, candidate), format)
+        assertEquals(first, receipt.previousBase)
+        val newer = candidate.copy(revision = Revision("newer"), content = candidate.content.copy(recurrence = candidate.content.recurrence!!.copy(
+            additionalDates = listOf(RecurrencePoint.AllDay(LocalDate.of(2026, 10, 6))))))
+        store.queue(newer); assertTrue(store.restoreProjection(AppliedProjectionWitness(receipt)))
+        assertEquals(candidate, store.projectedBaseline(scope, original.eventId))
+        assertEquals(newer, store.pending(scope).single { it.change.eventId == original.eventId }.change)
+        assertEquals(child, store.pending(scope).single { it.change.eventId == child.eventId }.change)
+        assertEquals(child, store.projectedBaseline(scope, child.eventId))
+        assertNull(store.projectionReceipt(scope, original.eventId))
+    }
+
     @Test fun preparationIsNotApplicationOrAcknowledgement() = fixture { store, _ ->
         val receipt = store.receipt()
         assertEquals(applied, receipt.change); assertEquals(scope, receipt.scope); assertEquals(format, receipt.format)
@@ -160,7 +203,8 @@ class ProjectionReceiptStoreDeviceTest {
             Revision("unmapped"), format, DeferredEventReason.UNSUPPORTED_CONTENT, "sealed-fixture")) }
         refused { store.prepareProjection(ProjectionIntent(scope, applied), format) }
         store.transaction(scope) { (this as StagedSyncTransaction).clearDeferred(applied.eventId) }
-        val detailed = applied.copy(content = applied.content.copy(recurrence = EventRecurrence("fixture-uid", "FREQ=DAILY")))
+        val detailed = applied.copy(content = applied.content.copy(recurrence = EventRecurrence("fixture-uid",
+            original = RecurrencePoint.Timed(java.time.Instant.parse("2026-10-01T00:00:00Z")))))
         store.queue(detailed); refused { store.prepareProjection(ProjectionIntent(scope, detailed), format) }
         val gone = RemoteChange.Deleted(applied.eventId, Revision("gone"))
         store.queue(gone); refused { store.prepareProjection(ProjectionIntent(scope, gone), format) }
