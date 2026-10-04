@@ -139,14 +139,20 @@ Nine focused JVM cases pass, including independent fold/gap arithmetic, a
 half-hour gap, interval/count boundaries, exclusions, year overflow, refusal and
 snapshot isolation. The initial placeholder failed six positive cases; review
 then exposed and reproduced year-boundary and input-list alias defects before
-their correction. Android fixtures have been implemented for exact instances,
-exceptions, cached replacement, dirty/deleted protection and lost-ACK reopening;
-physical qualification is pending.
+their correction. Four physical Android fixtures pass for exact instances,
+exceptions, cached replacement, dirty/deleted protection and lost-ACK reopening.
+The first run exposed an incorrect native-marker assertion in the recovery test;
+the corrected test qualifies the persisted-receipt comparison described below.
+Both complete recurrence/recovery device classes pass 78 methods without failures
+or skips on the qualified physical target. These are isolated native fixtures,
+not a live Proton import or broader timezone/OEM qualification.
 
 Those fixtures deliberately persist and authenticate the synthetic RDATE view.
 They do not establish that a canonical RRULE import can use that representation
-while keeping its durable canonical baseline and historical receipts. A copied
-receipt for the canonical rule must not authenticate the date view. Versioned
+while keeping its durable canonical baseline and historical receipts. Native
+inspection verifies a historical identity/nonce marker, not recurrence content;
+SQLite recovery must reject a copied canonical receipt because it differs from
+the complete persisted date-view receipt. Versioned
 representation selection, parser eligibility, ordinary matching and recovery
 must be integrated and tested together before activation.
 

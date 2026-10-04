@@ -583,14 +583,25 @@ in `ProjectionRecoveryDeviceTest` uses the production SQLite/Provider/coordinato
 with a controlled remote, a synthetic date-view input and a lost private ACK.
 It checks two-hour instance duration, reminders/participants, reopening without
 a repeated write, and preservation of a subsequent dirty local title. Its baseline
-is explicitly the RDATE view; inspection of the same receipt copied to its
-canonical RRULE must fail. This is not canonical RRULE storage/recovery support.
+is explicitly the RDATE view. The native marker identifies the historical write
+by scope, identities, revision and nonce; it does not authenticate recurrence
+content. Copying that receipt to the canonical RRULE can pass native inspection,
+but SQLite restoration must reject the changed receipt and retain the original
+preparation, baseline and pending view. This is not canonical RRULE
+storage/recovery support. The first physical run exposed the test's incorrect
+assumption that native inspection alone would reject copied content; the test
+now checks the full persisted-receipt comparison instead.
 The fixture's original autumn query defaults remain unchanged; this test supplies
 spring/autumn windows explicitly.
 
 Native tests are opt-in via `providerFixture=true` and require an authorized
-physical target. The four new methods and the modified classes' regression suites
-are currently NOT RUN. APK/test compilation and lint pass with zero errors and
+physical target. The four new methods pass without failures or skips on the
+qualified physical target. Both complete modified classes also pass: 31 recurrence
+and 47 recovery methods, 78 total, without failures or skips. Run with
+`-e providerFixture true -e class` selecting `RecurrenceProviderDeviceTest` and
+`ProjectionRecoveryDeviceTest`; the fixtures use isolated Provider/SQLite data
+and a controlled remote, without Proton service writes.
+APK/test compilation and lint pass with zero errors and
 20 existing warnings. `:app:compileReleaseSources` also passes; the experiment is
 absent from compiled release classes and its unit tests belong to `testDebug`.
 This is source compilation, not release APK or distribution qualification.

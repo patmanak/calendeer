@@ -629,8 +629,11 @@ replay differs, confirming that host arithmetic does not qualify Android.
 A debug-only finite daily-rule prototype now derives independent nominal dates
 and a separate explicit recurrence view for the existing native UTC mapper.
 It preserves its canonical rule snapshot and admits at most 32 occurrences within
-366 days, with other limits described in the audit. Nine focused JVM cases pass;
-physical qualification of the new instance/exception/recovery fixtures is pending.
+366 days, with other limits described in the audit. Nine focused JVM cases and
+the four new physical instance/exception/recovery fixtures pass. Native markers
+identify historical writes; SQLite recovery binds the complete persisted receipt
+and rejects a copy with canonical rule content in place of the date view. Both
+complete recurrence/recovery device classes pass all 78 methods without skips.
 Their receipts and SQLite baselines concern synthetic date views, not canonical
 RRULE imports. Canonical source eligibility, representation persistence/matching
 and historical receipt recovery still need integrated qualification before

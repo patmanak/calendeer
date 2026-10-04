@@ -61,7 +61,14 @@ class ProjectionRecoveryDeviceTest {
             val receipt = f.store.projectionReceipt(f.target, f.base.eventId)!!
             assertEquals(view, receipt.change)
             assertEquals(AppliedProjectionWitness(receipt), f.native.inspectProjectionReceipt(receipt))
-            assertNull("A native date-view proof must not authenticate its canonical rule", f.native.inspectProjectionReceipt(receipt.copy(change = canonical)))
+            // The native marker identifies a historical write, not its current content.
+            // Only the complete receipt persisted before that write authorizes recovery.
+            val copiedWitness = f.native.inspectProjectionReceipt(receipt.copy(change = canonical))!!
+            assertFalse("A copied canonical rule must not replace the persisted date-view receipt", f.store.restoreProjection(copiedWitness))
+            assertEquals(receipt, f.store.projectionReceipt(f.target, f.base.eventId))
+            assertEquals(f.base, f.store.projectedBaseline(f.target, f.base.eventId))
+            assertEquals(listOf(ProjectionIntent(f.target, view)), f.store.pending(f.target))
+            assertEquals(applies, f.applies.get())
             if (dirty) f.edit("Later local finite-date edit")
             f.reopen(); assertEquals(ImportRunResult.COMPLETE, f.coordinator.run(false))
             assertEquals(view, f.store.projectedBaseline(f.target, f.base.eventId))
