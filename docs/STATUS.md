@@ -31,7 +31,10 @@ the profile on their next projection. The /e/OS event-detail editor saved a titl
 that remained capturable after restart on the same row. Samsung editing and
 automatic UPDATE remain unqualified. An [internal title UPDATE experiment](TITLE_UPDATE_SUBMISSION.md)
 adds a separate protected request and durable inspection-only journal, without
-native acknowledgement or worker activation. One retained simple timed event
+native acknowledgement or worker activation. Verified full-content results now
+have immutable, attempt-bound storage and an internal inspect-only recovery path;
+retained history can be read offline without releasing the UNKNOWN attempt.
+One retained simple timed event
 qualified a single title PUT and full authenticated readback after process restart,
 with its original preparation and UNKNOWN journal intact. Fresh GET/PUT is not server CAS.
 See [personal editing](LOCAL_EDIT_CAPTURE.md#personal-editing-permission-profile).

@@ -24,7 +24,7 @@ import org.json.JSONObject
  * Payload/evidence are opaque protected strings; this store grants no HTTP or Provider capability.
  */
 class TitleUpdateAttemptStore(context: Context, name: String = "calendar-title-update-attempt-v1.db") :
-    SQLiteOpenHelper(context, name, null, 1), TitleUpdateAttemptJournal {
+    SQLiteOpenHelper(context, name, null, 2), TitleUpdateAttemptJournal, TitleUpdateResultJournal {
     private val lock = Mutex()
     @Volatile var admitDispatch: (CalendarScope) -> Boolean = { false }
 
@@ -43,7 +43,7 @@ class TitleUpdateAttemptStore(context: Context, name: String = "calendar-title-u
                 adapter TEXT NOT NULL, version INTEGER NOT NULL CHECK(version > 0),
                 payload TEXT NOT NULL,
                 state TEXT NOT NULL CHECK(state IN ('PREPARED','OUTCOME_UNKNOWN')),
-                evidence TEXT,
+                evidence TEXT, result TEXT,
                 PRIMARY KEY(account,calendar,generation,mutation),
                 UNIQUE(account,calendar,event)
             )
@@ -51,7 +51,9 @@ class TitleUpdateAttemptStore(context: Context, name: String = "calendar-title-u
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        error("Explicit title update journal migration required")
+        check(oldVersion == 1 && newVersion == 2) { "Explicit title update journal migration required" }
+        // Additive domain snapshot only: never reinterpret protected payloads or reopen UNKNOWN.
+        db.execSQL("ALTER TABLE title_update_attempts ADD COLUMN result TEXT")
     }
 
     override suspend fun remember(record: TitleUpdateAttemptRecord) {
@@ -83,6 +85,78 @@ class TitleUpdateAttemptStore(context: Context, name: String = "calendar-title-u
 
     override suspend fun read(scope: CalendarScope, id: MutationId): TitleUpdateAttemptRecord? =
         access { db -> read(db, scope, id) }
+
+    override suspend fun retainVerified(result: TitleUpdateVerifiedResult) {
+        val frozen = TitleUpdateVerifiedResult.of(result.record,
+            TitleUpdateSubmissionObservation.Verified(result.attempt, result.event))
+        val encoded = encodeResult(frozen)
+        access { db -> transaction(db) {
+            val current = read(db, frozen.record.scope, frozen.record.id)
+            check(current != null && current.state == TitleUpdateAttemptState.OUTCOME_UNKNOWN &&
+                current.copy(protectedEvidence = null) == frozen.record) {
+                "A verified result requires identical unknown title work"
+            }
+            val existing = readVerified(db, current)
+            if (existing != null) {
+                check(existing == frozen) { "Verified title result is immutable" }
+            } else {
+                // The transaction holds the database writer lock across the complete comparison.
+                // Evidence can attach independently; it is intentionally not part of this CAS.
+                check(db.update(TABLE, ContentValues().apply { put("result", encoded) },
+                    "$IDENTITY AND state=? AND result IS NULL",
+                    identity(current.scope, current.id) + TitleUpdateAttemptState.OUTCOME_UNKNOWN.name) == 1) {
+                    "Verified title result was not retained"
+                }
+            }
+        } }
+    }
+
+    override suspend fun readVerified(scope: CalendarScope, id: MutationId): TitleUpdateVerifiedResult? =
+        access { db -> transaction(db) { read(db, scope, id)?.let { readVerified(db, it) } } }
+
+    private fun readVerified(db: SQLiteDatabase, current: TitleUpdateAttemptRecord): TitleUpdateVerifiedResult? =
+        db.query(TABLE, arrayOf("result"), IDENTITY, identity(current.scope, current.id), null, null, null).use { row ->
+            if (!row.moveToFirst() || row.isNull(0)) null else try {
+                require(row.getType(0) == Cursor.FIELD_TYPE_STRING)
+                decodeResult(row.getString(0), current)
+            } catch (_: Exception) { throw IllegalStateException("Invalid retained verified title result") }
+        }
+
+    private fun encodeResult(value: TitleUpdateVerifiedResult): String = bounded(JSONObject().apply {
+        put("schema", 1); put("attempt", attemptJson(value.attempt))
+        put("event", JSONObject().apply {
+            put("id", value.event.eventId.value); put("revision", value.event.revision.value)
+            put("content", contentJson(value.event.content))
+        })
+    }.toString())
+
+    private fun attemptJson(value: TitleUpdateAttemptIdentity) = JSONObject().apply {
+        put("account", value.scope.account.value); put("calendar", value.scope.calendar.value)
+        put("generation", value.scope.generation); put("id", value.id.value); put("intent", value.localIntentId.value)
+        put("event", value.eventId.value); put("baseRevision", value.baseRevision.value)
+        put("adapter", value.format.id); put("version", value.format.version)
+        put("preparationAdapter", value.preparationFormat.id); put("preparationVersion", value.preparationFormat.version)
+        put("preparationFingerprint", value.preparationFingerprint); put("payloadFingerprint", value.payloadFingerprint)
+    }
+
+    private fun decodeResult(payload: String, current: TitleUpdateAttemptRecord): TitleUpdateVerifiedResult {
+        val json = JSONObject(bounded(payload))
+        require(json.keys().asSequence().toSet() == RESULT_FIELDS && integer(json, "schema") == 1L)
+        val attempt = json.getJSONObject("attempt")
+        require(attempt.keys().asSequence().toSet() == ATTEMPT_FIELDS)
+        val identity = TitleUpdateAttemptIdentity(
+            CalendarScope(AccountId(text(attempt, "account")), CalendarId(text(attempt, "calendar")), integer(attempt, "generation")),
+            MutationId(text(attempt, "id")), MutationId(text(attempt, "intent")), EventId(text(attempt, "event")),
+            Revision(text(attempt, "baseRevision")), AdapterFormat(text(attempt, "adapter"), version(attempt, "version")),
+            AdapterFormat(text(attempt, "preparationAdapter"), version(attempt, "preparationVersion")),
+            text(attempt, "preparationFingerprint"), text(attempt, "payloadFingerprint"))
+        require(identity == TitleUpdateAttemptIdentity.of(current))
+        val event = json.getJSONObject("event")
+        require(event.keys().asSequence().toSet() == RESULT_EVENT_FIELDS)
+        val observed = RemoteChange.Upsert(EventId(text(event, "id")), Revision(text(event, "revision")),
+            decodeContent(event.getJSONObject("content")))
+        return TitleUpdateVerifiedResult.of(current, TitleUpdateSubmissionObservation.Verified(identity, observed))
+    }
 
     /** The complete frozen preparation and ciphertext must still match before durable UNKNOWN.
      * SQLite transactions arbitrate independent helpers; successful commit precedes true/dispatch.
@@ -239,5 +313,9 @@ class TitleUpdateAttemptStore(context: Context, name: String = "calendar-title-u
         val PREPARATION_FIELDS = setOf("schema", "id", "account", "calendar", "generation", "intentAdapter", "intentVersion",
             "intentState", "event", "revision", "base", "newTitle", "timestamp", "preparationAdapter", "preparationVersion", "preparationPayload")
         val CONTENT_FIELDS = setOf("title", "description", "location", "knownEmptyDetails", "allDay", "start", "end")
+        val RESULT_FIELDS = setOf("schema", "attempt", "event")
+        val RESULT_EVENT_FIELDS = setOf("id", "revision", "content")
+        val ATTEMPT_FIELDS = setOf("account", "calendar", "generation", "id", "intent", "event", "baseRevision",
+            "adapter", "version", "preparationAdapter", "preparationVersion", "preparationFingerprint", "payloadFingerprint")
     }
 }

@@ -99,6 +99,19 @@ class CalendarTitleUpdateSubmissionLiveDeviceTest {
         assertTrue("Complete event content must match", preparation.intent.content == verified.event.content)
         assertTrue("Only the original event can qualify", event == verified.event.eventId)
         assertTrue("Observed revision must differ from the original", preparation.intent.base.revision != verified.event.revision)
+        val durableResult = TitleUpdateVerifiedResult.of(unknown, verified)
+        TitleUpdateAttemptStore(app, journalName).use { journal ->
+            journal.admitDispatch = { error("Result retention must never enter dispatch admission") }
+            journal.retainVerified(durableResult)
+            assertTrue("Retaining the result must preserve UNKNOWN work and evidence", journal.read(scope, id) == unknown)
+        }
+        TitleUpdateAttemptStore(app, journalName).use { reopened ->
+            assertTrue("The exact verified result must survive reopening", reopened.readVerified(scope, id) == durableResult)
+            assertTrue("Historical preparation and response evidence must remain intact", reopened.read(scope, id) == unknown)
+        }
+        // This identity hash was qualified against the authenticated account above. The offline
+        // test uses it only to bind the retained historical fixture, never as a current login proof.
+        assertTrue(fixture.edit().putString("result_account_hash", hash).putBoolean("verified_result_retained", true).commit())
         TitleUpdateAttemptStore(app, journalName).use { reopened ->
             reopened.admitDispatch = { true }
             assertTrue(!reopened.claim(record))
@@ -114,6 +127,7 @@ class CalendarTitleUpdateSubmissionLiveDeviceTest {
         InstrumentationRegistry.getInstrumentation().sendStatus(0, Bundle().apply {
             putBoolean("title_update_restart_inspects_without_readmission", true)
             putBoolean("title_update_original_preparation_retained", true)
+            putBoolean("title_update_verified_result_durable", true)
         })
     }
 }

@@ -57,7 +57,29 @@ integers must be nonnegative, and a changed `LastEditTime` must advance monotoni
 and equal the current `ModifyTime`. Other metadata remains exactly equal. This
 rule describes the measured experimental profile, not a documented server CAS
 or a general permission to ignore timestamps. A matching display title or
-success response alone is insufficient. Inspection does not alter the journal.
+success response alone is insufficient. The adapter's inspection does not alter
+the journal.
+
+## Retained verified results
+
+`TitleUpdateVerifiedResult` binds the complete expected contents and observed
+revision to the exact UNKNOWN attempt, original preparation and protected wire
+payload. It accepts only the submission adapter's full-content verified
+observation. Response evidence is retained independently and is the sole field
+excluded from the result's attempt comparison.
+
+The journal retains the first result in a `synchronous=FULL` transaction against
+the entire identical UNKNOWN record. Exact repetitions are idempotent. Another
+revision or substituted work cannot replace it. Its version-two migration adds
+result storage without changing original attempts, preparation or evidence.
+Decoded results are validated again against their owning record.
+
+`TitleUpdateResultRecovery` first reads retained history without network access.
+If no proof exists, it only inspects the UNKNOWN attempt and returns a verified
+result after durable retention. Failure or cancellation propagates; there is no
+prepare, claim or submit step. A retained result is a historical observation,
+not current server state, server authorship, native ACK admission or permission
+to send again. The event's unresolved-attempt hold remains in place.
 
 ## Concurrency and integration limits
 
@@ -69,7 +91,7 @@ history. This adapter does not advertise general conflict-safe write capability.
 There is no production worker, UI toggle or Provider acknowledgement for UPDATE.
 The existing system observer continues to retain edits/deletions locally. Before
 activation, a separate owner must bind captured native work to this journal,
-retain verified results durably, acknowledge only the exact unchanged native
+acknowledge only the exact unchanged native
 snapshot, preserve a later DIRTY edit and recover the cross-store transition.
 Conflict policy, further editable fields, recurrence, invitations and DELETE
 remain separate work.
@@ -82,6 +104,12 @@ remain separate work.
   `providerFixture=true`. It exercises concurrent handles, reopening, immutable
   evidence, generation isolation and an actual deferred constraint failure at
   commit. These fixtures make no Provider or service requests.
+- `TitleUpdateVerifiedResultTest` checks exact full-content binding, immutable
+  snapshots, inspect-only recovery, offline historical reads and failure before
+  durable retention.
+- `TitleUpdateResultStoreDeviceTest` checks result persistence, migration,
+  immutable first proof, concurrent handles, corruption and transaction failures
+  in isolated SQLite fixtures. No Provider or service request is involved.
 - `ProtonTitleUpdateSubmissionTest`, `ProtonTitleUpdateSubmissionDispatchTest`
   and `ProtonTitleUpdateSubmissionCoreTest` exercise strict serialization,
   fresh qualification, readback refusal, transport permits and the real Core/
@@ -93,6 +121,10 @@ remain separate work.
   authorized fixture/account identity. It retains the exact attempt before one
   controlled title submission. `titleUpdateInspectOnly=true` permits restart
   inspection without admission; reruns of UNKNOWN work cannot send again.
+- `CalendarTitleUpdateResultLiveDeviceTest` requires explicit opt-in and the same
+  retained fixture. It reads the previously verified result after restart with
+  a port that rejects inspection and submission. This checks the recovery path's
+  offline behavior; it does not claim that all other application activity is offline.
 
 Live tests must never run indiscriminately or replace an unresolved fixture with
 a new identity. Local tests do not establish service acceptance or Samsung UI
@@ -105,3 +137,9 @@ process restart. Reopened submission inspected the same UNKNOWN attempt without
 dispatch admission; its preparation and first protected response stayed intact.
 This evidence covers that title-only profile, not automatic native reconciliation
 or concurrent writers.
+
+The same UNKNOWN fixture subsequently qualified durable result retention by
+inspection only, then historical recovery after process restart with all remote
+port methods forbidden. The original preparation and first response evidence
+remained intact. Isolated physical SQLite fixtures qualified the result journal's
+migration, immutable first result, concurrent helpers and failed-commit behavior.
