@@ -30,7 +30,9 @@ import com.patmanak.proton.andcalendarbridge.sync.catalog.CalendarSummary
 /** Android-layer boundary. A failed apply leaves its durable intent unacknowledged for replay. */
 interface CalendarProjection {
     val titleUpdateAcknowledgementProtocol: Int? get() = null
-    /** Atomic metadata-only ACK of one exact ordinary dirty edit. Never rewrite content or insert. */
+    /** Atomic metadata-only ACK of one exact dirty edit, with explicit CREATE handoff when present.
+     * Preserve creation provenance; never rewrite content, insert or infer handoff from row markers.
+     */
     suspend fun acknowledgeTitleUpdate(receipt: TitleUpdateAcknowledgementReceipt): AppliedTitleUpdateAcknowledgement? = null
     /** Historical marker proof only; preserve every subsequent local edit, tombstone and child. */
     suspend fun inspectTitleUpdateAcknowledgement(receipt: TitleUpdateAcknowledgementReceipt): AppliedTitleUpdateAcknowledgement? = null

@@ -1,14 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 package com.patmanak.proton.andcalendarbridge.sync
 
-/** Metadata-only acknowledgement of an ordinary imported event. The caller must retain the
+/** Metadata-only acknowledgement of an imported or transferred CREATE event. The caller must retain the
  * verified result and reserve this exact receipt durably before its one fresh native write.
- * No CREATE provenance, recurrence representation, dispatch or current access is implied.
+ * CREATE provenance must be supplied explicitly; no dispatch or current access is implied.
  */
 data class TitleUpdateAcknowledgementReceipt(
     val attempt: TitleUpdateAttemptIdentity,
     val intent: LocalEditIntent,
     val projection: ProjectionReceipt,
+    val handoff: CapturedCreateHandoffFrame? = null,
 ) {
     init {
         LocalEditPreparation.freezeIntent(intent)
@@ -19,15 +20,33 @@ data class TitleUpdateAcknowledgementReceipt(
             projection.previousBase == intent.base && projection.change.eventId == intent.base.eventId &&
             projection.change.content == intent.content && projection.change.revision != intent.base.revision)
         require(projection.representation == null && projection.previousRepresentation == null)
+        handoff?.let {
+            require(it.scope == intent.scope && it.format == intent.format && it.base == intent.base)
+            CapturedHandoffProjection(it, projection)
+        }
     }
-    fun snapshot() = copy(intent = LocalEditPreparation.freezeIntent(intent), projection = projection.snapshot())
-    fun matches(result: TitleUpdateVerifiedResult) = snapshot() == of(result, projection.nonce)
+    fun snapshot(): TitleUpdateAcknowledgementReceipt {
+        val frozenHandoff = handoff?.let { frame ->
+            // Every admitted handoff has known-empty details. Own both the immutable
+            // creation baseline and the current reference before suspension or storage.
+            require(supportsCapturedHandoff(frame.receipt.acknowledgement.baseline.change) &&
+                supportsCapturedHandoff(frame.base))
+            fun freeze(value: RemoteChange.Upsert) = value.copy(content = value.content.copy(details = EventDetails()))
+            val acknowledgement = frame.receipt.acknowledgement
+            frame.copy(receipt = frame.receipt.copy(acknowledgement = acknowledgement.copy(
+                baseline = acknowledgement.baseline.copy(change = freeze(acknowledgement.baseline.change)))),
+                base = freeze(frame.base), lastProjection = frame.lastProjection?.snapshot())
+        }
+        return copy(intent = LocalEditPreparation.freezeIntent(intent), projection = projection.snapshot(), handoff = frozenHandoff)
+    }
+    fun matches(result: TitleUpdateVerifiedResult) = snapshot() == of(result, projection.nonce, handoff)
     override fun toString() = "TitleUpdateAcknowledgementReceipt(redacted)"
     companion object {
-        fun of(result: TitleUpdateVerifiedResult, nonce: String): TitleUpdateAcknowledgementReceipt {
+        fun of(result: TitleUpdateVerifiedResult, nonce: String,
+            handoff: CapturedCreateHandoffFrame? = null): TitleUpdateAcknowledgementReceipt {
             val intent = LocalEditPreparation.freezeIntent(result.record.preparation.intent)
             return TitleUpdateAcknowledgementReceipt(result.attempt, intent,
-                ProjectionReceipt(intent.scope, intent.format, result.event, nonce, intent.base)).snapshot()
+                ProjectionReceipt(intent.scope, intent.format, result.event, nonce, intent.base), handoff).snapshot()
         }
     }
 }

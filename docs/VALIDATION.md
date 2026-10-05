@@ -11,8 +11,9 @@ has separate domain, SQLite, Core/loopback and explicitly authorized live recipe
 Its isolated journal suite passed fourteen physical cases without skips. A single
 title update of a retained simple timed event qualified full signed/decrypted
 readback after process restart, with UNKNOWN work and the protected preparation
-unchanged and no further dispatch admission. It adds no production UPDATE worker
-or native acknowledgement. The server edit-clock rule is a measured, bounded
+unchanged and no further dispatch admission. Separate internal native ACK paths
+cover ordinary and transferred CREATE title results using isolated Provider/SQLite
+fixtures; the experiment adds no production UPDATE worker. The server edit-clock rule is a measured, bounded
 profile; it is not a conditional-write guarantee.
 
 Experimental system CREATE qualification covers `SystemCreateWorkStoreDeviceTest`,

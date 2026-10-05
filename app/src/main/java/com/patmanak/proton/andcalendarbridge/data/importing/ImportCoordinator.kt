@@ -455,7 +455,7 @@ class ImportCoordinator(
             }
         }
 
-    /** Internal ordinary title acknowledgement only. Reads an already durable verified result;
+    /** Internal simple title acknowledgement only. Reads an already durable verified result;
      * never prepares, inspects the service or dispatches UPDATE. A fresh reservation permits one
      * conditional native metadata write. Reopening only inspects the retained nonce.
      */
@@ -489,12 +489,21 @@ class ImportCoordinator(
             if (existing?.state == TitleUpdateAcknowledgementState.RESTORED)
                 return@withLock TitleUpdateAcknowledgementResult.ACKNOWLEDGED
             val reservation = if (existing != null) TitleUpdateAcknowledgementReservation(existing, false) else {
-                val snapshot = projection.captureOwnedSimpleEdit(target, intent.base)
-                    ?: return@withLock TitleUpdateAcknowledgementResult.UNRESOLVED
+                val transfer = store.capturedHandoff(target, eventId)
+                val frame = transfer?.frame
+                val content = if (frame == null) {
+                    projection.captureOwnedSimpleEdit(target, intent.base)?.content
+                } else {
+                    if (transfer.state != CapturedCreateHandoffState.RELEASED || !transfer.waiting ||
+                        frame.base != intent.base || frame.format != intent.format)
+                        return@withLock TitleUpdateAcknowledgementResult.UNRESOLVED
+                    val observed = projection.captureCapturedHandoffCurrent(frame) as? CapturedHandoffCurrentObservation.Supported
+                    observed?.snapshot?.takeIf { it.frame == frame && !it.deleted }?.content
+                } ?: return@withLock TitleUpdateAcknowledgementResult.UNRESOLVED
                 if (!available()) return@withLock TitleUpdateAcknowledgementResult.INACTIVE
-                if (snapshot.content != intent.content || journal.readVerified(target, attempt) != result)
+                if (content != intent.content || journal.readVerified(target, attempt) != result)
                     return@withLock TitleUpdateAcknowledgementResult.UNRESOLVED
-                store.prepareTitleUpdateAcknowledgement(result)
+                store.prepareTitleUpdateAcknowledgement(result, frame)
                     ?: return@withLock TitleUpdateAcknowledgementResult.UNRESOLVED
             }
             val retained = reservation.record
@@ -505,6 +514,10 @@ class ImportCoordinator(
             if (reservation.fresh && (store.localEdit(target, eventId) != intent ||
                 store.localEditPreparation(target, eventId) != result.record.preparation))
                 return@withLock TitleUpdateAcknowledgementResult.UNRESOLVED
+            if (reservation.fresh && retained.receipt.handoff?.let { frame ->
+                    store.capturedHandoff(target, eventId) != CapturedCreateHandoffRecord(frame,
+                        CapturedCreateHandoffState.RELEASED, waiting = true)
+                } == true) return@withLock TitleUpdateAcknowledgementResult.UNRESOLVED
             // The final journal/source reads can suspend. Recheck selection and account after
             // them as well as the synchronous epoch/mode/permission lease in the Provider.
             if (!available()) return@withLock TitleUpdateAcknowledgementResult.INACTIVE

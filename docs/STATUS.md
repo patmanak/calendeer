@@ -34,11 +34,13 @@ adds a separate protected request and durable inspection-only journal, without
 automatic UPDATE or worker activation. Verified full-content results now
 have immutable, attempt-bound storage and an internal inspect-only recovery path;
 retained history can be read offline without releasing the UNKNOWN attempt.
-An internal ordinary-event acknowledgement reserves a durable receipt, changes
+An internal simple-event acknowledgement reserves a durable receipt, changes
 only native synchronization metadata and restores the exact local intent's SQL
 baseline. Recovery inspects the same nonce and preserves later local edits and
-new remote observations. CREATE-handoff acknowledgement remains separate work;
-the service-to-native UPDATE journey and automatic activation are unqualified.
+new remote observations. Transferred CREATE events require their complete original
+provenance and current handoff frame; acknowledgement also advances that frame
+atomically while preserving the immutable creation evidence. The service-to-native
+UPDATE journey and automatic activation are unqualified.
 Isolated physical Provider/SQLite integration qualifies same-row acknowledgement,
 interrupted restoration and preservation of a later dirty edit. Newer cached
 observations retain their projection state and require a later requeue trigger.

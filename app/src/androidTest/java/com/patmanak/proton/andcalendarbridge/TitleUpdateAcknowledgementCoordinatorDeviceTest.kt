@@ -24,7 +24,7 @@ import org.junit.runner.RunWith
 /** Real isolated SQLite and controlled native ports. No account, Provider or service mutation. */
 @RunWith(AndroidJUnit4::class)
 class TitleUpdateAcknowledgementCoordinatorDeviceTest {
-    private class Fixture {
+    private class Fixture(val transferred: Boolean = false) {
         private val context = ApplicationProvider.getApplicationContext<Context>()
         private val token = UUID.randomUUID().toString()
         val name = "title-ack-owner-$token.db"
@@ -43,6 +43,16 @@ class TitleUpdateAcknowledgementCoordinatorDeviceTest {
         val result = TitleUpdateVerifiedResult.of(unknown,
             TitleUpdateSubmissionObservation.Verified(TitleUpdateAttemptIdentity.of(unknown), verified))
         val newer = base.copy(revision = Revision("newer-remote"), content = base.content.copy(title = "Newer remote fixture"))
+        val frame: CapturedCreateHandoffFrame by lazy {
+            val capture = LocalCreateIntent(LocalCreateReservation(MutationId("synthetic-create-capture"),
+                LocalEventId(UUID(0, 2).toString()), target, format, Instant.parse("2030-10-01T00:00:00Z")), base.content)
+            val submission = LocalCreateSubmission(LocalCreateSubmissionReservation(capture,
+                MutationId(UUID(0, 3).toString()), AdapterFormat("synthetic-create-wire", 1)), "synthetic-create-opaque")
+            val attachment = CapturedCreateAttachmentReceipt(CapturedCreateBinding(CapturedCreateDispatchIdentity.of(submission),
+                base.eventId, base.revision), UUID(0, 4).toString())
+            val ack = CapturedCreateAcknowledgementReceipt(CapturedCreateBaseline(attachment, base), UUID(0, 5).toString())
+            CapturedCreateHandoffFrame(CapturedCreateHandoffReceipt(ack, UUID(0, 6).toString()), base)
+        }
         val store = ImportStore(context, name)
         val journal = TitleUpdateAttemptStore(context, journalName)
         var permission = true
@@ -67,7 +77,14 @@ class TitleUpdateAcknowledgementCoordinatorDeviceTest {
             override suspend fun apply(intent: ProjectionIntent, seriesUid: String?) = error("No generic projection")
             override suspend fun captureOwnedSimpleEdit(scope: CalendarScope, base: RemoteChange.Upsert): OwnedLocalEditSnapshot? {
                 check(admitOperation()); captures++
+                if (transferred) error("Transferred events must use their full handoff frame")
                 return if (scope == target && nativeRevision == base.revision && dirty) OwnedLocalEditSnapshot(1, 1, nativeContent) else null
+            }
+            override suspend fun captureCapturedHandoffCurrent(frame: CapturedCreateHandoffFrame): CapturedHandoffCurrentObservation {
+                check(admitOperation()); captures++
+                return if (transferred && frame == this@Fixture.frame && nativeRevision == frame.base.revision && dirty)
+                    CapturedHandoffCurrentObservation.Supported(CapturedHandoffCurrent(frame, nativeContent, false))
+                else CapturedHandoffCurrentObservation.Unresolved
             }
             override suspend fun acknowledgeTitleUpdate(receipt: TitleUpdateAcknowledgementReceipt): AppliedTitleUpdateAcknowledgement? {
                 check(admitOperation()); writes++
@@ -100,8 +117,16 @@ class TitleUpdateAcknowledgementCoordinatorDeviceTest {
             store.remember(target.account, listOf(CalendarSummary(target.calendar, "Acknowledgement fixture")))
             store.setEnabled(target, true)
             store.transaction(target) { putRemote(base); putProjection(ProjectionIntent(target, base)); checkpoint = PageCheckpoint(target, format) }
-            assertEquals(1, store.acknowledge(ProjectionIntent(target, base)))
-            assertEquals(intent, store.captureLocalEdit(intent))
+            if (transferred) {
+                val ack = frame.receipt.acknowledgement
+                assertTrue(store.retainCapturedBaseline(ack.baseline, AppliedCapturedCreateAttachment(ack.baseline.receipt)))
+                store.reserveCapturedAcknowledgement(ack); store.retainCapturedAcknowledgement(AppliedCapturedCreateAcknowledgement(ack))
+                store.reserveCapturedHandoff(frame.receipt); store.retainCapturedHandoff(frame.receipt, CapturedCreateCleanWitness(ack))
+                assertEquals(LocalEditState.PAUSED, store.retainCapturedHandoffLocalChange(CapturedHandoffCurrent(frame, intent.content, false), intent.id))
+            } else {
+                assertEquals(1, store.acknowledge(ProjectionIntent(target, base)))
+                assertEquals(intent, store.captureLocalEdit(intent))
+            }
             assertTrue(store.retainLocalEditPreparation(preparation))
             journal.remember(prepared); journal.admitDispatch = { it == target }; assertTrue(journal.claim(prepared))
             journal.admitDispatch = { error("Acknowledgement must never admit dispatch") }
@@ -123,9 +148,9 @@ class TitleUpdateAcknowledgementCoordinatorDeviceTest {
             journal.close(); store.close(); context.deleteDatabase(name); context.deleteDatabase(journalName)
         }
     }
-    private fun fixture(block: suspend Fixture.() -> Unit) = runBlocking {
+    private fun fixture(transferred: Boolean = false, block: suspend Fixture.() -> Unit) = runBlocking {
         assumeTrue(InstrumentationRegistry.getArguments().getString("providerFixture") == "true")
-        val fixture = Fixture()
+        val fixture = Fixture(transferred)
         try { fixture.seed(); fixture.block() } finally { fixture.close() }
     }
 
@@ -259,5 +284,53 @@ class TitleUpdateAcknowledgementCoordinatorDeviceTest {
         }
         assertEquals(TitleUpdateAcknowledgementResult.INACTIVE, acknowledge(changing))
         assertEquals(0, writes); assertTrue(dirty); assertEquals(intent, owner())
+    }
+
+    @Test fun transferredTitleSelectsFullFrameAndRestoresItAlongsideItsOriginalOwner() = fixture(transferred = true) {
+        assertEquals(TitleUpdateAcknowledgementResult.ACKNOWLEDGED, acknowledge())
+        assertNull(owner()); assertEquals(frame, receipt()!!.receipt.handoff)
+        val current = store.capturedHandoff(target, base.eventId)!!
+        assertEquals(CapturedCreateHandoffFrame(frame.receipt, verified, receipt()!!.receipt.projection), current.frame)
+        assertFalse(current.waiting); assertEquals(1, writes); assertEquals(verified, cached())
+    }
+
+    @Test fun transferredLaterTitleBeforeReservationIsNeverAcknowledged() = fixture(transferred = true) {
+        nativeContent = intent.content.copy(title = "A later synthetic transferred edit")
+        assertEquals(TitleUpdateAcknowledgementResult.UNRESOLVED, acknowledge())
+        assertEquals(0, writes); assertNull(receipt()); assertTrue(dirty); assertEquals(intent, owner())
+    }
+
+    @Test fun transferredPendingReservationWithoutNativeCommitNeverRearmsWrite() = fixture(transferred = true) {
+        assertTrue(store.prepareTitleUpdateAcknowledgement(result, frame)!!.fresh)
+        assertEquals(TitleUpdateAcknowledgementResult.UNRESOLVED, acknowledge())
+        assertEquals(0, writes); assertEquals(1, inspections); assertTrue(dirty); assertEquals(intent, owner())
+    }
+
+    @Test fun transferredWaitingChangedDuringFinalReadPreventsNativeWrite() = fixture(transferred = true) {
+        var reads = 0
+        val changing = object : TitleUpdateResultJournal {
+            override suspend fun readVerified(scope: CalendarScope, id: MutationId): TitleUpdateVerifiedResult {
+                if (++reads == 3) store.writableDatabase.execSQL("UPDATE captured_create_handoffs SET waiting=0")
+                return result
+            }
+            override suspend fun retainVerified(result: TitleUpdateVerifiedResult) = error("No retention here")
+        }
+        assertEquals(TitleUpdateAcknowledgementResult.UNRESOLVED, acknowledge(changing))
+        assertEquals(0, writes); assertTrue(dirty); assertEquals(intent, owner())
+    }
+
+    @Test fun transferredOriginCorruptionRefusesWithoutOrdinaryFallback() = fixture(transferred = true) {
+        store.writableDatabase.execSQL("UPDATE captured_create_acknowledgements SET fingerprint='synthetic-corruption'")
+        assertEquals(TitleUpdateAcknowledgementResult.UNRESOLVED, acknowledge())
+        assertEquals(0, writes); assertEquals(0, captures); assertTrue(dirty); assertEquals(intent, owner())
+    }
+
+    @Test fun transferredRemoteObservationAfterNativeCommitClosesOnlyOriginalWork() = fixture(transferred = true) {
+        afterWrite = { cache(newer); assertEquals(LocalEditState.CONFLICT, owner()!!.state) }
+        assertEquals(TitleUpdateAcknowledgementResult.ACKNOWLEDGED, acknowledge())
+        assertNull(owner()); assertEquals(newer, cached()); assertTrue(store.pending(target).isEmpty())
+        assertEquals(verified, store.capturedHandoff(target, base.eventId)!!.frame.base)
+        assertEquals(frame.receipt, store.capturedHandoff(target, base.eventId)!!.frame.receipt)
+        assertFalse(store.capturedHandoff(target, base.eventId)!!.waiting)
     }
 }

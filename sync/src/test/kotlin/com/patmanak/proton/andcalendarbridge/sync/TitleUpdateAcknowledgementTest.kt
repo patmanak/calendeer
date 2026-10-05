@@ -3,6 +3,7 @@ package com.patmanak.proton.andcalendarbridge.sync
 
 import java.time.Instant
 import java.time.LocalDate
+import java.util.UUID
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -22,6 +23,45 @@ class TitleUpdateAcknowledgementTest {
         TitleUpdateSubmissionObservation.Verified(TitleUpdateAttemptIdentity.of(unknown), event))
     private val nonce = "00000000-0000-0000-0000-000000000001"
     private fun receipt() = TitleUpdateAcknowledgementReceipt.of(result, nonce)
+
+    private fun handoff(): CapturedCreateHandoffFrame {
+        val capture = LocalCreateIntent(LocalCreateReservation(MutationId("synthetic-capture"),
+            LocalEventId(UUID(0, 2).toString()), scope, intent.format, Instant.parse("2030-05-01T00:00:00Z")), base.content)
+        val submission = LocalCreateSubmission(LocalCreateSubmissionReservation(capture,
+            MutationId(UUID(0, 3).toString()), AdapterFormat("synthetic-create-wire", 1)), "synthetic-create-payload")
+        val binding = CapturedCreateBinding(CapturedCreateDispatchIdentity.of(submission), base.eventId, base.revision)
+        val origin = CapturedCreateBaseline(CapturedCreateAttachmentReceipt(binding, UUID(0, 4).toString()), base)
+        val ack = CapturedCreateAcknowledgementReceipt(origin, UUID(0, 5).toString())
+        return CapturedCreateHandoffFrame(CapturedCreateHandoffReceipt(ack, UUID(0, 6).toString()), base)
+    }
+
+    @Test fun handoffReceiptBindsExactCurrentFrameAndDistinctAcknowledgementNonce() {
+        val frame = handoff()
+        val receipt = TitleUpdateAcknowledgementReceipt.of(result, nonce, frame)
+        assertEquals(frame, receipt.handoff); assertTrue(receipt.matches(result))
+        assertNotEquals(receipt(), receipt)
+        val altered = base.copy(revision = Revision("another-current-reference"))
+        val projection = ProjectionReceipt(scope, intent.format, altered, UUID(0, 7).toString(), base)
+        rejects { receipt.copy(handoff = frame.copy(base = altered, lastProjection = projection)) }
+        for (reserved in listOf(frame.receipt.nonce, frame.receipt.acknowledgement.nonce,
+            frame.receipt.acknowledgement.baseline.receipt.nonce)) {
+            rejects { TitleUpdateAcknowledgementReceipt.of(result, reserved, frame) }
+        }
+    }
+
+    @Test fun handoffReceiptOwnsTheOriginalAndCurrentCollectionSnapshots() {
+        val reminders = mutableListOf<EventReminder>()
+        val content = base.content.copy(details = EventDetails(reminders))
+        val original = handoff()
+        val origin = original.receipt.acknowledgement.baseline.copy(change = base.copy(content = content))
+        val frame = original.copy(receipt = original.receipt.copy(acknowledgement =
+            original.receipt.acknowledgement.copy(baseline = origin)), base = base.copy(content = content))
+        val receipt = TitleUpdateAcknowledgementReceipt.of(result, nonce, frame)
+        reminders.add(EventReminder(10))
+        assertEquals(EventDetails(), receipt.handoff!!.base.content.details)
+        assertEquals(EventDetails(), receipt.handoff.receipt.acknowledgement.baseline.change.content.details)
+        assertTrue(receipt.matches(result))
+    }
 
     @Test fun receiptBindsOriginalIntentAndCompleteVerifiedProjection() {
         val receipt = receipt()

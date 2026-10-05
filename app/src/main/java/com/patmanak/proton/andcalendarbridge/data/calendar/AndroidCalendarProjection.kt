@@ -94,6 +94,12 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
     override suspend fun acknowledgeTitleUpdate(receipt: TitleUpdateAcknowledgementReceipt): AppliedTitleUpdateAcknowledgement? {
         val frozen = receipt.snapshot()
         return operation {
+            frozen.handoff?.let { frame ->
+                val original = frame.receipt.acknowledgement
+                return@operation if (captureCapturedCurrent(original.baseline, expectedAck = original, handoff = frame,
+                        titleAcknowledgement = frozen) is CapturedCreateCurrentObservation.Supported)
+                    AppliedTitleUpdateAcknowledgement(frozen) else null
+            }
             if (captureSimpleSnapshot(frozen.intent.scope, frozen.intent.base, deleted = false, acknowledgement = frozen) != null)
                 AppliedTitleUpdateAcknowledgement(frozen) else null
         }
@@ -101,6 +107,10 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
     override suspend fun inspectTitleUpdateAcknowledgement(receipt: TitleUpdateAcknowledgementReceipt): AppliedTitleUpdateAcknowledgement? {
         val frozen = receipt.snapshot()
         return operation {
+            frozen.handoff?.let { frame ->
+                return@operation if (inspectCapturedHistory(frame.receipt.acknowledgement, frozen.projection))
+                    AppliedTitleUpdateAcknowledgement(frozen) else null
+            }
             val scope = frozen.intent.scope
             val account = accountFor(scope.account)
             val calendar = calendarRow(scope, account) ?: return@operation null
@@ -748,7 +758,12 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
         writeAck: CapturedCreateAcknowledgementReceipt? = null,
         clean: Boolean = false,
         handoff: CapturedCreateHandoffFrame? = null,
-        handoffProjection: CapturedHandoffProjection? = null): CapturedCreateCurrentObservation {
+        handoffProjection: CapturedHandoffProjection? = null,
+        titleAcknowledgement: TitleUpdateAcknowledgementReceipt? = null): CapturedCreateCurrentObservation {
+        if (titleAcknowledgement != null) {
+            require(!clean && writeAck == null && handoffProjection == null && handoff != null &&
+                titleAcknowledgement.handoff == handoff && expectedAck == handoff.receipt.acknowledgement)
+        }
         val ackMarker = (expectedAck ?: writeAck)?.let(::capturedAcknowledgementMarker)
         val receipt = baseline.receipt
         val expected = capturedAttachmentValues(receipt) // Strict canonical identity before Provider IO.
@@ -809,6 +824,8 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
         } catch (_: IllegalArgumentException) { return CapturedCreateCurrentObservation.Unsupported }
         val unchanged = if (handoff == null) snapshot.unchanged else !snapshot.deleted && snapshot.content == handoff.base.content
         if ((writeAck != null || clean) && !unchanged) return CapturedCreateCurrentObservation.Unresolved
+        if (titleAcknowledgement != null && (snapshot.deleted || snapshot.content != titleAcknowledgement.intent.content))
+            return CapturedCreateCurrentObservation.Unresolved
         val checks = arrayListOf(assertion(syncUri(Calendars.CONTENT_URI, account), calendarSelection(scope, account), calendar),
             ContentProviderOperation.newAssertQuery(uri).withSelection(local.sql, local.args)
                 .withValues(values).withExpectedCount(1).build(),
@@ -825,6 +842,10 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
         if (writeAck != null) checks += ContentProviderOperation.newUpdate(uri)
             .withSelection(local.sql, local.args).withValue(Events.DIRTY, 0)
             .withValue(Events.SYNC_DATA7, ackMarker).withExpectedCount(1).build()
+        if (titleAcknowledgement != null) checks += ContentProviderOperation.newUpdate(uri)
+            .withSelection(local.sql, local.args).withValue(Events.DIRTY, 0)
+            .withValue(Events.SYNC_DATA2, digest("revision-v1", titleAcknowledgement.projection.change.revision.value))
+            .withValue(Events.SYNC_DATA3, receiptMarker(titleAcknowledgement.projection)).withExpectedCount(1).build()
         if (handoffProjection != null) checks += ContentProviderOperation.newUpdate(uri)
             .withSelection(local.sql, local.args).withValues(eventValues(handoffProjection.receipt.change, account).apply {
                 put(Events.SYNC_DATA2, digest("revision-v1", handoffProjection.receipt.change.revision.value))
@@ -833,7 +854,7 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
         // ACK and incoming handoff writes admit from current assertions, never a prior snapshot.
         // Every identity, content/flag value and child absence is qualified in this one batch.
         requirePermissions()
-        capturedBatch(checks, if (writeAck != null || handoffProjection != null)
+        capturedBatch(checks, if (writeAck != null || handoffProjection != null || titleAcknowledgement != null)
             intArrayOf(1, 1, 1, 0, 0, 0, 1) else intArrayOf(1, 1, 1, 0, 0, 0))
         requirePermissions()
         return CapturedCreateCurrentObservation.Supported(snapshot)

@@ -3,7 +3,7 @@
 The release target remains bidirectional synchronization through Android calendar
 clients. This internal experiment qualifies a narrower service boundary: submitting
 one prepared title change for a simple personal event. A separate internal path
-conditionally acknowledges ordinary imported Android events after their result
+conditionally acknowledges ordinary imported and transferred CREATE events after their result
 is retained. UPDATE remains unavailable to production workers and UI controls.
 
 ## Supported work and ownership
@@ -82,13 +82,14 @@ prepare, claim or submit step. A retained result is a historical observation,
 not current server state, server authorship, native ACK admission or permission
 to send again. The event's unresolved-attempt hold remains in place.
 
-## Ordinary native acknowledgement
+## Native title acknowledgement
 
 `ImportCoordinator.acknowledgeLocalTitle` consumes an already retained result;
 it cannot prepare, submit or inspect a service request. Current account, calendar
 selection, import format, permissions and experimental editing policy must qualify
-the call, including after suspended source reads. CREATE origin rows and represented
-events are refused. This first path covers ordinary simple imported events only.
+the call, including after suspended source reads. Represented events are refused.
+An ordinary event has no CREATE provenance. A transferred CREATE requires its
+explicit complete frame; it cannot fall back to ordinary acknowledgement.
 
 Before writing Android, `ImportStore` reserves one immutable receipt linking the
 attempt identity, complete original intent, old/new baselines and nonce. The
@@ -98,7 +99,7 @@ version-sixteen import migration preserves existing work.
 
 Only the fresh reservation may call the native write. One atomic Calendar Provider
 batch asserts the unique owned calendar and both event identities, complete
-submitted contents, old revision, `DIRTY=1`, `DELETED=0`, supported ordinary markers
+submitted contents, old revision, `DIRTY=1`, `DELETED=0`, supported markers
 and absent children. It changes only `DIRTY`, revision marker `SYNC_DATA2` and
 receipt marker `SYNC_DATA3`. A later edit, tombstone, child or metadata change
 before the batch prevents acknowledgement and stays intact.
@@ -121,6 +122,21 @@ native write. If the first batch never committed, the receipt stays pending;
 there is no automatic rearming. A RESTORED replay never consumes the next intent.
 The network attempt remains UNKNOWN and its per-event hold remains in place.
 
+For a transferred CREATE, the receipt also freezes the full original creation,
+attachment, acknowledgement and handoff reference. The existing import database
+stays at version sixteen: ordinary receipt encoding is unchanged, and the extended
+encoding is self-contained even after the current baseline advances. Reserving a
+fresh receipt requires the exact RELEASED frame with its retained local change,
+`waiting=1`, and no unresolved incoming projection receipt.
+
+The Provider asserts original CREATE markers and the old projection marker together
+with the complete dirty snapshot. It still changes only `DIRTY/SYNC_DATA2/SYNC_DATA3`.
+SQL restoration additionally advances `last_projection` to the verified result and
+clears the original frame's waiting flag, atomically with baseline advancement and
+exact owner consumption. Original CREATE evidence is never rewritten. The native
+proof establishes the creation and projection markers; the handoff nonce and
+RELEASED state remain separately qualified by the SQL owner.
+
 ## Concurrency and integration limits
 
 The fresh GET and subsequent PUT are successive observations, **not an atomic
@@ -130,9 +146,9 @@ history. This adapter does not advertise general conflict-safe write capability.
 
 There is no production worker or UI toggle for UPDATE. The existing system
 observer continues to retain edits/deletions locally. Before activation, a
-separate owner must bind captured native work to this journal, extend native
-acknowledgement to CREATE-handoff provenance and qualify the complete service
-and native journey. The ordinary internal path does not release the permanent
+separate owner must bind captured native work to this journal, connect UPDATE
+to production scheduling and qualify the complete service and native journey.
+The internal acknowledgement paths do not release the permanent
 network attempt hold or enable a second outgoing edit cycle.
 Conflict policy, further editable fields, recurrence, invitations and DELETE
 remain separate work.
@@ -157,6 +173,12 @@ remain separate work.
   access revocation and idempotent history. Integration fixtures combine the real
   Provider, both SQLite stores and coordinator with synthetic result evidence;
   they do not establish Proton acceptance or a service-to-native UPDATE journey.
+- `CapturedHandoffTitleAcknowledgementProviderDeviceTest` and
+  `CapturedHandoffTitleAcknowledgementStoreDeviceTest` qualify explicit CREATE
+  provenance, original and advanced frames, receipt reopening, conditional
+  metadata acknowledgement and interrupted transactional restoration. Coordinator
+  fixtures check source changes during suspended reads; integration fixtures use
+  the real Provider and SQLite stores and preserve a later transferred dirty edit.
 - `ProtonTitleUpdateSubmissionTest`, `ProtonTitleUpdateSubmissionDispatchTest`
   and `ProtonTitleUpdateSubmissionCoreTest` exercise strict serialization,
   fresh qualification, readback refusal, transport permits and the real Core/

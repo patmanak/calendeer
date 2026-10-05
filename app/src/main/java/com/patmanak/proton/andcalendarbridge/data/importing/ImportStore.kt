@@ -1339,23 +1339,26 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
         })
         checkStagingCapacity(db)
     }
-    /** Reserve the immutable ordinary title receipt before the one fresh native metadata write.
+    /** Reserve the immutable title receipt before the one fresh native metadata write.
      * The coordinator owns verified-result admission; this transaction qualifies only its SQL source.
      */
-    suspend fun prepareTitleUpdateAcknowledgement(result: TitleUpdateVerifiedResult): TitleUpdateAcknowledgementReservation? {
+    suspend fun prepareTitleUpdateAcknowledgement(result: TitleUpdateVerifiedResult,
+        handoff: CapturedCreateHandoffFrame? = null): TitleUpdateAcknowledgementReservation? {
         val frozen = TitleUpdateVerifiedResult.of(result.record,
             TitleUpdateSubmissionObservation.Verified(result.attempt, result.event))
-        val proposed = TitleUpdateAcknowledgementReceipt.of(frozen, UUID.randomUUID().toString())
+        val proposed = TitleUpdateAcknowledgementReceipt.of(frozen, UUID.randomUUID().toString(), handoff)
         val encoded = encodeTitleUpdateAcknowledgement(proposed)
         return stagingMutation(proposed.intent.scope) { db ->
             val scope = proposed.intent.scope
             val event = proposed.intent.base.eventId
             val existing = readTitleUpdateAcknowledgement(db, scope, event)
             if (existing != null) {
-                check(existing.receipt.matches(frozen)) { "Title acknowledgement receipt is immutable" }
+                check(existing.receipt.matches(frozen) && existing.receipt.handoff == proposed.handoff) {
+                    "Title acknowledgement receipt is immutable"
+                }
                 return@stagingMutation TitleUpdateAcknowledgementReservation(existing, fresh = false)
             }
-            if (!ordinaryTitleAcknowledgement(db, scope, event) ||
+            if (!titleAcknowledgementSource(db, proposed) ||
                 !directTitleAcknowledgementBase(db, scope, event) ||
                 titleAcknowledgementOwner(db, scope, event) != proposed.intent ||
                 localTitlePreparationAdmission(db, proposed.intent) != LocalTitlePreparationAdmission.HISTORICAL)
@@ -1389,7 +1392,7 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
             if (retained.receipt != receipt) return@stagingMutation false
             if (retained.state == TitleUpdateAcknowledgementState.RESTORED) return@stagingMutation true
             if (!activeProjectionScope(db, scope) || !titleAcknowledgementFormatMatches(db, scope, intent.format) ||
-                !ordinaryTitleAcknowledgement(db, scope, event) || !directTitleAcknowledgementBase(db, scope, event))
+                !titleAcknowledgementSource(db, receipt) || !directTitleAcknowledgementBase(db, scope, event))
                 return@stagingMutation false
             val owner = titleAcknowledgementOwner(db, scope, event) ?: return@stagingMutation false
             if (owner.copy(state = LocalEditState.PAUSED) != intent) return@stagingMutation false
@@ -1401,6 +1404,17 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
             val local = encodeChange(intent.base.copy(content = intent.content))
             check(db.update("projection_bases", ContentValues().apply { put("payload", newBase) },
                 "scope=? AND event=? AND payload=? AND representation IS NULL", arrayOf(key(scope), event.value, oldBase)) == 1)
+            receipt.handoff?.let { frame ->
+                check(db.update("captured_create_handoffs", ContentValues().apply {
+                    put("last_projection", encodeHandoffProjection(receipt.projection)); put("waiting", 0)
+                }, "scope=? AND event=? AND nonce=? AND protocol=? AND ack_nonce=? AND ack_fingerprint=? " +
+                    "AND fingerprint=? AND state='RELEASED' AND waiting=1 AND last_projection IS ?",
+                    arrayOf(key(scope), event.value, frame.receipt.nonce, frame.receipt.protocol.toString(),
+                        frame.receipt.acknowledgement.nonce, frame.receipt.acknowledgement.fingerprint(), frame.receipt.fingerprint(),
+                        frame.lastProjection?.let(::encodeHandoffProjection))) == 1) {
+                    "Transferred title acknowledgement source changed"
+                }
+            }
             check(db.delete("local_edit_preparations", "scope=? AND event=? AND mutation=? AND adapter=? AND version=? " +
                 "AND base=? AND local=? AND state=? AND timestamp=? AND prep_adapter=? AND prep_version=? AND payload=?",
                 arrayOf(key(scope), event.value, intent.id.value, intent.format.id, intent.format.version.toString(), oldBase,
@@ -1427,6 +1441,18 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
     private fun ordinaryTitleAcknowledgement(db: SQLiteDatabase, scope: CalendarScope, event: EventId): Boolean =
         listOf("captured_create_bases", "captured_create_acknowledgements", "captured_create_handoffs", "projection_receipts")
             .none { hasRawEventRow(db, it, scope, event) }
+
+    private fun titleAcknowledgementSource(db: SQLiteDatabase, receipt: TitleUpdateAcknowledgementReceipt): Boolean {
+        val scope = receipt.intent.scope
+        val event = receipt.intent.base.eventId
+        val frame = receipt.handoff ?: return ordinaryTitleAcknowledgement(db, scope, event)
+        if (!activeProjectionScope(db, scope) || !titleAcknowledgementFormatMatches(db, scope, receipt.intent.format) ||
+            hasRawEventRow(db, "projection_receipts", scope, event)) return false
+        // This reader validates the full immutable origin/PROVEN acknowledgement and current base.
+        // The ordinary handoff clean guard cannot be reused while this exact local intent is held.
+        val current = readCapturedHandoff(db, scope, event) ?: return false
+        return current.state == CapturedCreateHandoffState.RELEASED && current.waiting && current.frame == frame
+    }
 
     private fun titleAcknowledgementOwner(db: SQLiteDatabase, scope: CalendarScope, event: EventId): LocalEditIntent? {
         val update = db.rawQuery("SELECT 1 FROM local_edits WHERE scope=? AND event=? AND kind='UPDATE'",
@@ -1459,7 +1485,7 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
     private fun encodeTitleUpdateAcknowledgement(value: TitleUpdateAcknowledgementReceipt): String = JSONObject().apply {
         val receipt = value.snapshot()
         val attempt = receipt.attempt
-        put("schema", 1)
+        put("schema", if (receipt.handoff == null) 1 else 2)
         put("attempt", JSONObject().apply {
             put("account", attempt.scope.account.value); put("calendar", attempt.scope.calendar.value); put("generation", attempt.scope.generation)
             put("id", attempt.id.value); put("intent", attempt.localIntentId.value); put("event", attempt.eventId.value)
@@ -1472,6 +1498,7 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
         put("local", JSONObject(encodeChange(receipt.intent.base.copy(content = receipt.intent.content))))
         put("change", JSONObject(encodeChange(receipt.projection.change)))
         put("nonce", receipt.projection.nonce); put("protocol", receipt.projection.protocol)
+        receipt.handoff?.let { put("handoff", encodeTitleHandoffFrame(it)) }
     }.toString().also(::requirePreparationSnapshotBudget)
 
     private fun decodeTitleUpdateAcknowledgement(payload: String): TitleUpdateAcknowledgementReceipt {
@@ -1484,8 +1511,10 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
         fun version(source: JSONObject, field: String): Int = integer(source, field).let {
             require(it in 1..Int.MAX_VALUE.toLong()); it.toInt()
         }
-        require(json.keys().asSequence().toSet() == setOf("schema", "attempt", "adapter", "version", "base", "local", "change", "nonce", "protocol"))
-        require(integer(json, "schema") == 1L && integer(json, "protocol") == 1L)
+        val schema = integer(json, "schema")
+        require(schema in 1L..2L && integer(json, "protocol") == 1L)
+        require(json.keys().asSequence().toSet() == setOf("schema", "attempt", "adapter", "version", "base", "local", "change", "nonce", "protocol") +
+            if (schema == 2L) setOf("handoff") else emptySet())
         val attempt = json.getJSONObject("attempt")
         require(attempt.keys().asSequence().toSet() == setOf("account", "calendar", "generation", "id", "intent", "event", "revision",
             "adapter", "version", "preparationAdapter", "preparationVersion", "preparationFingerprint", "payloadFingerprint"))
@@ -1499,11 +1528,66 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
         require(local.eventId == base.eventId && local.revision == base.revision)
         val intent = LocalEditIntent(identity.localIntentId, scope, AdapterFormat(text(json, "adapter"), version(json, "version")), base, local.content)
         val change = decodeChange(json.getJSONObject("change").toString()) as RemoteChange.Upsert
+        val handoff = if (schema == 1L) null else decodeTitleHandoffFrame(json.getJSONObject("handoff"))
         val receipt = TitleUpdateAcknowledgementReceipt(identity, intent,
-            ProjectionReceipt(scope, intent.format, change, text(json, "nonce"), base)).snapshot()
+            ProjectionReceipt(scope, intent.format, change, text(json, "nonce"), base), handoff).snapshot()
         // Re-encoding rejects extra event/detail fields, coercions and noncanonical metadata.
         require(encodeTitleUpdateAcknowledgement(receipt) == payload)
         return receipt
+    }
+
+    /** Full historical frame, independent of mutable projection_bases and live handoff rows. */
+    private fun encodeTitleHandoffFrame(frame: CapturedCreateHandoffFrame): JSONObject = JSONObject().apply {
+        val baseline = frame.receipt.acknowledgement.baseline
+        val attachment = baseline.receipt
+        val binding = attachment.binding
+        val capture = binding.identity
+        val attempt = capture.attempt
+        put("origin", JSONObject().apply {
+            put("account", attempt.scope.account.value); put("calendar", attempt.scope.calendar.value); put("generation", attempt.scope.generation)
+            put("attempt", attempt.id.value); put("adapter", attempt.format.id); put("version", attempt.format.version)
+            put("payloadFingerprint", attempt.payloadFingerprint); put("local", capture.localId.value); put("capture", capture.captureId.value)
+            put("captureAdapter", capture.captureFormat.id); put("captureVersion", capture.captureFormat.version)
+            put("timestamp", capture.timestamp.toString()); put("contentFingerprint", capture.contentFingerprint); put("fingerprintVersion", capture.fingerprintVersion)
+            put("event", binding.eventId.value); put("revision", binding.verifiedRevision.value)
+            put("attachmentNonce", attachment.nonce); put("attachmentProtocol", attachment.protocol)
+            put("change", JSONObject(encodeChange(baseline.change)))
+        })
+        put("ackNonce", frame.receipt.acknowledgement.nonce); put("ackProtocol", frame.receipt.acknowledgement.protocol)
+        put("nonce", frame.receipt.nonce); put("protocol", frame.receipt.protocol)
+        put("base", JSONObject(encodeChange(frame.base)))
+        put("lastProjection", frame.lastProjection?.let { JSONObject(encodeHandoffProjection(it)) } ?: JSONObject.NULL)
+    }
+
+    private fun decodeTitleHandoffFrame(json: JSONObject): CapturedCreateHandoffFrame {
+        fun text(source: JSONObject, field: String): String = source.get(field).let { require(it is String); it }
+        fun integer(source: JSONObject, field: String): Long = source.get(field).let {
+            require(it is Int || it is Long); (it as Number).toLong()
+        }
+        fun version(source: JSONObject, field: String): Int = integer(source, field).let {
+            require(it in 1..Int.MAX_VALUE.toLong()); it.toInt()
+        }
+        require(json.keys().asSequence().toSet() == setOf("origin", "ackNonce", "ackProtocol", "nonce", "protocol", "base", "lastProjection"))
+        val origin = json.getJSONObject("origin")
+        require(origin.keys().asSequence().toSet() == setOf("account", "calendar", "generation", "attempt", "adapter", "version",
+            "payloadFingerprint", "local", "capture", "captureAdapter", "captureVersion", "timestamp", "contentFingerprint", "fingerprintVersion",
+            "event", "revision", "attachmentNonce", "attachmentProtocol", "change"))
+        val scope = CalendarScope(AccountId(text(origin, "account")), CalendarId(text(origin, "calendar")), integer(origin, "generation"))
+        val attempt = CreateAttemptIdentity(scope, MutationId(text(origin, "attempt")),
+            AdapterFormat(text(origin, "adapter"), version(origin, "version")), text(origin, "payloadFingerprint"))
+        val timestamp = Instant.parse(text(origin, "timestamp"))
+        require(timestamp.toString() == text(origin, "timestamp"))
+        val capture = CapturedCreateDispatchIdentity(attempt, LocalEventId(text(origin, "local")), MutationId(text(origin, "capture")),
+            AdapterFormat(text(origin, "captureAdapter"), version(origin, "captureVersion")), timestamp,
+            text(origin, "contentFingerprint"), version(origin, "fingerprintVersion"))
+        val binding = CapturedCreateBinding(capture, EventId(text(origin, "event")), Revision(text(origin, "revision")))
+        val baseline = CapturedCreateBaseline(CapturedCreateAttachmentReceipt(binding, text(origin, "attachmentNonce"),
+            version(origin, "attachmentProtocol")), decodeChange(origin.getJSONObject("change").toString()) as RemoteChange.Upsert)
+        val acknowledgement = CapturedCreateAcknowledgementReceipt(baseline, text(json, "ackNonce"), version(json, "ackProtocol"))
+        val receipt = CapturedCreateHandoffReceipt(acknowledgement, text(json, "nonce"), version(json, "protocol"))
+        val base = decodeChange(json.getJSONObject("base").toString()) as RemoteChange.Upsert
+        val last = if (json.isNull("lastProjection")) null else decodeHandoffProjection(scope, json.getJSONObject("lastProjection").toString())
+        return CapturedCreateHandoffFrame(receipt, base, last)
     }
 
     /** Historical inspection only: a frozen PAUSED snapshot never resets the current conflict state. */
