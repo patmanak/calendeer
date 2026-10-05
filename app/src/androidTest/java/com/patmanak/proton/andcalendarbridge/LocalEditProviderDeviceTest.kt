@@ -317,10 +317,13 @@ class LocalEditProviderDeviceTest {
 
     @Test fun dirtySeriesChildPreventsDeletionAndMasterConversionAtomically() = runBlocking {
         withFixture { scope, calendar ->
-            val master = timed().copy(content = timed().content.copy(recurrence = EventRecurrence("fixture-series", "FREQ=DAILY;COUNT=3")))
+            // This is a dirty-child protection fixture, independent of finite/DST admission.
+            val simple = timed().copy(content = timed().content.copy(time =
+                (timed().content.time as EventTime.Timed).copy(zone = ZoneId.of("UTC"))))
+            val master = simple.copy(content = simple.content.copy(recurrence = EventRecurrence("fixture-series", "FREQ=DAILY")))
             projection.apply(ProjectionIntent(scope, master))
             val masterRow = eventRow(calendar)
-            val child = timed().copy(eventId = EventId("fixture-child"), content = timed().content.copy(
+            val child = simple.copy(eventId = EventId("fixture-child"), content = simple.content.copy(
                 title = "fixture child", recurrence = EventRecurrence("fixture-series",
                     original = RecurrencePoint.Timed(Instant.parse("2030-10-28T00:30:00Z")))))
             projection.apply(ProjectionIntent(scope, child))
@@ -332,7 +335,7 @@ class LocalEditProviderDeviceTest {
             requireRefusal { projection.apply(ProjectionIntent(scope,
                 RemoteChange.Deleted(master.eventId, Revision("fixture-deleted"))), "fixture-series") }
             requireRefusal { projection.apply(ProjectionIntent(scope, timed().copy(revision = Revision("fixture-simple")))) }
-            assertEquals("FREQ=DAILY;COUNT=3", field(masterRow, Events.RRULE))
+            assertEquals("FREQ=DAILY", field(masterRow, Events.RRULE))
             assertEquals("1", field(childRow, Events.DIRTY))
             assertEquals("fixture child", field(childRow, Events.TITLE))
         }

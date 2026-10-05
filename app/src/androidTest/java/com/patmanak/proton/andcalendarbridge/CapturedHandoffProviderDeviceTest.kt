@@ -31,6 +31,19 @@ import org.junit.runner.RunWith
 /** Isolated native conditional update and historical recovery qualification; no server writes. */
 @RunWith(AndroidJUnit4::class)
 class CapturedHandoffProviderDeviceTest {
+    @Test fun handoffIncomingPersonalTitleKeepsNativeEditingAndCapturesNextEdit() = fixture {
+        val current = applied()
+        assertEquals("0", field(Events.GUESTS_CAN_MODIFY))
+        assertEquals(projection.accountFor(target.account).name, field(Events.ORGANIZER))
+        assertEquals("1", field(Events.IS_ORGANIZER))
+        assertEquals("0", field(Events.HAS_ATTENDEE_DATA))
+        val next = applied(plan(current, "second"))
+        mutate(ContentValues().apply { put(Events.DIRTY, 1); put(Events.TITLE, "Native title after incoming update") })
+        val observed = projection.captureCapturedHandoffCurrent(next) as CapturedHandoffCurrentObservation.Supported
+        assertEquals("Native title after incoming update", observed.snapshot.content.title)
+        assertEquals("1", field(Events.DIRTY)); assertEquals(1, rows())
+    }
+
     @Test fun lostAttachmentResponseRequiresHistoricalRecoveryWithoutRewritingLaterEdit() = fixture {
         unattached()
         assertUnavailable { lost().attachCapturedCreate(receipt) }
@@ -276,7 +289,7 @@ class CapturedHandoffProviderDeviceTest {
 
     @Test fun unsupportedFlagsColorPrecisionAndRecurrenceRefuseProjection() = fixture {
         for ((column, changed) in listOf(Events.EVENT_COLOR to "-5631710", Events.ACCESS_LEVEL to Events.ACCESS_PRIVATE.toString(),
-            Events.GUESTS_CAN_MODIFY to "1", Events.RRULE to "FREQ=DAILY", Events.DTSTART to
+            Events.GUESTS_CAN_MODIFY to "1", Events.GUESTS_CAN_INVITE_OTHERS to "1", Events.RRULE to "FREQ=DAILY", Events.DTSTART to
                 ((content.time as EventTime.Timed).start.toEpochMilli() + 1).toString())) {
             val previous = field(column); mutate(ContentValues().apply { put(column, changed) }); val before = values()
             assertNull(projection.applyCapturedHandoffProjection(plan())); assertEquals(before, values())

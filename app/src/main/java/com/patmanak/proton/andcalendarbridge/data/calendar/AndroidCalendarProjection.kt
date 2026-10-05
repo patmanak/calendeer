@@ -276,7 +276,7 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
                 if (previousMaster != null && previousMaster != ownSyncId) {
                     removeChildren(operations, uri, calendar, previousMaster)
                 }
-                val values = eventValues(change).apply {
+                val values = eventValues(change, account).apply {
                     put(Events.CALENDAR_ID, calendar)
                     put(Events._SYNC_ID, ownSyncId)
                     put(Events.SYNC_DATA1, OWNER_MARKER)
@@ -438,11 +438,12 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
         val unsupported = arrayOf(Events.RRULE, Events.RDATE, Events.EXRULE, Events.EXDATE, Events.DURATION,
             Events.ORIGINAL_ID, Events.ORIGINAL_SYNC_ID, Events.ORIGINAL_INSTANCE_TIME, Events.ORIGINAL_ALL_DAY,
             Events.ORGANIZER, Events.EVENT_COLOR_KEY, Events.CUSTOM_APP_PACKAGE, Events.CUSTOM_APP_URI)
-        if (unsupported.any { values[it] != null }) return null
+        val personalOwner = simplePersonalOwner(values, account, base.content)
+        if (unsupported.any { values[it] != null && !(it == Events.ORGANIZER && personalOwner) }) return null
         val emptyFlags = arrayOf(Events.HAS_ATTENDEE_DATA, Events.IS_ORGANIZER, Events.GUESTS_CAN_MODIFY,
             Events.GUESTS_CAN_INVITE_OTHERS, Events.GUESTS_CAN_SEE_GUESTS, Events.HAS_ALARM,
             Events.SELF_ATTENDEE_STATUS, Events.ACCESS_LEVEL)
-        if (emptyFlags.any { values.getAsInteger(it) != 0 } ||
+        if (emptyFlags.any { !simplePersonalFlag(values, it, personalOwner) } ||
             values.getAsInteger(Events.STATUS) != Events.STATUS_CONFIRMED ||
             values.getAsInteger(Events.AVAILABILITY) != Events.AVAILABILITY_BUSY) return null
         val expectedColor = base.content.colorRgb?.or(0xFF000000.toInt())
@@ -725,8 +726,9 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
         } ?: fail(CalendarProjectionFailure.PROVIDER_UNAVAILABLE)
         if (!remoteMatches) return CapturedCreateCurrentObservation.Unresolved
         val localOwnerPlaceholder = simpleLocalOwnerPlaceholder(values, account)
-        if (unsupported.any { values[it] != null && !(it == Events.ORGANIZER && localOwnerPlaceholder) } ||
-            (!localOwnerPlaceholder && emptyFlags.any { values.getAsInteger(it) != 0 }) ||
+        val personalOwner = handoff != null && simplePersonalOwner(values, account, handoff.base.content)
+        if (unsupported.any { values[it] != null && !(it == Events.ORGANIZER && (localOwnerPlaceholder || personalOwner)) } ||
+            (!localOwnerPlaceholder && emptyFlags.any { !simplePersonalFlag(values, it, personalOwner) }) ||
             values.getAsInteger(Events.STATUS) != Events.STATUS_CONFIRMED ||
             values.getAsInteger(Events.AVAILABILITY) != Events.AVAILABILITY_BUSY)
             return CapturedCreateCurrentObservation.Unsupported
@@ -755,7 +757,7 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
             .withSelection(local.sql, local.args).withValue(Events.DIRTY, 0)
             .withValue(Events.SYNC_DATA7, ackMarker).withExpectedCount(1).build()
         if (handoffProjection != null) checks += ContentProviderOperation.newUpdate(uri)
-            .withSelection(local.sql, local.args).withValues(eventValues(handoffProjection.receipt.change).apply {
+            .withSelection(local.sql, local.args).withValues(eventValues(handoffProjection.receipt.change, account).apply {
                 put(Events.SYNC_DATA2, digest("revision-v1", handoffProjection.receipt.change.revision.value))
                 put(Events.SYNC_DATA3, receiptMarker(handoffProjection.receipt))
             }).withExpectedCount(1).build()
@@ -919,6 +921,25 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
                 Events.GUESTS_CAN_SEE_GUESTS).all { values.getAsInteger(it) == 1 } &&
             listOf(Events.GUESTS_CAN_MODIFY, Events.HAS_ALARM, Events.SELF_ATTENDEE_STATUS,
                 Events.ACCESS_LEVEL).all { values.getAsInteger(it) == 0 }
+
+    /** Personal owner profile v1. This opaque local label carries no remote organizer
+     * identity. Only explicitly known-empty, non-recurring events qualify; calendar access
+     * remains the gate for read-only mode. Legacy zero flags remain readable without repair.
+     */
+    private fun simplePersonalEvent(content: EventContent): Boolean =
+        content.recurrence == null && content.details == EventDetails()
+
+    private fun simplePersonalOwner(values: ContentValues, account: Account, content: EventContent): Boolean =
+        simplePersonalEvent(content) && values.getAsString(Events.ORGANIZER) == account.name &&
+            values.getAsInteger(Events.IS_ORGANIZER) == 1 &&
+            listOf(Events.HAS_ATTENDEE_DATA, Events.GUESTS_CAN_MODIFY, Events.GUESTS_CAN_INVITE_OTHERS,
+                Events.GUESTS_CAN_SEE_GUESTS, Events.HAS_ALARM, Events.SELF_ATTENDEE_STATUS,
+                Events.ACCESS_LEVEL).all { values.getAsInteger(it) == 0 }
+
+    private fun simplePersonalFlag(values: ContentValues, column: String, personalOwner: Boolean): Boolean {
+        val flag = values.getAsInteger(column)
+        return flag == 0 || (column == Events.IS_ORGANIZER && flag == 1 && personalOwner)
+    }
 
     private fun readSimpleTime(values: ContentValues, localOwnerPlaceholder: Boolean = false): EventTime? {
         val start = values.getAsLong(Events.DTSTART) ?: return null
@@ -1093,7 +1114,7 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
         return builder.build()
     }
 
-    private fun eventValues(change: RemoteChange.Upsert): ContentValues = ContentValues().apply {
+    private fun eventValues(change: RemoteChange.Upsert, account: Account): ContentValues = ContentValues().apply {
         put(Events.TITLE, change.content.title)
         put(Events.DESCRIPTION, change.content.description)
         put(Events.EVENT_LOCATION, change.content.location)
@@ -1108,11 +1129,18 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
         val details = change.content.details
         put(Events.HAS_ATTENDEE_DATA, if (details?.organizer != null || !details?.attendees.isNullOrEmpty()) 1 else 0)
         val organizer = details?.organizer
-        if (organizer == null) putNull(Events.ORGANIZER) else put(Events.ORGANIZER, organizer.email)
+        val personalOwner = simplePersonalEvent(change.content)
+        when {
+            organizer != null -> put(Events.ORGANIZER, organizer.email)
+            personalOwner -> put(Events.ORGANIZER, account.name)
+            else -> putNull(Events.ORGANIZER)
+        }
         // Provider defaults SELF_ATTENDEE_STATUS to NONE. Supplying it would create a
         // synthetic self-attendee on insert and is forbidden on event updates. Our owned
         // calendar's opaque owner name cannot match an attendee email, so no RSVP is inferred.
-        put(Events.IS_ORGANIZER, 0)
+        // AOSP clients also check this event-level permission before opening their editor.
+        // Use only the local calendar's opaque label; no participant is synthesized.
+        put(Events.IS_ORGANIZER, if (personalOwner) 1 else 0)
         put(Events.GUESTS_CAN_MODIFY, 0)
         put(Events.GUESTS_CAN_INVITE_OTHERS, 0)
         put(Events.GUESTS_CAN_SEE_GUESTS, 0)

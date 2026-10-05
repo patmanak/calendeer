@@ -1,9 +1,9 @@
 # Internal local UPDATE and DELETE capture
 
-The internal `ImportCoordinator.captureLocalEdit` entry point retains one local
-change to an already imported simple event. It does not enable editable calendars,
-observe Provider changes automatically, send a mutation, or acknowledge an Android
-edit. The production mirror remains read-only. `captureLocalDelete` separately
+The `ImportCoordinator.captureLocalEdit` entry point retains one local
+change to an already imported simple event. The opt-in system creation controller
+now discovers and retains these changes automatically; it does not send or
+acknowledge an UPDATE. Read-only remains the default calendar mode. `captureLocalDelete` separately
 retains an explicit local deletion of an already imported simple event; it does
 not submit or acknowledge that deletion.
 
@@ -26,6 +26,45 @@ An assertion-only Provider batch checks the complete observed row, ownership and
 absence of reminder, attendee and extended-property rows. The reader neither
 changes the event nor clears its dirty flag. Missing, ambiguous, unsupported or
 concurrently changed rows remain untouched.
+
+## Personal editing permission profile
+
+`PERSONAL_OWNER_V1` is a local Calendar Provider profile for non-recurring events
+whose remote details are explicitly `EventDetails()`. Projection sets
+`ORGANIZER` to the owning local calendar's opaque account label and
+`IS_ORGANIZER=1`, with `HAS_ATTENDEE_DATA=0` and all guest flags zero.
+This local permission label is not an email or remote organizer identity;
+it creates no attendee, reminder or invitation and never enters the domain or
+Proton request. Unknown
+details, invitations and richer events retain their existing permission mapping.
+Calendar access remains READ unless the experimental calendar mode is enabled.
+
+AOSP's editor requires calendar write access and either local organizer identity
+or `guestsCanModify`. It derives organizer identity by comparing the event
+organizer with the calendar owner, so setting `IS_ORGANIZER` alone is insufficient.
+Some event-detail screens also require organizer identity to show the edit button;
+`GUESTS_CAN_MODIFY=1` alone did not expose editing in the qualified client.
+Its existing-event save retains `HAS_ATTENDEE_DATA` and does not set organizer
+or guest flags. [Pinned editor source](https://android.googlesource.com/platform/packages/apps/Calendar.git/+/7b051c6e9ef7922f08d9ebf664ac3087d5fa0552/src/com/android/calendar/event/EditEventHelper.java).
+
+Ordinary capture and capture after CREATE handoff recognize this exact profile,
+alongside the previous zero-flag profile. They still assert the full row and
+absence of children atomically, leave DIRTY unchanged and refuse other flags or
+unsupported data. Raw CREATE admission retains its separate measured profiles.
+Incoming projection applies the profile only when the row is eligible for that
+projection; it never repairs a dirty row or discards a retained intention.
+
+Existing clean rows gain the profile on their next projection; this change does
+not migrate every already settled row. Provider metadata and direct editor
+launch alone cannot qualify every client. Edits adding participants remain
+unsupported and must not be stripped or sent as a partial title change. Outgoing UPDATE/DELETE remain
+unimplemented.
+
+Physical qualification with the /e/OS calendar client opened the projected event's
+detail screen, used its Edit button, saved a title and captured it after application
+restart on the same row with no participant or reminder. Provider fixtures also
+qualify the CREATE-handoff path and dirty-row protection. This does not establish
+Samsung client behavior, migration of settled rows or Proton UPDATE compatibility.
 
 ## Durable state and imports
 

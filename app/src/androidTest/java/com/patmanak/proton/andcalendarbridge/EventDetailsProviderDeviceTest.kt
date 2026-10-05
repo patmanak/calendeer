@@ -105,7 +105,7 @@ class EventDetailsProviderDeviceTest {
                     content = event.content.copy(details = details))))
                 val row = eventRow(calendar, "replace")
                 assertEquals(id, row.id)
-                assertNull(row.organizer)
+                assertEquals(if (details == EventDetails()) projection.accountFor(scope.account).name else null, row.organizer)
                 assertEquals(0, row.hasAlarm)
                 assertEquals(0, row.hasAttendees)
                 assertEquals(Attendees.ATTENDEE_STATUS_NONE, row.selfStatus)

@@ -24,6 +24,12 @@ same-row acknowledgement and handoff. Read-only remains the default. Pausing or
 disabling creation closes native editing without deleting events; pending work
 stays visible with the mode off. UNKNOWN submissions can only be inspected, never
 automatically sent again. UPDATE/DELETE remain held locally without upload.
+Known-empty, non-recurring incoming events now use the calendar's opaque local
+owner label to preserve native editing, without a remote organizer or attendee. Ordinary and CREATE-handoff
+capture accept that profile and preserve DIRTY edits. Existing settled rows gain
+the profile on their next projection. The /e/OS event-detail editor saved a title
+that remained capturable after restart on the same row. Samsung editing and
+outgoing UPDATE remain unqualified. See [personal editing](LOCAL_EDIT_CAPTURE.md#personal-editing-permission-profile).
 See [system creation](LOCAL_CREATE_CAPTURE.md#opt-in-system-creation) for the exact
 supported profiles, pagination and unresolved limitations.
 
