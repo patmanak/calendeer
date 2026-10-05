@@ -203,9 +203,13 @@ class LocalEditPreparationStoreDeviceTest {
         store.capture(); val receipt = ReceivedCalendarPage(PageRequest(PageCheckpoint(scope, format), 100), "sealed-inbox")
         store.transaction(scope) { (this as StagedSyncTransaction).received = receipt }
         store.close()
-        raw(name) { it.execSQL("DROP TABLE local_edit_preparations"); it.version = 13 }
+        raw(name) {
+            it.execSQL("DROP TABLE local_edit_preparations")
+            it.execSQL("DROP TABLE title_update_acknowledgements")
+            it.version = 13
+        }
         ImportStore(context, name).use { upgraded ->
-            assertEquals(15, upgraded.readableDatabase.version)
+            assertEquals(16, upgraded.readableDatabase.version)
             assertEquals(edit(), upgraded.localEdit(scope, base.eventId)); assertEquals(base, upgraded.projectedBaseline(scope, base.eventId))
             assertEquals(receipt, upgraded.transaction(scope) { (this as StagedSyncTransaction).received })
             assertNull(upgraded.localEditPreparation(scope, base.eventId)); assertTrue(upgraded.retainLocalEditPreparation(preparation()))

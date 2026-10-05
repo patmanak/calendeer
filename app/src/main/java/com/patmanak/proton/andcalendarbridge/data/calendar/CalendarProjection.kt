@@ -23,10 +23,17 @@ import com.patmanak.proton.andcalendarbridge.sync.CapturedHandoffCleanWitness
 import com.patmanak.proton.andcalendarbridge.sync.CapturedHandoffCurrentObservation
 import com.patmanak.proton.andcalendarbridge.sync.CapturedHandoffProjection
 import com.patmanak.proton.andcalendarbridge.sync.AppliedCapturedHandoffProjection
+import com.patmanak.proton.andcalendarbridge.sync.TitleUpdateAcknowledgementReceipt
+import com.patmanak.proton.andcalendarbridge.sync.AppliedTitleUpdateAcknowledgement
 import com.patmanak.proton.andcalendarbridge.sync.catalog.CalendarSummary
 
 /** Android-layer boundary. A failed apply leaves its durable intent unacknowledged for replay. */
 interface CalendarProjection {
+    val titleUpdateAcknowledgementProtocol: Int? get() = null
+    /** Atomic metadata-only ACK of one exact ordinary dirty edit. Never rewrite content or insert. */
+    suspend fun acknowledgeTitleUpdate(receipt: TitleUpdateAcknowledgementReceipt): AppliedTitleUpdateAcknowledgement? = null
+    /** Historical marker proof only; preserve every subsequent local edit, tombstone and child. */
+    suspend fun inspectTitleUpdateAcknowledgement(receipt: TitleUpdateAcknowledgementReceipt): AppliedTitleUpdateAcknowledgement? = null
     /** Native lookup key only; never a remote identifier or ownership/capture proof. */
     fun eventIdentityKey(scope: CalendarScope, event: EventId): String? = null
     val capturedHandoffProtocol: Int? get() = null

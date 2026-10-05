@@ -358,7 +358,7 @@ class CapturedCreateBaselineStoreDeviceTest {
                 old.version = 10
                 for (table in tables) before[table] = rows(old, table)
             }
-            assertEquals(15, store.writableDatabase.version)
+            assertEquals(16, store.writableDatabase.version)
             for (table in tables) {
                 val after = rows(store.writableDatabase, table)
                 val added = when (table) { "projection_bases" -> 1; "projection_receipts" -> 2; else -> 0 }

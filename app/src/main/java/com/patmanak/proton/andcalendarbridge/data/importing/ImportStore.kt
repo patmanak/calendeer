@@ -32,7 +32,7 @@ import org.json.JSONException
 enum class LocalTitlePreparationAdmission { ELIGIBLE, STORED, HISTORICAL, INACTIVE, UNQUALIFIED, CONFLICT }
 
 class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
-    SQLiteOpenHelper(context, name, null, 15), SyncStore {
+    SQLiteOpenHelper(context, name, null, 16), SyncStore {
     private val lock = Mutex()
     /** Check the run lease both before its transaction and before durable commit. */
     @Volatile var admitTransaction: (CalendarScope) -> Boolean = { true }
@@ -55,9 +55,10 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
         createCapturedHandoffs(db)
         createLocalEditPreparations(db)
         createProjectionRepresentations(db)
+        createTitleUpdateAcknowledgements(db)
     }
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        check(oldVersion in 1..14 && newVersion == 15) { "Explicit import schema migration required" }
+        check(oldVersion in 1..15 && newVersion == 16) { "Explicit import schema migration required" }
         if (oldVersion < 2) createStaging(db)
         if (oldVersion < 3) createDelta(db)
         if (oldVersion < 4) createReconciliation(db)
@@ -83,7 +84,15 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
         if (oldVersion < 12) createCapturedAcknowledgements(db)
         if (oldVersion < 13) createCapturedHandoffs(db)
         if (oldVersion < 14) createLocalEditPreparations(db)
-        createProjectionRepresentations(db)
+        if (oldVersion < 15) createProjectionRepresentations(db)
+        createTitleUpdateAcknowledgements(db)
+    }
+    private fun createTitleUpdateAcknowledgements(db: SQLiteDatabase) {
+        db.execSQL("""CREATE TABLE title_update_acknowledgements (
+            scope TEXT NOT NULL, event TEXT NOT NULL, nonce TEXT NOT NULL UNIQUE,
+            receipt TEXT NOT NULL, state TEXT NOT NULL CHECK(state IN ('PENDING','RESTORED')),
+            PRIMARY KEY(scope,event)
+        )""".trimIndent())
     }
     private fun createProjectionRepresentations(db: SQLiteDatabase) {
         // Historical table helpers are shared by fresh creation and older upgrades.
@@ -1330,6 +1339,173 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
         })
         checkStagingCapacity(db)
     }
+    /** Reserve the immutable ordinary title receipt before the one fresh native metadata write.
+     * The coordinator owns verified-result admission; this transaction qualifies only its SQL source.
+     */
+    suspend fun prepareTitleUpdateAcknowledgement(result: TitleUpdateVerifiedResult): TitleUpdateAcknowledgementReservation? {
+        val frozen = TitleUpdateVerifiedResult.of(result.record,
+            TitleUpdateSubmissionObservation.Verified(result.attempt, result.event))
+        val proposed = TitleUpdateAcknowledgementReceipt.of(frozen, UUID.randomUUID().toString())
+        val encoded = encodeTitleUpdateAcknowledgement(proposed)
+        return stagingMutation(proposed.intent.scope) { db ->
+            val scope = proposed.intent.scope
+            val event = proposed.intent.base.eventId
+            val existing = readTitleUpdateAcknowledgement(db, scope, event)
+            if (existing != null) {
+                check(existing.receipt.matches(frozen)) { "Title acknowledgement receipt is immutable" }
+                return@stagingMutation TitleUpdateAcknowledgementReservation(existing, fresh = false)
+            }
+            if (!ordinaryTitleAcknowledgement(db, scope, event) ||
+                !directTitleAcknowledgementBase(db, scope, event) ||
+                titleAcknowledgementOwner(db, scope, event) != proposed.intent ||
+                localTitlePreparationAdmission(db, proposed.intent) != LocalTitlePreparationAdmission.HISTORICAL)
+                return@stagingMutation null
+            val preparation = readLocalEditPreparation(db, scope, event) ?: return@stagingMutation null
+            if (preparation != frozen.record.preparation || !proposed.attempt.matchesPreparation(preparation))
+                return@stagingMutation null
+            db.insertOrThrow("title_update_acknowledgements", null, ContentValues().apply {
+                put("scope", key(scope)); put("event", event.value); put("nonce", proposed.projection.nonce)
+                put("receipt", encoded); put("state", TitleUpdateAcknowledgementState.PENDING.name)
+            })
+            TitleUpdateAcknowledgementReservation(TitleUpdateAcknowledgementRecord(proposed,
+                TitleUpdateAcknowledgementState.PENDING), fresh = true)
+        }
+    }
+
+    /** Historical leased inspection, including inactive scopes; never permission for a native write. */
+    suspend fun titleUpdateAcknowledgement(scope: CalendarScope, event: EventId): TitleUpdateAcknowledgementRecord? =
+        stagingMutation(scope) { db -> readTitleUpdateAcknowledgement(db, scope, event) }
+
+    /** Close only the exact historically acknowledged owner. New remote/deferred work survives.
+     * A RESTORED replay is read-only and cannot consume a subsequent intent or preparation.
+     */
+    suspend fun restoreTitleUpdateAcknowledgement(witness: AppliedTitleUpdateAcknowledgement): Boolean {
+        val receipt = witness.receipt.snapshot()
+        val intent = receipt.intent
+        val scope = intent.scope
+        val event = intent.base.eventId
+        return stagingMutation(scope) { db ->
+            val retained = readTitleUpdateAcknowledgement(db, scope, event) ?: return@stagingMutation false
+            if (retained.receipt != receipt) return@stagingMutation false
+            if (retained.state == TitleUpdateAcknowledgementState.RESTORED) return@stagingMutation true
+            if (!activeProjectionScope(db, scope) || !titleAcknowledgementFormatMatches(db, scope, intent.format) ||
+                !ordinaryTitleAcknowledgement(db, scope, event) || !directTitleAcknowledgementBase(db, scope, event))
+                return@stagingMutation false
+            val owner = titleAcknowledgementOwner(db, scope, event) ?: return@stagingMutation false
+            if (owner.copy(state = LocalEditState.PAUSED) != intent) return@stagingMutation false
+            val preparation = readLocalEditPreparation(db, scope, event) ?: return@stagingMutation false
+            if (preparation.intent != intent || !receipt.attempt.matchesPreparation(preparation)) return@stagingMutation false
+            if (readBaseline(db, scope, event) != intent.base) return@stagingMutation false
+            val oldBase = encodeChange(intent.base)
+            val newBase = encodeChange(receipt.projection.change)
+            val local = encodeChange(intent.base.copy(content = intent.content))
+            check(db.update("projection_bases", ContentValues().apply { put("payload", newBase) },
+                "scope=? AND event=? AND payload=? AND representation IS NULL", arrayOf(key(scope), event.value, oldBase)) == 1)
+            check(db.delete("local_edit_preparations", "scope=? AND event=? AND mutation=? AND adapter=? AND version=? " +
+                "AND base=? AND local=? AND state=? AND timestamp=? AND prep_adapter=? AND prep_version=? AND payload=?",
+                arrayOf(key(scope), event.value, intent.id.value, intent.format.id, intent.format.version.toString(), oldBase,
+                    local, LocalEditState.PAUSED.name, preparation.timestamp.toString(), preparation.format.id,
+                    preparation.format.version.toString(), preparation.protectedPayload)) == 1)
+            check(db.delete("local_edits", "scope=? AND event=? AND mutation=? AND adapter=? AND version=? " +
+                "AND base=? AND local=? AND state=? AND kind='UPDATE'",
+                arrayOf(key(scope), event.value, intent.id.value, intent.format.id, intent.format.version.toString(),
+                    oldBase, local, owner.state.name)) == 1)
+            // Advance only an exact old cache; a concurrent/newer update, deletion or absence survives.
+            db.update("records", ContentValues().apply { put("payload", newBase); put("pending", 0) },
+                "scope=? AND event=? AND payload=?", arrayOf(key(scope), event.value, oldBase))
+            db.update("records", ContentValues().apply { put("pending", 0) },
+                "scope=? AND event=? AND payload=? AND pending=1", arrayOf(key(scope), event.value, newBase))
+            check(db.update("title_update_acknowledgements", ContentValues().apply {
+                put("state", TitleUpdateAcknowledgementState.RESTORED.name)
+            }, "scope=? AND event=? AND nonce=? AND receipt=? AND state=?",
+                arrayOf(key(scope), event.value, receipt.projection.nonce, encodeTitleUpdateAcknowledgement(receipt),
+                    TitleUpdateAcknowledgementState.PENDING.name)) == 1)
+            true
+        }
+    }
+
+    private fun ordinaryTitleAcknowledgement(db: SQLiteDatabase, scope: CalendarScope, event: EventId): Boolean =
+        listOf("captured_create_bases", "captured_create_acknowledgements", "captured_create_handoffs", "projection_receipts")
+            .none { hasRawEventRow(db, it, scope, event) }
+
+    private fun titleAcknowledgementOwner(db: SQLiteDatabase, scope: CalendarScope, event: EventId): LocalEditIntent? {
+        val update = db.rawQuery("SELECT 1 FROM local_edits WHERE scope=? AND event=? AND kind='UPDATE'",
+            arrayOf(key(scope), event.value)).use { it.moveToFirst() }
+        return if (update) readPreparationOwner(db, scope, event) else null
+    }
+
+    private fun directTitleAcknowledgementBase(db: SQLiteDatabase, scope: CalendarScope, event: EventId): Boolean =
+        db.rawQuery("SELECT 1 FROM projection_bases WHERE scope=? AND event=? AND representation IS NULL",
+            arrayOf(key(scope), event.value)).use { it.moveToFirst() }
+
+    private fun titleAcknowledgementFormatMatches(db: SQLiteDatabase, scope: CalendarScope, format: AdapterFormat): Boolean =
+        db.rawQuery("SELECT checkpoint FROM calendars WHERE scope=?", arrayOf(key(scope))).use {
+            it.moveToFirst() && !it.isNull(0) && decodeCheckpoint(scope, it.getString(0)).format == format
+        }
+
+    private fun readTitleUpdateAcknowledgement(db: SQLiteDatabase, scope: CalendarScope, event: EventId): TitleUpdateAcknowledgementRecord? =
+        stagedQuery(db, "SELECT nonce,receipt,state FROM title_update_acknowledgements WHERE scope=? AND event=?",
+            arrayOf(key(scope), event.value)).use { row ->
+            if (!row.moveToFirst()) null else try {
+                val receipt = decodeTitleUpdateAcknowledgement(row.getString(1))
+                require(receipt.intent.scope == scope && receipt.intent.base.eventId == event && receipt.projection.nonce == row.getString(0))
+                TitleUpdateAcknowledgementRecord(receipt, TitleUpdateAcknowledgementState.valueOf(row.getString(2)))
+            } catch (failure: CancellationException) { throw failure }
+            catch (failure: SQLiteException) { throw failure }
+            catch (_: Exception) { throw IllegalStateException("Invalid retained title acknowledgement") }
+        }
+
+    /** Canonical immutable metadata only. Sealed preparation/wire/evidence payloads are not copied. */
+    private fun encodeTitleUpdateAcknowledgement(value: TitleUpdateAcknowledgementReceipt): String = JSONObject().apply {
+        val receipt = value.snapshot()
+        val attempt = receipt.attempt
+        put("schema", 1)
+        put("attempt", JSONObject().apply {
+            put("account", attempt.scope.account.value); put("calendar", attempt.scope.calendar.value); put("generation", attempt.scope.generation)
+            put("id", attempt.id.value); put("intent", attempt.localIntentId.value); put("event", attempt.eventId.value)
+            put("revision", attempt.baseRevision.value); put("adapter", attempt.format.id); put("version", attempt.format.version)
+            put("preparationAdapter", attempt.preparationFormat.id); put("preparationVersion", attempt.preparationFormat.version)
+            put("preparationFingerprint", attempt.preparationFingerprint); put("payloadFingerprint", attempt.payloadFingerprint)
+        })
+        put("adapter", receipt.intent.format.id); put("version", receipt.intent.format.version)
+        put("base", JSONObject(encodeChange(receipt.intent.base)))
+        put("local", JSONObject(encodeChange(receipt.intent.base.copy(content = receipt.intent.content))))
+        put("change", JSONObject(encodeChange(receipt.projection.change)))
+        put("nonce", receipt.projection.nonce); put("protocol", receipt.projection.protocol)
+    }.toString().also(::requirePreparationSnapshotBudget)
+
+    private fun decodeTitleUpdateAcknowledgement(payload: String): TitleUpdateAcknowledgementReceipt {
+        requirePreparationSnapshotBudget(payload)
+        val json = JSONObject(payload)
+        fun text(source: JSONObject, field: String): String = source.get(field).let { require(it is String); it }
+        fun integer(source: JSONObject, field: String): Long = source.get(field).let {
+            require(it is Int || it is Long); (it as Number).toLong()
+        }
+        fun version(source: JSONObject, field: String): Int = integer(source, field).let {
+            require(it in 1..Int.MAX_VALUE.toLong()); it.toInt()
+        }
+        require(json.keys().asSequence().toSet() == setOf("schema", "attempt", "adapter", "version", "base", "local", "change", "nonce", "protocol"))
+        require(integer(json, "schema") == 1L && integer(json, "protocol") == 1L)
+        val attempt = json.getJSONObject("attempt")
+        require(attempt.keys().asSequence().toSet() == setOf("account", "calendar", "generation", "id", "intent", "event", "revision",
+            "adapter", "version", "preparationAdapter", "preparationVersion", "preparationFingerprint", "payloadFingerprint"))
+        val scope = CalendarScope(AccountId(text(attempt, "account")), CalendarId(text(attempt, "calendar")), integer(attempt, "generation"))
+        val identity = TitleUpdateAttemptIdentity(scope, MutationId(text(attempt, "id")), MutationId(text(attempt, "intent")),
+            EventId(text(attempt, "event")), Revision(text(attempt, "revision")), AdapterFormat(text(attempt, "adapter"), version(attempt, "version")),
+            AdapterFormat(text(attempt, "preparationAdapter"), version(attempt, "preparationVersion")),
+            text(attempt, "preparationFingerprint"), text(attempt, "payloadFingerprint"))
+        val base = decodeChange(json.getJSONObject("base").toString()) as RemoteChange.Upsert
+        val local = decodeChange(json.getJSONObject("local").toString()) as RemoteChange.Upsert
+        require(local.eventId == base.eventId && local.revision == base.revision)
+        val intent = LocalEditIntent(identity.localIntentId, scope, AdapterFormat(text(json, "adapter"), version(json, "version")), base, local.content)
+        val change = decodeChange(json.getJSONObject("change").toString()) as RemoteChange.Upsert
+        val receipt = TitleUpdateAcknowledgementReceipt(identity, intent,
+            ProjectionReceipt(scope, intent.format, change, text(json, "nonce"), base)).snapshot()
+        // Re-encoding rejects extra event/detail fields, coercions and noncanonical metadata.
+        require(encodeTitleUpdateAcknowledgement(receipt) == payload)
+        return receipt
+    }
+
     /** Historical inspection only: a frozen PAUSED snapshot never resets the current conflict state. */
     suspend fun localEditPreparation(scope: CalendarScope, eventId: EventId): LocalEditPreparation? =
         stagingMutation(scope) { db -> readLocalEditPreparation(db, scope, eventId) }

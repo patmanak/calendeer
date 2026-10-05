@@ -60,6 +60,7 @@ enum class CapturedCreateReconciliationResult { INACTIVE, UNRESOLVED, UNSUPPORTE
 enum class CapturedCreateAcknowledgementResult { INACTIVE, UNRESOLVED, UNSUPPORTED, ACKNOWLEDGED }
 enum class CapturedCreateCleanResult { INACTIVE, UNRESOLVED, CLEAN }
 enum class CapturedCreateHandoffResult { INACTIVE, UNRESOLVED, WAITING, HANDED_OFF }
+enum class TitleUpdateAcknowledgementResult { INACTIVE, UNRESOLVED, ACKNOWLEDGED }
 /** One process owner for foreground and durable worker triggers; no event content reaches UI. */
 class ImportCoordinator(
     private val context: Context,
@@ -453,6 +454,79 @@ class ImportCoordinator(
                 projection.admitOperation = { false }
             }
         }
+
+    /** Internal ordinary title acknowledgement only. Reads an already durable verified result;
+     * never prepares, inspects the service or dispatches UPDATE. A fresh reservation permits one
+     * conditional native metadata write. Reopening only inspects the retained nonce.
+     */
+    suspend fun acknowledgeLocalTitle(target: CalendarScope, eventId: EventId, attempt: MutationId,
+        journal: TitleUpdateResultJournal): TitleUpdateAcknowledgementResult = mutex.withLock {
+        val expected = generation
+        val policy = createPolicyRevision.get()
+        val active = { authenticated && generation == expected && createPolicyRevision.get() == policy &&
+            systemCreatesEnabled(target) && hasCalendarPermissions() }
+        suspend fun available(): Boolean {
+            if (!active() || !isCurrent(expected, target.account)) return false
+            val selected = store.selections(target.account).singleOrNull { it.scope == target }
+            return selected?.enabled == true && selected.available && active()
+        }
+        try {
+            if (!available()) return@withLock TitleUpdateAcknowledgementResult.INACTIVE
+            store.admitTransaction = { it == target && active() }
+            projection.admitOperation = active
+            if (projection.titleUpdateAcknowledgementProtocol != 1)
+                return@withLock TitleUpdateAcknowledgementResult.UNRESOLVED
+            val result = journal.readVerified(target, attempt)
+                ?: return@withLock TitleUpdateAcknowledgementResult.UNRESOLVED
+            if (!available()) return@withLock TitleUpdateAcknowledgementResult.INACTIVE
+            val intent = result.record.preparation.intent
+            if (result.record.scope != target || result.record.id != attempt || result.event.eventId != eventId ||
+                intent.format != remote.format || store.transaction(target) { checkpoint?.format } != intent.format)
+                return@withLock TitleUpdateAcknowledgementResult.UNRESOLVED
+            val existing = store.titleUpdateAcknowledgement(target, eventId)
+            if (existing != null && !existing.receipt.matches(result))
+                return@withLock TitleUpdateAcknowledgementResult.UNRESOLVED
+            if (existing?.state == TitleUpdateAcknowledgementState.RESTORED)
+                return@withLock TitleUpdateAcknowledgementResult.ACKNOWLEDGED
+            val reservation = if (existing != null) TitleUpdateAcknowledgementReservation(existing, false) else {
+                val snapshot = projection.captureOwnedSimpleEdit(target, intent.base)
+                    ?: return@withLock TitleUpdateAcknowledgementResult.UNRESOLVED
+                if (!available()) return@withLock TitleUpdateAcknowledgementResult.INACTIVE
+                if (snapshot.content != intent.content || journal.readVerified(target, attempt) != result)
+                    return@withLock TitleUpdateAcknowledgementResult.UNRESOLVED
+                store.prepareTitleUpdateAcknowledgement(result)
+                    ?: return@withLock TitleUpdateAcknowledgementResult.UNRESOLVED
+            }
+            val retained = reservation.record
+            if (!available()) return@withLock TitleUpdateAcknowledgementResult.INACTIVE
+            if (!retained.receipt.matches(result) || store.titleUpdateAcknowledgement(target, eventId) != retained ||
+                journal.readVerified(target, attempt) != result)
+                return@withLock TitleUpdateAcknowledgementResult.UNRESOLVED
+            if (reservation.fresh && (store.localEdit(target, eventId) != intent ||
+                store.localEditPreparation(target, eventId) != result.record.preparation))
+                return@withLock TitleUpdateAcknowledgementResult.UNRESOLVED
+            // The final journal/source reads can suspend. Recheck selection and account after
+            // them as well as the synchronous epoch/mode/permission lease in the Provider.
+            if (!available()) return@withLock TitleUpdateAcknowledgementResult.INACTIVE
+            // No fallback from historical inspection to another native write. The first receipt
+            // stays pending even when an interruption happened before the batch actually executed.
+            val witness = if (reservation.fresh) projection.acknowledgeTitleUpdate(retained.receipt)
+                else projection.inspectTitleUpdateAcknowledgement(retained.receipt)
+            if (!available()) return@withLock TitleUpdateAcknowledgementResult.INACTIVE
+            if (witness?.receipt?.snapshot() != retained.receipt || journal.readVerified(target, attempt) != result ||
+                store.titleUpdateAcknowledgement(target, eventId) != retained)
+                return@withLock TitleUpdateAcknowledgementResult.UNRESOLVED
+            if (!store.restoreTitleUpdateAcknowledgement(witness))
+                return@withLock TitleUpdateAcknowledgementResult.UNRESOLVED
+            TitleUpdateAcknowledgementResult.ACKNOWLEDGED
+        } catch (cancelled: CancellationException) { throw cancelled }
+          catch (_: Exception) {
+              if (!active()) TitleUpdateAcknowledgementResult.INACTIVE else TitleUpdateAcknowledgementResult.UNRESOLVED
+          } finally {
+              store.admitTransaction = { false }
+              projection.admitOperation = { false }
+          }
+    }
 
     /** Explicit internal UPDATE snapshot only. The dirty Provider row is never acknowledged. */
     suspend fun captureLocalEdit(target: CalendarScope, eventId: EventId, id: MutationId): LocalEditCaptureResult = mutex.withLock {

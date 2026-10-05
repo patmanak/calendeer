@@ -2,8 +2,9 @@
 
 The release target remains bidirectional synchronization through Android calendar
 clients. This internal experiment qualifies a narrower service boundary: submitting
-one prepared title change for a simple personal event. It does not activate UPDATE
-in the application, acknowledge Android edits or release pending local work.
+one prepared title change for a simple personal event. A separate internal path
+conditionally acknowledges ordinary imported Android events after their result
+is retained. UPDATE remains unavailable to production workers and UI controls.
 
 ## Supported work and ownership
 
@@ -81,6 +82,45 @@ prepare, claim or submit step. A retained result is a historical observation,
 not current server state, server authorship, native ACK admission or permission
 to send again. The event's unresolved-attempt hold remains in place.
 
+## Ordinary native acknowledgement
+
+`ImportCoordinator.acknowledgeLocalTitle` consumes an already retained result;
+it cannot prepare, submit or inspect a service request. Current account, calendar
+selection, import format, permissions and experimental editing policy must qualify
+the call, including after suspended source reads. CREATE origin rows and represented
+events are refused. This first path covers ordinary simple imported events only.
+
+Before writing Android, `ImportStore` reserves one immutable receipt linking the
+attempt identity, complete original intent, old/new baselines and nonce. The
+preparation fingerprint checks every original field, timestamp and protected
+payload without copying a second sealed blob into the receipt. The additive
+version-sixteen import migration preserves existing work.
+
+Only the fresh reservation may call the native write. One atomic Calendar Provider
+batch asserts the unique owned calendar and both event identities, complete
+submitted contents, old revision, `DIRTY=1`, `DELETED=0`, supported ordinary markers
+and absent children. It changes only `DIRTY`, revision marker `SYNC_DATA2` and
+receipt marker `SYNC_DATA3`. A later edit, tombstone, child or metadata change
+before the batch prevents acknowledgement and stays intact.
+
+Qualified native proof restores SQL atomically: advance the exact old baseline,
+close only the original intent and preparation, advance only an exact old cached
+record to the result, and archive the receipt as RESTORED. Other remote records
+and deferred observations survive. If a poll changed the same original intent
+to CONFLICT after the native commit, proof may close that exact historical
+owner; it never resets a conflict or substitutes another owner.
+
+Newer cached observations retain their existing projection state. If their
+projection was held by the original local intent, a later projection trigger must
+requeue them; this acknowledgement does not schedule that trigger.
+
+After interruption, an existing receipt permits marker inspection only. That
+historical inspection ignores and preserves subsequent native content, dirty
+flags, tombstones and children. SQL restoration can then complete without another
+native write. If the first batch never committed, the receipt stays pending;
+there is no automatic rearming. A RESTORED replay never consumes the next intent.
+The network attempt remains UNKNOWN and its per-event hold remains in place.
+
 ## Concurrency and integration limits
 
 The fresh GET and subsequent PUT are successive observations, **not an atomic
@@ -88,11 +128,12 @@ server precondition**. A concurrent Proton change between them may be overwritte
 Readback proves current observed contents, not authorship or immutable remote
 history. This adapter does not advertise general conflict-safe write capability.
 
-There is no production worker, UI toggle or Provider acknowledgement for UPDATE.
-The existing system observer continues to retain edits/deletions locally. Before
-activation, a separate owner must bind captured native work to this journal,
-acknowledge only the exact unchanged native
-snapshot, preserve a later DIRTY edit and recover the cross-store transition.
+There is no production worker or UI toggle for UPDATE. The existing system
+observer continues to retain edits/deletions locally. Before activation, a
+separate owner must bind captured native work to this journal, extend native
+acknowledgement to CREATE-handoff provenance and qualify the complete service
+and native journey. The ordinary internal path does not release the permanent
+network attempt hold or enable a second outgoing edit cycle.
 Conflict policy, further editable fields, recurrence, invitations and DELETE
 remain separate work.
 
@@ -110,6 +151,12 @@ remain separate work.
 - `TitleUpdateResultStoreDeviceTest` checks result persistence, migration,
   immutable first proof, concurrent handles, corruption and transaction failures
   in isolated SQLite fixtures. No Provider or service request is involved.
+- `TitleUpdateAcknowledgementTest` checks complete receipt/preparation bindings.
+  The Provider, Store and Coordinator device fixtures exercise atomic metadata
+  changes, concurrent local/remote edits, lost replies, interrupted restoration,
+  access revocation and idempotent history. Integration fixtures combine the real
+  Provider, both SQLite stores and coordinator with synthetic result evidence;
+  they do not establish Proton acceptance or a service-to-native UPDATE journey.
 - `ProtonTitleUpdateSubmissionTest`, `ProtonTitleUpdateSubmissionDispatchTest`
   and `ProtonTitleUpdateSubmissionCoreTest` exercise strict serialization,
   fresh qualification, readback refusal, transport permits and the real Core/

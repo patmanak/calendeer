@@ -31,9 +31,17 @@ the profile on their next projection. The /e/OS event-detail editor saved a titl
 that remained capturable after restart on the same row. Samsung editing and
 automatic UPDATE remain unqualified. An [internal title UPDATE experiment](TITLE_UPDATE_SUBMISSION.md)
 adds a separate protected request and durable inspection-only journal, without
-native acknowledgement or worker activation. Verified full-content results now
+automatic UPDATE or worker activation. Verified full-content results now
 have immutable, attempt-bound storage and an internal inspect-only recovery path;
 retained history can be read offline without releasing the UNKNOWN attempt.
+An internal ordinary-event acknowledgement reserves a durable receipt, changes
+only native synchronization metadata and restores the exact local intent's SQL
+baseline. Recovery inspects the same nonce and preserves later local edits and
+new remote observations. CREATE-handoff acknowledgement remains separate work;
+the service-to-native UPDATE journey and automatic activation are unqualified.
+Isolated physical Provider/SQLite integration qualifies same-row acknowledgement,
+interrupted restoration and preservation of a later dirty edit. Newer cached
+observations retain their projection state and require a later requeue trigger.
 One retained simple timed event
 qualified a single title PUT and full authenticated readback after process restart,
 with its original preparation and UNKNOWN journal intact. Fresh GET/PUT is not server CAS.

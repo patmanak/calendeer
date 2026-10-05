@@ -136,10 +136,12 @@ class ProjectionRepresentationStoreDeviceTest {
             db.execSQL("ALTER TABLE projection_receipts RENAME TO old_receipts")
             db.execSQL("CREATE TABLE projection_receipts(scope TEXT NOT NULL,event TEXT NOT NULL,nonce TEXT NOT NULL UNIQUE,payload TEXT NOT NULL,adapter TEXT NOT NULL,version INTEGER NOT NULL,previous_base TEXT,protocol INTEGER NOT NULL CHECK(protocol=1),PRIMARY KEY(scope,event))")
             db.execSQL("INSERT INTO projection_receipts SELECT scope,event,nonce,payload,adapter,version,previous_base,protocol FROM old_receipts")
-            db.execSQL("DROP TABLE old_receipts"); db.version = 14
+            db.execSQL("DROP TABLE old_receipts")
+            db.execSQL("DROP TABLE title_update_acknowledgements")
+            db.version = 14
         }
         ImportStore(context, name).use { reopened ->
-            assertEquals(15, reopened.readableDatabase.version); assertEquals(receipt, reopened.projectionReceipt(scope, next.eventId))
+            assertEquals(16, reopened.readableDatabase.version); assertEquals(receipt, reopened.projectionReceipt(scope, next.eventId))
             assertEquals(basePayload, reopened.readableDatabase.rawQuery("SELECT payload FROM projection_bases", null).use { it.moveToFirst(); it.getString(0) })
             assertEquals(receiptPayload, reopened.readableDatabase.rawQuery("SELECT payload FROM projection_receipts", null).use { it.moveToFirst(); it.getString(0) })
             assertTrue(reopened.restoreProjection(AppliedProjectionWitness(receipt)))

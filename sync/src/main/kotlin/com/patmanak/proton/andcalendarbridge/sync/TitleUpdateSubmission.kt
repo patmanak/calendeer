@@ -44,6 +44,15 @@ data class TitleUpdateAttemptIdentity(val scope: CalendarScope, val id: Mutation
         require(listOf(preparationFingerprint, payloadFingerprint).all { it.matches(Regex("[a-f0-9]{64}")) })
     }
     override fun toString() = "TitleUpdateAttemptIdentity(redacted)"
+    /** Complete historical preparation binding; no protected wire decoding or write admission. */
+    fun matchesPreparation(preparation: LocalEditPreparation): Boolean {
+        val frozen = preparation.copy(intent = LocalEditPreparation.freezeIntent(preparation.intent))
+        val intent = frozen.intent
+        if (intent.base.content.details != EventDetails() || intent.base.content.colorRgb != null) return false
+        return scope == intent.scope && localIntentId == intent.id && eventId == intent.base.eventId &&
+            baseRevision == intent.base.revision && preparationFormat == frozen.format &&
+            preparationFingerprint == preparationFingerprint(frozen)
+    }
     companion object {
         fun of(record: TitleUpdateAttemptRecord): TitleUpdateAttemptIdentity {
             val value = record.frozen()

@@ -44,6 +44,8 @@ import com.patmanak.proton.andcalendarbridge.sync.CapturedHandoffCurrent
 import com.patmanak.proton.andcalendarbridge.sync.CapturedHandoffCurrentObservation
 import com.patmanak.proton.andcalendarbridge.sync.CapturedHandoffProjection
 import com.patmanak.proton.andcalendarbridge.sync.AppliedCapturedHandoffProjection
+import com.patmanak.proton.andcalendarbridge.sync.TitleUpdateAcknowledgementReceipt
+import com.patmanak.proton.andcalendarbridge.sync.AppliedTitleUpdateAcknowledgement
 import com.patmanak.proton.andcalendarbridge.sync.RecurrencePoint
 import com.patmanak.proton.andcalendarbridge.sync.RemoteChange
 import com.patmanak.proton.andcalendarbridge.sync.EventContent
@@ -88,6 +90,51 @@ data class EnsuredCalendar(val id: Long, val created: Boolean)
  * order opaque revisions and never infers deletion from an absent event in a server page.
  */
 class AndroidCalendarProjection(context: Context) : CalendarProjection {
+    override val titleUpdateAcknowledgementProtocol: Int? = 1
+    override suspend fun acknowledgeTitleUpdate(receipt: TitleUpdateAcknowledgementReceipt): AppliedTitleUpdateAcknowledgement? {
+        val frozen = receipt.snapshot()
+        return operation {
+            if (captureSimpleSnapshot(frozen.intent.scope, frozen.intent.base, deleted = false, acknowledgement = frozen) != null)
+                AppliedTitleUpdateAcknowledgement(frozen) else null
+        }
+    }
+    override suspend fun inspectTitleUpdateAcknowledgement(receipt: TitleUpdateAcknowledgementReceipt): AppliedTitleUpdateAcknowledgement? {
+        val frozen = receipt.snapshot()
+        return operation {
+            val scope = frozen.intent.scope
+            val account = accountFor(scope.account)
+            val calendar = calendarRow(scope, account) ?: return@operation null
+            val remoteId = digest("event-v1", calendarSyncId(scope), frozen.intent.base.eventId.value)
+            val uri = syncUri(Events.CONTENT_URI, account)
+            val identity = Selection("${Events.CALENDAR_ID}=? AND (${Events.SYNC_DATA4}=? OR " +
+                "(${Events.SYNC_DATA4} IS NULL AND ${Events._SYNC_ID}=?))", arrayOf(calendar.toString(), remoteId, remoteId))
+            val row = ownedRow(uri, identity, Events.SYNC_DATA1) ?: return@operation null
+            // Historical proof excludes current flags/content/children; all ownership metadata
+            // remains exact and is asserted atomically, including reserved and CREATE markers.
+            val metadata = resolver.query(uri, arrayOf(Events._ID, Events.CALENDAR_ID) + ATTACHMENT_SYNC_COLUMNS,
+                identity.sql, identity.args, null)?.use {
+                if (it.count != 1 || !it.moveToFirst()) return@operation null
+                ContentValues().apply { DatabaseUtils.cursorRowToContentValues(it, this) }
+            } ?: fail(CalendarProjectionFailure.PROVIDER_UNAVAILABLE)
+            if (metadata.getAsLong(Events._ID) != row || metadata.getAsLong(Events.CALENDAR_ID) != calendar ||
+                metadata.getAsString(Events._SYNC_ID) != remoteId || metadata.getAsString(Events.SYNC_DATA4) != remoteId ||
+                metadata.getAsString(Events.SYNC_DATA1) != OWNER_MARKER ||
+                metadata.getAsString(Events.SYNC_DATA2) != digest("revision-v1", frozen.projection.change.revision.value) ||
+                metadata.getAsString(Events.SYNC_DATA3) != receiptMarker(frozen.projection) ||
+                ORDINARY_RESERVED_COLUMNS.any { metadata[it] != null }) return@operation null
+            val syncIdentity = Selection("${Events.CALENDAR_ID}=? AND ${Events._SYNC_ID}=?", arrayOf(calendar.toString(), remoteId))
+            if (ownedRow(uri, syncIdentity, Events.SYNC_DATA1) != row) return@operation null
+            requirePermissions()
+            capturedBatch(arrayListOf(
+                assertion(syncUri(Calendars.CONTENT_URI, account), calendarSelection(scope, account), calendar),
+                ContentProviderOperation.newAssertQuery(uri).withSelection(identity.sql, identity.args)
+                    .withValues(metadata).withExpectedCount(1).build(),
+                assertion(uri, syncIdentity, row),
+            ), intArrayOf(1, 1, 1))
+            requirePermissions()
+            AppliedTitleUpdateAcknowledgement(frozen)
+        }
+    }
     @Volatile override var admitOperation: () -> Boolean = { true }
     private val context = context.applicationContext
     private val resolver = this.context.contentResolver
@@ -405,7 +452,8 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
         captureSimpleSnapshot(scope, base, deleted = true)
     }
 
-    private fun captureSimpleSnapshot(scope: CalendarScope, base: RemoteChange.Upsert, deleted: Boolean): OwnedLocalEditSnapshot? {
+    private fun captureSimpleSnapshot(scope: CalendarScope, base: RemoteChange.Upsert, deleted: Boolean,
+        acknowledgement: TitleUpdateAcknowledgementReceipt? = null): OwnedLocalEditSnapshot? {
         if (base.content.recurrence != null ||
             (base.content.details != null && base.content.details != EventDetails())) return null
         val account = accountFor(scope.account)
@@ -424,7 +472,8 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
             Events.ORIGINAL_ALL_DAY, Events.STATUS, Events.HAS_ATTENDEE_DATA, Events.ORGANIZER, Events.IS_ORGANIZER,
             Events.GUESTS_CAN_MODIFY, Events.GUESTS_CAN_INVITE_OTHERS, Events.GUESTS_CAN_SEE_GUESTS,
             Events.HAS_ALARM, Events.SELF_ATTENDEE_STATUS, Events.AVAILABILITY, Events.ACCESS_LEVEL,
-            Events.CUSTOM_APP_PACKAGE, Events.CUSTOM_APP_URI)
+            Events.CUSTOM_APP_PACKAGE, Events.CUSTOM_APP_URI) + if (acknowledgement == null) emptyArray() else
+                arrayOf(Events.SYNC_DATA3, Events.SYNC_DATA8, Events.SYNC_DATA9, Events.SYNC_DATA10)
         val values = resolver.query(uri, columns, identity.sql, identity.args, null)?.use {
             if (it.count != 1 || !it.moveToFirst()) return null
             ContentValues().apply { DatabaseUtils.cursorRowToContentValues(it, this) }
@@ -435,6 +484,9 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
             CAPTURED_ORIGIN_COLUMNS.any { values[it] != null } ||
             values.getAsInteger(Events.DIRTY) != 1 || values.getAsInteger(Events.DELETED) != (if (deleted) 1 else 0))
             return null
+        if (acknowledgement != null && (values.getAsString(Events.SYNC_DATA4) != remoteId ||
+                ORDINARY_RESERVED_COLUMNS.any { values[it] != null } ||
+                !ordinaryReceiptMarker(values.getAsString(Events.SYNC_DATA3)))) return null
         val unsupported = arrayOf(Events.RRULE, Events.RDATE, Events.EXRULE, Events.EXDATE, Events.DURATION,
             Events.ORIGINAL_ID, Events.ORIGINAL_SYNC_ID, Events.ORIGINAL_INSTANCE_TIME, Events.ORIGINAL_ALL_DAY,
             Events.ORGANIZER, Events.EVENT_COLOR_KEY, Events.CUSTOM_APP_PACKAGE, Events.CUSTOM_APP_URI)
@@ -453,12 +505,20 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
             values.getAsString(Events.DESCRIPTION) ?: "", values.getAsString(Events.EVENT_LOCATION) ?: "",
             base.content.colorRgb, details = base.content.details)
         if (!deleted && content == base.content) return null
-        // Assertion-only batch: qualify the complete snapshot and absent child data together.
-        // It does not make the later SQLite capture atomic with the Provider or clear DIRTY.
+        if (acknowledgement != null && content != acknowledgement.intent.content) return null
+        // Ordinary capture stays assertion-only. ACK additionally compares the exact submitted
+        // content and changes only three metadata columns in the same atomic Provider batch.
         val checks = arrayListOf(assertion(syncUri(Calendars.CONTENT_URI, account), calendarSelection(scope, account), calendar),
             assertion(uri, identity, row),
             ContentProviderOperation.newAssertQuery(uri).withSelection(identity.sql, identity.args)
                 .withValues(values).withExpectedCount(1).build())
+        val expected = mutableListOf(1, 1, 1)
+        if (acknowledgement != null) {
+            val syncIdentity = Selection("${Events.CALENDAR_ID}=? AND ${Events._SYNC_ID}=?", arrayOf(calendar.toString(), remoteId))
+            if (ownedRow(uri, syncIdentity, Events.SYNC_DATA1) != row) return null
+            checks += assertion(uri, syncIdentity, row)
+            expected += 1
+        }
         for ((child, column) in listOf(Reminders.CONTENT_URI to Reminders.EVENT_ID,
             Attendees.CONTENT_URI to Attendees.EVENT_ID, ExtendedProperties.CONTENT_URI to ExtendedProperties.EVENT_ID)) {
             val childrenAbsent = resolver.query(syncUri(child, account), arrayOf("_id"),
@@ -467,9 +527,18 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
             if (!childrenAbsent) return null
             checks += ContentProviderOperation.newAssertQuery(syncUri(child, account))
                 .withSelection("$column=?", arrayOf(row.toString())).withExpectedCount(0).build()
+            expected += 0
+        }
+        if (acknowledgement != null) {
+            checks += ContentProviderOperation.newUpdate(uri).withSelection(identity.sql, identity.args)
+                .withValue(Events.DIRTY, 0)
+                .withValue(Events.SYNC_DATA2, digest("revision-v1", acknowledgement.projection.change.revision.value))
+                .withValue(Events.SYNC_DATA3, receiptMarker(acknowledgement.projection))
+                .withExpectedCount(1).build()
+            expected += 1
         }
         requirePermissions()
-        capturedBatch(checks, intArrayOf(1, 1, 1, 0, 0, 0))
+        capturedBatch(checks, expected.toIntArray())
         requirePermissions()
         return OwnedLocalEditSnapshot(calendar, row, content)
     }
@@ -1258,6 +1327,9 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
             Events.SYNC_DATA3, Events.SYNC_DATA4, Events.SYNC_DATA5, Events.SYNC_DATA6, Events.SYNC_DATA7,
             Events.SYNC_DATA8, Events.SYNC_DATA9, Events.SYNC_DATA10)
         private val CAPTURED_ORIGIN_COLUMNS = arrayOf(Events.SYNC_DATA5, Events.SYNC_DATA6, Events.SYNC_DATA7)
+        private val ORDINARY_RESERVED_COLUMNS = CAPTURED_ORIGIN_COLUMNS + arrayOf(Events.SYNC_DATA8, Events.SYNC_DATA9, Events.SYNC_DATA10)
+        private fun ordinaryReceiptMarker(value: String?) = value == null ||
+            value.matches(Regex("calendeer-projection-receipt-v1:[a-f0-9]{8}(-[a-f0-9]{4}){3}-[a-f0-9]{12}"))
         private fun strictAttachmentDigest(vararg parts: String): String {
             val hash = MessageDigest.getInstance("SHA-256")
             for (part in parts) {
