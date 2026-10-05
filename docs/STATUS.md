@@ -45,6 +45,11 @@ receipt history supports successive title cycles and old replay without consumin
 the next intent. The original UNKNOWN attempt remains non-resendable; unresolved
 work and corrupt history block new admission across generations. The service-to-native
 UPDATE journey and automatic activation are unqualified.
+The system observer now reuses a retained UPDATE identity and allocates a distinct
+identity after that owner is consumed, for imported and CREATE-handoff events.
+A bounded, scope-bound metadata index lists unresolved title attempts independently
+of the local intent table, including the gap between acknowledgement and completion.
+This discovery index grants no dispatch or recovery authority.
 Isolated physical Provider/SQLite integration qualifies same-row acknowledgement,
 interrupted restoration and preservation of a later dirty edit. Newer cached
 observations retain their projection state and require a later requeue trigger.
@@ -67,7 +72,7 @@ sessions and imported calendars. See [identity and interface](DESIGN.md).
 | Module | Implemented | Not established by this slice |
 | --- | --- | --- |
 | `app` | Configuration, login, discovery, read-only imports and opt-in simple system CREATE; eight languages; durable import/create queues, Calendar Provider projection, permissions and background scheduling. | Broad Android/OEM qualification, general UPDATE/DELETE or complete event feature coverage. |
-| `sync` | Pure scoped models, bounded transactional pagination, access gates, immutable simple local CREATE/UPDATE/DELETE intents, conflict checks, uncertain-outcome write states, internal title submission contract and a separate metadata catalog controller. | General outgoing queue, automatic UPDATE capture or bidirectional reconciliation. |
+| `sync` | Pure scoped models, bounded transactional pagination, access gates, immutable simple local CREATE/UPDATE/DELETE intents, conflict checks, uncertain-outcome write states, internal title submission contract and a separate metadata catalog controller. | General outgoing queue, automatic UPDATE submission or bidirectional reconciliation. |
 | `auth` | Contako-derived secret contract and state controller, cancellation/cleanup gates, retry policy and focused tests. | Calendar bootstrap or per-calendar capability checks. |
 | `proton-auth` | Proton Core login/session integration, discovery, Calendar key bootstrap, paginated decryption, sealed change polling, bounded recurrence mapping, experimental single simple-event CREATE and internal title UPDATE transport. | All challenge variants, external-author trust resolution, complete recurrence/history coverage or general event editing. |
 

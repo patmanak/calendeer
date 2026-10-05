@@ -141,9 +141,9 @@ class SystemCreateController(
                             val event = change.event
                             if (event == null) mutableState.update { it.copy(failed = true) }
                             else {
-                                val mutation = mutation(target, "imported-local-change", event.value)
-                                val result = if (change.deleted) imports.captureLocalDelete(target, event, mutation)
-                                    else imports.captureLocalEdit(target, event, mutation)
+                                val result = if (change.deleted) imports.captureLocalDelete(target, event,
+                                    mutation(target, "imported-local-change", event.value))
+                                    else imports.captureSystemLocalEdit(target, event)
                                 if (result == LocalEditCaptureResult.UNAVAILABLE) retry = true
                                 if (result == LocalEditCaptureResult.UNQUALIFIED)
                                     mutableState.update { it.copy(failed = true) }
@@ -155,7 +155,7 @@ class SystemCreateController(
                             if (retained == null) mutableState.update { it.copy(failed = true) }
                             else if (retained.status == SystemCreateWorkStatus.COMPLETE) {
                                 val result = imports.reconcileHandoffLocalCreate(target, retained.localId,
-                                    retained.captureId, retained.attempt, mutation(target, "captured-local-change", retained.captureId.value))
+                                    retained.captureId, retained.attempt)
                                 if (result != CapturedCreateReconciliationResult.UNCHANGED)
                                     work.status(retained, if (result == CapturedCreateReconciliationResult.UNSUPPORTED)
                                         SystemCreateWorkStatus.UNSUPPORTED else SystemCreateWorkStatus.WAITING)
@@ -195,7 +195,7 @@ class SystemCreateController(
         val mutation = mutation(target, "captured-local-change", retained.captureId.value)
         if (priorAttempt?.state == CreateAttemptState.OUTCOME_UNKNOWN) {
             // Recover a completed handoff whose final queue status was lost, or preserve later edits.
-            when (imports.reconcileHandoffLocalCreate(target, retained.localId, retained.captureId, retained.attempt, mutation)) {
+            when (imports.reconcileHandoffLocalCreate(target, retained.localId, retained.captureId, retained.attempt)) {
                 CapturedCreateReconciliationResult.UNCHANGED -> {
                     work.status(retained, SystemCreateWorkStatus.COMPLETE); return false
                 }

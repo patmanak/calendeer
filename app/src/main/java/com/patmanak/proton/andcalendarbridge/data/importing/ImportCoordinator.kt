@@ -600,9 +600,17 @@ class ImportCoordinator(
         captureLocalEditLocked(target, eventId, id, generation, createPolicyRevision.get())
     }
 
-    private suspend fun captureLocalEditLocked(target: CalendarScope, eventId: EventId, id: MutationId,
-        expected: Long, policy: Long): LocalEditCaptureResult {
-        val active = { authenticated && generation == expected && createPolicyRevision.get() == policy && hasCalendarPermissions() }
+    /** Offline observer capture. Reuse the durable owner until it is closed; a later cycle
+     * receives a new identity, never the event's fixed identity from a previous upload.
+     */
+    suspend fun captureSystemLocalEdit(target: CalendarScope, eventId: EventId): LocalEditCaptureResult = mutex.withLock {
+        captureLocalEditLocked(target, eventId, null, generation, createPolicyRevision.get(), requireSystemMode = true)
+    }
+
+    private suspend fun captureLocalEditLocked(target: CalendarScope, eventId: EventId, id: MutationId?,
+        expected: Long, policy: Long, requireSystemMode: Boolean = false): LocalEditCaptureResult {
+        val active = { authenticated && generation == expected && createPolicyRevision.get() == policy && hasCalendarPermissions() &&
+            (!requireSystemMode || systemCreatesEnabled(target)) }
         if (!isCurrent(expected, target.account) || !active()) return LocalEditCaptureResult.INACTIVE
         store.admitTransaction = { it == target && active() }
         projection.admitOperation = active
@@ -614,14 +622,15 @@ class ImportCoordinator(
             if (format != remote.format) return LocalEditCaptureResult.UNQUALIFIED
             if (store.localDelete(target, eventId) != null) return LocalEditCaptureResult.UNQUALIFIED
             val retained = store.localEdit(target, eventId)
+            val mutation = id ?: retained?.id ?: MutationId(java.util.UUID.randomUUID().toString())
             if (retained != null) {
-                if (retained.id != id || retained.format != format) return LocalEditCaptureResult.UNQUALIFIED
+                if (retained.id != mutation || retained.format != format) return LocalEditCaptureResult.UNQUALIFIED
                 return if (retained.state == LocalEditState.CONFLICT) LocalEditCaptureResult.CONFLICT else LocalEditCaptureResult.RETAINED
             }
             val base = captureBaseline(expected, target, eventId) ?: return LocalEditCaptureResult.UNQUALIFIED
             val snapshot = projection.captureOwnedSimpleEdit(target, base) ?: return LocalEditCaptureResult.UNQUALIFIED
             if (!isCurrent(expected, target.account) || !active()) return LocalEditCaptureResult.INACTIVE
-            val captured = store.captureLocalEdit(LocalEditIntent(id, target, format, base, snapshot.content))
+            val captured = store.captureLocalEdit(LocalEditIntent(mutation, target, format, base, snapshot.content))
             if (captured.state == LocalEditState.CONFLICT) LocalEditCaptureResult.CONFLICT else LocalEditCaptureResult.RETAINED
         } catch (cancelled: CancellationException) { throw cancelled }
           catch (_: Exception) { LocalEditCaptureResult.UNAVAILABLE }
@@ -1654,15 +1663,19 @@ class ImportCoordinator(
         return store.restoreCapturedHandoffProjection(witness)
     }
 
-    /** Retain a later dirty intention against the current reference, never the original sent base. */
+    /** Retain a later dirty intention against the current reference, never the original sent base.
+     * Automatic observations reuse an existing durable owner, or allocate a distinct new UUID.
+     * Explicit caller identities retain their original strict matching behavior.
+     */
     suspend fun reconcileHandoffLocalCreate(target: CalendarScope, localId: LocalEventId, id: MutationId,
-        attempt: MutationId, mutation: MutationId): CapturedCreateReconciliationResult = mutex.withLock {
+        attempt: MutationId, mutation: MutationId? = null): CapturedCreateReconciliationResult = mutex.withLock {
         val captures = localCreates ?: return@withLock CapturedCreateReconciliationResult.UNRESOLVED
         val journal = creates ?: return@withLock CapturedCreateReconciliationResult.UNRESOLVED
         ensureCreateLifecycle()
         val expected = generation
         val policy = createPolicyRevision.get()
-        val active = { authenticated && generation == expected && createPolicyRevision.get() == policy && hasCalendarPermissions() }
+        val active = { authenticated && generation == expected && createPolicyRevision.get() == policy && hasCalendarPermissions() &&
+            (mutation != null || systemCreatesEnabled(target)) }
         suspend fun available(): Boolean = isCurrent(expected, target.account) && active() &&
             store.selections(target.account).singleOrNull { it.scope == target }?.let { it.enabled && it.available } == true && active()
         try {
@@ -1671,7 +1684,7 @@ class ImportCoordinator(
             val submission = captures.readSubmission(target, localId) ?: return@withLock CapturedCreateReconciliationResult.UNRESOLVED
             val capture = submission.reservation.intent.reservation
             if (capture.id != id || capture.localId != localId || capture.scope != target || submission.reservation.attempt != attempt ||
-                mutation == id || mutation == attempt || mutation.value == localId.value) return@withLock CapturedCreateReconciliationResult.UNRESOLVED
+                mutation == id || mutation == attempt || mutation?.value == localId.value) return@withLock CapturedCreateReconciliationResult.UNRESOLVED
             val binding = journal.capturedBinding(CapturedCreateDispatchIdentity.of(submission)) ?: return@withLock CapturedCreateReconciliationResult.UNRESOLVED
             var role = store.capturedHandoff(target, binding.eventId) ?: return@withLock CapturedCreateReconciliationResult.UNRESOLVED
             if (role.state != CapturedCreateHandoffState.RELEASED || !handoffSource(role.frame, active) ||
@@ -1687,7 +1700,11 @@ class ImportCoordinator(
                 return@withLock if (observed == CapturedHandoffCurrentObservation.Unsupported)
                     CapturedCreateReconciliationResult.UNSUPPORTED else CapturedCreateReconciliationResult.UNRESOLVED
             }
-            val retained = store.retainCapturedHandoffLocalChange(snapshot, mutation)
+            val owner = mutation ?: store.localEdit(target, binding.eventId)?.id ?: store.localDelete(target, binding.eventId)?.id
+                ?: MutationId(java.util.UUID.randomUUID().toString())
+            if (owner == id || owner == attempt || owner.value == localId.value)
+                return@withLock CapturedCreateReconciliationResult.UNRESOLVED
+            val retained = store.retainCapturedHandoffLocalChange(snapshot, owner)
             if (!available()) return@withLock CapturedCreateReconciliationResult.INACTIVE
             val second = projection.captureCapturedHandoffCurrent(role.frame) as? CapturedHandoffCurrentObservation.Supported
             if (!available()) return@withLock CapturedCreateReconciliationResult.INACTIVE

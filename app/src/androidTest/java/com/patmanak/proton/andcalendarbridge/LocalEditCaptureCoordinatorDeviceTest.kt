@@ -9,6 +9,7 @@ import com.patmanak.proton.andcalendarbridge.data.calendar.*
 import com.patmanak.proton.andcalendarbridge.data.importing.*
 import com.patmanak.proton.andcalendarbridge.sync.*
 import com.patmanak.proton.andcalendarbridge.sync.catalog.CalendarSummary
+import java.time.Instant
 import java.time.LocalDate
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicInteger
@@ -33,6 +34,7 @@ class LocalEditCaptureCoordinatorDeviceTest {
         val latest = base.copy(revision = Revision("remote"), content = base.content.copy(title = "Remote fixture"))
         val store = ImportStore(context, name)
         var permission = true
+        var systemMode = true
         var currentAccount: AccountId? = target.account
         var reads = 0
         var onRead: suspend () -> Unit = {}
@@ -64,7 +66,8 @@ class LocalEditCaptureCoordinatorDeviceTest {
             override fun continueWork(network: Boolean) = Unit
         }
         private val jobs = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-        val coordinator = ImportCoordinator(context, store, remote, projection, jobs, scheduler)
+        val coordinator = ImportCoordinator(context, store, remote, projection, jobs, scheduler,
+            systemCreatesEnabled = { systemMode })
         suspend fun seed() {
             store.remember(target.account, listOf(CalendarSummary(target.calendar, "Capture fixture")))
             store.setEnabled(target, true)
@@ -80,6 +83,7 @@ class LocalEditCaptureCoordinatorDeviceTest {
             }
         }
         suspend fun capture(editId: MutationId = id) = coordinator.captureLocalEdit(target, base.eventId, editId)
+        suspend fun observe() = coordinator.captureSystemLocalEdit(target, base.eventId)
         suspend fun retained(): LocalEditIntent? {
             store.admitTransaction = { true }
             return store.localEdit(target, base.eventId)
@@ -161,5 +165,44 @@ class LocalEditCaptureCoordinatorDeviceTest {
         store.transaction(target) { checkpoint = PageCheckpoint(target, AdapterFormat("foreign-format", 1)) }
         assertEquals(LocalEditCaptureResult.UNQUALIFIED, capture())
         assertEquals(0, reads); assertNull(retained())
+    }
+
+    @Test fun observerPreservesPreparedOwnerAndConflictWithoutReadingALaterNativeEdit() = fixture {
+        assertEquals(LocalEditCaptureResult.RETAINED, observe())
+        val first = retained()!!
+        val preparation = LocalEditPreparation(first, Instant.parse("2030-10-01T10:00:00Z"),
+            AdapterFormat("synthetic-preparation", 1), "synthetic-protected-preparation")
+        assertTrue(store.retainLocalEditPreparation(preparation))
+        snapshot = snapshot!!.copy(content = local.copy(title = "Later synthetic native edit"))
+        assertEquals(LocalEditCaptureResult.RETAINED, observe())
+        assertEquals(first, retained()); assertEquals(1, reads)
+        assertEquals(preparation, store.localEditPreparation(target, base.eventId))
+        cache(latest)
+        assertEquals(LocalEditCaptureResult.CONFLICT, observe())
+        val conflict = retained()!!
+        assertEquals(first.id, conflict.id); assertEquals(first.content, conflict.content)
+        assertEquals(LocalEditState.CONFLICT, conflict.state); assertEquals(1, reads)
+        // A remote conflict does not replace the preparation already retained for this identity.
+        assertEquals(preparation, store.localEditPreparation(target, base.eventId))
+    }
+
+    @Test fun observerRequiresSystemModePermissionsAndMatchingAccountBeforeNativeRead() = fixture {
+        systemMode = false
+        assertEquals(LocalEditCaptureResult.INACTIVE, observe())
+        systemMode = true; permission = false
+        assertEquals(LocalEditCaptureResult.INACTIVE, observe())
+        permission = true; currentAccount = AccountId("foreign-fixture")
+        assertEquals(LocalEditCaptureResult.INACTIVE, observe())
+        assertEquals(0, reads); assertNull(retained())
+        currentAccount = target.account; systemMode = false
+        // Existing explicit callers retain their original contract, independent of observer opt-in.
+        assertEquals(LocalEditCaptureResult.RETAINED, capture())
+        assertEquals(id, retained()!!.id)
+    }
+
+    @Test fun disablingSystemModeDuringObserverSnapshotCannotPersistANewOwner() = fixture {
+        onRead = { systemMode = false }
+        assertEquals(LocalEditCaptureResult.INACTIVE, observe())
+        assertEquals(1, reads); assertNull(retained())
     }
 }

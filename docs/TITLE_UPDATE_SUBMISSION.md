@@ -163,6 +163,33 @@ including their complete CREATE handoff frames, and corruption blocks new work.
 These histories currently retain every completed cycle; retention policy and
 production scheduling remain separate work.
 
+## Offline observation and work discovery
+
+The system observer reuses the existing durable UPDATE owner instead of deriving
+every edit's identity from the event ID. Its immutable content and preparation
+remain unchanged while retained, including after restart or conflict detection.
+After acknowledgement consumes that owner, a later observed edit receives a new
+UUID. Imported events and transferred CREATE events follow this rule; transferred
+events still require their complete creation evidence and current handoff frame.
+Automatic observation requires the experimental system-editing mode and the
+existing session, selection, adapter and permission gates. Explicit capture calls
+keep their caller-supplied identity contract.
+
+`TitleUpdateWorkJournal` exposes current unresolved attempt metadata in pages of
+at most fifty entries. Its cursor binds account, calendar, generation and protocol;
+SQLite BINARY event ordering and one-row lookahead determine continuation. Reads
+select bounded identities and state only, without loading protected requests or
+decoding proof histories. Non-null completions are excluded without qualifying
+their contents. Corrupt included metadata rejects the page with a sanitized error.
+
+The index survives process restart and does not depend on `local_edits`, which
+acknowledgement may already have consumed before completion is durable. It is
+neither a snapshot nor a dispatch permit. New insertions behind a cursor require
+a fresh first page. Old-generation work requires querying its original scope;
+the index does not rebind it to the current generation. Recovery must separately
+read full attempts and proofs and recheck access and admission. No production
+UPDATE scheduler is activated by these prerequisites.
+
 ## Concurrency and integration limits
 
 The fresh GET and subsequent PUT are successive observations, **not an atomic
@@ -205,6 +232,12 @@ remain separate work.
   Provider/SQLite composition checks two successive ordinary and transferred
   title cycles, lost completion commits and old replay during a newer reservation.
   Their remote results are synthetic; they make no UPDATE service request.
+- `TitleUpdateWorkPageTest` and `TitleUpdateWorkPageDeviceTest` check bounded
+  metadata pages, lookahead, strict identities, scope isolation, binary ordering,
+  reopening and insertions behind a cursor. `SystemCreatePipelineDeviceTest`
+  combines the real observer, Provider and SQLite stores for successive imported
+  and transferred title cycles with synthetic remote results. Capture coordinator
+  fixtures verify immutable preparations, conflict retention and observer gates.
 - `CapturedHandoffTitleAcknowledgementProviderDeviceTest` and
   `CapturedHandoffTitleAcknowledgementStoreDeviceTest` qualify explicit CREATE
   provenance, original and advanced frames, receipt reopening, conditional

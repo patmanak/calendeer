@@ -13,6 +13,7 @@ import java.nio.charset.CodingErrorAction
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
@@ -25,10 +26,42 @@ import org.json.JSONObject
  * Payload/evidence are opaque protected strings; this store grants no HTTP or Provider capability.
  */
 class TitleUpdateAttemptStore(context: Context, name: String = "calendar-title-update-attempt-v1.db") :
-    SQLiteOpenHelper(context, name, null, 3), TitleUpdateAttemptJournal, TitleUpdateCompletionJournal {
+    SQLiteOpenHelper(context, name, null, 3), TitleUpdateAttemptJournal, TitleUpdateCompletionJournal, TitleUpdateWorkJournal {
     private val lock = Mutex()
     override val completionProtocol = 1
     @Volatile var admitDispatch: (CalendarScope) -> Boolean = { false }
+
+    /** Metadata discovery only. A non-null completion is excluded without qualifying its proof;
+     * admission still validates the full event history independently, across generations.
+     */
+    override suspend fun page(query: TitleUpdateWorkQuery): TitleUpdateWorkPage = access { db -> transaction(db) {
+        try {
+            // Bound every selected value before CursorWindow allocation, including lookahead.
+            // Preserve UTF-8 bytes for strict decoding instead of accepting replacement text.
+            val columns = "CASE WHEN typeof(mutation)='text' AND length(CAST(mutation AS BLOB)) BETWEEN 1 AND 4096 THEN CAST(mutation AS BLOB) END, " +
+                "CASE WHEN typeof(event)='text' AND length(CAST(event AS BLOB)) BETWEEN 1 AND 4096 THEN CAST(event AS BLOB) END, " +
+                "CASE WHEN typeof(state)='text' AND length(CAST(state AS BLOB)) BETWEEN 1 AND 15 THEN state END"
+            val position = if (query.cursor == null) "" else " AND event COLLATE BINARY > ?"
+            val args = buildList {
+                add(query.scope.account.value); add(query.scope.calendar.value); add(query.scope.generation.toString())
+                query.cursor?.let { add(it.afterEvent.value) }; add((query.limit + 1).toString())
+            }.toTypedArray()
+            val rows = db.rawQuery("SELECT $columns FROM $TABLE WHERE account=? AND calendar=? AND generation=? " +
+                "AND completion IS NULL$position ORDER BY event COLLATE BINARY LIMIT ?", args).use { row -> buildList {
+                while (row.moveToNext()) {
+                    require(row.getType(0) == Cursor.FIELD_TYPE_BLOB && row.getType(1) == Cursor.FIELD_TYPE_BLOB &&
+                        row.getType(2) == Cursor.FIELD_TYPE_STRING)
+                    fun identity(column: Int) = Charsets.UTF_8.newDecoder()
+                        .onMalformedInput(CodingErrorAction.REPORT).onUnmappableCharacter(CodingErrorAction.REPORT)
+                        .decode(java.nio.ByteBuffer.wrap(row.getBlob(column))).toString()
+                    add(TitleUpdateWorkRef(MutationId(identity(0)), EventId(identity(1)),
+                        TitleUpdateAttemptState.valueOf(row.getString(2))))
+                }
+            } }
+            TitleUpdateWorkPage.fromOrderedMetadata(query, rows)
+        } catch (cancelled: CancellationException) { throw cancelled }
+          catch (_: Exception) { throw IllegalStateException("Invalid title work metadata") }
+    } }
 
     override fun onConfigure(db: SQLiteDatabase) {
         db.execSQL("PRAGMA synchronous=FULL")

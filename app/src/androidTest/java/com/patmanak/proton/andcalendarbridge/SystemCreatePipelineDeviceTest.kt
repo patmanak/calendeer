@@ -196,6 +196,18 @@ class SystemCreatePipelineDeviceTest {
         assertNotEquals(SystemCreateWorkStatus.COMPLETE, work.read(target, row)!!.status)
     }
 
+    @Test fun offlineObserverKeepsImportedIntentAcrossRestartAndAllocatesNextCycleIdentity() = fixture {
+        seedImported()
+        twoObservedTitleCycles(expectedCreates = 0)
+    }
+
+    @Test fun offlineObserverKeepsTransferredIntentAcrossRestartAndAllocatesNextCycleIdentity() = fixture {
+        assertEquals(ImportRunResult.COMPLETE, controller.run(network = true))
+        assertEquals(CapturedCreateHandoffState.RELEASED, handoff()!!.state)
+        cacheCreatedEcho()
+        twoObservedTitleCycles(expectedCreates = 1)
+    }
+
     @Test fun pausingImportClosesEditorAccessAndDisablingTheModeNeverCreatesAnInactiveCalendar() = fixture {
         assertTrue(coordinator.configureSystemCalendar(target))
         assertEquals(CalendarContract.Calendars.CAL_ACCESS_EDITOR, calendarAccess())
@@ -422,6 +434,79 @@ class SystemCreatePipelineDeviceTest {
         suspend fun handoff() = stored { store.capturedHandoff(target, remoteEvent.eventId) }
         suspend fun acknowledgement() = stored { store.capturedAcknowledgement(target, remoteEvent.eventId) }
         suspend fun localEdit() = stored { store.localEdit(target, remoteEvent.eventId) }
+
+        suspend fun cacheCreatedEcho() = stored { store.transaction(target) { putRemote(remoteEvent) } }
+
+        suspend fun seedImported() {
+            assertEquals(1, context.contentResolver.delete(syncUri(Events.CONTENT_URI),
+                "${Events._ID}=? AND ${Events.CALENDAR_ID}=?", arrayOf(row.toString(), calendar.toString())))
+            stored {
+                store.transaction(target) { putRemote(remoteEvent); putProjection(ProjectionIntent(target, remoteEvent)) }
+                projection.admitOperation = { true }
+                projection.apply(ProjectionIntent(target, remoteEvent))
+                assertEquals(1, store.acknowledge(ProjectionIntent(target, remoteEvent)))
+            }
+            row = context.contentResolver.query(syncUri(Events.CONTENT_URI), arrayOf(Events._ID),
+                "${Events.CALENDAR_ID}=?", arrayOf(calendar.toString()), null)!!.use {
+                assertEquals(1, it.count); assertTrue(it.moveToFirst()); it.getLong(0)
+            }
+        }
+
+        suspend fun finishTitle(intent: LocalEditIntent, cycle: String, journal: TitleUpdateAttemptStore) {
+            val preparation = LocalEditPreparation(intent, Instant.parse("2026-10-06T10:00:00Z"),
+                AdapterFormat("synthetic-observer-title-preparation", 1), "synthetic-protected-preparation-$cycle")
+            stored { assertTrue(store.retainLocalEditPreparation(preparation)) }
+            val attempt = TitleUpdateAttemptRecord(MutationId("synthetic-observer-title-attempt-$cycle"), preparation,
+                AdapterFormat("synthetic-observer-title-wire", 1), "synthetic-protected-wire-$cycle")
+            journal.remember(attempt); journal.admitDispatch = { it == target }; assertTrue(journal.claim(attempt))
+            journal.admitDispatch = { error("Observer recovery must never send title work") }
+            val unknown = attempt.copy(state = TitleUpdateAttemptState.OUTCOME_UNKNOWN)
+            val result = TitleUpdateVerifiedResult.of(unknown, TitleUpdateSubmissionObservation.Verified(
+                TitleUpdateAttemptIdentity.of(unknown), intent.base.copy(revision = Revision("synthetic-observer-title-revision-$cycle"), content = intent.content)))
+            journal.retainVerified(result)
+            assertEquals(TitleUpdateAcknowledgementResult.ACKNOWLEDGED,
+                coordinator.acknowledgeLocalTitle(target, remoteEvent.eventId, attempt.id, journal))
+            assertNull(localEdit())
+            // Restart discovery must not depend on the intent ACK has already consumed.
+            val recovery = TitleUpdateAttemptStore(context, name = journal.databaseName)
+            try {
+                assertEquals(listOf(TitleUpdateWorkRef(attempt.id, remoteEvent.eventId,
+                    TitleUpdateAttemptState.OUTCOME_UNKNOWN)), recovery.page(TitleUpdateWorkQuery(target)).entries)
+            } finally { recovery.close() }
+            assertEquals(TitleUpdateCompletionResult.COMPLETED,
+                coordinator.completeLocalTitle(target, remoteEvent.eventId, attempt.id, journal))
+            assertTrue(journal.page(TitleUpdateWorkQuery(target)).entries.isEmpty())
+            assertNull(localEdit())
+        }
+
+        suspend fun twoObservedTitleCycles(expectedCreates: Int) {
+            val name = "system-observer-title-fixture-${UUID.randomUUID()}.db"
+            val journal = TitleUpdateAttemptStore(context, name)
+            try {
+                mutate(ContentValues().apply { put(Events.TITLE, "Synthetic first observed title"); put(Events.DIRTY, 1) })
+                assertEquals(ImportRunResult.COMPLETE, controller.run(network = false))
+                val first = localEdit()!!
+                assertEquals("Synthetic first observed title", first.content.title)
+                val firstNative = providerSnapshot()
+                assertEquals(ImportRunResult.COMPLETE, controller.run(network = false))
+                assertEquals(first, localEdit()); assertEquals(firstNative, providerSnapshot())
+                reopen()
+                assertEquals(ImportRunResult.COMPLETE, controller.run(network = false))
+                assertEquals(first, localEdit()); assertEquals(firstNative, providerSnapshot())
+                finishTitle(first, "first", journal)
+                mutate(ContentValues().apply { put(Events.TITLE, "Synthetic second observed title"); put(Events.DIRTY, 1) })
+                assertEquals(ImportRunResult.COMPLETE, controller.run(network = false))
+                val next = localEdit()!!
+                assertNotEquals("A new cycle must not reuse an acknowledged intent", first.id, next.id)
+                assertNotEquals(first.base.revision, next.base.revision)
+                val nextNative = providerSnapshot()
+                assertEquals(ImportRunResult.COMPLETE, controller.run(network = false))
+                assertEquals(next, localEdit()); assertEquals(nextNative, providerSnapshot())
+                finishTitle(next, "second", journal)
+                assertEquals(expectedCreates, sends)
+                assertEquals(1, rows()); assertEquals("0", field(Events.DIRTY))
+            } finally { journal.close(); context.deleteDatabase(name) }
+        }
 
         suspend fun reopen() {
             coordinator.authenticationChanged(false)
