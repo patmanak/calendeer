@@ -738,3 +738,75 @@ daily rules with `COUNT` up to 4096 and optional `INTERVAL`, without selectors o
 retaining unsupported source rather than normalizing signed occurrence instants.
 The same policy guards Android admission; it is not an upstream recurrence
 expander or proof that other rule profiles are compatible.
+
+## Experimental title-only UPDATE submission
+
+`ProtonTitleUpdateSubmissionCodec`, `ProtonTitleUpdateSubmissionAdapter` and the
+separate `ProtonTitleUpdateDispatchAttempt` adapt the same-calendar update branch
+of Proton WebClients at `40cc08c12c8fbac7f66521186c7297ddf3e17861`:
+
+- [API route](https://github.com/ProtonMail/WebClients/blob/40cc08c12c8fbac7f66521186c7297ddf3e17861/packages/shared/lib/api/calendars.ts)
+  and [input types](https://github.com/ProtonMail/WebClients/blob/40cc08c12c8fbac7f66521186c7297ddf3e17861/packages/shared/lib/interfaces/calendar/Api.ts):
+  `PUT calendar/v1/{calendar}/events/sync`, `MemberID`, `IsImport`, and one
+  `Events[{ID,Event}]` operation.
+- [Same-calendar builder](https://github.com/ProtonMail/WebClients/blob/40cc08c12c8fbac7f66521186c7297ddf3e17861/applications/calendar/src/app/containers/calendar/getSyncMultipleEventsPayload.ts),
+  [formatter](https://github.com/ProtonMail/WebClients/blob/40cc08c12c8fbac7f66521186c7297ddf3e17861/packages/shared/lib/calendar/formatData.ts)
+  and [serializer](https://github.com/ProtonMail/WebClients/blob/40cc08c12c8fbac7f66521186c7297ddf3e17861/packages/shared/lib/calendar/serialize.ts):
+  reuse prepared Type 2/3 Data/Signature fragments, omit Author and original key
+  packets from this UPDATE input, retain explicitly empty notifications and the
+  qualified personal-event flags. No CREATE overwrite or movement fields apply.
+- [GET event types](https://github.com/ProtonMail/WebClients/blob/40cc08c12c8fbac7f66521186c7297ddf3e17861/packages/shared/lib/interfaces/calendar/Event.ts)
+  and the pinned Android `CalendarsApiImpl.EventResponse` distinguish read-only
+  response metadata from request fields. Unknown JSON fields are rejected by this
+  first writer profile; they are not silently omitted from a general update.
+
+Three additional GET fields have an observation-based experimental qualification,
+not a proven upstream semantic contract: optional nonnegative numeric
+`LastEditTime`, exactly empty `NotificationOccurrences`, and optional
+`AttendeesInfo.Code` equal to API success `1000`. The pinned declarations above
+do not document these extensions. Their presence must be preserved. The empty
+notification occurrences and attendee response remain exact unchanged context.
+One controlled UPDATE/readback measured a changed `LastEditTime` equal to the
+current `ModifyTime`, with exact submitted signatures/data/authors, unchanged
+other metadata and independently verified complete decrypted content. The
+experimental readback rule therefore permits unchanged `LastEditTime` or a
+nonnegative integer value that is nondecreasing from its original value and
+exactly equals the current `ModifyTime`. Appearance, disappearance, wrong types,
+backward movement or another new value are rejected. This is measured response
+behavior, not a documented server contract or a conditional-write guarantee.
+An absent or null attendee representation does not prove absence of attendees.
+
+Read and write attendee permissions are qualified separately. The pinned Web
+[constants](https://github.com/ProtonMail/WebClients/blob/40cc08c12c8fbac7f66521186c7297ddf3e17861/packages/shared/lib/calendar/constants.ts#L33)
+define attendee SEE=1, INVITE=2 and SEE_AND_INVITE=3, independently of calendar
+WRITE=16. The pinned Android
+[GET DTO](https://github.com/ProtonMail/android-calendar/blob/83bbd6a15b0aaa135e424fb5ac195c0a52929b4f/app/src/main/java/me/proton/android/calendar/data/api/CalendarsApiImpl.kt#L903)
+labels the field an attendee bitmap; its published
+[GET fixtures](https://github.com/ProtonMail/android-calendar/blob/83bbd6a15b0aaa135e424fb5ac195c0a52929b4f/app/src/test/resources/get_events_different_spans.json)
+use 3. This strictly empty-attendee writer profile accepts GET 1 or 3 only.
+The Web builder above supplies DEFAULT_ATTENDEE_PERMISSIONS=SEE=1 to both create
+and update branches; our UPDATE input remains 1. Readback still requires the exact
+original GET bitmap, including 3 when observed. Other bitmaps remain unsupported;
+this does not authorize invitation handling or changes to attendee permissions.
+
+These local GPL-3.0-only adaptations reuse the existing protected title fragments
+and Proton Core signing/encryption. A distinct versioned envelope binds the exact
+preparation, attempt, member, author, keys and calendar/bootstrap context hashes.
+Fresh preparation of the same immutable intent/time must observe the identical
+complete original event and context before durable journal admission. Randomized
+fresh ciphertext is not used as an equality test against retained ciphertext.
+
+The journal commits UNKNOWN before one transport exchange. CREATE and UPDATE
+permits cannot authorize each other's payloads; duplicate tags, redirects,
+re-entry and body reuse are refused. The first available HTTP body, including an
+HTTP error body when supplied by Retrofit, is protected before inspection. Lost
+responses, cancellation and evidence failures do not make the attempt resendable.
+Inspection reads the exact event ID, compares all submitted shared fragments and
+unchanged JSON context with the explicit server clock checks above, and then verifies native
+crypto and complete expected mapped content. Equal display titles are insufficient.
+
+This is an internal controlled-writer experiment, with no automatic worker,
+capability advertisement or native acknowledgement. A fresh GET followed by PUT
+is **not server compare-and-swap**: a concurrent edit between those requests can
+still be overwritten. Readback proves current observed contents, not authorship,
+immutable remote history, or general conflict-safe bidirectional synchronization.

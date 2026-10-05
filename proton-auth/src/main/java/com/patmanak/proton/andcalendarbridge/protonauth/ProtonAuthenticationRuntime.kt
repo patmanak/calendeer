@@ -4,6 +4,7 @@ package com.patmanak.proton.andcalendarbridge.protonauth
 
 import android.content.Context
 import com.patmanak.proton.andcalendarbridge.auth.AuthenticationFlowPort
+import com.patmanak.proton.andcalendarbridge.sync.CalendarTitleUpdateSubmissionPort
 import com.patmanak.proton.andcalendarbridge.sync.CalendarDeltaRemote
 import com.patmanak.proton.andcalendarbridge.sync.CalendarCreatePreparationPort
 import com.patmanak.proton.andcalendarbridge.sync.CalendarCreateSubmissionPort
@@ -82,6 +83,7 @@ internal data class ProtonAuthenticationGraph(
     val submissions: CalendarCreateSubmissionPort? = null,
     val matchesIdentityHash: suspend (AccountId, String) -> Boolean = { _, _ -> false },
     val localEdits: CalendarLocalEditPreparationPort = CalendarLocalEditPreparationPort { _, _ -> localEditUnavailable(LocalEditPreparationFailure.UNSUPPORTED) },
+    val titleUpdates: CalendarTitleUpdateSubmissionPort? = null,
     val catalog: CalendarCatalogPort,
 )
 
@@ -180,6 +182,19 @@ internal object ProtonAuthenticationRuntime {
                 userManager.getUser(session.userId, refresh = true)
                 userManager.getAddresses(session.userId, refresh = true)
             }
+            val calendarMetadata = ProtonCreateCalendarMetadataRemote(network.apiProvider)
+            val titlePreparations = ProtonLocalTitlePreparationAdapter(readSession, contextRefresher,
+                calendarMetadata, eventRemote, LocalTitleEventRemote { session, scope, id ->
+                    ProtonChangeFeedRemote(network.apiProvider).event(session, scope.feedScope(), id.value).obj("Event")
+                }, localAddresses, localTitleCryptoPreparation(cryptoContext, eventProtector))
+            val titleContext = TitleUpdateContextQualification { session, scope ->
+                contextRefresher.refresh(session)
+                val metadata = calendarMetadata.calendar(session, scope.calendar.value)
+                val bootstrap = eventRemote.bootstrap(session, scope.calendar.value)
+                val addresses = localAddresses.get(session.userId)
+                val selected = ProtonCreateContextPolicy.select(scope, metadata, bootstrap, addresses)
+                ProtonTitleUpdateSubmissionCodec.context(selected, metadata, bootstrap)
+            }
         return ProtonAuthenticationGraph(
             authentication = ProtonAuthenticationFlowAdapter(
                 accountScope,
@@ -200,11 +215,9 @@ internal object ProtonAuthenticationRuntime {
             preparations = ProtonCreatePreparationAdapter(readSession, contextRefresher,
                 ProtonCreateCalendarMetadataRemote(network.apiProvider), eventRemote, localAddresses,
                 ProtonCreateContextResolver(cryptoContext)::prepare, eventProtector),
-            localEdits = ProtonLocalTitlePreparationAdapter(readSession, contextRefresher,
-                ProtonCreateCalendarMetadataRemote(network.apiProvider), eventRemote,
-                LocalTitleEventRemote { session, scope, id ->
-                    ProtonChangeFeedRemote(network.apiProvider).event(session, scope.feedScope(), id.value).obj("Event")
-                }, localAddresses, localTitleCryptoPreparation(cryptoContext, eventProtector)),
+            localEdits = titlePreparations,
+            titleUpdates = ProtonTitleUpdateSubmissionAdapter(titlePreparations, eventProtector, readSession, titleContext,
+                ProtonTitleUpdateSubmissionRemote(network.apiProvider), eventRemote, eventDecoder::decodeCreated),
             submissions = ProtonCreateSubmissionAdapter(ProtonCreatePreparationAdapter(readSession, contextRefresher,
                 ProtonCreateCalendarMetadataRemote(network.apiProvider), eventRemote, localAddresses,
                 ProtonCreateContextResolver(cryptoContext)::prepare, eventProtector, submission = true),

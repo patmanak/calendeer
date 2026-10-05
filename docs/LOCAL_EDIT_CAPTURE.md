@@ -255,4 +255,6 @@ concurrent parent-rule change. Historical proof is not a present series snapshot
 
 See [validation](VALIDATION.md) for the distinct domain, SQLite, controlled-owner
 and real Provider fixtures. They do not establish Samsung editing UI behavior or
-live Proton UPDATE acceptance.
+general Proton UPDATE acceptance. The separate
+[internal title submission experiment](TITLE_UPDATE_SUBMISSION.md) does not
+acknowledge or consume these captured native intentions.

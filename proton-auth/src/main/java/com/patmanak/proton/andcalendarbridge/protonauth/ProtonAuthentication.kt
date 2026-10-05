@@ -28,6 +28,7 @@ object ProtonAuthentication {
     fun createPreparations(context: Context): CalendarCreatePreparationPort = shared(context)
     fun createSubmissions(context: Context): CalendarCreateSubmissionPort = shared(context)
     fun localEditPreparations(context: Context): CalendarLocalEditPreparationPort = shared(context)
+    fun titleUpdates(context: Context): CalendarTitleUpdateSubmissionPort = shared(context)
     internal suspend fun matchesIdentityHash(context: Context, account: AccountId, expectedHash: String): Boolean =
         shared(context).matchesIdentityHash(account, expectedHash)
 
@@ -58,11 +59,12 @@ internal class SerializedAuthenticationPort(
     private val createGraph: () -> ProtonAuthenticationGraph,
     private val cancelVerification: () -> Unit,
     private val dispatcher: CoroutineDispatcher = Dispatchers.IO,
-) : AuthenticationFlowPort, CalendarCatalogPort, CalendarDeltaRemote, RollingCalendarRemote, ContentMappingRemote, CalendarCreatePreparationPort, CalendarCreateSubmissionPort, CalendarLocalEditPreparationPort {
+) : AuthenticationFlowPort, CalendarCatalogPort, CalendarDeltaRemote, RollingCalendarRemote, ContentMappingRemote, CalendarCreatePreparationPort, CalendarCreateSubmissionPort, CalendarLocalEditPreparationPort, CalendarTitleUpdateSubmissionPort {
     override val contentMapping = EVENT_CONTENT_MAPPING
     override val localCreateFormat = LOCAL_CREATE_PREPARATION_FORMAT
     override val knownEmptySubmissionFormat = KNOWN_EMPTY_SUBMISSION_FORMAT
     override val localTitleFormat = LOCAL_TITLE_PREPARATION_FORMAT
+    override val titleUpdateFormat = TITLE_UPDATE_SUBMISSION_FORMAT
     constructor(context: Context, verification: HumanVerificationHost) : this(
         { ProtonAuthenticationRuntime.build(context, verification.delegate.hooks) },
         verification::cancel,
@@ -95,6 +97,24 @@ internal class SerializedAuthenticationPort(
         }
     }
     override suspend fun prepareSubmission(draft: CalendarCreateDraft): PreparedCalendarCreate = submissionOperation { it.prepareSubmission(draft) }
+    override suspend fun prepareSubmission(id: MutationId, preparation: LocalEditPreparation): TitleUpdateAttemptRecord {
+        val frozen = preparation.copy(intent = LocalEditPreparation.freezeIntent(preparation.intent))
+        return titleUpdateOperation { it.prepareSubmission(id, frozen) }
+    }
+    override suspend fun submit(record: TitleUpdateAttemptRecord, journal: TitleUpdateAttemptJournal): TitleUpdateSubmissionObservation {
+        val frozen = record.frozen()
+        return titleUpdateOperation { it.submit(frozen, journal) }
+    }
+    override suspend fun inspect(record: TitleUpdateAttemptRecord): TitleUpdateSubmissionObservation {
+        val frozen = record.frozen()
+        return titleUpdateOperation { it.inspect(frozen) }
+    }
+    private suspend fun <T> titleUpdateOperation(block: suspend (CalendarTitleUpdateSubmissionPort) -> T): T = withContext(dispatcher) {
+        lock.withLock {
+            if (!authenticated) localEditUnavailable(LocalEditPreparationFailure.AUTHENTICATION)
+            block(checkNotNull(graph).titleUpdates ?: localEditUnavailable(LocalEditPreparationFailure.UNSUPPORTED))
+        }
+    }
     internal suspend fun matchesIdentityHash(account: AccountId, expectedHash: String): Boolean = withContext(dispatcher) {
         lock.withLock { authenticated && graph?.matchesIdentityHash?.invoke(account, expectedHash) == true }
     }

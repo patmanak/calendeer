@@ -6,6 +6,15 @@ Install neither an emulator nor a device-specific environment as part of a build
 
 The reusable [acceptance plan](ACCEPTANCE.md) defines expected outcomes by boundary.
 
+The [internal title UPDATE experiment](TITLE_UPDATE_SUBMISSION.md#repeatable-verification)
+has separate domain, SQLite, Core/loopback and explicitly authorized live recipes.
+Its isolated journal suite passed fourteen physical cases without skips. A single
+title update of a retained simple timed event qualified full signed/decrypted
+readback after process restart, with UNKNOWN work and the protected preparation
+unchanged and no further dispatch admission. It adds no production UPDATE worker
+or native acknowledgement. The server edit-clock rule is a measured, bounded
+profile; it is not a conditional-write guarantee.
+
 Experimental system CREATE qualification covers `SystemCreateWorkStoreDeviceTest`,
 `SystemCreatePipelineDeviceTest`, `SystemImportedChangeResolutionDeviceTest`,
 `LocalCreateProviderDeviceTest` and `CapturedCreateDispatchCoordinatorDeviceTest`.

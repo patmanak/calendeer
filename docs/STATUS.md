@@ -23,13 +23,18 @@ and WorkManager pipeline reuse the existing Proton preparation, verified readbac
 same-row acknowledgement and handoff. Read-only remains the default. Pausing or
 disabling creation closes native editing without deleting events; pending work
 stays visible with the mode off. UNKNOWN submissions can only be inspected, never
-automatically sent again. UPDATE/DELETE remain held locally without upload.
+automatically sent again. Production UPDATE/DELETE remain held locally without upload.
 Known-empty, non-recurring incoming events now use the calendar's opaque local
 owner label to preserve native editing, without a remote organizer or attendee. Ordinary and CREATE-handoff
 capture accept that profile and preserve DIRTY edits. Existing settled rows gain
 the profile on their next projection. The /e/OS event-detail editor saved a title
 that remained capturable after restart on the same row. Samsung editing and
-outgoing UPDATE remain unqualified. See [personal editing](LOCAL_EDIT_CAPTURE.md#personal-editing-permission-profile).
+automatic UPDATE remain unqualified. An [internal title UPDATE experiment](TITLE_UPDATE_SUBMISSION.md)
+adds a separate protected request and durable inspection-only journal, without
+native acknowledgement or worker activation. One retained simple timed event
+qualified a single title PUT and full authenticated readback after process restart,
+with its original preparation and UNKNOWN journal intact. Fresh GET/PUT is not server CAS.
+See [personal editing](LOCAL_EDIT_CAPTURE.md#personal-editing-permission-profile).
 See [system creation](LOCAL_CREATE_CAPTURE.md#opt-in-system-creation) for the exact
 supported profiles, pagination and unresolved limitations.
 
@@ -45,9 +50,9 @@ sessions and imported calendars. See [identity and interface](DESIGN.md).
 | Module | Implemented | Not established by this slice |
 | --- | --- | --- |
 | `app` | Configuration, login, discovery, read-only imports and opt-in simple system CREATE; eight languages; durable import/create queues, Calendar Provider projection, permissions and background scheduling. | Broad Android/OEM qualification, general UPDATE/DELETE or complete event feature coverage. |
-| `sync` | Pure scoped models, bounded transactional pagination, access gates, immutable simple local CREATE/UPDATE/DELETE intents, conflict checks, uncertain-outcome write states and a separate metadata catalog controller. | General outgoing queue, automatic capture or bidirectional reconciliation. |
+| `sync` | Pure scoped models, bounded transactional pagination, access gates, immutable simple local CREATE/UPDATE/DELETE intents, conflict checks, uncertain-outcome write states, internal title submission contract and a separate metadata catalog controller. | General outgoing queue, automatic UPDATE capture or bidirectional reconciliation. |
 | `auth` | Contako-derived secret contract and state controller, cancellation/cleanup gates, retry policy and focused tests. | Calendar bootstrap or per-calendar capability checks. |
-| `proton-auth` | Proton Core login/session integration, discovery, Calendar key bootstrap, paginated decryption, sealed change polling, bounded recurrence mapping and experimental single simple-event CREATE with verified readback. | All challenge variants, external-author trust resolution, complete recurrence/history coverage or general event editing. |
+| `proton-auth` | Proton Core login/session integration, discovery, Calendar key bootstrap, paginated decryption, sealed change polling, bounded recurrence mapping, experimental single simple-event CREATE and internal title UPDATE transport. | All challenge variants, external-author trust resolution, complete recurrence/history coverage or general event editing. |
 
 The development application offers real account sign-in and automatically loads
 calendar names and colors after session restoration or login. Manual refresh,
