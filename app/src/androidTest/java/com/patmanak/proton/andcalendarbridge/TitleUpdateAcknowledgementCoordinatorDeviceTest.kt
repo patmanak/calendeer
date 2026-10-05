@@ -24,6 +24,14 @@ import org.junit.runner.RunWith
 /** Real isolated SQLite and controlled native ports. No account, Provider or service mutation. */
 @RunWith(AndroidJUnit4::class)
 class TitleUpdateAcknowledgementCoordinatorDeviceTest {
+    private open class CompletionPort(private val journal: TitleUpdateCompletionJournal) : TitleUpdateCompletionJournal {
+        override val completionProtocol: Int? get() = journal.completionProtocol
+        override suspend fun retainVerified(result: TitleUpdateVerifiedResult) = journal.retainVerified(result)
+        override suspend fun readVerified(scope: CalendarScope, id: MutationId) = journal.readVerified(scope, id)
+        override suspend fun readCompletion(scope: CalendarScope, id: MutationId) = journal.readCompletion(scope, id)
+        override suspend fun retainCompletion(completion: TitleUpdateCompletion, admit: (CalendarScope) -> Boolean) =
+            journal.retainCompletion(completion, admit)
+    }
     private class Fixture(val transferred: Boolean = false) {
         private val context = ApplicationProvider.getApplicationContext<Context>()
         private val token = UUID.randomUUID().toString()
@@ -136,6 +144,8 @@ class TitleUpdateAcknowledgementCoordinatorDeviceTest {
         }
         suspend fun acknowledge(port: TitleUpdateResultJournal = journal) =
             coordinator.acknowledgeLocalTitle(target, base.eventId, prepared.id, port)
+        suspend fun complete(port: TitleUpdateCompletionJournal = journal) =
+            coordinator.completeLocalTitle(target, base.eventId, prepared.id, port)
         suspend fun owner(): LocalEditIntent? { store.admitTransaction = { true }; return store.localEdit(target, base.eventId) }
         suspend fun receipt(): TitleUpdateAcknowledgementRecord? { store.admitTransaction = { true }; return store.titleUpdateAcknowledgement(target, base.eventId) }
         suspend fun cached(): RemoteChange? { store.admitTransaction = { true }; return store.transaction(target) { remote(base.eventId) } }
@@ -163,6 +173,70 @@ class TitleUpdateAcknowledgementCoordinatorDeviceTest {
         assertEquals(TitleUpdateAcknowledgementState.RESTORED, receipt()!!.state)
         assertEquals(unknown, journal.read(target, prepared.id)); assertEquals(result, journal.readVerified(target, prepared.id))
         assertFalse(projection.admitOperation())
+    }
+
+    @Test fun completionRequiresActualRestoredSqlReceiptAndQualifiedJournal() = fixture {
+        assertEquals(TitleUpdateCompletionResult.UNRESOLVED, complete())
+        store.admitTransaction = { true }
+        val pending = store.prepareTitleUpdateAcknowledgement(result)!!
+        assertEquals(TitleUpdateCompletionResult.UNRESOLVED, complete())
+        assertNull(journal.readCompletion(target, prepared.id)); assertEquals(0, writes); assertEquals(0, inspections)
+        marker = pending.record.receipt
+        assertEquals(TitleUpdateAcknowledgementResult.ACKNOWLEDGED, acknowledge())
+        val unsupported = object : CompletionPort(journal) { override val completionProtocol: Int? = null }
+        assertEquals(TitleUpdateCompletionResult.UNRESOLVED, complete(unsupported))
+        assertNull(journal.readCompletion(target, prepared.id))
+        assertEquals(TitleUpdateCompletionResult.COMPLETED, complete())
+        assertEquals(TitleUpdateCompletionResult.COMPLETED, complete())
+        assertEquals(unknown, journal.read(target, prepared.id)); assertEquals(0, writes); assertEquals(1, inspections)
+    }
+
+    @Test fun completionChecksPermissionsPolicyAccountAndSelectionWithoutNativeAccess() = fixture {
+        assertEquals(TitleUpdateAcknowledgementResult.ACKNOWLEDGED, acknowledge())
+        permission = false; assertEquals(TitleUpdateCompletionResult.INACTIVE, complete()); permission = true
+        mode = false; assertEquals(TitleUpdateCompletionResult.INACTIVE, complete()); mode = true
+        account = AccountId("different-account"); assertEquals(TitleUpdateCompletionResult.INACTIVE, complete()); account = target.account
+        store.setEnabled(target, false); assertEquals(TitleUpdateCompletionResult.INACTIVE, complete())
+        assertNull(journal.readCompletion(target, prepared.id)); assertEquals(1, writes); assertEquals(0, inspections)
+    }
+
+    @Test fun selectionRevokedDuringCompletionResultReadPreventsClosure() = fixture {
+        assertEquals(TitleUpdateAcknowledgementResult.ACKNOWLEDGED, acknowledge())
+        var reads = 0
+        val changing = object : CompletionPort(journal) {
+            override suspend fun readVerified(scope: CalendarScope, id: MutationId): TitleUpdateVerifiedResult? {
+                if (++reads == 2) store.setEnabled(target, false)
+                return journal.readVerified(scope, id)
+            }
+        }
+        assertEquals(TitleUpdateCompletionResult.INACTIVE, complete(changing))
+        assertNull(journal.readCompletion(target, prepared.id)); assertEquals(1, writes); assertEquals(0, inspections)
+    }
+
+    @Test fun corruptArchiveBeforeSlotRotationCannotReleaseAttemptThroughValidCurrentCopy() = fixture {
+        assertEquals(TitleUpdateAcknowledgementResult.ACKNOWLEDGED, acknowledge())
+        store.writableDatabase.execSQL("UPDATE title_update_acknowledgement_history SET receipt='not-json'")
+        assertEquals(TitleUpdateCompletionResult.UNRESOLVED, complete())
+        assertNull(journal.readCompletion(target, prepared.id))
+        assertEquals(unknown, journal.read(target, prepared.id)); assertEquals(1, writes); assertEquals(0, inspections)
+    }
+
+    @Test fun completionLeaseRevokedInsideJournalRollsBackAndCanRecoverOffline() = fixture {
+        assertEquals(TitleUpdateAcknowledgementResult.ACKNOWLEDGED, acknowledge())
+        val changing = object : CompletionPort(journal) {
+            override suspend fun retainCompletion(completion: TitleUpdateCompletion, admit: (CalendarScope) -> Boolean): Boolean {
+                var checks = 0
+                return journal.retainCompletion(completion) {
+                    if (++checks == 2) permission = false
+                    admit(it)
+                }
+            }
+        }
+        assertEquals(TitleUpdateCompletionResult.INACTIVE, complete(changing))
+        assertNull(journal.readCompletion(target, prepared.id)); assertEquals(unknown, journal.read(target, prepared.id))
+        permission = true
+        assertEquals(TitleUpdateCompletionResult.COMPLETED, complete())
+        assertEquals(1, writes); assertEquals(0, inspections)
     }
 
     @Test fun missingDurableResultAndChangedNativeContentNeverReserveOrWrite() = fixture {

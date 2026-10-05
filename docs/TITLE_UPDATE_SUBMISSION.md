@@ -120,11 +120,12 @@ historical inspection ignores and preserves subsequent native content, dirty
 flags, tombstones and children. SQL restoration can then complete without another
 native write. If the first batch never committed, the receipt stays pending;
 there is no automatic rearming. A RESTORED replay never consumes the next intent.
-The network attempt remains UNKNOWN and its per-event hold remains in place.
+The network attempt remains UNKNOWN. Its per-event hold remains until a separate
+durable completion binds the first verified result to the exact RESTORED receipt.
 
 For a transferred CREATE, the receipt also freezes the full original creation,
 attachment, acknowledgement and handoff reference. The existing import database
-stays at version sixteen: ordinary receipt encoding is unchanged, and the extended
+uses unchanged ordinary and extended receipt encodings. The extended
 encoding is self-contained even after the current baseline advances. Reserving a
 fresh receipt requires the exact RELEASED frame with its retained local change,
 `waiting=1`, and no unresolved incoming projection receipt.
@@ -137,6 +138,31 @@ exact owner consumption. Original CREATE evidence is never rewritten. The native
 proof establishes the creation and projection markers; the handoff nonce and
 RELEASED state remain separately qualified by the SQL owner.
 
+## Durable completion and subsequent title cycles
+
+The internal completion coordinator reads the actual verified-result journal and
+attempt-scoped RESTORED import receipt. It checks the selected calendar, current
+account, permissions, policy epoch and adapter format before retaining closure.
+It makes no Provider write or service request. An interruption between restoring
+the receipt and committing completion leaves the event blocked until this
+historical read-only recovery succeeds.
+
+Import schema seventeen archives complete RESTORED receipts atomically with SQL
+restoration. A later qualified cycle may replace the current event slot only
+after preserving its exact previous receipt. Old replays resolve their original
+attempt and cannot consume the next local owner or its preparation. Legacy
+version-sixteen receipts remain byte-identical and are archived when reused;
+PENDING receipts cannot be replaced.
+
+Attempt-journal schema three adds immutable completion without changing UNKNOWN,
+the protected request, preparation, evidence or first result. Migration never
+infers closure from an old result. An unresolved attempt blocks the same event
+across generations. A valid closure permits a distinct new intention and attempt;
+claiming the old attempt still fails. Admission validates historical closures,
+including their complete CREATE handoff frames, and corruption blocks new work.
+These histories currently retain every completed cycle; retention policy and
+production scheduling remain separate work.
+
 ## Concurrency and integration limits
 
 The fresh GET and subsequent PUT are successive observations, **not an atomic
@@ -148,8 +174,8 @@ There is no production worker or UI toggle for UPDATE. The existing system
 observer continues to retain edits/deletions locally. Before activation, a
 separate owner must bind captured native work to this journal, connect UPDATE
 to production scheduling and qualify the complete service and native journey.
-The internal acknowledgement paths do not release the permanent
-network attempt hold or enable a second outgoing edit cycle.
+The internal completion path permits successive locally qualified title cycles;
+it does not activate production UPDATE or establish repeated service submissions.
 Conflict policy, further editable fields, recurrence, invitations and DELETE
 remain separate work.
 
@@ -173,6 +199,12 @@ remain separate work.
   access revocation and idempotent history. Integration fixtures combine the real
   Provider, both SQLite stores and coordinator with synthetic result evidence;
   they do not establish Proton acceptance or a service-to-native UPDATE journey.
+- `TitleUpdateCompletionTest`, `TitleUpdateCompletionJournalDeviceTest` and
+  `TitleUpdateAcknowledgementHistoryDeviceTest` check closure bindings, migration,
+  immutable history, default-denied admission, corruption and rollback. Real
+  Provider/SQLite composition checks two successive ordinary and transferred
+  title cycles, lost completion commits and old replay during a newer reservation.
+  Their remote results are synthetic; they make no UPDATE service request.
 - `CapturedHandoffTitleAcknowledgementProviderDeviceTest` and
   `CapturedHandoffTitleAcknowledgementStoreDeviceTest` qualify explicit CREATE
   provenance, original and advanced frames, receipt reopening, conditional

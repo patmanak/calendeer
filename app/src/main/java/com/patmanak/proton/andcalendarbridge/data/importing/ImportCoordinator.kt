@@ -61,6 +61,7 @@ enum class CapturedCreateAcknowledgementResult { INACTIVE, UNRESOLVED, UNSUPPORT
 enum class CapturedCreateCleanResult { INACTIVE, UNRESOLVED, CLEAN }
 enum class CapturedCreateHandoffResult { INACTIVE, UNRESOLVED, WAITING, HANDED_OFF }
 enum class TitleUpdateAcknowledgementResult { INACTIVE, UNRESOLVED, ACKNOWLEDGED }
+enum class TitleUpdateCompletionResult { INACTIVE, UNRESOLVED, COMPLETED }
 /** One process owner for foreground and durable worker triggers; no event content reaches UI. */
 class ImportCoordinator(
     private val context: Context,
@@ -483,7 +484,7 @@ class ImportCoordinator(
             if (result.record.scope != target || result.record.id != attempt || result.event.eventId != eventId ||
                 intent.format != remote.format || store.transaction(target) { checkpoint?.format } != intent.format)
                 return@withLock TitleUpdateAcknowledgementResult.UNRESOLVED
-            val existing = store.titleUpdateAcknowledgement(target, eventId)
+            val existing = store.titleUpdateAcknowledgement(target, eventId, attempt)
             if (existing != null && !existing.receipt.matches(result))
                 return@withLock TitleUpdateAcknowledgementResult.UNRESOLVED
             if (existing?.state == TitleUpdateAcknowledgementState.RESTORED)
@@ -508,7 +509,7 @@ class ImportCoordinator(
             }
             val retained = reservation.record
             if (!available()) return@withLock TitleUpdateAcknowledgementResult.INACTIVE
-            if (!retained.receipt.matches(result) || store.titleUpdateAcknowledgement(target, eventId) != retained ||
+            if (!retained.receipt.matches(result) || store.titleUpdateAcknowledgement(target, eventId, attempt) != retained ||
                 journal.readVerified(target, attempt) != result)
                 return@withLock TitleUpdateAcknowledgementResult.UNRESOLVED
             if (reservation.fresh && (store.localEdit(target, eventId) != intent ||
@@ -527,7 +528,7 @@ class ImportCoordinator(
                 else projection.inspectTitleUpdateAcknowledgement(retained.receipt)
             if (!available()) return@withLock TitleUpdateAcknowledgementResult.INACTIVE
             if (witness?.receipt?.snapshot() != retained.receipt || journal.readVerified(target, attempt) != result ||
-                store.titleUpdateAcknowledgement(target, eventId) != retained)
+                store.titleUpdateAcknowledgement(target, eventId, attempt) != retained)
                 return@withLock TitleUpdateAcknowledgementResult.UNRESOLVED
             if (!store.restoreTitleUpdateAcknowledgement(witness))
                 return@withLock TitleUpdateAcknowledgementResult.UNRESOLVED
@@ -535,6 +536,59 @@ class ImportCoordinator(
         } catch (cancelled: CancellationException) { throw cancelled }
           catch (_: Exception) {
               if (!active()) TitleUpdateAcknowledgementResult.INACTIVE else TitleUpdateAcknowledgementResult.UNRESOLVED
+          } finally {
+              store.admitTransaction = { false }
+              projection.admitOperation = { false }
+          }
+    }
+
+    /** Internal durable closure only; no Provider write or service request. The two journals
+     * commit independently: a restored ACK without completion keeps the attempt's hold and
+     * can be resumed by reading its exact historical proof, including after a later edit.
+     */
+    suspend fun completeLocalTitle(target: CalendarScope, eventId: EventId, attempt: MutationId,
+        journal: TitleUpdateCompletionJournal): TitleUpdateCompletionResult = mutex.withLock {
+        val expected = generation
+        val policy = createPolicyRevision.get()
+        val active = { authenticated && generation == expected && createPolicyRevision.get() == policy &&
+            systemCreatesEnabled(target) && hasCalendarPermissions() }
+        suspend fun available(): Boolean {
+            if (!active() || !isCurrent(expected, target.account)) return false
+            val selected = store.selections(target.account).singleOrNull { it.scope == target }
+            return selected?.enabled == true && selected.available && active()
+        }
+        try {
+            if (!available()) return@withLock TitleUpdateCompletionResult.INACTIVE
+            store.admitTransaction = { it == target && active() }
+            if (journal.completionProtocol != 1) return@withLock TitleUpdateCompletionResult.UNRESOLVED
+            val result = journal.readVerified(target, attempt) ?: return@withLock TitleUpdateCompletionResult.UNRESOLVED
+            if (!available()) return@withLock TitleUpdateCompletionResult.INACTIVE
+            val intent = result.record.preparation.intent
+            if (result.record.scope != target || result.record.id != attempt || result.event.eventId != eventId ||
+                intent.format != remote.format || store.transaction(target) { checkpoint?.format } != intent.format)
+                return@withLock TitleUpdateCompletionResult.UNRESOLVED
+            val acknowledgement = store.titleUpdateAcknowledgement(target, eventId, attempt)
+                ?: return@withLock TitleUpdateCompletionResult.UNRESOLVED
+            if (acknowledgement.state != TitleUpdateAcknowledgementState.RESTORED || !acknowledgement.receipt.matches(result))
+                return@withLock TitleUpdateCompletionResult.UNRESOLVED
+            val completion = TitleUpdateCompletion.of(result, acknowledgement)
+            val retained = journal.readCompletion(target, attempt)
+            if (retained != null && retained != completion) return@withLock TitleUpdateCompletionResult.UNRESOLVED
+            if (journal.readVerified(target, attempt) != result ||
+                store.titleUpdateAcknowledgement(target, eventId, attempt) != acknowledgement)
+                return@withLock TitleUpdateCompletionResult.UNRESOLVED
+            // Repeat the selected-calendar/account check after the historical reads suspend.
+            if (!available()) return@withLock TitleUpdateCompletionResult.INACTIVE
+            if (retained == null && !journal.retainCompletion(completion) { it == target && active() })
+                return@withLock TitleUpdateCompletionResult.UNRESOLVED
+            if (!available()) return@withLock TitleUpdateCompletionResult.INACTIVE
+            if (journal.readCompletion(target, attempt) != completion)
+                return@withLock TitleUpdateCompletionResult.UNRESOLVED
+            if (!available()) return@withLock TitleUpdateCompletionResult.INACTIVE
+            TitleUpdateCompletionResult.COMPLETED
+        } catch (cancelled: CancellationException) { throw cancelled }
+          catch (_: Exception) {
+              if (!active()) TitleUpdateCompletionResult.INACTIVE else TitleUpdateCompletionResult.UNRESOLVED
           } finally {
               store.admitTransaction = { false }
               projection.admitOperation = { false }

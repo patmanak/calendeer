@@ -6,6 +6,7 @@ import android.content.Context
 import android.database.Cursor
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
+import com.patmanak.proton.andcalendarbridge.data.serialization.TitleUpdateAcknowledgementCodec
 import com.patmanak.proton.andcalendarbridge.sync.*
 import java.nio.CharBuffer
 import java.nio.charset.CodingErrorAction
@@ -24,8 +25,9 @@ import org.json.JSONObject
  * Payload/evidence are opaque protected strings; this store grants no HTTP or Provider capability.
  */
 class TitleUpdateAttemptStore(context: Context, name: String = "calendar-title-update-attempt-v1.db") :
-    SQLiteOpenHelper(context, name, null, 2), TitleUpdateAttemptJournal, TitleUpdateResultJournal {
+    SQLiteOpenHelper(context, name, null, 3), TitleUpdateAttemptJournal, TitleUpdateCompletionJournal {
     private val lock = Mutex()
+    override val completionProtocol = 1
     @Volatile var admitDispatch: (CalendarScope) -> Boolean = { false }
 
     override fun onConfigure(db: SQLiteDatabase) {
@@ -43,17 +45,25 @@ class TitleUpdateAttemptStore(context: Context, name: String = "calendar-title-u
                 adapter TEXT NOT NULL, version INTEGER NOT NULL CHECK(version > 0),
                 payload TEXT NOT NULL,
                 state TEXT NOT NULL CHECK(state IN ('PREPARED','OUTCOME_UNKNOWN')),
-                evidence TEXT, result TEXT,
-                PRIMARY KEY(account,calendar,generation,mutation),
-                UNIQUE(account,calendar,event)
+                evidence TEXT, result TEXT, completion TEXT,
+                PRIMARY KEY(account,calendar,generation,mutation)
             )
         """.trimIndent())
+        db.execSQL("CREATE UNIQUE INDEX title_update_unresolved_event ON $TABLE(account,calendar,event) WHERE completion IS NULL")
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        check(oldVersion == 1 && newVersion == 2) { "Explicit title update journal migration required" }
-        // Additive domain snapshot only: never reinterpret protected payloads or reopen UNKNOWN.
-        db.execSQL("ALTER TABLE title_update_attempts ADD COLUMN result TEXT")
+        check(oldVersion in 1..2 && newVersion == 3) { "Explicit title update journal migration required" }
+        // SQLiteOpenHelper owns the migration transaction. Copy opaque bytes without interpreting
+        // them; neither an existing verified result nor a state name establishes completion.
+        if (oldVersion == 1) db.execSQL("ALTER TABLE $TABLE ADD COLUMN result TEXT")
+        db.execSQL("ALTER TABLE $TABLE RENAME TO title_update_attempts_legacy")
+        onCreate(db)
+        db.execSQL("""INSERT INTO $TABLE(account,calendar,generation,mutation,event,preparation,
+            adapter,version,payload,state,evidence,result,completion)
+            SELECT account,calendar,generation,mutation,event,preparation,
+            adapter,version,payload,state,evidence,result,NULL FROM title_update_attempts_legacy""".trimIndent())
+        db.execSQL("DROP TABLE title_update_attempts_legacy")
     }
 
     override suspend fun remember(record: TitleUpdateAttemptRecord) {
@@ -63,15 +73,18 @@ class TitleUpdateAttemptStore(context: Context, name: String = "calendar-title-u
         }
         val preparation = encodePreparation(frozen.preparation)
         access { db -> transaction(db) {
+            val history = eventHistory(db, frozen.scope, frozen.preparation.intent.base.eventId)
             val existing = read(db, frozen.scope, frozen.id)
             if (existing != null) {
                 check(existing.copy(state = TitleUpdateAttemptState.PREPARED, protectedEvidence = null) == frozen) {
                     "Title update attempt is immutable"
                 }
             } else {
-                check(!hasEvent(db, frozen.scope, frozen.preparation.intent.base.eventId)) {
+                check(history.all { it.completed }) {
                     "An unresolved title attempt already owns this event"
                 }
+                check(history.none { it.localIntentId == frozen.preparation.intent.id ||
+                    it.id == frozen.id }) { "A previous title intention cannot be admitted again" }
                 db.insertOrThrow(TABLE, null, ContentValues().apply {
                     put("account", frozen.scope.account.value); put("calendar", frozen.scope.calendar.value)
                     put("generation", frozen.scope.generation); put("mutation", frozen.id.value)
@@ -85,6 +98,60 @@ class TitleUpdateAttemptStore(context: Context, name: String = "calendar-title-u
 
     override suspend fun read(scope: CalendarScope, id: MutationId): TitleUpdateAttemptRecord? =
         access { db -> read(db, scope, id) }
+
+    override suspend fun retainCompletion(completion: TitleUpdateCompletion,
+        admit: (CalendarScope) -> Boolean): Boolean {
+        val frozen = completion.snapshot()
+        val work = frozen.result.record
+        val encoded = encodeCompletion(frozen)
+        return access { db ->
+            if (!admit(work.scope)) false else transaction(db, beforeCommit = {
+                check(admit(work.scope)) { "Title completion lease is not current" }
+            }) {
+                val current = read(db, work.scope, work.id)
+                check(current != null && current.state == TitleUpdateAttemptState.OUTCOME_UNKNOWN &&
+                    current.copy(protectedEvidence = null) == work) {
+                    "Completion requires identical unknown title work"
+                }
+                val retained = readVerified(db, current)
+                check(retained != null && retained == frozen.result) {
+                    "Completion requires the first durable verified result"
+                }
+                eventHistory(db, work.scope, work.preparation.intent.base.eventId)
+                val existing = readCompletion(db, current)
+                if (existing != null) check(existing == frozen) { "Title completion is immutable" }
+                else check(db.update(TABLE, ContentValues().apply { put("completion", encoded) },
+                    "$IDENTITY AND state=? AND completion IS NULL AND result=?",
+                    identity(work.scope, work.id) + arrayOf(TitleUpdateAttemptState.OUTCOME_UNKNOWN.name,
+                        encodeResult(retained))) == 1) { "Title completion was not retained" }
+                true
+            }
+        }
+    }
+
+    override suspend fun readCompletion(scope: CalendarScope, id: MutationId): TitleUpdateCompletion? =
+        access { db -> transaction(db) { read(db, scope, id)?.let { readCompletion(db, it) } } }
+
+    private fun encodeCompletion(value: TitleUpdateCompletion): String = bounded(JSONObject().apply {
+        put("schema", 1)
+        put("result", JSONObject(encodeResult(value.result)))
+        put("receipt", TitleUpdateAcknowledgementCodec.encode(value.receipt))
+    }.toString())
+
+    private fun readCompletion(db: SQLiteDatabase, current: TitleUpdateAttemptRecord): TitleUpdateCompletion? =
+        db.query(TABLE, arrayOf("completion"), IDENTITY, identity(current.scope, current.id), null, null, null).use { row ->
+            if (!row.moveToFirst() || row.isNull(0)) null else try {
+                require(row.getType(0) == Cursor.FIELD_TYPE_STRING && current.state == TitleUpdateAttemptState.OUTCOME_UNKNOWN)
+                val payload = bounded(row.getString(0))
+                val json = JSONObject(payload)
+                require(json.keys().asSequence().toSet() == setOf("schema", "result", "receipt") && integer(json, "schema") == 1L)
+                val result = decodeResult(json.getJSONObject("result").toString(), current)
+                require(result == readVerified(db, current))
+                val receipt = TitleUpdateAcknowledgementCodec.decode(text(json, "receipt"))
+                TitleUpdateCompletion.of(result, TitleUpdateAcknowledgementRecord(receipt,
+                    TitleUpdateAcknowledgementState.RESTORED)).also { require(encodeCompletion(it) == payload) }
+            } catch (_: Exception) { throw IllegalStateException("Invalid retained title completion") }
+        }
 
     override suspend fun retainVerified(result: TitleUpdateVerifiedResult) {
         val frozen = TitleUpdateVerifiedResult.of(result.record,
@@ -118,7 +185,7 @@ class TitleUpdateAttemptStore(context: Context, name: String = "calendar-title-u
         db.query(TABLE, arrayOf("result"), IDENTITY, identity(current.scope, current.id), null, null, null).use { row ->
             if (!row.moveToFirst() || row.isNull(0)) null else try {
                 require(row.getType(0) == Cursor.FIELD_TYPE_STRING)
-                decodeResult(row.getString(0), current)
+                decodeResult(row.getString(0), current).also { require(encodeResult(it) == row.getString(0)) }
             } catch (_: Exception) { throw IllegalStateException("Invalid retained verified title result") }
         }
 
@@ -167,15 +234,20 @@ class TitleUpdateAttemptStore(context: Context, name: String = "calendar-title-u
         val preparation = encodePreparation(frozen.preparation)
         return access { db ->
             currentCoroutineContext().ensureActive()
-            if (!admitDispatch(frozen.scope)) false else transaction(db) {
+            if (!admitDispatch(frozen.scope)) false else transaction(db, beforeCommit = {
+                check(admitDispatch(frozen.scope)) { "Title update dispatch lease is not current" }
+            }) {
+                val history = eventHistory(db, frozen.scope, frozen.preparation.intent.base.eventId)
                 val current = read(db, frozen.scope, frozen.id)
-                val admitted = current == frozen && db.update(TABLE, ContentValues().apply {
+                val admitted = current == frozen && history.singleOrNull {
+                    it.scope == frozen.scope && it.id == frozen.id && !it.completed
+                } != null && history.none { !it.completed &&
+                    (it.scope != frozen.scope || it.id != frozen.id) } && db.update(TABLE, ContentValues().apply {
                     put("state", TitleUpdateAttemptState.OUTCOME_UNKNOWN.name)
-                }, "$IDENTITY AND event=? AND preparation=? AND adapter=? AND version=? AND payload=? AND state=? AND evidence IS NULL",
+                }, "$IDENTITY AND event=? AND preparation=? AND adapter=? AND version=? AND payload=? AND state=? AND evidence IS NULL AND completion IS NULL",
                     identity(frozen.scope, frozen.id) + arrayOf(frozen.preparation.intent.base.eventId.value,
                         preparation, frozen.format.id, frozen.format.version.toString(), frozen.protectedPayload,
                         TitleUpdateAttemptState.PREPARED.name)) == 1
-                check(admitDispatch(frozen.scope)) { "Title update dispatch lease is not current" }
                 admitted
             }
         }
@@ -207,16 +279,44 @@ class TitleUpdateAttemptStore(context: Context, name: String = "calendar-title-u
         } }
     }
 
-    private fun hasEvent(db: SQLiteDatabase, scope: CalendarScope, event: EventId): Boolean =
-        db.query(TABLE, arrayOf("mutation"), "account=? AND calendar=? AND event=?",
+    private data class History(val scope: CalendarScope, val id: MutationId,
+        val localIntentId: MutationId, val completed: Boolean)
+
+    /** A non-null column alone must never release the event hold. Validate every historical
+     * proof under the writer transaction, including history in earlier generations. Discard each
+     * full work/result/receipt after validation; only admission identities survive the iteration.
+     */
+    private fun eventHistory(db: SQLiteDatabase, scope: CalendarScope, event: EventId): List<History> {
+        val history = db.query(TABLE, arrayOf("generation", "mutation"), "account=? AND calendar=? AND event=?",
             arrayOf(scope.account.value, scope.calendar.value, event.value),
-            null, null, null).use { it.moveToFirst() }
+            null, null, null).use { rows -> buildList {
+                while (rows.moveToNext()) {
+                    check(rows.getType(0) == Cursor.FIELD_TYPE_INTEGER && rows.getType(1) == Cursor.FIELD_TYPE_STRING) {
+                        "Invalid title attempt history identity"
+                    }
+                    val previousScope = scope.copy(generation = rows.getLong(0))
+                    val record = checkNotNull(read(db, previousScope, MutationId(rows.getString(1))))
+                    check(record.preparation.intent.base.eventId == event)
+                    val completed = readCompletion(db, record) != null
+                    add(History(record.scope, record.id, record.preparation.intent.id, completed))
+                }
+            } }
+        check(history.count { !it.completed } <= 1 &&
+            history.map { it.id }.distinct().size == history.size &&
+            history.map { it.localIntentId }.distinct().size == history.size) {
+            "Title attempt history is inconsistent"
+        }
+        return history
+    }
 
     private fun read(db: SQLiteDatabase, scope: CalendarScope, id: MutationId): TitleUpdateAttemptRecord? =
         db.query(TABLE, arrayOf("event", "preparation", "adapter", "version", "payload", "state", "evidence"),
             IDENTITY, identity(scope, id), null, null, null).use { row ->
             if (!row.moveToFirst()) null else try {
+                require((0..6).all { row.getType(it) == if (it == 3) Cursor.FIELD_TYPE_INTEGER
+                    else if (it == 6 && row.isNull(it)) Cursor.FIELD_TYPE_NULL else Cursor.FIELD_TYPE_STRING })
                 val preparation = decodePreparation(row.getString(1))
+                require(encodePreparation(preparation) == row.getString(1))
                 require(preparation.intent.scope == scope && preparation.intent.base.eventId.value == row.getString(0))
                 TitleUpdateAttemptRecord(id, preparation, AdapterFormat(row.getString(2), version(row, 3)),
                     row.getString(4), TitleUpdateAttemptState.valueOf(row.getString(5)),
@@ -296,10 +396,12 @@ class TitleUpdateAttemptStore(context: Context, name: String = "calendar-title-u
     private suspend fun <T> access(action: suspend (SQLiteDatabase) -> T): T = withContext(Dispatchers.IO) {
         lock.withLock { currentCoroutineContext().ensureActive(); action(writableDatabase) }
     }
-    private suspend fun <T> transaction(db: SQLiteDatabase, action: () -> T): T {
+    private suspend fun <T> transaction(db: SQLiteDatabase, beforeCommit: () -> Unit = {}, action: () -> T): T {
         db.beginTransaction()
         try {
             val result = action()
+            currentCoroutineContext().ensureActive()
+            beforeCommit()
             currentCoroutineContext().ensureActive()
             db.setTransactionSuccessful()
             return result

@@ -204,6 +204,88 @@ class TitleUpdateAcknowledgementIntegrationDeviceTest {
             }
         }
         suspend fun acknowledge() = coordinator.acknowledgeLocalTitle(target, base.eventId, prepared.id, journal)
+        suspend fun complete(attempt: MutationId = prepared.id) =
+            coordinator.completeLocalTitle(target, base.eventId, attempt, journal)
+
+        suspend fun secondCycle(): Pair<TitleUpdateAttemptRecord, TitleUpdateVerifiedResult> {
+            val id = MutationId("synthetic-second-intent")
+            mutateTitle("Synthetic second submitted system title")
+            if (transferred) captureTransferred(id) else
+                assertEquals(LocalEditCaptureResult.RETAINED, coordinator.captureLocalEdit(target, base.eventId, id))
+            allowSql()
+            val next = store.localEdit(target, base.eventId)!!
+            assertEquals(verified, next.base)
+            val nextPreparation = preparation.copy(intent = next, timestamp = preparation.timestamp.plusSeconds(1))
+            assertTrue(store.retainLocalEditPreparation(nextPreparation))
+            val nextAttempt = prepared.copy(id = MutationId("synthetic-second-attempt"), preparation = nextPreparation)
+            journal.remember(nextAttempt); journal.admitDispatch = { it == target }; assertTrue(journal.claim(nextAttempt))
+            journal.admitDispatch = { error("Acknowledgement and completion cannot dispatch") }
+            val unknown = nextAttempt.copy(state = TitleUpdateAttemptState.OUTCOME_UNKNOWN)
+            val result = TitleUpdateVerifiedResult.of(unknown, TitleUpdateSubmissionObservation.Verified(
+                TitleUpdateAttemptIdentity.of(unknown), verified.copy(revision = Revision("synthetic-second-revision"), content = next.content)))
+            journal.retainVerified(result)
+            return nextAttempt to result
+        }
+
+        suspend fun twoCycles(recoverSecond: Boolean = false) {
+            assertEquals(TitleUpdateCompletionResult.UNRESOLVED, complete())
+            assertEquals(TitleUpdateAcknowledgementResult.ACKNOWLEDGED, acknowledge())
+            val firstReceipt = receipt()!!
+            val firstNative = values()
+            journal.writableDatabase.execSQL("CREATE TRIGGER fixture_completion_loss BEFORE UPDATE OF completion ON title_update_attempts BEGIN SELECT RAISE(ABORT,'synthetic completion loss'); END")
+            assertEquals(TitleUpdateCompletionResult.UNRESOLVED, complete())
+            assertNull(journal.readCompletion(target, prepared.id))
+            assertEquals(firstNative, values())
+            journal.writableDatabase.execSQL("DROP TRIGGER fixture_completion_loss")
+            assertEquals(TitleUpdateCompletionResult.COMPLETED, complete())
+            assertEquals(TitleUpdateCompletion.of(result, firstReceipt), journal.readCompletion(target, prepared.id))
+            assertEquals(firstNative, values())
+            val (second, secondResult) = secondCycle()
+            val nextNative = values()
+            allowSql()
+            val nextIntent = store.localEdit(target, base.eventId)
+            val secondFrame = store.capturedHandoff(target, base.eventId)?.frame
+            val pending = if (recoverSecond) store.prepareTitleUpdateAcknowledgement(secondResult, secondFrame)!! else null
+            pending?.let { assertTrue(it.fresh) }
+            // A late replay belongs to the first attempt, even with a new owner or PENDING receipt.
+            assertEquals(TitleUpdateAcknowledgementResult.ACKNOWLEDGED, acknowledge())
+            assertEquals(TitleUpdateCompletionResult.COMPLETED, complete())
+            allowSql(); assertEquals(nextIntent, store.localEdit(target, base.eventId))
+            assertEquals(pending?.record, store.titleUpdateAcknowledgement(target, base.eventId, second.id))
+            assertEquals(nextNative, values()); assertEquals(1, writes.get()); assertEquals(0, inspections.get())
+            if (pending != null) {
+                // Simulate a process loss after the directly reserved fresh native write.
+                native.admitOperation = { true }
+                assertNotNull(native.acknowledgeTitleUpdate(pending.record.receipt))
+            }
+            assertEquals(TitleUpdateAcknowledgementResult.ACKNOWLEDGED,
+                coordinator.acknowledgeLocalTitle(target, base.eventId, second.id, journal))
+            assertEquals(TitleUpdateCompletionResult.COMPLETED, complete(second.id))
+            allowSql()
+            assertEquals(secondResult.event, store.projectedBaseline(target, base.eventId))
+            assertNull(store.localEdit(target, base.eventId)); assertNull(store.localEditPreparation(target, base.eventId))
+            assertEquals(firstReceipt, store.titleUpdateAcknowledgement(target, base.eventId, prepared.id))
+            assertEquals(unknown, journal.read(target, prepared.id))
+            assertEquals(second.copy(state = TitleUpdateAttemptState.OUTCOME_UNKNOWN), journal.read(target, second.id))
+            TitleUpdateAttemptStore(context, attemptName).use { reopened ->
+                assertEquals(journal.readCompletion(target, prepared.id), reopened.readCompletion(target, prepared.id))
+                assertEquals(journal.readCompletion(target, second.id), reopened.readCompletion(target, second.id))
+                reopened.admitDispatch = { true }; assertFalse(reopened.claim(prepared)); assertFalse(reopened.claim(second))
+            }
+            val finalNative = values()
+            assertEquals(TitleUpdateAcknowledgementResult.ACKNOWLEDGED, acknowledge())
+            assertEquals(TitleUpdateCompletionResult.COMPLETED, complete())
+            assertEquals(finalNative, values()); assertSingleOriginalRow()
+            assertEquals(if (recoverSecond) 1 else 2, writes.get())
+            assertEquals(if (recoverSecond) 1 else 0, inspections.get())
+            if (transferred) {
+                allowSql()
+                val final = store.capturedHandoff(target, base.eventId)!!
+                assertEquals(frame!!.receipt, final.frame.receipt)
+                assertEquals(secondResult.event, final.frame.base)
+                assertEquals(secondFrame, journal.readCompletion(target, second.id)!!.receipt.handoff)
+            }
+        }
         suspend fun receipt(): TitleUpdateAcknowledgementRecord? { allowSql(); return store.titleUpdateAcknowledgement(target, base.eventId) }
         suspend fun assertSqlRestored() {
             allowSql()
@@ -257,6 +339,19 @@ class TitleUpdateAcknowledgementIntegrationDeviceTest {
         assertEquals(expected, values()); assertSingleOriginalRow()
         assertEquals(1, writes.get()); assertEquals(0, inspections.get())
         assertSqlRestored()
+    }
+
+    @Test fun twoOrdinaryAllDayTitleCyclesRetainHistoryAndRecoverCompletionLoss() = fixture(allDay = true) { twoCycles(recoverSecond = true) }
+    @Test fun twoOrdinaryTimedTitleCyclesRetainHistoryAndRecoverCompletionLoss() = fixture(allDay = false) { twoCycles() }
+    @Test fun twoTransferredAllDayTitleCyclesPreserveOriginAndRecoverCompletionLoss() = fixture(allDay = true, transferred = true) { twoCycles(recoverSecond = true) }
+    @Test fun twoTransferredTimedTitleCyclesPreserveOriginAndRecoverCompletionLoss() = fixture(allDay = false, transferred = true) { twoCycles() }
+
+    @Test fun restoredNativeSqlProofCanCloseUnknownWithoutNativeOrNetwork() = fixture(allDay = false) {
+        assertEquals(TitleUpdateAcknowledgementResult.ACKNOWLEDGED, acknowledge())
+        val before = values()
+        assertEquals(TitleUpdateCompletionResult.COMPLETED, complete())
+        assertNotNull(journal.readCompletion(target, prepared.id))
+        assertEquals(before, values()); assertEquals(1, writes.get()); assertEquals(0, inspections.get())
     }
 
     @Test fun transferredAcknowledgementKeepsAllDayOriginAndAdvancesTheSameFrame() = fixture(allDay = true, transferred = true) {

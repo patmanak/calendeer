@@ -39,7 +39,11 @@ only native synchronization metadata and restores the exact local intent's SQL
 baseline. Recovery inspects the same nonce and preserves later local edits and
 new remote observations. Transferred CREATE events require their complete original
 provenance and current handoff frame; acknowledgement also advances that frame
-atomically while preserving the immutable creation evidence. The service-to-native
+atomically while preserving the immutable creation evidence. A separate internal
+completion binds the first durable result to its RESTORED receipt. Immutable
+receipt history supports successive title cycles and old replay without consuming
+the next intent. The original UNKNOWN attempt remains non-resendable; unresolved
+work and corrupt history block new admission across generations. The service-to-native
 UPDATE journey and automatic activation are unqualified.
 Isolated physical Provider/SQLite integration qualifies same-row acknowledgement,
 interrupted restoration and preservation of a later dirty edit. Newer cached
