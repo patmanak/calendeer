@@ -70,6 +70,7 @@ class ImportCoordinator(
     private val scheduler: ImportScheduler = WorkManagerImportScheduler(context),
     private val creates: CreateAttemptStore? = null,
     private val localCreates: LocalCreateStore? = null,
+    private val systemCreatesEnabled: (CalendarScope) -> Boolean = { false },
 ) {
     private val mutex = Mutex()
     private val serial = AccountSerialExecutor()
@@ -99,6 +100,83 @@ class ImportCoordinator(
 
     /** Production startup is conservative: legacy preparations require explicit future resolution. */
     suspend fun initializeCreates() = mutex.withLock { ensureCreateLifecycle() }
+
+    /** Synchronous invalidation also covers a disable/re-enable during adapter IO. */
+    fun systemCreatePolicyChanged(target: CalendarScope, enabled: Boolean) {
+        createPolicyRevision.incrementAndGet()
+        creates?.admitDispatch = { false }
+        freshCapturedSubmissions.entries.removeIf { it.key.first == target }
+        if (!enabled) pendingCreatePauses[target] = CreatePauseReason.CALENDAR_DISABLED
+    }
+
+    suspend fun configureSystemCalendar(target: CalendarScope): Boolean = mutex.withLock {
+        val expected = generation
+        if (!hasCalendarPermissions()) return@withLock false
+        val selected = store.selections(target.account).singleOrNull { it.scope == target }
+        val mode = systemCreatesEnabled(target) && selected?.enabled == true && selected.available &&
+            isCurrent(expected, target.account)
+        val policy = createPolicyRevision.get()
+        projection.admitOperation = { generation == expected && hasCalendarPermissions() &&
+            createPolicyRevision.get() == policy && (!mode || (authenticated && systemCreatesEnabled(target))) }
+        try {
+            if (mode) projection.ensureCalendarState(target, selected!!.summary, true)
+            else projection.makeCalendarReadOnly(target)
+            true
+        }
+        finally { projection.admitOperation = { false } }
+    }
+
+    /** Also closes retained mirrors after sign-out/account changes and a cold process restart. */
+    suspend fun reconcileSystemCalendarAccess() {
+        for (target in store.calendarScopes()) configureSystemCalendar(target)
+    }
+
+    suspend fun discoverSystemChanges(target: CalendarScope, afterRow: Long = 0, limit: Int = 25):
+        com.patmanak.proton.andcalendarbridge.data.calendar.SystemCalendarChangePage? = mutex.withLock {
+        val expected = generation
+        val policy = createPolicyRevision.get()
+        val active = { authenticated && generation == expected && createPolicyRevision.get() == policy &&
+            systemCreatesEnabled(target) && hasCalendarPermissions() }
+        if (!active() || !isCurrent(expected, target.account)) return@withLock null
+        val selected = store.selections(target.account).singleOrNull { it.scope == target }
+        if (selected?.enabled != true || !selected.available) return@withLock null
+        projection.admitOperation = active
+        store.admitTransaction = { it == target && active() }
+        try {
+            val page = projection.discoverSystemChanges(target, afterRow, limit)
+                ?: return@withLock null
+            val keys = page.changes.filter { it.kind == com.patmanak.proton.andcalendarbridge.data.calendar.SystemCalendarChangeKind.IMPORTED }
+                .mapNotNull { it.nativeKey }.toSet()
+            val resolved = mutableMapOf<String, EventId>()
+            val ambiguous = mutableSetOf<String>()
+            var afterEvent: EventId? = null
+            // Metadata traversal can be linear in acknowledged event count. Memory stays bounded
+            // to one ID page and the native change page; a persisted native-key index is future work.
+            if (keys.isNotEmpty()) while (true) {
+                currentCoroutineContext().ensureActive()
+                if (!active() || !isCurrent(expected, target.account)) return@withLock null
+                val ids = store.projectedEventIds(target, afterEvent, 100)
+                for (event in ids) {
+                    val key = projection.eventIdentityKey(target, event) ?: continue
+                    if (key !in keys || key in ambiguous) continue
+                    val previous = resolved.put(key, event)
+                    if (previous != null && previous != event) {
+                        resolved.remove(key); ambiguous += key
+                    }
+                }
+                if (ids.size < 100) break
+                afterEvent = ids.last()
+            }
+            val canonical = page.copy(changes = page.changes.map { change ->
+                if (change.kind == com.patmanak.proton.andcalendarbridge.data.calendar.SystemCalendarChangeKind.IMPORTED)
+                    change.copy(event = change.nativeKey?.let(resolved::get)) else change
+            })
+            val current = store.selections(target.account).singleOrNull { it.scope == target }
+            if (active() && current?.enabled == true && current.available) canonical else null
+        } catch (cancelled: CancellationException) { throw cancelled }
+          catch (_: Exception) { null }
+          finally { projection.admitOperation = { false }; store.admitTransaction = { false } }
+    }
 
     private suspend fun ensureCreateLifecycle() {
         val journal = creates ?: return
@@ -770,6 +848,71 @@ class ImportCoordinator(
               projection.admitOperation = { false }
               journal.admitCapture = { false }
           }
+    }
+
+    /** Opt-in automatic path requalifies the same unsent payload; UNKNOWN remains inspect-only. */
+    suspend fun resumePreparedLocalCreate(target: CalendarScope, localId: LocalEventId, id: MutationId,
+        attempt: MutationId, port: CalendarCreateSubmissionPort): LocalCreateSubmissionResult = mutex.withLock {
+        val captures = localCreates ?: return@withLock LocalCreateSubmissionResult.UNRESOLVED
+        val journal = creates ?: return@withLock LocalCreateSubmissionResult.UNRESOLVED
+        ensureCreateLifecycle()
+        val expected = generation
+        val policy = createPolicyRevision.get()
+        val active = { authenticated && generation == expected && createPolicyRevision.get() == policy &&
+            systemCreatesEnabled(target) && hasCalendarPermissions() }
+        if (!active()) return@withLock LocalCreateSubmissionResult.INACTIVE
+        val key = target to attempt
+        var retainedLease: CapturedSubmissionLease? = null
+        try {
+            qualifyCreate(target, expected, policy)
+            captures.admitCapture = { it == target && active() }
+            store.admitTransaction = { it == target && active() }
+            projection.admitOperation = active
+            val submission = captures.readSubmission(target, localId) ?: return@withLock LocalCreateSubmissionResult.UNRESOLVED
+            val captured = submission.reservation.intent.reservation
+            if (captured.scope != target || captured.localId != localId || captured.id != id ||
+                submission.reservation.attempt != attempt || captured.format != remote.format ||
+                port.knownEmptySubmissionFormat != submission.reservation.format)
+                return@withLock LocalCreateSubmissionResult.UNQUALIFIED
+            val wanted = CapturedCreateDispatchIdentity.of(submission)
+            val record = journal.read(target, attempt)
+            if (record?.state == CreateAttemptState.OUTCOME_UNKNOWN) return@withLock LocalCreateSubmissionResult.UNRESOLVED
+            suspend fun qualifies(): Boolean {
+                if (!active() || !isCurrent(expected, target.account)) return false
+                val selected = store.selections(target.account).singleOrNull { it.scope == target }
+                if (selected?.enabled != true || !selected.available ||
+                    store.transaction(target) { checkpoint?.format } != captured.format ||
+                    captures.readSubmission(target, localId) != submission ||
+                    port.knownEmptySubmissionFormat != submission.reservation.format) return false
+                val row = projection.inspectStampedSimpleCreate(target, localId)
+                return row?.content == submission.reservation.intent.content && active() &&
+                    captures.readSubmission(target, localId) == submission &&
+                    store.transaction(target) { checkpoint?.format } == captured.format
+            }
+            if (!qualifies()) return@withLock if (active()) LocalCreateSubmissionResult.UNQUALIFIED else LocalCreateSubmissionResult.INACTIVE
+            val lease = CapturedSubmissionLease(wanted, expected, policy)
+            retainedLease = lease
+            freshCapturedSubmissions[key] = lease
+            journal.admitDispatch = { it == target && active() && freshCapturedSubmissions[key] == lease }
+            if (!journal.resumeCapturedPrepared(submission)) {
+                freshCapturedSubmissions.remove(key, lease)
+                return@withLock LocalCreateSubmissionResult.UNQUALIFIED
+            }
+            if (!qualifies()) {
+                freshCapturedSubmissions.remove(key, lease)
+                return@withLock if (active()) LocalCreateSubmissionResult.UNQUALIFIED else LocalCreateSubmissionResult.INACTIVE
+            }
+            LocalCreateSubmissionResult.RETAINED
+        } catch (cancelled: CancellationException) {
+            retainedLease?.let { freshCapturedSubmissions.remove(key, it) }
+            throw cancelled
+        } catch (_: Exception) {
+            retainedLease?.let { freshCapturedSubmissions.remove(key, it) }
+            if (active()) LocalCreateSubmissionResult.UNAVAILABLE else LocalCreateSubmissionResult.INACTIVE
+        } finally {
+            captures.admitCapture = { false }; journal.admitDispatch = { false }
+            store.admitTransaction = { false }; projection.admitOperation = { false }
+        }
     }
 
     /** Explicit internal dispatch; original Provider acknowledgement and association remain separate. */
@@ -1718,7 +1861,14 @@ class ImportCoordinator(
                 try {
                     store.status(calendarScope, "RUNNING")
                     if (!isCurrent(expected, account)) return ImportRunResult.COMPLETE
-                    val ensuredCalendar = projection.ensureCalendarState(calendarScope, selection.summary)
+                    val createsMode = systemCreatesEnabled(calendarScope)
+                    val accessPolicy = createPolicyRevision.get()
+                    projection.admitOperation = { authenticated && generation == expected &&
+                        createPolicyRevision.get() == accessPolicy && systemCreatesEnabled(calendarScope) == createsMode }
+                    val ensuredCalendar = try {
+                        if (createsMode) projection.ensureCalendarState(calendarScope, selection.summary, true)
+                        else projection.ensureCalendarState(calendarScope, selection.summary)
+                    } finally { projection.admitOperation = { authenticated && generation == expected } }
                     val providerId = ensuredCalendar.id
                     val providerKey = projection.accountFor(account).name + ":" + selection.scope.calendar.value
                     if (ensuredCalendar.created || providerIds.getLong(providerKey, -1) != providerId) {

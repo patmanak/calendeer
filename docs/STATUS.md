@@ -17,7 +17,15 @@ The release-candidate target is bidirectional use from system calendar clients;
 read-only delivery is a validation stage. A [FOSS synchronization source audit](research/FOSS_SYNC_REUSE.md)
 identifies reusable DAVx5/EteSync capture and exception handling, the current
 synctools library, and server-specific concurrency mechanisms. No new dependency
-or outgoing capability is enabled by that audit.
+is imported by that audit. The application now exposes opt-in experimental simple
+CREATE from a system calendar client. An offline identity queue, Provider observer
+and WorkManager pipeline reuse the existing Proton preparation, verified readback,
+same-row acknowledgement and handoff. Read-only remains the default. Pausing or
+disabling creation closes native editing without deleting events; pending work
+stays visible with the mode off. UNKNOWN submissions can only be inspected, never
+automatically sent again. UPDATE/DELETE remain held locally without upload.
+See [system creation](LOCAL_CREATE_CAPTURE.md#opt-in-system-creation) for the exact
+supported profiles, pagination and unresolved limitations.
 
 ## Current delivery boundary
 
@@ -30,7 +38,7 @@ sessions and imported calendars. See [identity and interface](DESIGN.md).
 
 | Module | Implemented | Not established by this slice |
 | --- | --- | --- |
-| `app` | Configuration, login, discovery and per-calendar read-only import controls; eight languages; durable import queue, Calendar Provider projection, permissions and background scheduling. | Broad Android/OEM qualification, editable mode or complete event feature coverage. |
+| `app` | Configuration, login, discovery, read-only imports and opt-in simple system CREATE; eight languages; durable import/create queues, Calendar Provider projection, permissions and background scheduling. | Broad Android/OEM qualification, general UPDATE/DELETE or complete event feature coverage. |
 | `sync` | Pure scoped models, bounded transactional pagination, access gates, immutable simple local CREATE/UPDATE/DELETE intents, conflict checks, uncertain-outcome write states and a separate metadata catalog controller. | General outgoing queue, automatic capture or bidirectional reconciliation. |
 | `auth` | Contako-derived secret contract and state controller, cancellation/cleanup gates, retry policy and focused tests. | Calendar bootstrap or per-calendar capability checks. |
 | `proton-auth` | Proton Core login/session integration, discovery, Calendar key bootstrap, paginated decryption, sealed change polling, bounded recurrence mapping and experimental single simple-event CREATE with verified readback. | All challenge variants, external-author trust resolution, complete recurrence/history coverage or general event editing. |
@@ -885,11 +893,18 @@ event-specific queue. A subsequent one-shot native title edit was retained as a
 paused intention against that advanced base without dispatch. Inspection after a
 controlled process stop and reopen preserved the dirty row and waiting state.
 These checks use the production owner, journals, Provider and real incoming Proton
-adapter. Creation or editing through a system-calendar UI remains unqualified;
-the local mutation in this journey uses an explicit conditional Provider batch.
-The application still exposes no writable mirror or event editor. General outgoing
-queue/resolution, automatic Provider capture and conditional Proton UPDATE/DELETE
-guarantees remain unqualified. See
+adapter. That earlier journey uses an explicit conditional Provider batch.
+A real system-editor simple creation now also passes through the production
+controller and Proton adapter: authenticated readback, original-row acknowledgement,
+released handoff and restart inspection preserve its identity without another send.
+This qualifies the measured /e/OS editor profile without reminders; Samsung and
+general editing through a system-calendar UI still require separate qualification.
+A second retained system-editor creation also completed through the actual
+WorkManager path, without a direct controller run before completion. These
+service checks qualify simple creation and replay, not general bidirectional edits.
+The application now exposes an experimental writable mirror for qualified simple
+creation, with no event editor. General outgoing resolution and conditional Proton
+UPDATE/DELETE guarantees remain unqualified. See
 [source adaptation](../proton-auth/PROVENANCE.md).
 Explicit remote deletion notices
 now use a durable, scoped path to the Android mirror; historical deletion recovery

@@ -6,6 +6,27 @@ Install neither an emulator nor a device-specific environment as part of a build
 
 The reusable [acceptance plan](ACCEPTANCE.md) defines expected outcomes by boundary.
 
+Experimental system CREATE qualification covers `SystemCreateWorkStoreDeviceTest`,
+`SystemCreatePipelineDeviceTest`, `SystemImportedChangeResolutionDeviceTest`,
+`LocalCreateProviderDeviceTest` and `CapturedCreateDispatchCoordinatorDeviceTest`.
+Run these isolated tests with `providerFixture=true`. Their physical fixtures
+verify offline capture, restart identity, uncertain readback without resend,
+mid-send edits, final-claim mode changes, inactive-mirror access restriction,
+pending visibility and canonical imported-event IDs. Preserve the strict negative
+cases for reminders, guests and unsupported metadata.
+
+`CalendarSystemCreateLiveDeviceTest` is a separate authorized-account journey.
+Its opt-in `calendarSystemCreate=true` requires a frozen token, account verification
+hash and whole-second start. `systemCreatePhase=LAUNCH` freezes the original scope
+and opens one public system-editor insertion; never repeat a frozen launch.
+Save the synthetic example without reminders. `VERIFY` uses the same persisted
+fixture and production controller, requiring original-row ACK, released handoff
+and non-resendable journal identity. `systemCreateAutomaticOnly=true` uses a
+separate fixture and waits for the actual background worker before any direct
+controller replay. Retain visible service examples; isolate and remove temporary
+Provider fixtures only. A successful editor profile on one client is not proof
+of Samsung or another OEM's behavior.
+
 From the project root (use `gradlew.bat` on Windows):
 
 ```sh

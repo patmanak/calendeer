@@ -346,10 +346,14 @@ class CapturedCreateCleanProviderDeviceTest {
                 assertEquals(1, it.count); assertTrue(it.moveToFirst()); if (it.isNull(0)) null else it.getString(0)
             }
         suspend fun series(): Pair<RemoteChange.Upsert, Long> {
+            // These fixtures test captured-origin barriers on native parents/children, not finite
+            // date projection or DST geometry. Use an unambiguous UTC master and ordinary
+            // unbounded rule so setup does not enter the separately guarded recurrence risk path.
             val master = baseline.change.copy(eventId = EventId("clean-series-master"),
-                content = content.copy(recurrence = EventRecurrence("clean-fixture-series", "FREQ=DAILY;COUNT=3")))
+                content = content.copy(time = (content.time as EventTime.Timed).copy(zone = ZoneId.of("UTC")),
+                    recurrence = EventRecurrence("clean-fixture-series", "FREQ=DAILY")))
             projection.apply(ProjectionIntent(target, master))
-            val child = baseline.change.copy(eventId = EventId("clean-series-child"), content = content.copy(title = "Clean series child",
+            val child = baseline.change.copy(eventId = EventId("clean-series-child"), content = content.copy(title = "Clean series child", time = master.content.time,
                 recurrence = EventRecurrence("clean-fixture-series", original = RecurrencePoint.Timed(Instant.parse("2030-10-28T00:30:00Z")))))
             projection.apply(ProjectionIntent(target, child))
             val childRow = context.contentResolver.query(uri, arrayOf(Events._ID), "${Events.CALENDAR_ID}=? AND ${Events.TITLE}=?",
@@ -359,14 +363,18 @@ class CapturedCreateCleanProviderDeviceTest {
             return master to childRow
         }
         suspend fun exceptionParent(): Pair<Long, RemoteChange.Upsert> {
+            // Parent provenance admission is independent of finite views or DST geometry. The UTC
+            // master avoids the original fixture's ambiguous Paris start before the assertions.
             val master = baseline.change.copy(eventId = EventId("clean-exception-parent"),
-                content = content.copy(title = "Clean standalone master", recurrence = EventRecurrence("clean-attachment-series", "FREQ=DAILY;COUNT=3")))
+                content = content.copy(title = "Clean standalone master",
+                    time = (content.time as EventTime.Timed).copy(zone = ZoneId.of("UTC")),
+                    recurrence = EventRecurrence("clean-attachment-series", "FREQ=DAILY")))
             projection.apply(ProjectionIntent(target, master))
             val parent = context.contentResolver.query(uri, arrayOf(Events._ID), "${Events.CALENDAR_ID}=? AND ${Events.TITLE}=?",
                 arrayOf(calendar.toString(), "Clean standalone master"), null)!!.use {
                     assertEquals(1, it.count); assertTrue(it.moveToFirst()); it.getLong(0)
                 }
-            val child = baseline.change.copy(eventId = EventId("clean-unattached-exception"), content = content.copy(title = "Clean unattached child",
+            val child = baseline.change.copy(eventId = EventId("clean-unattached-exception"), content = content.copy(title = "Clean unattached child", time = master.content.time,
                 recurrence = EventRecurrence("clean-attachment-series", original = RecurrencePoint.Timed(Instant.parse("2030-10-28T00:30:00Z")))))
             return parent to child
         }

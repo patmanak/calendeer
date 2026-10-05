@@ -163,7 +163,7 @@ class CreateAttemptStore(context: Context, name: String = "calendar-create-attem
         """.trimIndent())
     }
 
-    /** Pause only unadmitted work. The first reason is retained and no resume operation exists. */
+    /** Pause only unadmitted work. Generic work has no resume; captured work requires fresh qualification. */
     suspend fun pausePrepared(reason: CreatePauseReason, account: AccountId? = null, target: CalendarScope? = null) {
         val selection: String
         val arguments: Array<String>
@@ -552,6 +552,35 @@ class CreateAttemptStore(context: Context, name: String = "calendar-create-attem
             catch (_: IllegalArgumentException) { null }
             catch (_: DateTimeException) { null }
         }
+
+    /** Fresh owner qualification may resume only this exact unsent captured payload.
+     * UNKNOWN, generic parents and orphan provenance never regain a dispatch right.
+     */
+    suspend fun resumeCapturedPrepared(submission: LocalCreateSubmission): Boolean {
+        val link = CapturedCreateDispatchIdentity.of(submission)
+        val expected = CreateAttemptRecord(link.attempt.id, link.attempt.scope, link.attempt.format, submission.protectedPayload)
+        return access { db -> dispatchTransaction(db, expected.scope, { false }) {
+            val parent = read(db, expected.scope, expected.id)
+            if (parent == null) {
+                if (hasCapturedWork(db, expected.scope, expected.id) ||
+                    db.query("create_pauses", arrayOf("mutation"), IDENTITY, identity(expected.scope, expected.id), null, null, null).use { it.count != 0 })
+                    return@dispatchTransaction false
+                db.insertOrThrow("create_attempts", null, ContentValues().apply {
+                    put("account", expected.scope.account.value); put("calendar", expected.scope.calendar.value)
+                    put("generation", expected.scope.generation); put("mutation", expected.id.value)
+                    put("adapter", expected.format.id); put("version", expected.format.version)
+                    put("payload", expected.protectedPayload); put("state", expected.state.name)
+                })
+                db.insertOrThrow("captured_create_links", null, capturedValues(link))
+            } else {
+                if (parent != expected || readCapturedIdentity(db, expected.scope, expected.id, parent) != link ||
+                    hasCapturedBinding(db, expected.scope, expected.id) || hasCapturedAttachment(db, expected.scope, expected.id))
+                    return@dispatchTransaction false
+                db.delete("create_pauses", IDENTITY, identity(expected.scope, expected.id))
+            }
+            true
+        } }
+    }
 
     /** Raw work/proof presence blocks generic paths even when its local link is missing or damaged. */
     suspend fun isCaptured(scope: CalendarScope, id: MutationId): Boolean =

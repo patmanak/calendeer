@@ -2,8 +2,9 @@
 
 `ImportCoordinator.captureLocalCreate` explicitly retains a simple new Android
 event offline. The application owns its capture journal, separate from the import
-database and experimental remote CREATE admission journal. Capture performs no
-dispatch or remote acknowledgement; no observer or editable calendar mode is enabled.
+database and experimental remote CREATE admission journal. Capture itself performs no
+dispatch or remote acknowledgement. The opt-in system creation controller below
+orchestrates the separate qualified submission path.
 A separate explicit
 read-only preparation entry point can retain a protected, non-dispatchable payload.
 
@@ -11,7 +12,8 @@ read-only preparation entry point can retain a protected, non-dispatchable paylo
 
 A canonical random local UUID identifies the candidate independently of a remote
 event ID, mutation ID or Android row locator. The caller supplies the UUID and
-mutation ID for an explicit capture; automatic discovery remains future work.
+mutation ID for an explicit capture; automatic discovery reserves these identities
+durably before invoking that same boundary.
 Scope includes account, calendar and generation. Adapter format/version and marker
 protocol are retained with a frozen second-precision timestamp.
 
@@ -26,6 +28,57 @@ unsupported flags are refused. This newly created content has an explicitly
 known-empty details profile; no unknown remote fields are inferred to be empty.
 Proton preparation uses a dedicated known-empty format. This is distinct from
 acceptance by the experimental submission adapter.
+
+An additional measured native-editor profile accepts the bridge's own opaque
+local organizer label, with the exact self-organizer/default guest flags and no
+participants, reminders or extended properties. This local label is not an
+external organizer or invitation. A missing end timezone uses the explicit start
+timezone only in this profile; an explicitly different end timezone is refused.
+Capture and acknowledgement assert and preserve the original native fields.
+The [AOSP editor helper](https://android.googlesource.com/platform/packages/apps/Calendar.git/+/7b051c6e9ef7922f08d9ebf664ac3087d5fa0552/src/com/android/calendar/event/EditEventHelper.java)
+sets attendee-data capability on new events and writes the start timezone without
+an end timezone. The rest of this profile comes from physical editor observation.
+This narrow admission does not loosen generic imported-event capture.
+
+## Opt-in system creation
+
+Each accessible imported calendar has an experimental creation switch, disabled
+by default. It enables Android's editor access for that mirror; event entry stays
+in the system calendar client. Disabling the mode, pausing the import or losing
+calendar access closes editing on the existing mirror. Retained mirrors are also
+closed after sign-out or a cold restart without the owning authenticated account.
+Closing access never creates a calendar or deletes event data.
+
+An event-table observer schedules durable local and network WorkManager jobs.
+Local discovery reads synchronization metadata, consumes at most 25 candidates
+per scope and persists its continuation. A separate backup-excluded journal
+reserves the local identity, capture identity, attempt and timestamp before stamp.
+Local work captures without networking. Network work prepares the exact payload,
+qualifies dispatch, verifies Proton readback and completes attachment, baseline,
+reconciliation, acknowledgement and handoff on the original Android row.
+The network path reuses the existing Proton adapter and official cryptography.
+The app adds no event editor, event reminder or synchronization notification.
+
+A restart may requalify the same captured PREPARED submission under the current
+mode, account, permissions, calendar access and unchanged native content. It never
+regenerates the payload or identities. Once the journal admits a send, its outcome
+is UNKNOWN until inspection verifies it; automatic processing cannot admit another
+send. Disable/re-enable invalidates the earlier dispatch lease, including at the
+final journal claim. Unsupported content and subsequent edits stay native and
+dirty; pending work remains visible even with the creation switch disabled.
+
+Imported changes resolve opaque Provider hashes through canonical acknowledged
+event IDs, reading metadata in pages of 100 without decoding payloads. Unknown or
+ambiguous keys cannot produce an intention. This resolution uses bounded memory
+but can traverse all projected IDs for a native page; a persistent reverse index
+is still needed for large catalogs. The native query is not a guaranteed database
+row limit, even though cursor consumption and job processing are paginated.
+
+UPDATE and DELETE captures remain held locally without upload. Automatic CREATE
+supports only the qualified simple profiles above. Per-event colors, recurrence,
+participants, reminders and interactive conflict/uncertainty resolution remain
+outside this experimental capability. General bidirectional release is not yet
+qualified, and additional system clients/OEMs require their own editor journeys.
 
 ## One-shot claim and first committed intention
 

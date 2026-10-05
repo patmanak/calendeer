@@ -18,4 +18,8 @@
     <string name="brand_back">Wstecz</string>
     <string name="brand_welcome">Twoje dni, połączone.</string>
     <string name="brand_independent">Niezależna aplikacja, niepowiązana z Proton.</string>
+    <string name="system_create_title">Eksperymentalne tworzenie</string>
+    <string name="system_create_limits">Twórz proste wydarzenia w aplikacji kalendarza. Przypomnienia, goście, powtarzanie i własne kolory nie są jeszcze obsługiwane. Zmiany i usunięcia pozostają lokalne i nie są wysyłane do Proton.</string>
+    <string name="system_create_pending">%1$d operacji oczekuje lub wymaga sprawdzenia. Niepewne wysłanie nigdy nie jest automatycznie powtarzane.</string>
+    <string name="system_create_error">Synchronizacja wymaga sprawdzenia. Dane Androida są zachowane.</string>
 </resources>

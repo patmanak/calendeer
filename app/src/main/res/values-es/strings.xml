@@ -18,4 +18,8 @@
     <string name="brand_back">Volver</string>
     <string name="brand_welcome">Tus días, conectados.</string>
     <string name="brand_independent">Aplicación independiente, no afiliada a Proton.</string>
+    <string name="system_create_title">Creación experimental</string>
+    <string name="system_create_limits">Crea eventos sencillos desde tu calendario. Los recordatorios, invitados, repeticiones y colores personalizados aún no son compatibles. Los cambios y borrados permanecen locales y no se envían a Proton.</string>
+    <string name="system_create_pending">%1$d creaciones pendientes o por revisar. Un envío incierto nunca se repite automáticamente.</string>
+    <string name="system_create_error">La sincronización requiere atención. Tus datos de Android se conservan.</string>
 </resources>

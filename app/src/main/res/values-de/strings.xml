@@ -18,4 +18,8 @@
     <string name="brand_back">Zurück</string>
     <string name="brand_welcome">Ihre Tage, gut verbunden.</string>
     <string name="brand_independent">Unabhängige Anwendung, nicht mit Proton verbunden.</string>
+    <string name="system_create_title">Experimentelle Erstellung</string>
+    <string name="system_create_limits">Erstellen Sie einfache Termine in Ihrer Kalender-App. Erinnerungen, Gäste, Wiederholungen und eigene Farben werden noch nicht unterstützt. Änderungen und Löschungen bleiben lokal und werden nicht an Proton gesendet.</string>
+    <string name="system_create_pending">%1$d Erstellungen warten oder müssen geprüft werden. Ein ungewisser Versand wird nie automatisch wiederholt.</string>
+    <string name="system_create_error">Die Synchronisierung benötigt eine Prüfung. Ihre Android-Daten bleiben erhalten.</string>
 </resources>

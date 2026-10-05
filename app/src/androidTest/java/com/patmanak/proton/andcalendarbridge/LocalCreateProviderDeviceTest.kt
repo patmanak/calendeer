@@ -7,6 +7,7 @@ import android.database.Cursor
 import android.net.Uri
 import android.provider.CalendarContract
 import android.provider.CalendarContract.Events
+import android.provider.CalendarContract.Attendees
 import android.provider.CalendarContract.Reminders
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -27,6 +28,44 @@ import org.junit.runner.RunWith
 /** Isolated Provider candidates; no editable UI, Proton transport, or outgoing CREATE is exercised. */
 @RunWith(AndroidJUnit4::class)
 class LocalCreateProviderDeviceTest {
+    @Test fun explicitSystemCreationModeKeepsTheSameCalendarAndDefaultsBackToReadOnly() = fixture {
+        val summary = CalendarSummary(target.calendar, "Create mode fixture")
+        assertEquals(calendar, projection.ensureCalendarState(target, summary, true).id)
+        fun level() = context.contentResolver.query(syncUri(CalendarContract.Calendars.CONTENT_URI),
+            arrayOf(CalendarContract.Calendars.CALENDAR_ACCESS_LEVEL), "_id=?", arrayOf(calendar.toString()), null)!!.use {
+            assertTrue(it.moveToFirst()); it.getInt(0)
+        }
+        assertEquals(CalendarContract.Calendars.CAL_ACCESS_EDITOR, level())
+        assertEquals(calendar, projection.ensureCalendarState(target, summary).id)
+        assertEquals(CalendarContract.Calendars.CAL_ACCESS_READ, level())
+        assertEquals(content, projection.captureAndStampSimpleCreate(target, row, localId)!!.content)
+    }
+
+    @Test fun systemDiscoveryUsesStablePagesAndNeverChangesOrStampsCandidates() = fixture {
+        val before = values()
+        val second = ContentUris.parseId(context.contentResolver.insert(uri, candidateValues())!!)
+        val first = projection.discoverSystemChanges(target, limit = 1)
+        assertEquals(listOf(SystemCalendarChange(row, SystemCalendarChangeKind.NEW)), first.changes)
+        assertEquals(row, first.afterRow); assertTrue(first.more)
+        val next = projection.discoverSystemChanges(target, first.afterRow, 1)
+        assertEquals(listOf(SystemCalendarChange(second, SystemCalendarChangeKind.NEW)), next.changes)
+        assertFalse(next.more); assertEquals(before, values())
+        projection.captureAndStampSimpleCreate(target, row, localId)!!
+        assertEquals(SystemCalendarChangeKind.CAPTURED, projection.discoverSystemChanges(target, limit = 1).changes.single().kind)
+    }
+
+    @Test fun systemDiscoveryDistinguishesImportedTombstonesWithoutInferringDeletion() = fixture {
+        mutate(ContentValues().apply {
+            put(Events.DIRTY, 0)
+        })
+        assertTrue(projection.discoverSystemChanges(target).changes.isEmpty())
+        mutate(ContentValues().apply { put(Events.DIRTY, 1); put(Events.DELETED, 1) })
+        val before = values()
+        val deleted = projection.discoverSystemChanges(target).changes.single()
+        assertEquals(SystemCalendarChangeKind.UNSUPPORTED, deleted.kind); assertTrue(deleted.deleted)
+        assertNull(deleted.event); assertEquals(before, values())
+    }
+
     @Test fun simpleTimedCandidateGetsOnlyALocalMarkerAndRetainsItsDirtyFlag() = fixture {
         val before = values()
         val snapshot = projection.captureAndStampSimpleCreate(target, row, localId)!!
@@ -44,6 +83,51 @@ class LocalCreateProviderDeviceTest {
         assertEquals(content, projection.captureAndStampSimpleCreate(target, row, localId)!!.content)
         assertEquals(content, projection.inspectStampedSimpleCreate(target, localId)!!.content)
         assertEquals("1", field(Events.DIRTY)); assertEquals("0", field(Events.DELETED))
+    }
+
+    @Test fun exactSystemSelfOrganizerProfileCanBeStampedWithoutNormalizingItsNativeFields() = fixture {
+        mutate(systemSelfOrganizerProfile())
+        val before = values()
+        assertEquals("0", before[Events.SELF_ATTENDEE_STATUS])
+        assertNull(before[Events.EVENT_END_TIMEZONE])
+        assertEquals(projection.accountFor(target.account).name, before[Events.ORGANIZER])
+        val captured = projection.captureAndStampSimpleCreate(target, row, localId)!!
+        assertEquals(row, captured.eventRow); assertEquals(content, captured.content)
+        assertNotNull(field(Events.SYNC_DATA5))
+        assertEquals(before - Events.SYNC_DATA5, values() - Events.SYNC_DATA5)
+        assertEquals(captured, projection.inspectStampedSimpleCreate(target, localId))
+        assertEquals(before - Events.SYNC_DATA5, values() - Events.SYNC_DATA5)
+    }
+
+    @Test fun systemSelfOrganizerProfileStillRefusesForeignOrganizerChildrenAndUnexpectedFlags() {
+        for (scenario in listOf("foreign-organizer", "same-owner-attendee", "reminder", "guest-modification")) fixture {
+            mutate(systemSelfOrganizerProfile())
+            assertEquals("0", field(Events.SELF_ATTENDEE_STATUS))
+            var child: Uri? = null
+            when (scenario) {
+                "foreign-organizer" -> mutate(ContentValues().apply { put(Events.ORGANIZER, "foreign-fixture@example.invalid") })
+                "guest-modification" -> mutate(ContentValues().apply { put(Events.GUESTS_CAN_MODIFY, 1) })
+                "same-owner-attendee" -> child = context.contentResolver.insert(syncUri(Attendees.CONTENT_URI), ContentValues().apply {
+                    put(Attendees.EVENT_ID, row); put(Attendees.ATTENDEE_EMAIL, projection.accountFor(target.account).name)
+                    put(Attendees.ATTENDEE_RELATIONSHIP, Attendees.RELATIONSHIP_ORGANIZER)
+                    put(Attendees.ATTENDEE_TYPE, Attendees.TYPE_REQUIRED); put(Attendees.ATTENDEE_STATUS, Attendees.ATTENDEE_STATUS_NONE)
+                })!!
+                "reminder" -> child = context.contentResolver.insert(syncUri(Reminders.CONTENT_URI), ContentValues().apply {
+                    put(Reminders.EVENT_ID, row); put(Reminders.MINUTES, 15); put(Reminders.METHOD, Reminders.METHOD_ALERT)
+                })!!
+            }
+            val before = values()
+            fun childValues(): Map<String, String?>? = child?.let { uri ->
+                context.contentResolver.query(syncUri(uri), null, null, null, null)!!.use { cursor ->
+                    assertEquals(1, cursor.count); assertTrue(cursor.moveToFirst())
+                    cursor.columnNames.withIndex().associate { (index, name) -> name to if (cursor.isNull(index)) null else cursor.getString(index) }
+                }
+            }
+            val beforeChild = childValues()
+            assertNull("Unexpected profile $scenario must not be stamped", projection.captureAndStampSimpleCreate(target, row, localId))
+            assertNull(field(Events.SYNC_DATA5)); assertEquals(before, values())
+            assertEquals(beforeChild, childValues()); assertEquals("1", field(Events.DIRTY))
+        }
     }
 
     @Test fun inspectionReadsCurrentContentButNeverClearsDirtyOrRestamps() = fixture {
@@ -220,6 +304,15 @@ class LocalCreateProviderDeviceTest {
         fun mutate(values: ContentValues) {
             assertEquals(1, context.contentResolver.update(uri, values, "${Events._ID}=?", arrayOf(row.toString())))
         }
+        fun systemSelfOrganizerProfile() = ContentValues().apply {
+            put(Events.ORGANIZER, projection.accountFor(target.account).name)
+            put(Events.HAS_ATTENDEE_DATA, 1); put(Events.IS_ORGANIZER, 1)
+            put(Events.GUESTS_CAN_INVITE_OTHERS, 1); put(Events.GUESTS_CAN_SEE_GUESTS, 1)
+            put(Events.GUESTS_CAN_MODIFY, 0); put(Events.HAS_ALARM, 0)
+            put(Events.ACCESS_LEVEL, 0)
+            put(Events.STATUS, Events.STATUS_CONFIRMED); put(Events.AVAILABILITY, Events.AVAILABILITY_BUSY)
+            putNull(Events.EVENT_END_TIMEZONE)
+        }
         fun field(column: String): String? = context.contentResolver.query(uri, arrayOf(column),
             "${Events._ID}=?", arrayOf(row.toString()), null)!!.use {
             assertEquals(1, it.count); assertTrue(it.moveToFirst()); if (it.isNull(0)) null else it.getString(0)
@@ -227,6 +320,9 @@ class LocalCreateProviderDeviceTest {
         fun values(): Map<String, String?> {
             val columns = listOf(Events.CALENDAR_ID, Events.TITLE, Events.DESCRIPTION, Events.EVENT_LOCATION, Events.DTSTART,
                 Events.DTEND, Events.ALL_DAY, Events.EVENT_TIMEZONE, Events.EVENT_END_TIMEZONE, Events.DIRTY, Events.DELETED,
+                Events.ORGANIZER, Events.HAS_ATTENDEE_DATA, Events.IS_ORGANIZER, Events.GUESTS_CAN_INVITE_OTHERS,
+                Events.GUESTS_CAN_SEE_GUESTS, Events.GUESTS_CAN_MODIFY, Events.HAS_ALARM, Events.SELF_ATTENDEE_STATUS,
+                Events.ACCESS_LEVEL, Events.STATUS, Events.AVAILABILITY,
                 Events._SYNC_ID, Events.SYNC_DATA1, Events.SYNC_DATA2, Events.SYNC_DATA3, Events.SYNC_DATA4, Events.SYNC_DATA5,
                 Events.SYNC_DATA6, Events.SYNC_DATA7, Events.SYNC_DATA8, Events.SYNC_DATA9, Events.SYNC_DATA10)
             return columns.associateWith(::field)

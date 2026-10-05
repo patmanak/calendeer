@@ -107,6 +107,29 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
         ensureCalendarState(scope, summary).id
 
     override suspend fun ensureCalendarState(scope: CalendarScope, summary: CalendarSummary): EnsuredCalendar = operation {
+        ensureCalendarInternal(scope, summary, false)
+    }
+
+    override suspend fun ensureCalendarState(scope: CalendarScope, summary: CalendarSummary, systemCreates: Boolean): EnsuredCalendar = operation {
+        ensureCalendarInternal(scope, summary, systemCreates)
+    }
+
+    override suspend fun makeCalendarReadOnly(scope: CalendarScope) = operation {
+        val account = accountFor(scope.account)
+        val existing = calendarRow(scope, account) ?: return@operation
+        val uri = syncUri(Calendars.CONTENT_URI, account)
+        val identity = calendarSelection(scope, account)
+        val operations = arrayListOf(assertion(uri, identity, existing),
+            ContentProviderOperation.newUpdate(uri).withSelection(identity.sql, identity.args)
+                .withValue(Calendars.CALENDAR_ACCESS_LEVEL, Calendars.CAL_ACCESS_READ)
+                .withExpectedCount(1).build())
+        requirePermissions()
+        val result = checkedBatch(operations)
+        if (result[0].count != 1 || result[1].count != 1)
+            fail(CalendarProjectionFailure.PROVIDER_UNAVAILABLE)
+    }
+
+    private fun ensureCalendarInternal(scope: CalendarScope, summary: CalendarSummary, systemCreates: Boolean): EnsuredCalendar {
         if (scope.calendar != summary.id) fail(CalendarProjectionFailure.IDENTITY_CONFLICT)
         val account = ensureAccountInternal(scope.account)
         val uri = syncUri(Calendars.CONTENT_URI, account)
@@ -115,7 +138,7 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
         val values = ContentValues().apply {
             put(Calendars.CALENDAR_DISPLAY_NAME, summary.title)
             put(Calendars.CALENDAR_COLOR, (summary.colorRgb ?: 0x167D8D) or 0xFF000000.toInt())
-            put(Calendars.CALENDAR_ACCESS_LEVEL, Calendars.CAL_ACCESS_READ)
+            put(Calendars.CALENDAR_ACCESS_LEVEL, if (systemCreates) Calendars.CAL_ACCESS_EDITOR else Calendars.CAL_ACCESS_READ)
             put(Calendars.MAX_REMINDERS, 5)
             put(Calendars.ALLOWED_REMINDERS, Reminders.METHOD_ALERT.toString())
             put(Calendars.CAN_ORGANIZER_RESPOND, 0)
@@ -148,7 +171,7 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
             (existing != null && result[1].count != 1)) fail(CalendarProjectionFailure.PROVIDER_UNAVAILABLE)
         val id = existing ?: result[1].uri?.let(ContentUris::parseId)
             ?: fail(CalendarProjectionFailure.PROVIDER_UNAVAILABLE)
-        EnsuredCalendar(id, created = existing == null)
+        return EnsuredCalendar(id, created = existing == null)
     }
 
     override val projectionReceiptProtocol: Int = 1
@@ -458,6 +481,44 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
         readLocalCreate(scope, localId, null)
     }
 
+    override fun eventIdentityKey(scope: CalendarScope, event: EventId): String =
+        digest("event-v1", calendarSyncId(scope), event.value)
+
+    /** Metadata-only discovery. Durable jobs and qualified capture, not this locator, authorize work. */
+    override suspend fun discoverSystemChanges(scope: CalendarScope, afterRow: Long, limit: Int): SystemCalendarChangePage = operation {
+        require(afterRow >= 0 && limit in 1..100)
+        val account = accountFor(scope.account)
+        val calendar = calendarRow(scope, account) ?: fail(CalendarProjectionFailure.CALENDAR_MISSING)
+        val sync = arrayOf(Events._SYNC_ID, Events.SYNC_DATA1, Events.SYNC_DATA2, Events.SYNC_DATA3,
+            Events.SYNC_DATA4, Events.SYNC_DATA5, Events.SYNC_DATA6, Events.SYNC_DATA7, Events.SYNC_DATA8,
+            Events.SYNC_DATA9, Events.SYNC_DATA10)
+        val columns = arrayOf(Events._ID, Events.DELETED) + sync
+        val changes = mutableListOf<SystemCalendarChange>()
+        var more = false
+        resolver.query(syncUri(Events.CONTENT_URI, account), columns,
+            "${Events.CALENDAR_ID}=? AND ${Events._ID}>? AND (${Events.DIRTY}=1 OR ${Events.DELETED}=1)",
+            arrayOf(calendar.toString(), afterRow.toString()), "${Events._ID} ASC")?.use { cursor ->
+            while (cursor.moveToNext()) {
+                if (changes.size == limit) { more = true; break }
+                val row = cursor.getLong(0)
+                val deleted = cursor.getInt(1) != 0
+                fun value(column: String): String? = cursor.getString(cursor.getColumnIndexOrThrow(column))
+                val remote = value(Events.SYNC_DATA4) ?: value(Events._SYNC_ID)
+                val kind = when {
+                    value(Events.SYNC_DATA5) != null -> SystemCalendarChangeKind.CAPTURED
+                    value(Events.SYNC_DATA1) == OWNER_MARKER && !remote.isNullOrBlank() -> SystemCalendarChangeKind.IMPORTED
+                    sync.all { value(it) == null } && !deleted -> SystemCalendarChangeKind.NEW
+                    else -> SystemCalendarChangeKind.UNSUPPORTED
+                }
+                // Provider keys are one-way hashes (and master sync IDs can identify a series).
+                // Only the owner can resolve them against scoped, acknowledged canonical IDs.
+                changes += SystemCalendarChange(row, kind, deleted = deleted,
+                    nativeKey = if (kind == SystemCalendarChangeKind.IMPORTED) remote else null)
+            }
+        } ?: fail(CalendarProjectionFailure.PROVIDER_UNAVAILABLE)
+        SystemCalendarChangePage(changes.toList(), changes.lastOrNull()?.row ?: afterRow, more)
+    }
+
     /** A row locator can select a candidate only for the durable claim's first invocation. */
     private fun readLocalCreate(scope: CalendarScope, localId: LocalEventId, firstRow: Long?): OwnedLocalEditSnapshot? {
         if (firstRow != null && firstRow <= 0) return null
@@ -488,13 +549,15 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
         val row = values.getAsLong(Events._ID) ?: return null
         if (row <= 0 || values.getAsLong(Events.CALENDAR_ID) != calendar ||
             values.getAsInteger(Events.DIRTY) != 1 || values.getAsInteger(Events.DELETED) != 0) return null
+        val localOwnerPlaceholder = simpleLocalOwnerPlaceholder(values, account)
         if (syncColumns.any { column ->
                 if (firstRow == null && column == Events.SYNC_DATA5) values.getAsString(column) != marker
                 else values[column] != null
-            } || unsupported.any { values[it] != null } || emptyFlags.any { values.getAsInteger(it) != 0 } ||
+            } || unsupported.any { values[it] != null && !(it == Events.ORGANIZER && localOwnerPlaceholder) } ||
+            (!localOwnerPlaceholder && emptyFlags.any { values.getAsInteger(it) != 0 }) ||
             values.getAsInteger(Events.STATUS) != Events.STATUS_CONFIRMED ||
             values.getAsInteger(Events.AVAILABILITY) != Events.AVAILABILITY_BUSY) return null
-        val time = readSimpleTime(values) ?: return null
+        val time = readSimpleTime(values, localOwnerPlaceholder) ?: return null
         val content = EventContent(values.getAsString(Events.TITLE) ?: "", time,
             values.getAsString(Events.DESCRIPTION) ?: "", values.getAsString(Events.EVENT_LOCATION) ?: "",
             details = EventDetails())
@@ -661,11 +724,13 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
             it.count == 1 && it.moveToFirst() && it.getLong(0) == row
         } ?: fail(CalendarProjectionFailure.PROVIDER_UNAVAILABLE)
         if (!remoteMatches) return CapturedCreateCurrentObservation.Unresolved
-        if (unsupported.any { values[it] != null } || emptyFlags.any { values.getAsInteger(it) != 0 } ||
+        val localOwnerPlaceholder = simpleLocalOwnerPlaceholder(values, account)
+        if (unsupported.any { values[it] != null && !(it == Events.ORGANIZER && localOwnerPlaceholder) } ||
+            (!localOwnerPlaceholder && emptyFlags.any { values.getAsInteger(it) != 0 }) ||
             values.getAsInteger(Events.STATUS) != Events.STATUS_CONFIRMED ||
             values.getAsInteger(Events.AVAILABILITY) != Events.AVAILABILITY_BUSY)
             return CapturedCreateCurrentObservation.Unsupported
-        val time = readSimpleTime(values) ?: return CapturedCreateCurrentObservation.Unsupported
+        val time = readSimpleTime(values, localOwnerPlaceholder) ?: return CapturedCreateCurrentObservation.Unsupported
         val snapshot = try {
             CapturedCreateCurrent(baseline, EventContent(values.getAsString(Events.TITLE) ?: "", time,
                 values.getAsString(Events.DESCRIPTION) ?: "", values.getAsString(Events.EVENT_LOCATION) ?: "",
@@ -845,12 +910,23 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
             receipt.protocol.toString(), receipt.nonce))
     }
 
-    private fun readSimpleTime(values: ContentValues): EventTime? {
+    /** Native local owner label only, not an invited participant. Used solely for new/captured
+     * CREATE with empty child tables, preserving the exact row in every capture/ACK assertion.
+     */
+    private fun simpleLocalOwnerPlaceholder(values: ContentValues, account: Account): Boolean =
+        values.getAsString(Events.ORGANIZER) == account.name &&
+            listOf(Events.HAS_ATTENDEE_DATA, Events.IS_ORGANIZER, Events.GUESTS_CAN_INVITE_OTHERS,
+                Events.GUESTS_CAN_SEE_GUESTS).all { values.getAsInteger(it) == 1 } &&
+            listOf(Events.GUESTS_CAN_MODIFY, Events.HAS_ALARM, Events.SELF_ATTENDEE_STATUS,
+                Events.ACCESS_LEVEL).all { values.getAsInteger(it) == 0 }
+
+    private fun readSimpleTime(values: ContentValues, localOwnerPlaceholder: Boolean = false): EventTime? {
         val start = values.getAsLong(Events.DTSTART) ?: return null
         val end = values.getAsLong(Events.DTEND) ?: return null
         if (end <= start || start % 1000L != 0L || end % 1000L != 0L) return null
         val zone = values.getAsString(Events.EVENT_TIMEZONE) ?: return null
-        if (values.getAsString(Events.EVENT_END_TIMEZONE) != zone) return null
+        val endZone = values.getAsString(Events.EVENT_END_TIMEZONE)
+        if (endZone != zone && !(localOwnerPlaceholder && endZone == null)) return null
         return try {
             when (values.getAsInteger(Events.ALL_DAY)) {
                 0 -> EventTime.Timed(Instant.ofEpochMilli(start), Instant.ofEpochMilli(end), ZoneId.of(zone))

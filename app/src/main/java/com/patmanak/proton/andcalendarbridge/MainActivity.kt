@@ -25,6 +25,7 @@ import com.patmanak.proton.andcalendarbridge.ui.auth.AuthenticationPanel
 import com.patmanak.proton.andcalendarbridge.ui.auth.HumanVerificationPanel
 import com.patmanak.proton.andcalendarbridge.ui.calendars.CalendarCatalogPanel
 import com.patmanak.proton.andcalendarbridge.ui.calendars.CalendarImportPanel
+import com.patmanak.proton.andcalendarbridge.ui.calendars.SystemCreatePanel
 import com.patmanak.proton.andcalendarbridge.protonauth.ProtonAuthentication
 import com.patmanak.proton.andcalendarbridge.ui.locale.AndroidLanguagePreferenceStore
 import com.patmanak.proton.andcalendarbridge.ui.theme.BridgeTheme
@@ -51,6 +52,7 @@ class MainActivity : ComponentActivity() {
             val verification by ProtonAuthentication.verification.state.collectAsState()
             val catalogState by catalog.state.collectAsState()
             val importState by preferences.imports.state.collectAsState()
+            val systemCreates by preferences.systemCreates.state.collectAsState()
             val authenticationState by authentication.state.collectAsState()
             SideEffect {
                 val style = if (darkTheme) SystemBarStyle.dark(Color.TRANSPARENT)
@@ -87,6 +89,7 @@ class MainActivity : ComponentActivity() {
                                 Manifest.permission.READ_CALENDAR, Manifest.permission.WRITE_CALENDAR)) },
                             onOpenSettings = { startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
                                 Uri.parse("package:$packageName"))) })
+                        SystemCreatePanel(importState, systemCreates, preferences.systemCreates::setEnabled)
                     },
                 )
             }

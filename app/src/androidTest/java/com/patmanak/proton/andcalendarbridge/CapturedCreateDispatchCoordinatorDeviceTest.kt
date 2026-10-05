@@ -26,6 +26,47 @@ import org.junit.runner.RunWith
 /** Isolated SQLite, controlled Provider and fake transport; no service mutation. */
 @RunWith(AndroidJUnit4::class)
 class CapturedCreateDispatchCoordinatorDeviceTest {
+    @Test fun explicitSystemResumeRequalifiesRetainedPayloadWithoutPreparingAgain() = fixture {
+        assertEquals(LocalCreateSubmissionResult.RETAINED, staged()); reopenOwner()
+        assertNull(record())
+        assertEquals(LocalCreateSubmissionResult.RETAINED, coordinator.resumePreparedLocalCreate(target, localId, id, attempt, port))
+        assertTrue(submit() is CreateSubmissionObservation.Verified)
+        assertEquals(1, sends); assertEquals(1, calls)
+        reopenOwner()
+        assertEquals(LocalCreateSubmissionResult.UNRESOLVED, coordinator.resumePreparedLocalCreate(target, localId, id, attempt, port))
+        assertTrue(submit() is CreateSubmissionObservation.Verified); assertEquals(1, sends)
+    }
+
+    @Test fun explicitSystemResumeRequalifiesPausedPreparedParentWithItsExactLink() = fixture {
+        assertEquals(LocalCreateSubmissionResult.RETAINED, staged())
+        beforeClaim = { snapshot = snapshot!!.copy(content = content.copy(title = "Temporary edit")) }
+        assertEquals(CreateSubmissionObservation.Unknown, submit())
+        assertEquals(CreateAttemptState.PREPARED, record()!!.state)
+        snapshot = OwnedLocalEditSnapshot(3, 7, content); beforeClaim = { }; reopenOwner()
+        assertNotNull(creates.pauseReason(target, attempt))
+        assertEquals(LocalCreateSubmissionResult.RETAINED, coordinator.resumePreparedLocalCreate(target, localId, id, attempt, port))
+        assertTrue(submit() is CreateSubmissionObservation.Verified); assertEquals(1, sends); assertEquals(1, calls)
+    }
+
+    @Test fun systemResumeRefusesDisabledModeAndChangedNativeContent() = fixture {
+        assertEquals(LocalCreateSubmissionResult.RETAINED, staged()); reopenOwner()
+        systemEnabled = false
+        assertEquals(LocalCreateSubmissionResult.INACTIVE, coordinator.resumePreparedLocalCreate(target, localId, id, attempt, port))
+        systemEnabled = true; snapshot = snapshot!!.copy(content = content.copy(title = "Later edit"))
+        assertEquals(LocalCreateSubmissionResult.UNQUALIFIED, coordinator.resumePreparedLocalCreate(target, localId, id, attempt, port))
+        assertEquals(CreateSubmissionObservation.Unknown, submit()); assertEquals(0, sends)
+    }
+
+    @Test fun modeDisableAndReenableDuringQualificationCannotRearmAnOldLease() = fixture {
+        assertEquals(LocalCreateSubmissionResult.RETAINED, staged()); reopenOwner()
+        onInspect = {
+            coordinator.systemCreatePolicyChanged(target, false)
+            coordinator.systemCreatePolicyChanged(target, true)
+        }
+        assertEquals(LocalCreateSubmissionResult.INACTIVE, coordinator.resumePreparedLocalCreate(target, localId, id, attempt, port))
+        onInspect = { }
+        assertEquals(CreateSubmissionObservation.Unknown, submit()); assertEquals(0, sends)
+    }
     @Test fun freshlyStagedCaptureAdmitsOnceThenOnlyInspectsWithoutProviderEvidence() = fixture {
         assertEquals(LocalCreateSubmissionResult.RETAINED, staged())
         assertTrue(submit() is CreateSubmissionObservation.Verified)
@@ -256,7 +297,9 @@ class CapturedCreateDispatchCoordinatorDeviceTest {
             override fun continueWork(network: Boolean) = Unit
         }
         private var jobs = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-        var coordinator = ImportCoordinator(context, store, remote, projection, jobs, scheduler, creates = creates, localCreates = journal)
+        var systemEnabled = true
+        var coordinator = ImportCoordinator(context, store, remote, projection, jobs, scheduler, creates = creates, localCreates = journal,
+            systemCreatesEnabled = { it == target && systemEnabled })
         suspend fun seed() {
             store.remember(target.account, listOf(CalendarSummary(target.calendar, "Preparation fixture")))
             store.setEnabled(target, true)
@@ -273,7 +316,8 @@ class CapturedCreateDispatchCoordinatorDeviceTest {
         suspend fun reopenOwner() {
             coordinator.authenticationChanged(false); jobs.coroutineContext[Job]!!.cancelAndJoin()
             jobs = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-            coordinator = ImportCoordinator(context, store, remote, projection, jobs, scheduler, creates = creates, localCreates = journal)
+            coordinator = ImportCoordinator(context, store, remote, projection, jobs, scheduler, creates = creates, localCreates = journal,
+                systemCreatesEnabled = { it == target && systemEnabled })
             val before = schedules.get(); coordinator.authenticationChanged(true)
             withTimeout(10_000) { while (schedules.get() == before) delay(10) }
             coordinator.initializeCreates()

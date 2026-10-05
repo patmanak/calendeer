@@ -27,6 +27,8 @@ import com.patmanak.proton.andcalendarbridge.sync.catalog.CalendarSummary
 
 /** Android-layer boundary. A failed apply leaves its durable intent unacknowledged for replay. */
 interface CalendarProjection {
+    /** Native lookup key only; never a remote identifier or ownership/capture proof. */
+    fun eventIdentityKey(scope: CalendarScope, event: EventId): String? = null
     val capturedHandoffProtocol: Int? get() = null
     /** Assert the current clean reference and full origin in one batch; no future write lease. */
     suspend fun inspectCapturedHandoffBase(frame: CapturedCreateHandoffFrame): CapturedHandoffCleanWitness? = null
@@ -41,6 +43,13 @@ interface CalendarProjection {
     fun hasPermissions(): Boolean
     fun accountFor(accountId: AccountId): Account
     suspend fun ensureCalendarState(scope: CalendarScope, summary: CalendarSummary): EnsuredCalendar
+    suspend fun ensureCalendarState(scope: CalendarScope, summary: CalendarSummary, systemCreates: Boolean): EnsuredCalendar {
+        check(!systemCreates) { "System creation unavailable" }
+        return ensureCalendarState(scope, summary)
+    }
+    suspend fun discoverSystemChanges(scope: CalendarScope, afterRow: Long = 0, limit: Int = 25): SystemCalendarChangePage? = null
+    /** Existing owned mirror only; closing access must never create a calendar or account. */
+    suspend fun makeCalendarReadOnly(scope: CalendarScope) { error("Access restriction unavailable") }
     suspend fun apply(intent: ProjectionIntent, seriesUid: String? = null)
     /** Null ports use ordinary projection; they cannot qualify recovery of a retained receipt. */
     val projectionReceiptProtocol: Int? get() = null

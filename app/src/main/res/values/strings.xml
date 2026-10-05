@@ -19,4 +19,8 @@
     <string name="brand_back">Back</string>
     <string name="brand_welcome">Your days, connected.</string>
     <string name="brand_independent">Independent application, not affiliated with Proton.</string>
+    <string name="system_create_title">Experimental creation</string>
+    <string name="system_create_limits">Create simple events from your calendar app. Reminders, guests, recurrence and custom colors are not supported yet. Changes and deletions remain local and are not sent to Proton.</string>
+    <string name="system_create_pending">%1$d creations waiting or requiring attention. An uncertain send is never repeated automatically.</string>
+    <string name="system_create_error">Creation synchronization needs attention. Your Android data is retained.</string>
 </resources>

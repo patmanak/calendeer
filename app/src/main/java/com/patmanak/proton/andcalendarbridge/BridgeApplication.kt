@@ -20,14 +20,22 @@ import com.patmanak.proton.andcalendarbridge.data.importing.ImportCoordinator
 import com.patmanak.proton.andcalendarbridge.data.importing.ImportStore
 import com.patmanak.proton.andcalendarbridge.data.outgoing.CreateAttemptStore
 import com.patmanak.proton.andcalendarbridge.data.outgoing.LocalCreateStore
+import com.patmanak.proton.andcalendarbridge.data.outgoing.SystemCreateWorkStore
+import com.patmanak.proton.andcalendarbridge.data.outgoing.SystemCreateController
 
 class BridgeApplication : Application() {
     private val authenticationScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private val createAttempts by lazy { CreateAttemptStore(this) }
+    private val localCreateCaptures by lazy { LocalCreateStore(this) }
+    private val nativeCalendar by lazy { AndroidCalendarProjection(this) }
+    private val systemCreateWork by lazy { SystemCreateWorkStore(this) }
+    val systemCreates by lazy { SystemCreateController(this, imports, nativeCalendar, systemCreateWork,
+        localCreateCaptures, createAttempts, ProtonAuthentication.createSubmissions(this), authenticationScope) }
 
     val imports by lazy {
         ImportCoordinator(this, ImportStore(this), ProtonAuthentication.events(this),
-            AndroidCalendarProjection(this), authenticationScope, creates = CreateAttemptStore(this),
-            localCreates = LocalCreateStore(this))
+            nativeCalendar, authenticationScope, creates = createAttempts,
+            localCreates = localCreateCaptures, systemCreatesEnabled = systemCreateWork::modeEnabled)
     }
 
     // App-owned: activity recreation must neither repeat login nor revoke a retained session.
@@ -65,6 +73,7 @@ class BridgeApplication : Application() {
         super.onCreate()
         themePreferences = AndroidThemePreferenceStore(this)
         languagePreferences = AndroidLanguagePreferenceStore(this)
+        systemCreates.start()
         authenticationScope.launch {
             try { imports.initializeCreates() }
             catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }

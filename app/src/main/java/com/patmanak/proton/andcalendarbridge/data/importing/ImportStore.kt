@@ -219,6 +219,14 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
         } finally { db.endTransaction() }
     }
 
+    /** Local metadata only, including inactive accounts, for closing retained mirror access. */
+    suspend fun calendarScopes(): List<CalendarScope> = access { db ->
+        db.query("calendars", arrayOf("account", "calendar", "generation"), null, null, null, null, null).use { cursor ->
+            buildList { while (cursor.moveToNext()) add(CalendarScope(AccountId(cursor.getString(0)),
+                CalendarId(cursor.getString(1)), cursor.getLong(2))) }
+        }
+    }
+
     suspend fun selections(account: AccountId): List<Selection> = access { db ->
         // One metadata-only statement keeps retained/conflicted counts coherent, including inactive scopes.
         db.rawQuery("SELECT c.*, (SELECT COUNT(*) FROM local_edits l WHERE l.scope=c.scope) AS retained_local_changes, " +
@@ -445,6 +453,20 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
             is RemoteChange.Deleted -> db.delete("projection_bases", "scope=? AND event=?", arrayOf(key(intent.scope), intent.change.eventId.value))
         }
         consumed
+    }
+
+    /** Bounded canonical ID metadata only; native keys must never be treated as remote IDs.
+     * Uses the existing (scope,event) primary key, without reading or decoding event payloads.
+     */
+    suspend fun projectedEventIds(scope: CalendarScope, afterEvent: EventId? = null, limit: Int = 100): List<EventId> = access { db ->
+        require(limit in 1..100)
+        check(admitTransaction(scope)) { "Inactive import lease" }; requireKnown(db, scope)
+        val ids = db.query("projection_bases", arrayOf("event"), "scope=? AND event>?",
+            arrayOf(key(scope), afterEvent?.value ?: ""), null, null, "event ASC", limit.toString()).use { cursor ->
+            buildList { while (cursor.moveToNext()) add(EventId(cursor.getString(0))) }
+        }
+        check(admitTransaction(scope)) { "Inactive import lease" }
+        ids
     }
 
     /** Last successful projection acknowledgement, independent of newer imported remote evidence. */
