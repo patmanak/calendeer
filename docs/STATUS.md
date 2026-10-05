@@ -13,6 +13,12 @@ integration and Proton-specific authentication/protocols.
 - Replaceable Proton integration, maximizing official library/source reuse.
 - Reuse Contako login behavior, eight languages plus system selection and three theme modes.
 
+The release-candidate target is bidirectional use from system calendar clients;
+read-only delivery is a validation stage. A [FOSS synchronization source audit](research/FOSS_SYNC_REUSE.md)
+identifies reusable DAVx5/EteSync capture and exception handling, the current
+synctools library, and server-specific concurrency mechanisms. No new dependency
+or outgoing capability is enabled by that audit.
+
 ## Current delivery boundary
 
 The application is branded **Calendeer**, with an original violet deer mascot,
