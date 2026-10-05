@@ -704,6 +704,43 @@ also pass all 197 physical methods without failures or skips. This includes the
 seven new methods and existing direct import/recovery and specialized handoff
 paths. No service requests are part of these isolated fixtures.
 
+### Explicit finite first insertion and recovery
+
+`FiniteInsertionDeviceTest` has twelve isolated methods using the real Provider
+and production import store. A saved `FINITE_DAILY_V1` master is prepared without
+a previous baseline, reopened and inserted through the explicit finite port.
+Spring/autumn instances, EXDATE, duration, color, reminders/participants and the
+canonical rule/timezone in SQL are checked. One saved fold instant intentionally
+differs from today's calculator: it qualifies saved-date use, not source eligibility.
+
+A trigger interrupts the actual SQL acknowledgement after a successful native
+batch. Reopening, historical inspection and exact restoration retain later local
+DIRTY/DELETED content, child-detail rows and newer pending source evidence without
+another event batch. Modified date receipts cannot authorize SQL recovery;
+copying a finite receipt to direct cannot claim its native history. Missing,
+changed-nonce, foreign-owner and duplicate rows establish no history.
+
+Other cases refuse existing event/series identity, same-nonce insertion replay,
+previous baselines, wrong representation, orphan children and concurrent identity
+or orphan insertion. Ordinary update/delete, parent exception admission,
+missing-master child deletion and marker changes at the batch boundary preserve
+finite/future-marker rows. The test wrapper counts only successfully returned
+event modification batches; assertion-only inspection is distinguished from writes.
+
+The initial ten methods failed before implementation: eight reached the unavailable
+port and two reproduced missing ordinary marker protections. All twelve final
+methods pass without failures or skips. Debug app/test builds, release source
+compilation, all 19 app unit cases and lint pass, with zero lint errors and the
+same 20 warnings. First insertion and explicit historical recovery are qualified
+on the tested device; replacement, finite-parent exceptions, automatic import,
+raw-source eligibility and other OEMs remain unqualified. These fixtures make no
+Proton requests and do not alter account attributes.
+
+The complete selected regression passes all 255 physical methods across 15
+storage, Provider, recurrence, recovery, import, capture and handoff classes,
+without failures or skips. This includes the twelve new methods. The final
+application was installed and reopened after the isolated fixtures completed.
+
 `RecurrenceStoreDeviceTest` covers schema 5-to-6 migration, legacy payload stability,
 reopen/rollback/CAS, master ordering, missing or deferred parents, mismatched original
 date types, durable tombstones and eligible-result limits. `RecurrenceCoordinatorDeviceTest`

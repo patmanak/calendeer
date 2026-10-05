@@ -106,7 +106,11 @@ immutable snapshots. Schema 15 connects explicitly supplied references to receip
 preparation and the applied SQL baseline; complete-reference recovery retains
 saved dates after acknowledgement without recalculating with a newer timezone
 database. Ordinary imports still prepare historical direct projections, and the
-Android mapper refuses finite metadata until native integration is qualified.
+ordinary Android mapper refuses finite metadata. A separate first-insertion port
+uses saved finite dates only with atomically absent event/series/child identities;
+its historical inspection permits exact SQL recovery without repeating the write.
+Finite native markers protect these rows from ordinary writes. Replacement and
+automatic finite import remain unavailable.
 Receipt protocol 1, canonical event encoding and production recurrence admission
 remain unchanged.
 

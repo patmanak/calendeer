@@ -281,7 +281,10 @@ the event first and discovering the limitation during SQL acknowledgement.
 Preparation is checked again immediately before application. Legacy and explicit
 direct representations remain supported, with exact receipt metadata preserved.
 This SQL observation does not replace atomic Provider preconditions or activate
-finite recurrence projection; see [representations](PROJECTION_REPRESENTATION.md).
+finite recurrence import. A separate explicit first-insertion/inspection port can
+qualify saved finite dates on an absent native series; its markers also block
+ordinary native writes. It is not selected by the import worker and cannot replace
+existing series; see [representations](PROJECTION_REPRESENTATION.md).
 
 Enabling projection requires both Android calendar permissions. The UI explains
 why Android write access is necessary for a read-only Proton mirror, and offers

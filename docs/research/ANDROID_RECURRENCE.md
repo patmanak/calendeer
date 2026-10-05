@@ -179,5 +179,9 @@ in equality. Historical restoration and schema 15 now retain saved dates without
 recalculating them; 13 reference cases and the original nine calculator cases
 pass. Structural reload preserves duplicates produced by whole-day gaps and
 does not establish their native geometry. The storage path does not enable the
-bounded profile in the Proton parser or Android projection; the latter refuses
-receipts with a current or previous finite representation until integration.
+bounded profile in the Proton parser or ordinary Android projection. An explicit
+first-insertion/inspection port now applies saved finite dates only to an absent
+event/series with no orphan children. It preserves canonical source receipts and
+can recover their exact SQL reference after native write/SQL acknowledgement
+interruption. Replacement, finite-parent exceptions, cache changes, raw-source
+eligibility and runtime selection still require integrated qualification.

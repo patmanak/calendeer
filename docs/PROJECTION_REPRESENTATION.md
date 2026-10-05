@@ -7,8 +7,9 @@ canonical event from the recurrence representation selected for a native view.
 It has no account/calendar scope, row locator, receipt, acknowledgement or write
 authority. The bounded calculator has no runtime import callers. The import
 store can persist an explicitly supplied representation, while ordinary runtime
-preparation keeps the historical direct mode. Finite Provider application and
-production activation remain disabled.
+preparation keeps the historical direct mode. An explicit native port supports
+finite first insertion and historical inspection; ordinary production activation
+and replacement remain disabled.
 
 The canonical upsert retains its opaque event ID and revision, original timezone,
 time, rule, UID, exclusion/original-slot identities and supported display details.
@@ -74,12 +75,12 @@ returns canonical content and validates saved metadata; `projectedReference`
 returns the complete saved reference without expansion. Ordinary acknowledgement
 cannot consume a represented receipt or overwrite a finite applied reference.
 
-Future Android application must use the saved view, while ownership, event/series IDs,
+Explicit Android first insertion uses the saved view, while ownership, event/series IDs,
 revision and details continue to derive from the canonical event. Historical
 inspection remains an identity/revision/nonce proof, independent of later local
 content. Local restoration authorizes only the exact persisted preparation;
 the marker alone does not authenticate recurrence geometry or copied content.
-The current Android mapper refuses receipts with a current or previous finite
+The ordinary Android mapper refuses receipts with a current or previous finite
 representation before applying or inspecting them. The storage tests use synthetic
 applied witnesses; they do not qualify an actual finite native write or its recovery.
 
@@ -89,8 +90,32 @@ untracked event writes. Finite or unreadable metadata blocks the operation befor
 Android event rows are modified, including remote deletion. Preparation is rechecked before
 native application; an existing explicit direct receipt retains its exact metadata
 rather than being replaced by NULL. The observation is not a lease across the SQL
-and Provider transactions. Finite application still requires dedicated native
+and Provider transactions. Finite replacement still requires complete native
 comparison and atomic write preconditions before activation.
+
+## Explicit finite first insertion
+
+`insertFiniteProjection` accepts a saved finite master only when its previous
+baseline is absent. It atomically asserts that both event/series identities and
+all children referencing the series are absent. Existing rows, even with the same
+nonce, and orphan exceptions cannot be adopted. The existing UTC RDATE mapper
+uses the saved dates without invoking the calculator; canonical rule, timezone,
+source revision and details remain in the persisted receipt and SQL baseline.
+
+The finite insertion uses a distinct native receipt-marker namespace; historical
+direct markers and receipt protocol 1 are unchanged. `inspectFiniteInsertion`
+asserts ownership, unique event/series identities, revision and that marker.
+It preserves later local content and dirty/deleted flags. Only exact persisted
+receipt restoration acknowledges SQL: a copied date list can identify the same
+historical nonce but cannot authorize another applied baseline.
+
+Ordinary event writes and parent admission refuse finite marker namespaces,
+including unknown future versions. Observed ordinary markers are asserted in
+the write transaction, and child removal asserts that no finite-marked children
+are present. These controls protect native rows independently of SQL admission.
+The explicit port does not replace an existing series, attach exceptions to a
+finite parent or resume finite work automatically. It has no ordinary import
+callers; source eligibility and full replacement remain separate requirements.
 
 Migration keeps existing canonical encodings and old preparations unchanged.
 Rows without representation metadata remain in the historical direct mode;

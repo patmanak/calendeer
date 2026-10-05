@@ -650,8 +650,8 @@ exact recovery compares both canonical content and metadata, retains the applied
 reference after receipt removal and leaves newer source content pending. Old
 NULL metadata remains direct and payloads/nonces stay unchanged. Unknown metadata
 blocks projection acknowledgement and represented rows cannot enter the historical
-captured-create handoff. The Android mapper refuses finite current/previous
-metadata; ordinary imports still use direct preparation. Native integration and
+captured-create handoff. The ordinary Android mapper refuses finite current/previous
+metadata; ordinary imports still use direct preparation. Native replacement and
 raw-source eligibility remain unqualified. The model itself grants no write or
 acknowledgement authority.
 The stored-reference model, migration and recovery checks pass 215 sync and
@@ -668,7 +668,21 @@ apply or recover with their exact metadata; protocol-less ports cannot bypass
 tracked acknowledgement. All 197 physical methods in the 15 affected regression
 classes pass, including the seven new methods; all 19 app unit cases also pass.
 This is an admission observation, not a cross-store lease; finite native
-application remains disabled.
+import remains disabled.
+An explicit finite first-insertion port now uses saved dates without recalculation
+and atomically requires absent event/series identities and no orphan children.
+Historical inspection plus exact SQL restoration can recover a lost acknowledgement
+while preserving later local edits/tombstones and newer pending source content.
+A distinct native marker prevents ordinary event replacement/deletion or exception
+attachment, including marker changes at the batch boundary. Existing series cannot
+be adopted or rewritten by this port. Automatic finite imports, full previous-view
+comparison, replacement/cache changes and finite-parent exceptions remain unqualified.
+All twelve first-insertion/recovery physical methods pass, as do the 19 app unit
+cases, debug builds, release source compilation and lint. These are controlled
+Provider/SQLite fixtures without Proton requests, not live source eligibility.
+The complete selected regression passes all 255 physical methods in 15 storage,
+Provider, recurrence, recovery, import, capture and handoff classes, without
+failures or skips. The application was reopened after testing.
 Nonce-backed recovery has passed source review, JVM checks and controlled physical
 SQLite/Provider fixtures, including lost private acknowledgement, reused opaque
 revision and schema migration. These fixtures do not qualify arbitrary power loss.

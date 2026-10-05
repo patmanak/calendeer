@@ -52,6 +52,14 @@ interface CalendarProjection {
      * Null means no proof. Dirty/deleted flags are never consumed by this inspection.
      */
     suspend fun inspectProjectionReceipt(receipt: ProjectionReceipt): AppliedProjectionWitness? = null
+    /** Explicit first insertion only: saved finite master, absent event/series/children,
+     * and no previous base. No replacement or ordinary import capability is implied.
+     */
+    suspend fun insertFiniteProjection(receipt: ProjectionReceipt): AppliedProjectionWitness = error("Finite insertion unavailable")
+    /** Historical first-insertion proof only. Preserve later dirty/deleted content;
+     * exact canonical/reference restoration remains the durable store's responsibility.
+     */
+    suspend fun inspectFiniteInsertion(receipt: ProjectionReceipt): AppliedProjectionWitness? = null
     /** Current owned-row witness only. Missing/duplicate/foreign/dirty rows cannot establish association. */
     suspend fun inspectOwnedEvent(scope: CalendarScope, eventId: EventId, revision: Revision): OwnedEventWitness? = null
     /** Snapshot only; no acknowledgement or upload. Unsupported/changed rows are left untouched. */

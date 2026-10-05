@@ -28,6 +28,7 @@ import com.patmanak.proton.andcalendarbridge.sync.EventTime
 import com.patmanak.proton.andcalendarbridge.sync.RecurringLocalTimeRisk
 import com.patmanak.proton.andcalendarbridge.sync.ProjectionIntent
 import com.patmanak.proton.andcalendarbridge.sync.ProjectionReceipt
+import com.patmanak.proton.andcalendarbridge.sync.ProjectionRepresentation
 import com.patmanak.proton.andcalendarbridge.sync.AppliedProjectionWitness
 import com.patmanak.proton.andcalendarbridge.sync.CapturedCreateAttachmentReceipt
 import com.patmanak.proton.andcalendarbridge.sync.AppliedCapturedCreateAttachment
@@ -165,7 +166,16 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
         }
     }
 
-    private fun applyInternal(intent: ProjectionIntent, seriesUid: String?, receipt: ProjectionReceipt?) {
+    override suspend fun insertFiniteProjection(receipt: ProjectionReceipt): AppliedProjectionWitness {
+        val frozen = snapshotFiniteInsertion(receipt)
+        return operation {
+            applyInternal(ProjectionIntent(frozen.scope, frozen.representation!!.nativeChange), null, frozen, firstFiniteInsertion = true)
+            requirePermissions()
+            AppliedProjectionWitness(frozen)
+        }
+    }
+
+    private fun applyInternal(intent: ProjectionIntent, seriesUid: String?, receipt: ProjectionReceipt?, firstFiniteInsertion: Boolean = false) {
         val account = accountFor(intent.scope.account)
         val calendar = calendarRow(intent.scope, account) ?: fail(CalendarProjectionFailure.CALENDAR_MISSING)
         val uri = syncUri(Events.CONTENT_URI, account)
@@ -173,7 +183,8 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
         val identity = Selection("${Events.CALENDAR_ID}=? AND (${Events.SYNC_DATA4}=? OR " +
             "(${Events.SYNC_DATA4} IS NULL AND ${Events._SYNC_ID}=?))", arrayOf(calendar.toString(), remoteId, remoteId))
         val existing = ownedRow(uri, identity, Events.SYNC_DATA1)
-        if (existing != null) refuseCapturedMarkers(uri, identity)
+        if (firstFiniteInsertion && existing != null) fail(CalendarProjectionFailure.IDENTITY_CONFLICT)
+        val observedMarker = existing?.let { ordinaryReceiptMarker(uri, identity) }
         val previousMaster = existing?.let { masterSyncId(uri, it) }
         val operations = arrayListOf<ContentProviderOperation>()
         // Recheck calendar ownership inside the same provider transaction as the event mutation.
@@ -182,6 +193,7 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
         if (existing != null) operations += ContentProviderOperation.newAssertQuery(uri)
             .withSelection(identity.sql, identity.args).withExpectedCount(1)
             .withValue(Events.DIRTY, 0).withValue(Events.DELETED, 0)
+            .withValue(Events.SYNC_DATA3, observedMarker)
             .withValue(Events.SYNC_DATA5, null).withValue(Events.SYNC_DATA6, null).withValue(Events.SYNC_DATA7, null).build()
         when (val change = intent.change) {
             is RemoteChange.Upsert -> {
@@ -194,12 +206,21 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
                 val sameSync = ownedRow(uri, syncIdentity, Events.SYNC_DATA1)
                 if (sameSync != null && sameSync != existing) fail(CalendarProjectionFailure.IDENTITY_CONFLICT)
                 operations += assertion(uri, syncIdentity, sameSync)
+                if (firstFiniteInsertion) {
+                    // An orphan exception can otherwise alter the new master's geometry.
+                    val children = Selection("${Events.CALENDAR_ID}=? AND ${Events.ORIGINAL_SYNC_ID}=?",
+                        arrayOf(calendar.toString(), ownSyncId))
+                    val absent = resolver.query(uri, arrayOf(Events._ID), children.sql, children.args, null)?.use { it.count == 0 }
+                        ?: fail(CalendarProjectionFailure.PROVIDER_UNAVAILABLE)
+                    if (!absent) fail(CalendarProjectionFailure.IDENTITY_CONFLICT)
+                    operations += ContentProviderOperation.newAssertQuery(uri).withSelection(children.sql, children.args).withExpectedCount(0).build()
+                }
                 val parent = if (recurrence != null && !recurrence.isMaster) {
                     val parentIdentity = Selection("${Events.CALENDAR_ID}=? AND ${Events._SYNC_ID}=?",
                         arrayOf(calendar.toString(), seriesId!!))
                     val parentId = ownedRow(uri, parentIdentity, Events.SYNC_DATA1)
                         ?: fail(CalendarProjectionFailure.IDENTITY_CONFLICT)
-                    refuseCapturedMarkers(uri, parentIdentity)
+                    val parentMarker = ordinaryReceiptMarker(uri, parentIdentity)
                     if (masterSyncId(uri, parentId) != seriesId) fail(CalendarProjectionFailure.IDENTITY_CONFLICT)
                     val originalAllDay = if (recurrence.original is RecurrencePoint.AllDay) 1 else 0
                     val parentValues = resolver.query(uri, arrayOf(Events.ALL_DAY, Events.DTSTART, Events.EVENT_TIMEZONE, Events.RRULE),
@@ -225,6 +246,7 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
                     operations += ContentProviderOperation.newAssertQuery(uri)
                         .withSelection(parentIdentity.sql, parentIdentity.args).withExpectedCount(1)
                         .withValues(parentValues)
+                        .withValue(Events.SYNC_DATA3, parentMarker)
                         .withValue(Events.SYNC_DATA5, null).withValue(Events.SYNC_DATA6, null).withValue(Events.SYNC_DATA7, null).build()
                     parentId
                 } else null
@@ -265,6 +287,15 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
 
     override suspend fun inspectProjectionReceipt(receipt: ProjectionReceipt): AppliedProjectionWitness? {
         val frozen = snapshotReceipt(receipt)
+        return inspectReceipt(frozen)
+    }
+
+    override suspend fun inspectFiniteInsertion(receipt: ProjectionReceipt): AppliedProjectionWitness? {
+        val frozen = snapshotFiniteInsertion(receipt)
+        return inspectReceipt(frozen)
+    }
+
+    private suspend fun inspectReceipt(frozen: ProjectionReceipt): AppliedProjectionWitness? {
         return operation {
             val scope = frozen.scope
             val account = accountFor(scope.account)
@@ -304,16 +335,27 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
     }
 
     private fun snapshotReceipt(receipt: ProjectionReceipt): ProjectionReceipt = try {
-        // Persisted finite views are not connected to this mapper yet. Never apply
-        // their canonical RRULE or mistake a historical marker for their geometry.
-        require(receipt.representation?.representation != com.patmanak.proton.andcalendarbridge.sync.ProjectionRepresentation.FINITE_DAILY_V1 &&
-            receipt.previousRepresentation?.representation != com.patmanak.proton.andcalendarbridge.sync.ProjectionRepresentation.FINITE_DAILY_V1)
+        // Ordinary projection remains direct; finite insertion has its own admission.
+        require(receipt.representation?.representation != ProjectionRepresentation.FINITE_DAILY_V1 &&
+            receipt.previousRepresentation?.representation != ProjectionRepresentation.FINITE_DAILY_V1)
         receipt.snapshot()
     }
         catch (cancelled: CancellationException) { throw cancelled }
         catch (_: Exception) { fail(CalendarProjectionFailure.PROVIDER_REJECTED) }
 
-    private fun receiptMarker(receipt: ProjectionReceipt) = "calendeer-projection-receipt-v${receipt.protocol}:${receipt.nonce}"
+    private fun snapshotFiniteInsertion(receipt: ProjectionReceipt): ProjectionReceipt = try {
+        val frozen = receipt.snapshot()
+        require(frozen.representation?.representation == ProjectionRepresentation.FINITE_DAILY_V1 &&
+            frozen.previousBase == null && frozen.previousRepresentation == null)
+        frozen
+    }
+        catch (cancelled: CancellationException) { throw cancelled }
+        catch (_: Exception) { fail(CalendarProjectionFailure.PROVIDER_REJECTED) }
+
+    private fun receiptMarker(receipt: ProjectionReceipt) =
+        if (receipt.representation?.representation == ProjectionRepresentation.FINITE_DAILY_V1)
+            "${FINITE_RECEIPT_PREFIX}daily-dates-v1-receipt-v${receipt.protocol}:${receipt.nonce}"
+        else "calendeer-projection-receipt-v${receipt.protocol}:${receipt.nonce}"
 
     override suspend fun inspectOwnedEvent(scope: CalendarScope, eventId: EventId, revision: Revision): OwnedEventWitness? = operation {
         val account = accountFor(scope.account)
@@ -886,10 +928,11 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
         val children = Selection("${Events.CALENDAR_ID}=? AND ${Events.ORIGINAL_SYNC_ID}=?",
             arrayOf(calendar.toString(), series))
         requirePermissions()
-        val count = resolver.query(uri, arrayOf(Events.SYNC_DATA1) + CAPTURED_ORIGIN_COLUMNS, children.sql, children.args, null)?.use {
+        val count = resolver.query(uri, arrayOf(Events.SYNC_DATA1) + CAPTURED_ORIGIN_COLUMNS + Events.SYNC_DATA3, children.sql, children.args, null)?.use {
             while (it.moveToNext()) {
                 if (it.getString(0) != OWNER_MARKER || (1..CAPTURED_ORIGIN_COLUMNS.size).any { column -> !it.isNull(column) })
                     fail(CalendarProjectionFailure.IDENTITY_CONFLICT)
+                if (finiteMarker(it.getString(1 + CAPTURED_ORIGIN_COLUMNS.size))) fail(CalendarProjectionFailure.PROVIDER_REJECTED)
             }
             it.count
         } ?: fail(CalendarProjectionFailure.PROVIDER_UNAVAILABLE)
@@ -899,6 +942,9 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
                 withValue(Events.DIRTY, 0); withValue(Events.DELETED, 0)
                 CAPTURED_ORIGIN_COLUMNS.forEach { withValue(it, null) }
             } }.build()
+        operations += ContentProviderOperation.newAssertQuery(uri)
+            .withSelection("${children.sql} AND ${Events.SYNC_DATA3} LIKE ?", children.args + "$FINITE_RECEIPT_PREFIX%")
+            .withExpectedCount(0).build()
         if (count > 0) operations += ContentProviderOperation.newDelete(uri).withSelection(children.sql, children.args)
             .withExpectedCount(count).build()
     }
@@ -930,14 +976,22 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
     private fun calendarRow(scope: CalendarScope, account: Account): Long? =
         ownedRow(syncUri(Calendars.CONTENT_URI, account), calendarSelection(scope, account), Calendars.CAL_SYNC1)
 
-    /** Captured rows require their specialized source/protocol, even when currently clean. */
-    private fun refuseCapturedMarkers(uri: Uri, selection: Selection) {
-        val captured = resolver.query(uri, CAPTURED_ORIGIN_COLUMNS, selection.sql, selection.args, null)?.use {
+    /** Specialized rows cannot enter ordinary writes, even when currently clean.
+     * Return the observed ordinary marker for an atomic write/parent assertion.
+     */
+    private fun ordinaryReceiptMarker(uri: Uri, selection: Selection): String? {
+        val cursor = resolver.query(uri, arrayOf(Events.SYNC_DATA3) + CAPTURED_ORIGIN_COLUMNS, selection.sql, selection.args, null)
+            ?: fail(CalendarProjectionFailure.PROVIDER_UNAVAILABLE)
+        return cursor.use {
             if (it.count != 1 || !it.moveToFirst()) fail(CalendarProjectionFailure.IDENTITY_CONFLICT)
-            CAPTURED_ORIGIN_COLUMNS.indices.any { column -> !it.isNull(column) }
-        } ?: fail(CalendarProjectionFailure.PROVIDER_UNAVAILABLE)
-        if (captured) fail(CalendarProjectionFailure.IDENTITY_CONFLICT)
+            if ((1..CAPTURED_ORIGIN_COLUMNS.size).any { column -> !it.isNull(column) }) fail(CalendarProjectionFailure.IDENTITY_CONFLICT)
+            val marker = it.getString(0)
+            if (finiteMarker(marker)) fail(CalendarProjectionFailure.PROVIDER_REJECTED)
+            marker
+        }
     }
+
+    private fun finiteMarker(marker: String?) = marker?.startsWith(FINITE_RECEIPT_PREFIX, ignoreCase = true) == true
 
     private fun ownedRow(uri: Uri, selection: Selection, ownerColumn: String): Long? {
         requirePermissions()
@@ -1094,6 +1148,7 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
     companion object {
         const val ACCOUNT_TYPE = "com.patmanak.proton.andcalendarbridge.account"
         private const val OWNER_MARKER = "calendar-bridge-projection-v1"
+        private const val FINITE_RECEIPT_PREFIX = "calendeer-finite-"
         private val projectionLock = Mutex()
         private val ATTACHMENT_SYNC_COLUMNS = arrayOf(Events._SYNC_ID, Events.SYNC_DATA1, Events.SYNC_DATA2,
             Events.SYNC_DATA3, Events.SYNC_DATA4, Events.SYNC_DATA5, Events.SYNC_DATA6, Events.SYNC_DATA7,
