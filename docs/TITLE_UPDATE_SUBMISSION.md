@@ -214,6 +214,32 @@ the index does not rebind it to the current generation. Recovery must separately
 read full attempts and proofs and recheck access and admission. No production
 UPDATE scheduler is activated by these prerequisites.
 
+## Bounded offline completion recovery
+
+`TitleUpdateOfflineRecoveryJournal` supplies metadata discovery, complete attempt
+reads and the existing result/completion history. The internal coordinator handles
+one page of at most fifty entries sequentially under its synchronization mutex.
+It captures one session generation and editing-policy revision for the entire
+invocation. Account, selection, permissions and editing mode are rechecked across
+suspending reads; acknowledgement and completion reuse that original epoch.
+
+Discovery alone permits no action. The coordinator validates each full attempt's
+scope, event and attempt identity and import format, then requires its already
+durable, exactly bound verified result. PREPARED work, incompatible import formats
+and missing proofs remain held. Invalid full records are counted as failed and
+retained; a later entry can still proceed. Existing acknowledgement and completion
+guards remain authoritative for any unresolved provenance or native-state conflict.
+No inspection, preparation, claim, submission or new result retention occurs.
+
+A RESTORED receipt without a committed completion can finish after reopening from
+its historical proof. This replay does not write native metadata again and preserves
+a later dirty edit. Progress counts describe only this invocation, not global sync
+completion. Held/failed entries and insertions behind a cursor require a fresh
+first-page traversal. Access invalidation returns no continuation, and cancellation
+propagates. The production worker and UI do not invoke this internal path yet.
+Online recovery of missing proof still requires separate transport and durable-result
+admission guards before scheduling can be activated.
+
 ## Concurrency and integration limits
 
 The fresh GET and subsequent PUT are successive observations, **not an atomic
@@ -259,6 +285,11 @@ remain separate work.
   Provider/SQLite composition checks two successive ordinary and transferred
   title cycles, lost completion commits and old replay during a newer reservation.
   Their remote results are synthetic; they make no UPDATE service request.
+  Offline-page coordinator fixtures additionally check mixed corrupt/held/ready
+  entries, access changes across reads, cancellation and unchanged dispatch capability.
+  Real Provider/SQLite integration covers one-page completion and reopening after
+  an aborted completion commit for imported and transferred CREATE events, preserving
+  later dirty edits and making no second native acknowledgement write.
 - `TitleUpdateWorkPageTest` and `TitleUpdateWorkPageDeviceTest` check bounded
   metadata pages, lookahead, strict identities, scope isolation, binary ordering,
   reopening and insertions behind a cursor. `SystemCreatePipelineDeviceTest`

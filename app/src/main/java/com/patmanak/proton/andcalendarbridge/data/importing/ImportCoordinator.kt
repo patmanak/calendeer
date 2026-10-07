@@ -456,14 +456,101 @@ class ImportCoordinator(
             }
         }
 
+    /** One internal offline page. No inspection, preparation or submission capability. */
+    suspend fun recoverLocalTitles(query: TitleUpdateWorkQuery,
+        journal: TitleUpdateOfflineRecoveryJournal): TitleUpdateOfflineRecoveryProgress = mutex.withLock {
+        val target = query.scope
+        val expected = generation
+        val policy = createPolicyRevision.get()
+        val active = { authenticated && generation == expected && createPolicyRevision.get() == policy &&
+            systemCreatesEnabled(target) && hasCalendarPermissions() }
+        var completed = 0
+        var held = 0
+        var failed = 0
+        fun progress(next: TitleUpdateWorkCursor? = null, inactive: Boolean = false) =
+            TitleUpdateOfflineRecoveryProgress(completed, held, failed, next, inactive)
+        suspend fun available(): Boolean {
+            currentCoroutineContext().ensureActive()
+            if (!active() || !isCurrent(expected, target.account)) return false
+            val selected = store.selections(target.account).singleOrNull { it.scope == target }
+            return selected?.enabled == true && selected.available && active()
+        }
+        try {
+            if (!available()) return@withLock progress(inactive = true)
+            check(journal.completionProtocol == 1) { "Incompatible title recovery journal" }
+            val page = journal.page(query)
+            if (!available()) return@withLock progress(inactive = true)
+            val next = page.next
+            check(page.scope == target && page.entries.size <= query.limit &&
+                (next == null || (next.scope == target && next.protocol == 1 &&
+                    next.afterEvent == page.entries.lastOrNull()?.eventId))) { "Invalid title recovery page" }
+            for (reference in page.entries) {
+                if (!available()) return@withLock progress(inactive = true)
+                // The helpers close their leases; install this invocation's same epoch again.
+                store.admitTransaction = { it == target && active() }
+                try {
+                    val record = journal.read(target, reference.id)?.frozen()
+                    if (!available()) return@withLock progress(inactive = true)
+                    if (record == null) { held++; continue }
+                    check(record.scope == target && record.id == reference.id &&
+                        record.preparation.intent.base.eventId == reference.eventId) { "Invalid title recovery binding" }
+                    // Metadata may have changed state since discovery. Only the complete record counts.
+                    if (record.state != TitleUpdateAttemptState.OUTCOME_UNKNOWN ||
+                        record.preparation.intent.format != remote.format ||
+                        store.transaction(target) { checkpoint?.format } != record.preparation.intent.format) {
+                        if (!available()) return@withLock progress(inactive = true)
+                        held++; continue
+                    }
+                    if (!available()) return@withLock progress(inactive = true)
+                    val result = journal.readVerified(target, reference.id)
+                    if (!available()) return@withLock progress(inactive = true)
+                    if (result == null) { held++; continue }
+                    check(result.record == record.copy(protectedEvidence = null)) { "Invalid title recovery result" }
+                    when (acknowledgeLocalTitleLocked(target, reference.eventId, reference.id, journal, expected, policy)) {
+                        TitleUpdateAcknowledgementResult.INACTIVE -> return@withLock progress(inactive = true)
+                        TitleUpdateAcknowledgementResult.UNRESOLVED -> { held++; continue }
+                        TitleUpdateAcknowledgementResult.ACKNOWLEDGED -> Unit
+                    }
+                    if (!available()) return@withLock progress(inactive = true)
+                    val completion = completeLocalTitleLocked(target, reference.eventId, reference.id, journal, expected, policy)
+                    if (!available()) return@withLock progress(inactive = true)
+                    when (completion) {
+                        TitleUpdateCompletionResult.INACTIVE -> return@withLock progress(inactive = true)
+                        TitleUpdateCompletionResult.UNRESOLVED -> held++
+                        TitleUpdateCompletionResult.COMPLETED -> completed++
+                    }
+                } catch (cancelled: CancellationException) { throw cancelled }
+                  catch (_: Exception) {
+                      if (!available()) return@withLock progress(inactive = true)
+                      failed++
+                  }
+            }
+            progress(next = next)
+        } catch (cancelled: CancellationException) { throw cancelled }
+          catch (_: Exception) {
+              if (!active()) progress(inactive = true)
+              else {
+                  // A failed page/access read gives no safe continuation. Restart at the first page.
+                  if (completed + held + failed < TitleUpdateWorkQuery.MAX_PAGE_SIZE) failed++
+                  progress()
+              }
+          } finally {
+              store.admitTransaction = { false }
+              projection.admitOperation = { false }
+          }
+    }
+
     /** Internal simple title acknowledgement only. Reads an already durable verified result;
      * never prepares, inspects the service or dispatches UPDATE. A fresh reservation permits one
      * conditional native metadata write. Reopening only inspects the retained nonce.
      */
     suspend fun acknowledgeLocalTitle(target: CalendarScope, eventId: EventId, attempt: MutationId,
         journal: TitleUpdateResultJournal): TitleUpdateAcknowledgementResult = mutex.withLock {
-        val expected = generation
-        val policy = createPolicyRevision.get()
+        acknowledgeLocalTitleLocked(target, eventId, attempt, journal, generation, createPolicyRevision.get())
+    }
+
+    private suspend fun acknowledgeLocalTitleLocked(target: CalendarScope, eventId: EventId, attempt: MutationId,
+        journal: TitleUpdateResultJournal, expected: Long, policy: Long): TitleUpdateAcknowledgementResult {
         val active = { authenticated && generation == expected && createPolicyRevision.get() == policy &&
             systemCreatesEnabled(target) && hasCalendarPermissions() }
         suspend fun available(): Boolean {
@@ -471,24 +558,24 @@ class ImportCoordinator(
             val selected = store.selections(target.account).singleOrNull { it.scope == target }
             return selected?.enabled == true && selected.available && active()
         }
-        try {
-            if (!available()) return@withLock TitleUpdateAcknowledgementResult.INACTIVE
+        return try {
+            if (!available()) return TitleUpdateAcknowledgementResult.INACTIVE
             store.admitTransaction = { it == target && active() }
             projection.admitOperation = active
             if (projection.titleUpdateAcknowledgementProtocol != 1)
-                return@withLock TitleUpdateAcknowledgementResult.UNRESOLVED
+                return TitleUpdateAcknowledgementResult.UNRESOLVED
             val result = journal.readVerified(target, attempt)
-                ?: return@withLock TitleUpdateAcknowledgementResult.UNRESOLVED
-            if (!available()) return@withLock TitleUpdateAcknowledgementResult.INACTIVE
+                ?: return TitleUpdateAcknowledgementResult.UNRESOLVED
+            if (!available()) return TitleUpdateAcknowledgementResult.INACTIVE
             val intent = result.record.preparation.intent
             if (result.record.scope != target || result.record.id != attempt || result.event.eventId != eventId ||
                 intent.format != remote.format || store.transaction(target) { checkpoint?.format } != intent.format)
-                return@withLock TitleUpdateAcknowledgementResult.UNRESOLVED
+                return TitleUpdateAcknowledgementResult.UNRESOLVED
             val existing = store.titleUpdateAcknowledgement(target, eventId, attempt)
             if (existing != null && !existing.receipt.matches(result))
-                return@withLock TitleUpdateAcknowledgementResult.UNRESOLVED
+                return TitleUpdateAcknowledgementResult.UNRESOLVED
             if (existing?.state == TitleUpdateAcknowledgementState.RESTORED)
-                return@withLock TitleUpdateAcknowledgementResult.ACKNOWLEDGED
+                return TitleUpdateAcknowledgementResult.ACKNOWLEDGED
             val reservation = if (existing != null) TitleUpdateAcknowledgementReservation(existing, false) else {
                 val transfer = store.capturedHandoff(target, eventId)
                 val frame = transfer?.frame
@@ -497,41 +584,41 @@ class ImportCoordinator(
                 } else {
                     if (transfer.state != CapturedCreateHandoffState.RELEASED || !transfer.waiting ||
                         frame.base != intent.base || frame.format != intent.format)
-                        return@withLock TitleUpdateAcknowledgementResult.UNRESOLVED
+                        return TitleUpdateAcknowledgementResult.UNRESOLVED
                     val observed = projection.captureCapturedHandoffCurrent(frame) as? CapturedHandoffCurrentObservation.Supported
                     observed?.snapshot?.takeIf { it.frame == frame && !it.deleted }?.content
-                } ?: return@withLock TitleUpdateAcknowledgementResult.UNRESOLVED
-                if (!available()) return@withLock TitleUpdateAcknowledgementResult.INACTIVE
+                } ?: return TitleUpdateAcknowledgementResult.UNRESOLVED
+                if (!available()) return TitleUpdateAcknowledgementResult.INACTIVE
                 if (content != intent.content || journal.readVerified(target, attempt) != result)
-                    return@withLock TitleUpdateAcknowledgementResult.UNRESOLVED
+                    return TitleUpdateAcknowledgementResult.UNRESOLVED
                 store.prepareTitleUpdateAcknowledgement(result, frame)
-                    ?: return@withLock TitleUpdateAcknowledgementResult.UNRESOLVED
+                    ?: return TitleUpdateAcknowledgementResult.UNRESOLVED
             }
             val retained = reservation.record
-            if (!available()) return@withLock TitleUpdateAcknowledgementResult.INACTIVE
+            if (!available()) return TitleUpdateAcknowledgementResult.INACTIVE
             if (!retained.receipt.matches(result) || store.titleUpdateAcknowledgement(target, eventId, attempt) != retained ||
                 journal.readVerified(target, attempt) != result)
-                return@withLock TitleUpdateAcknowledgementResult.UNRESOLVED
+                return TitleUpdateAcknowledgementResult.UNRESOLVED
             if (reservation.fresh && (store.localEdit(target, eventId) != intent ||
                 store.localEditPreparation(target, eventId) != result.record.preparation))
-                return@withLock TitleUpdateAcknowledgementResult.UNRESOLVED
+                return TitleUpdateAcknowledgementResult.UNRESOLVED
             if (reservation.fresh && retained.receipt.handoff?.let { frame ->
                     store.capturedHandoff(target, eventId) != CapturedCreateHandoffRecord(frame,
                         CapturedCreateHandoffState.RELEASED, waiting = true)
-                } == true) return@withLock TitleUpdateAcknowledgementResult.UNRESOLVED
+                } == true) return TitleUpdateAcknowledgementResult.UNRESOLVED
             // The final journal/source reads can suspend. Recheck selection and account after
             // them as well as the synchronous epoch/mode/permission lease in the Provider.
-            if (!available()) return@withLock TitleUpdateAcknowledgementResult.INACTIVE
+            if (!available()) return TitleUpdateAcknowledgementResult.INACTIVE
             // No fallback from historical inspection to another native write. The first receipt
             // stays pending even when an interruption happened before the batch actually executed.
             val witness = if (reservation.fresh) projection.acknowledgeTitleUpdate(retained.receipt)
                 else projection.inspectTitleUpdateAcknowledgement(retained.receipt)
-            if (!available()) return@withLock TitleUpdateAcknowledgementResult.INACTIVE
+            if (!available()) return TitleUpdateAcknowledgementResult.INACTIVE
             if (witness?.receipt?.snapshot() != retained.receipt || journal.readVerified(target, attempt) != result ||
                 store.titleUpdateAcknowledgement(target, eventId, attempt) != retained)
-                return@withLock TitleUpdateAcknowledgementResult.UNRESOLVED
+                return TitleUpdateAcknowledgementResult.UNRESOLVED
             if (!store.restoreTitleUpdateAcknowledgement(witness))
-                return@withLock TitleUpdateAcknowledgementResult.UNRESOLVED
+                return TitleUpdateAcknowledgementResult.UNRESOLVED
             TitleUpdateAcknowledgementResult.ACKNOWLEDGED
         } catch (cancelled: CancellationException) { throw cancelled }
           catch (_: Exception) {
@@ -548,8 +635,11 @@ class ImportCoordinator(
      */
     suspend fun completeLocalTitle(target: CalendarScope, eventId: EventId, attempt: MutationId,
         journal: TitleUpdateCompletionJournal): TitleUpdateCompletionResult = mutex.withLock {
-        val expected = generation
-        val policy = createPolicyRevision.get()
+        completeLocalTitleLocked(target, eventId, attempt, journal, generation, createPolicyRevision.get())
+    }
+
+    private suspend fun completeLocalTitleLocked(target: CalendarScope, eventId: EventId, attempt: MutationId,
+        journal: TitleUpdateCompletionJournal, expected: Long, policy: Long): TitleUpdateCompletionResult {
         val active = { authenticated && generation == expected && createPolicyRevision.get() == policy &&
             systemCreatesEnabled(target) && hasCalendarPermissions() }
         suspend fun available(): Boolean {
@@ -557,34 +647,34 @@ class ImportCoordinator(
             val selected = store.selections(target.account).singleOrNull { it.scope == target }
             return selected?.enabled == true && selected.available && active()
         }
-        try {
-            if (!available()) return@withLock TitleUpdateCompletionResult.INACTIVE
+        return try {
+            if (!available()) return TitleUpdateCompletionResult.INACTIVE
             store.admitTransaction = { it == target && active() }
-            if (journal.completionProtocol != 1) return@withLock TitleUpdateCompletionResult.UNRESOLVED
-            val result = journal.readVerified(target, attempt) ?: return@withLock TitleUpdateCompletionResult.UNRESOLVED
-            if (!available()) return@withLock TitleUpdateCompletionResult.INACTIVE
+            if (journal.completionProtocol != 1) return TitleUpdateCompletionResult.UNRESOLVED
+            val result = journal.readVerified(target, attempt) ?: return TitleUpdateCompletionResult.UNRESOLVED
+            if (!available()) return TitleUpdateCompletionResult.INACTIVE
             val intent = result.record.preparation.intent
             if (result.record.scope != target || result.record.id != attempt || result.event.eventId != eventId ||
                 intent.format != remote.format || store.transaction(target) { checkpoint?.format } != intent.format)
-                return@withLock TitleUpdateCompletionResult.UNRESOLVED
+                return TitleUpdateCompletionResult.UNRESOLVED
             val acknowledgement = store.titleUpdateAcknowledgement(target, eventId, attempt)
-                ?: return@withLock TitleUpdateCompletionResult.UNRESOLVED
+                ?: return TitleUpdateCompletionResult.UNRESOLVED
             if (acknowledgement.state != TitleUpdateAcknowledgementState.RESTORED || !acknowledgement.receipt.matches(result))
-                return@withLock TitleUpdateCompletionResult.UNRESOLVED
+                return TitleUpdateCompletionResult.UNRESOLVED
             val completion = TitleUpdateCompletion.of(result, acknowledgement)
             val retained = journal.readCompletion(target, attempt)
-            if (retained != null && retained != completion) return@withLock TitleUpdateCompletionResult.UNRESOLVED
+            if (retained != null && retained != completion) return TitleUpdateCompletionResult.UNRESOLVED
             if (journal.readVerified(target, attempt) != result ||
                 store.titleUpdateAcknowledgement(target, eventId, attempt) != acknowledgement)
-                return@withLock TitleUpdateCompletionResult.UNRESOLVED
+                return TitleUpdateCompletionResult.UNRESOLVED
             // Repeat the selected-calendar/account check after the historical reads suspend.
-            if (!available()) return@withLock TitleUpdateCompletionResult.INACTIVE
+            if (!available()) return TitleUpdateCompletionResult.INACTIVE
             if (retained == null && !journal.retainCompletion(completion) { it == target && active() })
-                return@withLock TitleUpdateCompletionResult.UNRESOLVED
-            if (!available()) return@withLock TitleUpdateCompletionResult.INACTIVE
+                return TitleUpdateCompletionResult.UNRESOLVED
+            if (!available()) return TitleUpdateCompletionResult.INACTIVE
             if (journal.readCompletion(target, attempt) != completion)
-                return@withLock TitleUpdateCompletionResult.UNRESOLVED
-            if (!available()) return@withLock TitleUpdateCompletionResult.INACTIVE
+                return TitleUpdateCompletionResult.UNRESOLVED
+            if (!available()) return TitleUpdateCompletionResult.INACTIVE
             TitleUpdateCompletionResult.COMPLETED
         } catch (cancelled: CancellationException) { throw cancelled }
           catch (_: Exception) {

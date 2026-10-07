@@ -50,6 +50,13 @@ identity after that owner is consumed, for imported and CREATE-handoff events.
 A bounded, scope-bound metadata index lists unresolved title attempts independently
 of the local intent table, including the gap between acknowledgement and completion.
 This discovery index grants no dispatch or recovery authority.
+An internal offline coordinator now processes one bounded page, revalidates full
+attempts and uses only already durable results to acknowledge and complete work.
+It retains one session/policy epoch across the page, holds PREPARED or unproven
+attempts, preserves corrupt entries and drops continuation after access invalidation.
+Acknowledgement-to-completion gaps can resume after reopening without rewriting
+the native row or consuming a later dirty edit. This path makes no service request
+and is not connected to the production worker.
 Isolated physical Provider/SQLite integration qualifies same-row acknowledgement,
 interrupted restoration and preservation of a later dirty edit. A distinct supported
 cached observation is now requeued for its exact event atomically with the first

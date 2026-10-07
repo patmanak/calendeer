@@ -338,6 +338,36 @@ class TitleUpdateAcknowledgementIntegrationDeviceTest {
         }
         suspend fun receipt(): TitleUpdateAcknowledgementRecord? { allowSql(); return store.titleUpdateAcknowledgement(target, base.eventId) }
 
+        suspend fun offlineBatchClosesStoredProofWithoutAnotherSend() {
+            val progress = coordinator.recoverLocalTitles(TitleUpdateWorkQuery(target), journal)
+            assertEquals(1, progress.completed); assertEquals(0, progress.held); assertEquals(0, progress.failed)
+            assertFalse(progress.inactive); assertNull(progress.next)
+            assertSqlRestored(); assertNotNull(journal.readCompletion(target, prepared.id))
+            assertEquals(1, writes.get()); assertEquals(0, inspections.get()); assertSingleOriginalRow()
+            val before = values()
+            assertEquals(TitleUpdateOfflineRecoveryProgress(), coordinator.recoverLocalTitles(TitleUpdateWorkQuery(target), journal))
+            assertEquals(before, values()); assertEquals(1, writes.get()); assertEquals(0, inspections.get())
+        }
+
+        suspend fun offlineBatchRecoversCompletionGapAfterReopeningAndKeepsLaterDirtyEdit() {
+            journal.writableDatabase.execSQL("CREATE TRIGGER fixture_completion_gap BEFORE UPDATE OF completion ON title_update_attempts BEGIN SELECT RAISE(ABORT,'synthetic completion gap'); END")
+            val held = coordinator.recoverLocalTitles(TitleUpdateWorkQuery(target), journal)
+            assertEquals(0, held.completed); assertEquals(1, held.held); assertEquals(0, held.failed)
+            assertSqlRestored(); assertNull(journal.readCompletion(target, prepared.id))
+            assertEquals(1, writes.get()); assertEquals(0, inspections.get())
+            mutateTitle("Synthetic later edit during completion gap")
+            val later = values()
+            journal.writableDatabase.execSQL("DROP TRIGGER fixture_completion_gap")
+            TitleUpdateAttemptStore(context, attemptName).use { reopened ->
+                val completed = coordinator.recoverLocalTitles(TitleUpdateWorkQuery(target), reopened)
+                assertEquals(1, completed.completed); assertEquals(0, completed.held); assertEquals(0, completed.failed)
+                assertNotNull(reopened.readCompletion(target, prepared.id))
+                assertEquals(unknown, reopened.read(target, prepared.id))
+            }
+            assertEquals(later, values()); assertEquals("1", values()[Events.DIRTY])
+            assertEquals(1, writes.get()); assertEquals(0, inspections.get()); assertSingleOriginalRow()
+        }
+
         private fun pendingFlag(source: ImportStore = store): Int = source.readableDatabase.rawQuery(
             "SELECT pending FROM records WHERE event=?", arrayOf(base.eventId.value)).use {
             assertEquals(1, it.count); assertTrue(it.moveToFirst()); it.getInt(0)
@@ -533,6 +563,19 @@ class TitleUpdateAcknowledgementIntegrationDeviceTest {
     @Test fun twoOrdinaryTimedTitleCyclesRetainHistoryAndRecoverCompletionLoss() = fixture(allDay = false) { twoCycles() }
     @Test fun twoTransferredAllDayTitleCyclesPreserveOriginAndRecoverCompletionLoss() = fixture(allDay = true, transferred = true) { twoCycles(recoverSecond = true) }
     @Test fun twoTransferredTimedTitleCyclesPreserveOriginAndRecoverCompletionLoss() = fixture(allDay = false, transferred = true) { twoCycles() }
+
+    @Test fun ordinaryStoredTitleProofCompletesThroughOfflineBatchOnSameRow() = fixture(allDay = false) {
+        offlineBatchClosesStoredProofWithoutAnotherSend()
+    }
+    @Test fun transferredStoredTitleProofCompletesThroughOfflineBatchOnSameRow() = fixture(allDay = true, transferred = true) {
+        offlineBatchClosesStoredProofWithoutAnotherSend()
+    }
+    @Test fun ordinaryOfflineBatchRecoversCompletionGapAndPreservesLaterDirtyEdit() = fixture(allDay = false) {
+        offlineBatchRecoversCompletionGapAfterReopeningAndKeepsLaterDirtyEdit()
+    }
+    @Test fun transferredOfflineBatchRecoversCompletionGapAndPreservesLaterDirtyEdit() = fixture(allDay = false, transferred = true) {
+        offlineBatchRecoversCompletionGapAfterReopeningAndKeepsLaterDirtyEdit()
+    }
 
     @Test fun ordinaryTimedCachedObservationAfterNativeAckDrainsOfflineOnSameRow() = fixture(allDay = false) {
         cachedObservationDrainsOfflineOnOriginalRow()

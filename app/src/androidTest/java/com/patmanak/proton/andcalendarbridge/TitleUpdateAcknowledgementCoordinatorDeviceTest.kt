@@ -32,6 +32,16 @@ class TitleUpdateAcknowledgementCoordinatorDeviceTest {
         override suspend fun retainCompletion(completion: TitleUpdateCompletion, admit: (CalendarScope) -> Boolean) =
             journal.retainCompletion(completion, admit)
     }
+    private open class RecoveryPort(protected val backing: TitleUpdateOfflineRecoveryJournal) : TitleUpdateOfflineRecoveryJournal {
+        override val completionProtocol: Int? get() = backing.completionProtocol
+        override suspend fun page(query: TitleUpdateWorkQuery) = backing.page(query)
+        override suspend fun read(scope: CalendarScope, id: MutationId) = backing.read(scope, id)
+        override suspend fun readVerified(scope: CalendarScope, id: MutationId) = backing.readVerified(scope, id)
+        override suspend fun retainVerified(result: TitleUpdateVerifiedResult): Unit = error("Offline recovery cannot obtain or retain new service proof")
+        override suspend fun readCompletion(scope: CalendarScope, id: MutationId) = backing.readCompletion(scope, id)
+        override suspend fun retainCompletion(completion: TitleUpdateCompletion, admit: (CalendarScope) -> Boolean) =
+            backing.retainCompletion(completion, admit)
+    }
     private class Fixture(val transferred: Boolean = false) {
         private val context = ApplicationProvider.getApplicationContext<Context>()
         private val token = UUID.randomUUID().toString()
@@ -146,6 +156,19 @@ class TitleUpdateAcknowledgementCoordinatorDeviceTest {
             coordinator.acknowledgeLocalTitle(target, base.eventId, prepared.id, port)
         suspend fun complete(port: TitleUpdateCompletionJournal = journal) =
             coordinator.completeLocalTitle(target, base.eventId, prepared.id, port)
+        suspend fun recover(query: TitleUpdateWorkQuery = TitleUpdateWorkQuery(target),
+            port: TitleUpdateOfflineRecoveryJournal = RecoveryPort(journal)) = coordinator.recoverLocalTitles(query, port)
+        suspend fun additionalWork(event: String, state: TitleUpdateAttemptState): TitleUpdateAttemptRecord {
+            val otherIntent = intent.copy(id = MutationId("intent-$event"), base = base.copy(eventId = EventId(event)))
+            val other = prepared.copy(id = MutationId("attempt-$event"), preparation = preparation.copy(intent = otherIntent))
+            journal.remember(other)
+            if (state == TitleUpdateAttemptState.OUTCOME_UNKNOWN) {
+                journal.admitDispatch = { it == target }
+                try { assertTrue(journal.claim(other)) }
+                finally { journal.admitDispatch = { error("Offline recovery cannot claim dispatch") } }
+            }
+            return other.copy(state = state)
+        }
         suspend fun owner(): LocalEditIntent? { store.admitTransaction = { true }; return store.localEdit(target, base.eventId) }
         suspend fun receipt(): TitleUpdateAcknowledgementRecord? { store.admitTransaction = { true }; return store.titleUpdateAcknowledgement(target, base.eventId) }
         suspend fun cached(): RemoteChange? { store.admitTransaction = { true }; return store.transaction(target) { remote(base.eventId) } }
@@ -162,6 +185,171 @@ class TitleUpdateAcknowledgementCoordinatorDeviceTest {
         assumeTrue(InstrumentationRegistry.getArguments().getString("providerFixture") == "true")
         val fixture = Fixture(transferred)
         try { fixture.seed(); fixture.block() } finally { fixture.close() }
+    }
+
+    @Test fun offlinePageRecoversDurableProofAndCompletesWithoutRetainingNewServiceEvidence() = fixture {
+        val progress = recover()
+        assertEquals(TitleUpdateOfflineRecoveryProgress(completed = 1), progress)
+        assertEquals(1, writes); assertEquals(0, inspections); assertFalse(dirty)
+        assertNotNull(journal.readCompletion(target, prepared.id)); assertEquals(unknown, journal.read(target, prepared.id))
+        assertEquals(result, journal.readVerified(target, prepared.id)); assertNull(owner())
+        assertEquals(TitleUpdateOfflineRecoveryProgress(), recover())
+        assertEquals(1, writes)
+    }
+
+    @Test fun offlineUnknownWithoutDurableProofIsHeldWithoutAnyNativeAccess() = fixture {
+        val missing = object : RecoveryPort(journal) {
+            override suspend fun readVerified(scope: CalendarScope, id: MutationId): TitleUpdateVerifiedResult? = null
+        }
+        assertEquals(TitleUpdateOfflineRecoveryProgress(held = 1), recover(port = missing))
+        assertEquals(0, captures); assertEquals(0, inspections); assertEquals(0, writes)
+        assertNull(receipt()); assertEquals(intent, owner()); assertNull(journal.readCompletion(target, prepared.id))
+    }
+
+    @Test fun offlinePreparedIsHeldWithoutReadingServiceProofOrTouchingNative() = fixture {
+        val other = additionalWork("a-prepared", TitleUpdateAttemptState.PREPARED)
+        val noProof = object : RecoveryPort(journal) {
+            override suspend fun readVerified(scope: CalendarScope, id: MutationId): TitleUpdateVerifiedResult? =
+                error("PREPARED cannot recover a verified outcome")
+        }
+        val progress = recover(TitleUpdateWorkQuery(target, 1), noProof)
+        assertEquals(0, progress.completed); assertEquals(1, progress.held); assertEquals(0, progress.failed)
+        assertEquals(TitleUpdateWorkCursor(target, other.preparation.intent.base.eventId), progress.next)
+        assertEquals(other, journal.read(target, other.id)); assertEquals(0, captures); assertEquals(0, writes)
+    }
+
+    @Test fun offlineMetadataAndFullRecordMismatchFailsWithoutMutatingEitherOwner() = fixture {
+        val mismatch = object : RecoveryPort(journal) {
+            override suspend fun page(query: TitleUpdateWorkQuery) = TitleUpdateWorkPage.fromOrderedMetadata(query,
+                listOf(TitleUpdateWorkRef(prepared.id, EventId("different-metadata-event"), TitleUpdateAttemptState.OUTCOME_UNKNOWN)))
+            override suspend fun readVerified(scope: CalendarScope, id: MutationId): TitleUpdateVerifiedResult? =
+                error("Mismatched metadata cannot reach result recovery")
+        }
+        assertEquals(TitleUpdateOfflineRecoveryProgress(failed = 1), recover(port = mismatch))
+        assertEquals(0, writes); assertEquals(0, captures); assertEquals(unknown, journal.read(target, prepared.id))
+        assertEquals(intent, owner()); assertNull(receipt())
+    }
+
+    @Test fun offlineCompleteRecordWithForeignScopeFailsBeforeProofOrNativeAccess() = fixture {
+        val wrong = unknown.copy(preparation = preparation.copy(intent = intent.copy(scope = target.copy(generation = 7))))
+        val mismatch = object : RecoveryPort(journal) {
+            override suspend fun read(scope: CalendarScope, id: MutationId) = wrong
+            override suspend fun readVerified(scope: CalendarScope, id: MutationId): TitleUpdateVerifiedResult? =
+                error("Foreign work cannot reach result recovery")
+        }
+        assertEquals(TitleUpdateOfflineRecoveryProgress(failed = 1), recover(port = mismatch))
+        assertEquals(0, captures); assertEquals(0, writes); assertEquals(intent, owner()); assertNull(receipt())
+    }
+
+    @Test fun offlineWrongImportFormatIsHeldWithoutInterpretingRetainedPayload() = fixture {
+        val wrong = unknown.copy(preparation = preparation.copy(intent = intent.copy(format = AdapterFormat("other-import", 1))))
+        val proof = TitleUpdateVerifiedResult.of(wrong, TitleUpdateSubmissionObservation.Verified(TitleUpdateAttemptIdentity.of(wrong), verified))
+        val incompatible = object : RecoveryPort(journal) {
+            override suspend fun read(scope: CalendarScope, id: MutationId) = wrong
+            override suspend fun readVerified(scope: CalendarScope, id: MutationId) = proof
+        }
+        assertEquals(TitleUpdateOfflineRecoveryProgress(held = 1), recover(port = incompatible))
+        assertEquals(0, captures); assertEquals(0, writes); assertEquals(intent, owner()); assertNull(receipt())
+    }
+
+    @Test fun offlineOnePageContinuesPastCorruptionAndHeldWorkThenFreshPageRetriesBlockedEntries() = fixture {
+        val bad = additionalWork("a-bad", TitleUpdateAttemptState.OUTCOME_UNKNOWN)
+        additionalWork("b-prepared", TitleUpdateAttemptState.PREPARED)
+        additionalWork("z-missing-proof", TitleUpdateAttemptState.OUTCOME_UNKNOWN)
+        journal.writableDatabase.execSQL("UPDATE title_update_attempts SET preparation='not-json' WHERE mutation=?", arrayOf(bad.id.value))
+        val first = recover(TitleUpdateWorkQuery(target, 3))
+        assertEquals(1, first.completed); assertEquals(1, first.held); assertEquals(1, first.failed)
+        assertEquals(TitleUpdateWorkCursor(target, base.eventId), first.next)
+        assertNotNull(journal.readCompletion(target, prepared.id)); assertEquals(1, writes)
+        val second = recover(TitleUpdateWorkQuery(target, 3, requireNotNull(first.next)))
+        assertEquals(TitleUpdateOfflineRecoveryProgress(held = 1), second)
+        val restarted = recover(TitleUpdateWorkQuery(target, 3))
+        assertEquals(TitleUpdateOfflineRecoveryProgress(held = 2, failed = 1), restarted)
+        assertEquals(1, writes); assertEquals(0, inspections)
+    }
+
+    @Test fun offlinePermissionModeAccountAndSelectionGateBeforePageAccess() = fixture {
+        var pages = 0
+        val counting = object : RecoveryPort(journal) {
+            override suspend fun page(query: TitleUpdateWorkQuery): TitleUpdateWorkPage { pages++; return super.page(query) }
+        }
+        permission = false; assertTrue(recover(port = counting).inactive); permission = true
+        mode = false; assertTrue(recover(port = counting).inactive); mode = true
+        account = AccountId("foreign-account"); assertTrue(recover(port = counting).inactive); account = target.account
+        store.setEnabled(target, false); assertTrue(recover(port = counting).inactive)
+        assertEquals(0, pages); assertEquals(0, writes); assertEquals(0, captures); assertNull(receipt())
+    }
+
+    @Test fun offlinePolicyOffAndOnDuringFullReadInvalidatesOriginalPageEpoch() = fixture {
+        additionalWork("z-held", TitleUpdateAttemptState.PREPARED)
+        val changing = object : RecoveryPort(journal) {
+            override suspend fun read(scope: CalendarScope, id: MutationId): TitleUpdateAttemptRecord? {
+                val record = super.read(scope, id)
+                coordinator.systemCreatePolicyChanged(target, false)
+                coordinator.systemCreatePolicyChanged(target, true)
+                return record
+            }
+            override suspend fun readVerified(scope: CalendarScope, id: MutationId): TitleUpdateVerifiedResult? =
+                error("Invalidated page cannot read service proof")
+        }
+        val progress = recover(TitleUpdateWorkQuery(target, 1), changing)
+        assertTrue(progress.inactive); assertNull(progress.next); assertEquals(0, progress.completed)
+        assertEquals(0, writes); assertEquals(0, captures); assertNull(receipt())
+    }
+
+    @Test fun offlineAccountChangedDuringResultReadStopsBeforeNativeAndDropsContinuation() = fixture {
+        additionalWork("z-held", TitleUpdateAttemptState.PREPARED)
+        val changing = object : RecoveryPort(journal) {
+            override suspend fun readVerified(scope: CalendarScope, id: MutationId): TitleUpdateVerifiedResult? {
+                val proof = super.readVerified(scope, id); account = AccountId("foreign-account"); return proof
+            }
+        }
+        val progress = recover(TitleUpdateWorkQuery(target, 1), changing)
+        assertTrue(progress.inactive); assertNull(progress.next); assertEquals(0, progress.completed)
+        assertEquals(0, writes); assertEquals(0, captures); assertNull(receipt())
+    }
+
+    @Test fun offlineSelectionRevokedDuringPageReadCannotProcessItsEntries() = fixture {
+        val changing = object : RecoveryPort(journal) {
+            override suspend fun page(query: TitleUpdateWorkQuery): TitleUpdateWorkPage {
+                val page = super.page(query); store.setEnabled(target, false); return page
+            }
+        }
+        val progress = recover(port = changing)
+        assertTrue(progress.inactive); assertNull(progress.next); assertEquals(0, writes); assertEquals(0, captures)
+        assertNull(receipt())
+    }
+
+    @Test fun offlinePolicyInvalidationInsideCompletionKeepsRestoredAckButStopsPage() = fixture {
+        additionalWork("z-held", TitleUpdateAttemptState.PREPARED)
+        val changing = object : RecoveryPort(journal) {
+            override suspend fun retainCompletion(completion: TitleUpdateCompletion, admit: (CalendarScope) -> Boolean): Boolean {
+                coordinator.systemCreatePolicyChanged(target, false)
+                coordinator.systemCreatePolicyChanged(target, true)
+                return backing.retainCompletion(completion, admit)
+            }
+        }
+        val progress = recover(TitleUpdateWorkQuery(target, 1), changing)
+        assertTrue(progress.inactive); assertNull(progress.next); assertEquals(0, progress.completed)
+        assertEquals(1, writes); assertEquals(TitleUpdateAcknowledgementState.RESTORED, receipt()!!.state)
+        assertNull(journal.readCompletion(target, prepared.id))
+        assertEquals(TitleUpdateOfflineRecoveryProgress(completed = 1, held = 1), recover())
+        assertEquals(1, writes); assertEquals(0, inspections)
+    }
+
+    @Test fun offlineCancellationDuringFullReadPropagatesWithoutProcessingLaterEntries() = fixture {
+        additionalWork("z-held", TitleUpdateAttemptState.PREPARED)
+        var reads = 0
+        val cancelled = object : RecoveryPort(journal) {
+            override suspend fun read(scope: CalendarScope, id: MutationId): TitleUpdateAttemptRecord? {
+                reads++; throw CancellationException("Synthetic offline recovery cancellation")
+            }
+            override suspend fun readVerified(scope: CalendarScope, id: MutationId): TitleUpdateVerifiedResult? =
+                error("Cancellation must stop proof recovery")
+        }
+        try { recover(port = cancelled); fail("Cancellation must propagate") } catch (_: CancellationException) { }
+        assertEquals(1, reads); assertEquals(0, writes); assertEquals(0, captures); assertNull(receipt())
+        assertEquals(unknown, journal.read(target, prepared.id))
     }
 
     @Test fun durableResultClosesExactIntentAndAdvancesBaselineWithoutDispatch() = fixture {
