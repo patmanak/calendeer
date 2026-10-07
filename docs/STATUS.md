@@ -43,8 +43,8 @@ atomically while preserving the immutable creation evidence. A separate internal
 completion binds the first durable result to its RESTORED receipt. Immutable
 receipt history supports successive title cycles and old replay without consuming
 the next intent. The original UNKNOWN attempt remains non-resendable; unresolved
-work and corrupt history block new admission across generations. The service-to-native
-UPDATE journey and automatic activation are unqualified.
+work and corrupt history block new admission across generations. The complete native
+capture-to-UPDATE submission journey and automatic activation are unqualified.
 The system observer now reuses a retained UPDATE identity and allocates a distinct
 identity after that owner is consumed, for imported and CREATE-handoff events.
 A bounded, scope-bound metadata index lists unresolved title attempts independently
@@ -77,6 +77,16 @@ projection path still guards against overwriting a later dirty native edit.
 One retained simple timed event
 qualified a single title PUT and full authenticated readback after process restart,
 with its original preparation and UNKNOWN journal intact. Fresh GET/PUT is not server CAS.
+A gated physical test now composes a fresh guarded Proton inspection of that
+historical attempt with real same-row Android acknowledgement and durable completion.
+It reconstructs an ordinary imported owner in isolated databases and a separate
+native generation, retaining the exact protected service scope and request.
+Reopened databases and explicit historical replay preserve every field of a later
+dirty title edit without another service inspection or native write. Production
+snapshots, taken after settling the existing native access policy, and the original
+historical journal remain intact at the measured points.
+This qualifies that isolated recovery composition, not acknowledgement of the
+original transferred CREATE row, a new capture-to-PUT journey or a production worker.
 See [personal editing](LOCAL_EDIT_CAPTURE.md#personal-editing-permission-profile).
 See [system creation](LOCAL_CREATE_CAPTURE.md#opt-in-system-creation) for the exact
 supported profiles, pagination and unresolved limitations.

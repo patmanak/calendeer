@@ -400,6 +400,23 @@ remain separate work.
   retained fixture. It reads the previously verified result after restart with
   a port that rejects inspection and submission. This checks the recovery path's
   offline behavior; it does not claim that all other application activity is offline.
+- `CalendarTitleRecoveryLiveDeviceTest` requires `calendarTitleRecoveryLive=true`
+  and the exact previously enrolled fixture/account. It reconstructs the original
+  UNKNOWN work, including protected response evidence, in a separate journal with
+  no result. It seeds an isolated imported owner and captures the real native title
+  edit, requiring the complete captured intent to equal the historical preparation.
+  Only native namespace keys are translated to a separate Provider generation;
+  the service's scope, preparation and request remain unchanged. A real guarded
+  Proton inspection must supply full verified contents before durable result
+  storage, metadata-only same-row acknowledgement and completion. Reopened
+  databases then read the durable history and explicitly replay acknowledgement
+  and completion while preserving a later dirty edit. Preparation, submission
+  and unrestricted inspection are forbidden throughout this recovery test.
+  The production owner first reconciles the existing native access level according
+  to the retained mode, without changing preferences or the session. Subsequent
+  production snapshots, original journals, calendars and the native account are
+  checked; only newly created isolated calendars/databases are cleaned up. Those
+  snapshots do not prove absence of unrelated background activity between reads.
 
 Live tests must never run indiscriminately or replace an unresolved fixture with
 a new identity. Local tests do not establish service acceptance or Samsung UI
@@ -418,3 +435,13 @@ inspection only, then historical recovery after process restart with all remote
 port methods forbidden. The original preparation and first response evidence
 remained intact. Isolated physical SQLite fixtures qualified the result journal's
 migration, immutable first result, concurrent helpers and failed-commit behavior.
+
+The guarded recovery fixture also passed with a real authenticated Proton readback
+followed by real Provider acknowledgement and SQL completion on the isolated native
+row. Only DIRTY, revision and receipt metadata changed. Reopening both databases
+and explicitly replaying historical acknowledgement/completion left every field
+of a later dirty title edit intact, with no additional service-port inspection or
+native write. This qualifies recovery of the historical service attempt into a
+reconstructed ordinary imported owner. It does not qualify acknowledgement of the
+original transferred CREATE row, another title submission from that native capture,
+process-death recovery of this composed journey, Samsung editing or automatic UPDATE.
