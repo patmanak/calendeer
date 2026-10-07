@@ -163,6 +163,30 @@ including their complete CREATE handoff frames, and corruption blocks new work.
 These histories currently retain every completed cycle; retention policy and
 production scheduling remain separate work.
 
+## Retained incoming observations after acknowledgement
+
+The first SQL acknowledgement restoration requeues only the acknowledged event's
+distinct, supported cached observation in the same transaction that advances the
+baseline, consumes the exact local owner/preparation and archives the RESTORED
+receipt. It preserves the cached payload and opaque revision; distinctness does
+not establish revision order. An old-base cache advances to the verified result,
+an exact-result echo remains settled, and an absent cache is never synthesized.
+No unrelated event or scope is requeued. An archived RESTORED replay is read-only.
+
+Deferred evidence is neither rearmed nor discarded. Ordinary recurrence exceptions
+retain the existing missing/incompatible-parent gate; children of inactive parents
+remain suppressed. Ordinary incoming deletions use the existing guarded import
+path. Transferred CREATE events preserve their narrower profile: unsupported
+deletions or recurrence are not rearmed by title acknowledgement and never fall
+back to ordinary projection. Previously pending distinct work keeps its existing state.
+
+Requeueing grants no permission to overwrite Android. The existing local incoming
+run separately qualifies the row and its provenance; a later DIRTY edit stays
+intact and can be captured as a conflicting intention. A SQL failure after
+requeueing rolls back the queue, baseline, owner, handoff frame and receipt together.
+Native acknowledgement recovery remains inspection-only. This change activates
+neither outgoing UPDATE nor a new scheduler.
+
 ## Offline observation and work discovery
 
 The system observer reuses the existing durable UPDATE owner instead of deriving
@@ -226,6 +250,9 @@ remain separate work.
   access revocation and idempotent history. Integration fixtures combine the real
   Provider, both SQLite stores and coordinator with synthetic result evidence;
   they do not establish Proton acceptance or a service-to-native UPDATE journey.
+  These fixtures also qualify event-scoped requeueing, rollback after that queue
+  update, reopening, incoming same-row offline projection and historical replay.
+  A later native dirty edit remains protected during the incoming drain.
 - `TitleUpdateCompletionTest`, `TitleUpdateCompletionJournalDeviceTest` and
   `TitleUpdateAcknowledgementHistoryDeviceTest` check closure bindings, migration,
   immutable history, default-denied admission, corruption and rollback. Real

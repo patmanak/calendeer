@@ -282,10 +282,7 @@ class TitleUpdateAcknowledgementCoordinatorDeviceTest {
         assertEquals(TitleUpdateAcknowledgementResult.ACKNOWLEDGED, acknowledge())
         assertNull(owner()); assertEquals(newer, cached())
         assertEquals(verified, store.projectedBaseline(target, base.eventId))
-        // The incoming projection was held by the original local owner. Restoration
-        // preserves that pending state; a later projection trigger can requeue it.
-        assertTrue(store.pending(target).isEmpty())
-        store.requeueAll(target)
+        // Closing the original owner durably requeues the supported newer observation.
         assertEquals(listOf(ProjectionIntent(target, newer)), store.pending(target))
     }
 
@@ -402,9 +399,22 @@ class TitleUpdateAcknowledgementCoordinatorDeviceTest {
     @Test fun transferredRemoteObservationAfterNativeCommitClosesOnlyOriginalWork() = fixture(transferred = true) {
         afterWrite = { cache(newer); assertEquals(LocalEditState.CONFLICT, owner()!!.state) }
         assertEquals(TitleUpdateAcknowledgementResult.ACKNOWLEDGED, acknowledge())
-        assertNull(owner()); assertEquals(newer, cached()); assertTrue(store.pending(target).isEmpty())
+        assertNull(owner()); assertEquals(newer, cached())
+        assertEquals(listOf(ProjectionIntent(target, newer)), store.pending(target))
         assertEquals(verified, store.capturedHandoff(target, base.eventId)!!.frame.base)
         assertEquals(frame.receipt, store.capturedHandoff(target, base.eventId)!!.frame.receipt)
         assertFalse(store.capturedHandoff(target, base.eventId)!!.waiting)
+    }
+
+    @Test fun unsupportedTransferredObservationRemainsHeldWithoutOrdinaryProjectionFallback() {
+        for (deleted in listOf(false, true)) fixture(transferred = true) {
+            val distinct = if (deleted) RemoteChange.Deleted(base.eventId, Revision("synthetic-transferred-deletion"))
+                else newer.copy(content = newer.content.copy(recurrence = EventRecurrence("synthetic-transferred-series", rule = "FREQ=DAILY;COUNT=3")))
+            afterWrite = { cache(distinct) }
+            assertEquals(TitleUpdateAcknowledgementResult.ACKNOWLEDGED, acknowledge())
+            assertNull(owner()); assertEquals(distinct, cached()); assertTrue(store.pending(target).isEmpty())
+            val current = store.capturedHandoff(target, base.eventId)!!
+            assertEquals(verified, current.frame.base); assertEquals(frame.receipt, current.frame.receipt)
+        }
     }
 }

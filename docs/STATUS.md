@@ -51,8 +51,12 @@ A bounded, scope-bound metadata index lists unresolved title attempts independen
 of the local intent table, including the gap between acknowledgement and completion.
 This discovery index grants no dispatch or recovery authority.
 Isolated physical Provider/SQLite integration qualifies same-row acknowledgement,
-interrupted restoration and preservation of a later dirty edit. Newer cached
-observations retain their projection state and require a later requeue trigger.
+interrupted restoration and preservation of a later dirty edit. A distinct supported
+cached observation is now requeued for its exact event atomically with the first
+title acknowledgement restoration. Deferred data and recurrence dependencies
+remain held; transferred CREATE events retain their narrower supported profile.
+Historical acknowledgement replay never requeues work. The existing incoming
+projection path still guards against overwriting a later dirty native edit.
 One retained simple timed event
 qualified a single title PUT and full authenticated readback after process restart,
 with its original preparation and UNKNOWN journal intact. Fresh GET/PUT is not server CAS.

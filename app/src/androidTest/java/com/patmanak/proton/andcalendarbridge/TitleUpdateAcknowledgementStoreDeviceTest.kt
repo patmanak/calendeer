@@ -137,6 +137,104 @@ class TitleUpdateAcknowledgementStoreDeviceTest {
         assertNull(store.localEdit(scope, base.eventId)); assertEquals(0, rowCount(store, "local_edit_preparations"))
     }
 
+    @Test fun distinctObservationRequeuesOnlyItsEventAndSurvivesRestartWithoutReplayRearming() = fixture { store, name ->
+        val first = reserve(store)
+        val newer = updated.copy(revision = Revision("synthetic-distinct"), content = updated.content.copy(title = "Synthetic distinct observation"))
+        val neighbour = base.copy(eventId = EventId("synthetic-neighbour"))
+        val other = scope.copy(account = AccountId("synthetic-other-account"))
+        store.remember(other.account, listOf(CalendarSummary(other.calendar, "Synthetic other fixture")))
+        store.setEnabled(other, true)
+        store.transaction(other) { putRemote(newer) }
+        store.transaction(scope) { putRemote(neighbour); putRemote(newer); putProjection(ProjectionIntent(scope, newer)) }
+        assertTrue(store.pending(scope).isEmpty())
+        val witness = AppliedTitleUpdateAcknowledgement(first.record.receipt)
+        assertTrue(store.restoreTitleUpdateAcknowledgement(witness))
+        val expected = listOf(ProjectionIntent(scope, newer))
+        assertEquals(expected, store.pending(scope)); assertTrue(store.pending(other).isEmpty())
+        store.close()
+        ImportStore(context, name).use { reopened ->
+            assertEquals(expected, reopened.pending(scope)); assertTrue(reopened.pending(other).isEmpty())
+            assertEquals(neighbour, reopened.transaction(scope) { remote(neighbour.eventId) })
+            assertEquals(updated, reopened.projectedBaseline(scope, base.eventId))
+            assertEquals(1, reopened.acknowledge(expected.single()))
+            assertTrue(reopened.restoreTitleUpdateAcknowledgement(witness))
+            assertTrue(reopened.pending(scope).isEmpty())
+            assertEquals(newer, reopened.projectedBaseline(scope, base.eventId))
+        }
+    }
+
+    @Test fun distinctOrdinaryDeletionRequeuesWithoutInventingContent() = fixture { store, _ ->
+        val first = reserve(store)
+        val deleted = RemoteChange.Deleted(base.eventId, Revision("synthetic-later-deletion"))
+        store.transaction(scope) { putRemote(deleted); putProjection(ProjectionIntent(scope, deleted)) }
+        assertEquals(0, pendingFlag(store))
+        assertTrue(store.restoreTitleUpdateAcknowledgement(AppliedTitleUpdateAcknowledgement(first.record.receipt)))
+        assertEquals(listOf(ProjectionIntent(scope, deleted)), store.pending(scope))
+        assertEquals(deleted, store.transaction(scope) { remote(base.eventId) })
+    }
+
+    @Test fun deferredObservationIsNotRearmedOrDiscarded() = fixture { store, _ ->
+        val first = reserve(store)
+        val deleted = RemoteChange.Deleted(base.eventId, Revision("synthetic-deferred-deletion"))
+        val deferred = DeferredCalendarEvent(base.eventId, Revision("synthetic-deferred"), format,
+            DeferredEventReason.UNVERIFIED_CONTENT, "synthetic-sealed-deferred")
+        store.transaction(scope) {
+            putRemote(deleted); putProjection(ProjectionIntent(scope, deleted))
+            (this as StagedSyncTransaction).defer(deferred)
+        }
+        assertEquals(0, pendingFlag(store))
+        assertTrue(store.restoreTitleUpdateAcknowledgement(AppliedTitleUpdateAcknowledgement(first.record.receipt)))
+        assertEquals(0, pendingFlag(store)); assertTrue(store.pending(scope).isEmpty())
+        assertEquals(deleted, store.transaction(scope) { remote(base.eventId) })
+        assertEquals(deferred, store.transaction(scope) { (this as StagedSyncTransaction).deferred(base.eventId) })
+    }
+
+    @Test fun missingOrInactiveRecurrenceParentKeepsItsExistingDependencyGate() {
+        for (inactive in listOf(false, true)) fixture { store, _ ->
+            val first = reserve(store)
+            val uid = "synthetic-series"
+            val master = base.copy(eventId = EventId("synthetic-master"),
+                content = base.content.copy(recurrence = EventRecurrence(uid, rule = "FREQ=DAILY;COUNT=3")))
+            val child = updated.copy(revision = Revision("synthetic-child"), content = updated.content.copy(
+                recurrence = EventRecurrence(uid, original = RecurrencePoint.AllDay(LocalDate.of(2026, 10, 5)))))
+            store.transaction(scope) {
+                if (inactive) { putRemote(master); putRemote(RemoteChange.Deleted(master.eventId, Revision("synthetic-parent-deleted"))) }
+                putRemote(child); putProjection(ProjectionIntent(scope, child))
+            }
+            assertTrue(store.restoreTitleUpdateAcknowledgement(AppliedTitleUpdateAcknowledgement(first.record.receipt)))
+            assertTrue(store.pending(scope).isEmpty())
+            assertEquals(if (inactive) 0 else 1, store.blockedSeriesCount(scope))
+            assertEquals(child, store.transaction(scope) { remote(base.eventId) })
+        }
+    }
+
+    @Test fun faultAfterRearmingRollsBackQueueBaselineOwnerAndReceiptTogether() = fixture { store, name ->
+        val first = reserve(store)
+        val newer = updated.copy(revision = Revision("synthetic-after-reservation"))
+        store.transaction(scope) { putRemote(newer); putProjection(ProjectionIntent(scope, newer)) }
+        store.writableDatabase.execSQL("CREATE TRIGGER reject_restored_receipt BEFORE UPDATE OF state ON title_update_acknowledgements WHEN NEW.state='RESTORED' BEGIN SELECT RAISE(ABORT,'synthetic restored receipt fault'); END")
+        val witness = AppliedTitleUpdateAcknowledgement(first.record.receipt)
+        reject { store.restoreTitleUpdateAcknowledgement(witness) }
+        assertEquals(0, pendingFlag(store)); assertEquals(base, store.projectedBaseline(scope, base.eventId))
+        assertEquals(intent.copy(state = LocalEditState.CONFLICT), store.localEdit(scope, base.eventId))
+        assertEquals(preparation, store.localEditPreparation(scope, base.eventId)); assertEquals(first.record, store.titleUpdateAcknowledgement(scope, base.eventId))
+        store.close()
+        ImportStore(context, name).use { reopened ->
+            assertEquals(0, pendingFlag(reopened)); reopened.writableDatabase.execSQL("DROP TRIGGER reject_restored_receipt")
+            assertTrue(reopened.restoreTitleUpdateAcknowledgement(witness))
+            assertEquals(listOf(ProjectionIntent(scope, newer)), reopened.pending(scope))
+            assertNull(reopened.localEdit(scope, base.eventId)); assertNull(reopened.localEditPreparation(scope, base.eventId))
+        }
+    }
+
+    @Test fun absentCacheIsNotSynthesizedByRestoration() = fixture { store, _ ->
+        val first = reserve(store)
+        store.writableDatabase.execSQL("DELETE FROM records")
+        assertTrue(store.restoreTitleUpdateAcknowledgement(AppliedTitleUpdateAcknowledgement(first.record.receipt)))
+        assertNull(store.transaction(scope) { remote(base.eventId) }); assertTrue(store.pending(scope).isEmpty())
+        assertEquals(updated, store.projectedBaseline(scope, base.eventId))
+    }
+
     @Test fun laterRemoteDeletionAndDeferredProtectedDataRemainWholeAfterRestoration() = fixture { store, _ ->
         val first = reserve(store)
         val deleted = RemoteChange.Deleted(base.eventId, Revision("synthetic-deleted-later"))

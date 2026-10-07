@@ -1455,6 +1455,7 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
                 "scope=? AND event=? AND payload=?", arrayOf(key(scope), event.value, oldBase))
             db.update("records", ContentValues().apply { put("pending", 0) },
                 "scope=? AND event=? AND payload=? AND pending=1", arrayOf(key(scope), event.value, newBase))
+            requeueDistinctTitleObservation(db, receipt, newBase)
             check(db.update("title_update_acknowledgements", ContentValues().apply {
                 put("state", TitleUpdateAcknowledgementState.RESTORED.name)
             }, "scope=? AND event=? AND nonce=? AND receipt=? AND state=?",
@@ -1463,6 +1464,30 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
             archiveTitleUpdateAcknowledgement(db, TitleUpdateAcknowledgementRecord(receipt,
                 TitleUpdateAcknowledgementState.RESTORED))
             true
+        }
+    }
+
+    /** The exact owner has been consumed in this transaction. Re-arm only its distinct cached
+     * observation, preserving deferred evidence and the normal recurrence/handoff boundaries.
+     * This is queue state, never permission to overwrite a later dirty Provider row.
+     */
+    private fun requeueDistinctTitleObservation(db: SQLiteDatabase, receipt: TitleUpdateAcknowledgementReceipt,
+        acknowledgedPayload: String) {
+        val scope = receipt.intent.scope
+        val event = receipt.intent.base.eventId
+        val condition = "scope=? AND event=? AND payload<>? AND pending=0 AND NOT EXISTS " +
+            "(SELECT 1 FROM deferred_events d WHERE d.scope=records.scope AND d.event=records.event) " +
+            "AND NOT EXISTS (SELECT 1 FROM local_edits l WHERE l.scope=records.scope AND l.event=records.event)"
+        val args = arrayOf(key(scope), event.value, acknowledgedPayload)
+        val change = stagedQuery(db, "SELECT payload FROM records WHERE $condition", args).use { row ->
+            if (row.moveToFirst()) decodeChange(row.getString(0)) else null
+        } ?: return
+        check(change.eventId == event) { "Invalid retained title observation" }
+        if (receipt.handoff != null && !supportsCapturedHandoff(change)) return
+        val recurrence = (change as? RemoteChange.Upsert)?.content?.recurrence
+        if (recurrence != null && !recurrence.isMaster && masterStates(db, scope)[recurrence.uid] == MasterState.INACTIVE) return
+        check(db.update("records", ContentValues().apply { put("pending", 1) }, condition, args) == 1) {
+            "Retained title observation changed"
         }
     }
 

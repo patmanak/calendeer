@@ -13,6 +13,8 @@ import androidx.test.platform.app.InstrumentationRegistry
 import com.patmanak.proton.andcalendarbridge.data.calendar.AndroidCalendarProjection
 import com.patmanak.proton.andcalendarbridge.data.calendar.CalendarProjection
 import com.patmanak.proton.andcalendarbridge.data.importing.*
+import com.patmanak.proton.andcalendarbridge.data.outgoing.CreateAttemptStore
+import com.patmanak.proton.andcalendarbridge.data.outgoing.LocalCreateStore
 import com.patmanak.proton.andcalendarbridge.data.outgoing.TitleUpdateAttemptStore
 import com.patmanak.proton.andcalendarbridge.sync.*
 import com.patmanak.proton.andcalendarbridge.sync.catalog.CalendarSummary
@@ -39,6 +41,8 @@ class TitleUpdateAcknowledgementIntegrationDeviceTest {
         val target = CalendarScope(AccountId("title-ack-integration-$token"), CalendarId("fixture"), 0)
         private val importName = "title-ack-integration-$token.db"
         private val attemptName = "title-ack-integration-attempt-$token.db"
+        private val captureName = "title-ack-integration-capture-$token.db"
+        private val createAttemptName = "title-ack-integration-create-attempt-$token.db"
         private val format = AdapterFormat("synthetic-title-ack-integration", 1)
         val base = RemoteChange.Upsert(EventId("synthetic-event"), Revision("synthetic-original-revision"),
             EventContent("Synthetic imported original", if (allDay)
@@ -59,10 +63,17 @@ class TitleUpdateAcknowledgementIntegrationDeviceTest {
         val native = AndroidCalendarProjection(context)
         val writes = AtomicInteger()
         val inspections = AtomicInteger()
+        var afterFreshAcknowledgement: (suspend () -> Unit)? = null
         private val projection = object : CalendarProjection by native {
             override suspend fun acknowledgeTitleUpdate(receipt: TitleUpdateAcknowledgementReceipt): AppliedTitleUpdateAcknowledgement? {
                 writes.incrementAndGet()
-                return native.acknowledgeTitleUpdate(receipt)
+                val witness = native.acknowledgeTitleUpdate(receipt)
+                if (witness != null) {
+                    val hook = afterFreshAcknowledgement
+                    afterFreshAcknowledgement = null
+                    hook?.invoke()
+                }
+                return witness
             }
             override suspend fun inspectTitleUpdateAcknowledgement(receipt: TitleUpdateAcknowledgementReceipt): AppliedTitleUpdateAcknowledgement? {
                 inspections.incrementAndGet()
@@ -71,6 +82,9 @@ class TitleUpdateAcknowledgementIntegrationDeviceTest {
         }
         val store = ImportStore(context, importName)
         val journal = TitleUpdateAttemptStore(context, attemptName)
+        private val captures = LocalCreateStore(context, captureName)
+        private val createAttempts = CreateAttemptStore(context, createAttemptName)
+        private var originalSubmission: LocalCreateSubmission? = null
         private val jobs = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         private val schedules = AtomicInteger()
         private val scheduler = object : ImportScheduler {
@@ -86,6 +100,8 @@ class TitleUpdateAcknowledgementIntegrationDeviceTest {
             override suspend fun dispatch(mutation: Mutation): DispatchResult = error("Synthetic result fixture cannot upload")
         }
         val coordinator = ImportCoordinator(context, store, remote, projection, jobs, scheduler,
+            creates = if (transferred) createAttempts else null,
+            localCreates = if (transferred) captures else null,
             systemCreatesEnabled = { it == target })
         private var calendar = -1L
         var row = -1L
@@ -134,8 +150,24 @@ class TitleUpdateAcknowledgementIntegrationDeviceTest {
                 localId, target, format, Instant.parse("2030-10-01T12:00:00Z")), base.content)
             val submission = LocalCreateSubmission(LocalCreateSubmissionReservation(captured,
                 MutationId(UUID(0, 9).toString()), AdapterFormat("synthetic-create-wire", 1)), "synthetic-create-opaque")
-            val attachment = CapturedCreateAttachmentReceipt(CapturedCreateBinding(CapturedCreateDispatchIdentity.of(submission),
-                base.eventId, base.revision), UUID.randomUUID().toString())
+            // The transferred drain checks these original journals independently of the mutable
+            // import frame. Persist the same synthetic source as a real completed CREATE path.
+            captures.admitCapture = { it == target }
+            assertTrue(captures.reserve(captured.reservation))
+            assertEquals(captured, captures.retain(captured))
+            val permit = captures.reserveSubmission(submission.reservation)!!
+            assertEquals(submission, captures.retainSubmission(permit, submission))
+            createAttempts.admitDispatch = { it == target }
+            createAttempts.admitAssociation = { it == target }
+            val identity = createAttempts.rememberCaptured(submission)
+            val originalAttempt = CreateAttemptRecord(identity.attempt.id, target, identity.attempt.format, submission.protectedPayload)
+            assertTrue(createAttempts.claimCaptured(originalAttempt, identity))
+            val binding = createAttempts.bindCaptured(originalAttempt.copy(state = CreateAttemptState.OUTCOME_UNKNOWN),
+                identity, CreateSubmissionObservation.Verified(identity.attempt, base))
+            val attachment = createAttempts.prepareCapturedAttachment(binding)
+            originalSubmission = submission
+            createAttempts.admitDispatch = { error("Transferred drain must never dispatch another CREATE") }
+            captures.admitCapture = { false }
             val origin = CapturedCreateBaseline(attachment, base)
             val candidate = ContentValues().apply {
                 put(Events.CALENDAR_ID, calendar); put(Events.TITLE, base.content.title)
@@ -177,6 +209,24 @@ class TitleUpdateAcknowledgementIntegrationDeviceTest {
             val transfer = store.reserveCapturedHandoff(CapturedCreateHandoffReceipt(acknowledgement, UUID.randomUUID().toString()))
             frame = store.retainCapturedHandoff(transfer.frame.receipt,
                 native.inspectAcknowledgedCreateClean(acknowledgement)!!).frame
+            assertOriginalCreateProvenance()
+        }
+
+        private suspend fun assertOriginalCreateProvenance() {
+            if (!transferred) return
+            val submitted = requireNotNull(originalSubmission)
+            val identity = CapturedCreateDispatchIdentity.of(submitted)
+            val attachment = requireNotNull(frame).receipt.acknowledgement.baseline.receipt
+            LocalCreateStore(context, captureName).use { reopened ->
+                reopened.admitCapture = { it == target }
+                assertEquals(submitted, reopened.readSubmission(target, identity.localId))
+            }
+            CreateAttemptStore(context, createAttemptName).use { reopened ->
+                assertEquals(identity, reopened.capturedIdentity(target, identity.attempt.id))
+                assertEquals(CreateAttemptState.OUTCOME_UNKNOWN, reopened.read(target, identity.attempt.id)!!.state)
+                assertEquals(attachment.binding, reopened.capturedBinding(identity))
+                assertEquals(attachment, reopened.capturedAttachment(attachment.binding))
+            }
         }
 
         suspend fun captureTransferred(id: MutationId) {
@@ -287,6 +337,143 @@ class TitleUpdateAcknowledgementIntegrationDeviceTest {
             }
         }
         suspend fun receipt(): TitleUpdateAcknowledgementRecord? { allowSql(); return store.titleUpdateAcknowledgement(target, base.eventId) }
+
+        private fun pendingFlag(source: ImportStore = store): Int = source.readableDatabase.rawQuery(
+            "SELECT pending FROM records WHERE event=?", arrayOf(base.eventId.value)).use {
+            assertEquals(1, it.count); assertTrue(it.moveToFirst()); it.getInt(0)
+        }
+
+        private suspend fun cacheDistinctObservation(): RemoteChange.Upsert {
+            val observed = verified.copy(revision = Revision("synthetic-distinct-cached-revision"),
+                content = verified.content.copy(title = "Synthetic distinct remote title"))
+            allowSql()
+            store.transaction(target) { putRemote(observed); putProjection(ProjectionIntent(target, observed)) }
+            // The local owner is still held: receipt restoration must explicitly rearm this work.
+            assertEquals(0, pendingFlag())
+            return observed
+        }
+
+        private suspend fun assertReopenedPending(observed: RemoteChange) {
+            ImportStore(context, importName).use { reopened ->
+                reopened.admitTransaction = { it == target }
+                assertEquals(1, pendingFlag(reopened))
+                assertEquals(observed, reopened.transaction(target) { remote(base.eventId) })
+                assertEquals(verified, reopened.projectedBaseline(target, base.eventId))
+                assertEquals(TitleUpdateAcknowledgementState.RESTORED,
+                    reopened.titleUpdateAcknowledgement(target, base.eventId, prepared.id)!!.state)
+            }
+        }
+
+        suspend fun cachedObservationDrainsOfflineOnOriginalRow() {
+            var observed: RemoteChange.Upsert? = null
+            afterFreshAcknowledgement = { observed = cacheDistinctObservation() }
+            assertEquals(TitleUpdateAcknowledgementResult.ACKNOWLEDGED, acknowledge())
+            val cached = requireNotNull(observed)
+            assertEquals(1, writes.get()); assertEquals(0, inspections.get())
+            assertEquals(local.title, values()[Events.TITLE]); assertEquals("0", values()[Events.DIRTY])
+            assertReopenedPending(cached)
+            assertOriginalCreateProvenance()
+            val afterAck = values()
+            coordinator.run(network = false)
+            val drained = values()
+            assertEquals(cached.content.title, drained[Events.TITLE]); assertEquals("0", drained[Events.DIRTY])
+            assertEquals(digest("revision-v1", cached.revision.value), drained[Events.SYNC_DATA2])
+            for (field in listOf(Events.DESCRIPTION, Events.EVENT_LOCATION, Events.DTSTART, Events.DTEND,
+                Events.ALL_DAY, Events.EVENT_TIMEZONE, Events.SYNC_DATA5, Events.SYNC_DATA6, Events.SYNC_DATA7))
+                assertEquals(afterAck[field], drained[field])
+            assertSingleOriginalRow(); assertEquals(0, pendingFlag())
+            allowSql()
+            assertEquals(cached, store.projectedBaseline(target, base.eventId))
+            assertEquals(cached, store.transaction(target) { remote(base.eventId) })
+            assertNull(store.localEdit(target, base.eventId))
+            if (transferred) {
+                val advanced = store.capturedHandoff(target, base.eventId)!!
+                assertEquals(frame!!.receipt, advanced.frame.receipt)
+                assertEquals(cached, advanced.frame.base); assertFalse(advanced.waiting)
+            }
+            // Replaying the first ACK is historical; it cannot rearm the already settled cache.
+            assertEquals(TitleUpdateAcknowledgementResult.ACKNOWLEDGED, acknowledge())
+            assertEquals(0, pendingFlag()); assertEquals(drained, values())
+            assertEquals(1, writes.get()); assertEquals(0, inspections.get())
+            coordinator.run(network = false)
+            assertEquals(drained, values()); assertEquals(0, pendingFlag()); assertSingleOriginalRow()
+        }
+
+        suspend fun ordinaryCachedDeletionDrainsOfflineWithoutRecreatingTheRow() {
+            val deleted = RemoteChange.Deleted(base.eventId, Revision("synthetic-later-cached-deletion"))
+            afterFreshAcknowledgement = {
+                allowSql()
+                store.transaction(target) { putRemote(deleted); putProjection(ProjectionIntent(target, deleted)) }
+                assertEquals(0, pendingFlag())
+            }
+            assertEquals(TitleUpdateAcknowledgementResult.ACKNOWLEDGED, acknowledge())
+            assertSingleOriginalRow(); assertReopenedPending(deleted)
+            coordinator.run(network = false)
+            context.contentResolver.query(uri, arrayOf(Events._ID), "${Events.CALENDAR_ID}=?",
+                arrayOf(calendar.toString()), null)!!.use { assertEquals(0, it.count) }
+            assertEquals(0, pendingFlag()); allowSql()
+            assertEquals(deleted, store.transaction(target) { remote(base.eventId) })
+            assertNull(store.projectedBaseline(target, base.eventId))
+            assertEquals(TitleUpdateAcknowledgementResult.ACKNOWLEDGED, acknowledge())
+            assertEquals(0, pendingFlag()); assertEquals(1, writes.get()); assertEquals(0, inspections.get())
+            coordinator.run(network = false)
+            context.contentResolver.query(uri, arrayOf(Events._ID), "${Events.CALENDAR_ID}=?",
+                arrayOf(calendar.toString()), null)!!.use { assertEquals(0, it.count) }
+        }
+
+        suspend fun cachedObservationSurvivesRollbackAndNeverOverwritesLaterDirtyEdit() {
+            var observed: RemoteChange.Upsert? = null
+            afterFreshAcknowledgement = { observed = cacheDistinctObservation() }
+            // This failure is after the queue update, so queue/base/owner/receipt must roll back together.
+            store.writableDatabase.execSQL("CREATE TRIGGER fixture_title_queue_restore_loss BEFORE UPDATE OF state ON title_update_acknowledgements WHEN NEW.state='RESTORED' BEGIN SELECT RAISE(ABORT,'synthetic restore loss'); END")
+            assertEquals(TitleUpdateAcknowledgementResult.UNRESOLVED, acknowledge())
+            val cached = requireNotNull(observed)
+            assertEquals(0, pendingFlag())
+            assertEquals("0", values()[Events.DIRTY])
+            assertEquals(TitleUpdateAcknowledgementState.PENDING, receipt()!!.state)
+            allowSql()
+            assertEquals(base, store.projectedBaseline(target, base.eventId))
+            assertEquals(preparation, store.localEditPreparation(target, base.eventId))
+            assertEquals(cached, store.transaction(target) { remote(base.eventId) })
+            val laterTitle = "Synthetic later dirty title retained offline"
+            mutateTitle(laterTitle)
+            val laterNative = values()
+            store.writableDatabase.execSQL("DROP TRIGGER fixture_title_queue_restore_loss")
+            assertEquals(TitleUpdateAcknowledgementResult.ACKNOWLEDGED, acknowledge())
+            assertEquals(1, writes.get()); assertEquals(1, inspections.get())
+            assertEquals(laterNative, values()); assertReopenedPending(cached)
+            assertOriginalCreateProvenance()
+            if (transferred) {
+                allowSql(); assertFalse(store.capturedHandoff(target, base.eventId)!!.waiting)
+            }
+            coordinator.run(network = false)
+            assertEquals(laterNative, values()); assertEquals("1", values()[Events.DIRTY]); assertSingleOriginalRow()
+            allowSql()
+            // Prove the transferred drain reached native qualification and explicitly held DIRTY.
+            if (transferred) assertTrue(store.capturedHandoff(target, base.eventId)!!.waiting)
+            assertEquals(verified, store.projectedBaseline(target, base.eventId))
+            val nextId = MutationId("synthetic-later-conflicting-title")
+            if (transferred) {
+                native.admitOperation = { true }
+                val current = store.capturedHandoff(target, base.eventId)!!.frame
+                val snapshot = native.captureCapturedHandoffCurrent(current) as CapturedHandoffCurrentObservation.Supported
+                assertEquals(LocalEditState.CONFLICT, store.retainCapturedHandoffLocalChange(snapshot.snapshot, nextId))
+            } else assertEquals(LocalEditCaptureResult.CONFLICT,
+                coordinator.captureLocalEdit(target, base.eventId, nextId))
+            allowSql()
+            val captured = store.localEdit(target, base.eventId)!!
+            assertEquals(nextId, captured.id); assertEquals(verified, captured.base)
+            assertEquals(verified.content.copy(title = laterTitle), captured.content)
+            assertEquals(LocalEditState.CONFLICT, captured.state)
+            assertTrue(store.pending(target).isEmpty())
+            assertEquals(cached, store.transaction(target) { remote(base.eventId) })
+            assertEquals(TitleUpdateAcknowledgementResult.ACKNOWLEDGED, acknowledge())
+            allowSql(); assertEquals(captured, store.localEdit(target, base.eventId))
+            coordinator.run(network = false)
+            assertEquals(laterNative, values()); assertSingleOriginalRow()
+            assertEquals(1, writes.get()); assertEquals(1, inspections.get())
+        }
+
         suspend fun assertSqlRestored() {
             allowSql()
             assertEquals(verified, store.projectedBaseline(target, base.eventId))
@@ -313,8 +500,9 @@ class TitleUpdateAcknowledgementIntegrationDeviceTest {
                     if (manager.getAccountsByType(AndroidCalendarProjection.ACCOUNT_TYPE).any { it == account })
                         assertTrue(manager.removeAccountExplicitly(account))
                 } finally {
-                    journal.close(); store.close()
+                    journal.close(); store.close(); captures.close(); createAttempts.close()
                     context.deleteDatabase(importName); context.deleteDatabase(attemptName)
+                    context.deleteDatabase(captureName); context.deleteDatabase(createAttemptName)
                 }
             }
         }
@@ -345,6 +533,28 @@ class TitleUpdateAcknowledgementIntegrationDeviceTest {
     @Test fun twoOrdinaryTimedTitleCyclesRetainHistoryAndRecoverCompletionLoss() = fixture(allDay = false) { twoCycles() }
     @Test fun twoTransferredAllDayTitleCyclesPreserveOriginAndRecoverCompletionLoss() = fixture(allDay = true, transferred = true) { twoCycles(recoverSecond = true) }
     @Test fun twoTransferredTimedTitleCyclesPreserveOriginAndRecoverCompletionLoss() = fixture(allDay = false, transferred = true) { twoCycles() }
+
+    @Test fun ordinaryTimedCachedObservationAfterNativeAckDrainsOfflineOnSameRow() = fixture(allDay = false) {
+        cachedObservationDrainsOfflineOnOriginalRow()
+    }
+    @Test fun ordinaryAllDayCachedObservationAfterNativeAckDrainsOfflineOnSameRow() = fixture(allDay = true) {
+        cachedObservationDrainsOfflineOnOriginalRow()
+    }
+    @Test fun ordinaryCachedDeletionAfterNativeAckDrainsOfflineWithoutRecreatingTheRow() = fixture(allDay = false) {
+        ordinaryCachedDeletionDrainsOfflineWithoutRecreatingTheRow()
+    }
+    @Test fun transferredTimedCachedObservationAfterNativeAckDrainsOfflineOnSameRow() = fixture(allDay = false, transferred = true) {
+        cachedObservationDrainsOfflineOnOriginalRow()
+    }
+    @Test fun transferredAllDayCachedObservationAfterNativeAckDrainsOfflineOnSameRow() = fixture(allDay = true, transferred = true) {
+        cachedObservationDrainsOfflineOnOriginalRow()
+    }
+    @Test fun ordinaryCachedQueueRollsBackThenRecoversWithoutOverwritingLaterDirtyEdit() = fixture(allDay = false) {
+        cachedObservationSurvivesRollbackAndNeverOverwritesLaterDirtyEdit()
+    }
+    @Test fun transferredCachedQueueRollsBackThenRecoversWithoutOverwritingLaterDirtyEdit() = fixture(allDay = false, transferred = true) {
+        cachedObservationSurvivesRollbackAndNeverOverwritesLaterDirtyEdit()
+    }
 
     @Test fun restoredNativeSqlProofCanCloseUnknownWithoutNativeOrNetwork() = fixture(allDay = false) {
         assertEquals(TitleUpdateAcknowledgementResult.ACKNOWLEDGED, acknowledge())
