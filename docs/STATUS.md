@@ -45,6 +45,14 @@ receipt history supports successive title cycles and old replay without consumin
 the next intent. The original UNKNOWN attempt remains non-resendable; unresolved
 work and corrupt history block new admission across generations. The complete native
 capture-to-UPDATE submission journey and automatic activation are unqualified.
+An internal offline binding now retains an already prepared title wire only for
+the exact current SQL owner, preparation capsule and complete native dirty edit.
+Transferred CREATE events require their original provenance and released waiting
+frame. Guarded journal retention revalidates complete event history and access
+through commit, including exact repetitions, without borrowing dispatch authority.
+Durable readback rechecks ownership and native contents; conflicts or later edits
+remain held. This path does not prepare wire, claim, send, inspect the service or
+acknowledge Android, and is not connected to the production worker.
 The system observer now reuses a retained UPDATE identity and allocates a distinct
 identity after that owner is consumed, for imported and CREATE-handoff events.
 A bounded, scope-bound metadata index lists unresolved title attempts independently

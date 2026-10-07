@@ -61,6 +61,39 @@ or a general permission to ignore timestamps. A matching display title or
 success response alone is insufficient. The adapter's inspection does not alter
 the journal.
 
+## Local binding of prepared work
+
+`ImportCoordinator.retainLocalTitleAttempt` binds an already prepared wire record
+to the exact retained Android edit and preparation capsule. It does not prepare
+wire, claim dispatch, inspect the service or acknowledge Android. Only a PREPARED
+record without response evidence is eligible, with the adapter's current wire
+format and the current import checkpoint. Mode, account, selection, permission
+and one session/policy epoch remain required through durable readback.
+
+The SQL owner, complete capsule, projected baseline, cached remote contents and
+deferred state must qualify. The current owned native dirty snapshot must still
+equal the complete prepared contents. A transferred CREATE additionally requires
+its released waiting frame, complete original journal provenance and an exact
+supported, non-deleted native snapshot. Missing provenance or a blocked scope
+cannot fall back to ordinary imported-event handling.
+
+The guarded `remember(record, admit)` overload denies by default and never falls
+back to unrestricted retention. The store checks its lease after waiting for
+access and immediately before commit, including exact repetitions. Full event
+history is revalidated across generations. UNKNOWN, another unresolved owner,
+substituted work and reused historical identities cannot create or replace a
+PREPARED record. Corrupt history remains held. Explicit legacy experiments keep
+their original idempotent retention behavior without resetting UNKNOWN.
+
+The coordinator requires exact durable record readback and requalifies both SQL
+ownership and the current native snapshot before reporting retention or qualified
+historical replay. A later conflict, edit or access loss may leave the committed
+wire intact while refusing current qualification. SQL stores and Calendar Provider
+have no distributed atomic commit. Retaining opaque wire does not prove its
+current cryptographic validity, refresh remote rights or authorize a future send;
+submission still needs its own fresh checks. The production worker does not call
+this internal binding path.
+
 ## Retained verified results
 
 `TitleUpdateVerifiedResult` binds the complete expected contents and observed
@@ -348,6 +381,16 @@ remain separate work.
   Guarded retention fixtures additionally observe a real uncommitted SQL write
   before revoking admission, verify rollback and reopening, and qualify idempotent
   replay, cancellation and independent-helper races under the per-call lease.
+- `TitleUpdateGuardedPreparationStoreDeviceTest` qualifies immutable guarded
+  PREPARED retention, default denial, complete history across generations,
+  UNKNOWN holds, corruption and rollback after observable writes or cancellation.
+  `TitleUpdateAttemptRetentionCoordinatorDeviceTest` checks exact owner/capsule
+  bindings, native edits, durable replay, unsupported journals, access invalidation
+  and cancellation, including account lookups that swallow cancellation.
+  Real Provider/SQLite integration additionally covers ordinary and transferred
+  ownership, reopening, unchanged native rows and missing CREATE provenance.
+  Service preparation, dispatch and inspection are forbidden in these fixtures;
+  synthetic wire does not establish Proton compatibility.
 - `TitleUpdateAcknowledgementTest` checks complete receipt/preparation bindings.
   The Provider, Store and Coordinator device fixtures exercise atomic metadata
   changes, concurrent local/remote edits, lost replies, interrupted restoration,

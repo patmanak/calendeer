@@ -98,6 +98,10 @@ data class TitleUpdateAttemptIdentity(val scope: CalendarScope, val id: Mutation
  */
 interface TitleUpdateAttemptJournal {
     suspend fun remember(record: TitleUpdateAttemptRecord)
+    /** Prepared-work retention only, with a per-call scope/epoch lease through commit.
+     * Never claim or reset UNKNOWN; unsupported journals deny without legacy fallback.
+     */
+    suspend fun remember(record: TitleUpdateAttemptRecord, admit: (CalendarScope) -> Boolean): Boolean = false
     suspend fun read(scope: CalendarScope, id: MutationId): TitleUpdateAttemptRecord?
     suspend fun claim(expected: TitleUpdateAttemptRecord): Boolean
     suspend fun retainEvidence(expectedUnknown: TitleUpdateAttemptRecord, protectedEvidence: String)

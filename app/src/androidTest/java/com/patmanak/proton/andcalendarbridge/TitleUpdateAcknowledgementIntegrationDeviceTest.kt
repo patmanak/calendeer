@@ -36,7 +36,8 @@ import org.junit.runner.RunWith
  */
 @RunWith(AndroidJUnit4::class)
 class TitleUpdateAcknowledgementIntegrationDeviceTest {
-    private class Fixture(val context: Context, allDay: Boolean, val transferred: Boolean = false) {
+    private class Fixture(val context: Context, allDay: Boolean, val transferred: Boolean = false,
+        private val preparedOnly: Boolean = false) {
         private val token = UUID.randomUUID().toString()
         val target = CalendarScope(AccountId("title-ack-integration-$token"), CalendarId("fixture"), 0)
         private val importName = "title-ack-integration-$token.db"
@@ -139,6 +140,10 @@ class TitleUpdateAcknowledgementIntegrationDeviceTest {
             allowSql()
             assertEquals(intent, store.localEdit(target, base.eventId))
             assertTrue(store.retainLocalEditPreparation(preparation))
+            if (preparedOnly) {
+                journal.admitDispatch = { error("Retaining wire must never claim dispatch") }
+                return
+            }
             journal.remember(prepared); journal.admitDispatch = { it == target }; assertTrue(journal.claim(prepared))
             journal.admitDispatch = { error("Native acknowledgement must never admit another send") }
             journal.retainVerified(result)
@@ -337,6 +342,59 @@ class TitleUpdateAcknowledgementIntegrationDeviceTest {
             }
         }
         suspend fun receipt(): TitleUpdateAcknowledgementRecord? { allowSql(); return store.titleUpdateAcknowledgement(target, base.eventId) }
+
+        suspend fun retainPreparedWireWithoutConsumingNativeOwner() {
+            val port = object : CalendarTitleUpdateSubmissionPort {
+                override val titleUpdateFormat = prepared.format
+                override suspend fun prepareSubmission(id: MutationId, preparation: LocalEditPreparation): TitleUpdateAttemptRecord =
+                    error("Retention cannot prepare remote wire")
+                override suspend fun submit(record: TitleUpdateAttemptRecord, journal: TitleUpdateAttemptJournal): TitleUpdateSubmissionObservation =
+                    error("Retention cannot submit")
+                override suspend fun inspect(record: TitleUpdateAttemptRecord): TitleUpdateSubmissionObservation =
+                    error("Retention cannot inspect service state")
+                override suspend fun inspect(record: TitleUpdateAttemptRecord, admit: (CalendarScope) -> Boolean): TitleUpdateSubmissionObservation =
+                    error("Retention cannot inspect service state")
+            }
+            val before = values()
+            assertEquals("1", before[Events.DIRTY])
+            assertEquals(LocalTitleAttemptRetentionResult.RETAINED, coordinator.retainLocalTitleAttempt(prepared, journal, port))
+            assertEquals(prepared, journal.read(target, prepared.id)); assertNull(journal.readVerified(target, prepared.id))
+            assertNull(journal.readCompletion(target, prepared.id)); assertEquals(before, values())
+            assertEquals(0, writes.get()); assertEquals(0, inspections.get()); assertSingleOriginalRow()
+            allowSql(); assertEquals(intent, store.localEdit(target, base.eventId))
+            assertEquals(preparation, store.localEditPreparation(target, base.eventId))
+            assertEquals(base, store.projectedBaseline(target, base.eventId)); assertNull(receipt())
+            assertOriginalCreateProvenance()
+            if (transferred) assertEquals(frame, store.capturedHandoff(target, base.eventId)!!.frame)
+            TitleUpdateAttemptStore(context, attemptName).use { reopened ->
+                reopened.admitDispatch = { error("Reopened retention cannot claim dispatch") }
+                assertEquals(LocalTitleAttemptRetentionResult.HISTORICAL, coordinator.retainLocalTitleAttempt(prepared, reopened, port))
+                assertEquals(prepared, reopened.read(target, prepared.id))
+            }
+            assertEquals(before, values()); assertSingleOriginalRow()
+            mutateTitle("Synthetic later title before any submission")
+            val later = values()
+            assertEquals(LocalTitleAttemptRetentionResult.UNRESOLVED, coordinator.retainLocalTitleAttempt(prepared, journal, port))
+            assertEquals(prepared, journal.read(target, prepared.id)); assertEquals(later, values())
+            assertEquals(0, writes.get()); assertEquals(0, inspections.get())
+        }
+
+        suspend fun missingCreateSourceCannotFallBackToOrdinaryWireRetention(dropFrame: Boolean) {
+            val before = values()
+            if (dropFrame) assertEquals(1, store.writableDatabase.delete("captured_create_handoffs", null, null))
+            else assertEquals(1, createAttempts.writableDatabase.delete("captured_create_attachments", null, null))
+            val port = object : CalendarTitleUpdateSubmissionPort {
+                override val titleUpdateFormat = prepared.format
+                override suspend fun prepareSubmission(id: MutationId, preparation: LocalEditPreparation): TitleUpdateAttemptRecord = error("No preparation")
+                override suspend fun submit(record: TitleUpdateAttemptRecord, journal: TitleUpdateAttemptJournal): TitleUpdateSubmissionObservation = error("No send")
+                override suspend fun inspect(record: TitleUpdateAttemptRecord): TitleUpdateSubmissionObservation = error("No inspection")
+            }
+            assertEquals(LocalTitleAttemptRetentionResult.UNRESOLVED, coordinator.retainLocalTitleAttempt(prepared, journal, port))
+            assertNull(journal.read(target, prepared.id)); assertEquals(before, values()); assertSingleOriginalRow()
+            allowSql(); assertEquals(intent, store.localEdit(target, base.eventId))
+            assertEquals(preparation, store.localEditPreparation(target, base.eventId))
+            assertEquals(0, writes.get()); assertEquals(0, inspections.get())
+        }
 
         suspend fun offlineBatchClosesStoredProofWithoutAnotherSend() {
             val progress = coordinator.recoverLocalTitles(TitleUpdateWorkQuery(target), journal)
@@ -589,12 +647,26 @@ class TitleUpdateAcknowledgementIntegrationDeviceTest {
         }
     }
 
-    private fun fixture(allDay: Boolean, transferred: Boolean = false, block: suspend Fixture.() -> Unit) = runBlocking {
+    private fun fixture(allDay: Boolean, transferred: Boolean = false, preparedOnly: Boolean = false,
+        block: suspend Fixture.() -> Unit) = runBlocking {
         assumeTrue(InstrumentationRegistry.getArguments().getString("providerFixture") == "true")
         val context = ApplicationProvider.getApplicationContext<Context>()
         assumeTrue(AndroidCalendarProjection(context).hasPermissions())
-        val fixture = Fixture(context, allDay, transferred)
+        val fixture = Fixture(context, allDay, transferred, preparedOnly)
         try { fixture.seed(); fixture.block() } finally { fixture.close() }
+    }
+
+    @Test fun ordinaryPreparedTitleWireRetainsExactNativeOwnerWithoutClaimOrAcknowledgement() = fixture(allDay = false, preparedOnly = true) {
+        retainPreparedWireWithoutConsumingNativeOwner()
+    }
+    @Test fun transferredPreparedTitleWireRetainsExactNativeOwnerAndOriginalCreateProvenance() = fixture(allDay = true, transferred = true, preparedOnly = true) {
+        retainPreparedWireWithoutConsumingNativeOwner()
+    }
+    @Test fun transferredPreparedTitleWireWithoutOriginalAttachmentNeverUsesOrdinaryRetention() = fixture(allDay = false, transferred = true, preparedOnly = true) {
+        missingCreateSourceCannotFallBackToOrdinaryWireRetention(dropFrame = false)
+    }
+    @Test fun transferredPreparedTitleWireWithoutHandoffFrameNeverUsesOrdinaryRetention() = fixture(allDay = false, transferred = true, preparedOnly = true) {
+        missingCreateSourceCannotFallBackToOrdinaryWireRetention(dropFrame = true)
     }
 
     @Test fun composedAcknowledgementKeepsSameAllDayRowAndContentWhileRestoringSql() = fixture(allDay = true) {

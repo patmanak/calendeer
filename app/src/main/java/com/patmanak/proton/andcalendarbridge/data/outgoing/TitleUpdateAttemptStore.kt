@@ -100,33 +100,55 @@ class TitleUpdateAttemptStore(context: Context, name: String = "calendar-title-u
     }
 
     override suspend fun remember(record: TitleUpdateAttemptRecord) {
+        rememberPrepared(record, { true }, guarded = false)
+    }
+
+    override suspend fun remember(record: TitleUpdateAttemptRecord,
+        admit: (CalendarScope) -> Boolean): Boolean = rememberPrepared(record, admit, guarded = true)
+
+    private suspend fun rememberPrepared(record: TitleUpdateAttemptRecord,
+        admit: (CalendarScope) -> Boolean, guarded: Boolean): Boolean {
+        currentCoroutineContext().ensureActive()
         val frozen = record.frozen()
+        if (guarded && (frozen.state != TitleUpdateAttemptState.PREPARED || frozen.protectedEvidence != null)) return false
         require(frozen.state == TitleUpdateAttemptState.PREPARED && frozen.protectedEvidence == null) {
             "Only prepared title work without evidence can be remembered"
         }
         val preparation = encodePreparation(frozen.preparation)
-        access { db -> transaction(db) {
-            val history = eventHistory(db, frozen.scope, frozen.preparation.intent.base.eventId)
-            val existing = read(db, frozen.scope, frozen.id)
-            if (existing != null) {
-                check(existing.copy(state = TitleUpdateAttemptState.PREPARED, protectedEvidence = null) == frozen) {
-                    "Title update attempt is immutable"
+        return access { db ->
+            if (!admit(frozen.scope)) false else transaction(db, beforeCommit = {
+                check(admit(frozen.scope)) { "Title preparation lease is not current" }
+            }) {
+                val history = eventHistory(db, frozen.scope, frozen.preparation.intent.base.eventId)
+                val existing = read(db, frozen.scope, frozen.id)
+                if (existing != null) {
+                    // Guarded binding cannot use the legacy tolerance for UNKNOWN or release
+                    // a history hold. Even exact repetitions qualify the complete event history.
+                    if (guarded && (existing != frozen || history.singleOrNull { !it.completed }?.let {
+                            it.scope == frozen.scope && it.id == frozen.id && it.localIntentId == frozen.preparation.intent.id
+                        } != true)) return@transaction false
+                    check(existing.copy(state = TitleUpdateAttemptState.PREPARED, protectedEvidence = null) == frozen) {
+                        "Title update attempt is immutable"
+                    }
+                } else {
+                    if (guarded && (history.any { !it.completed } || history.any {
+                            it.localIntentId == frozen.preparation.intent.id || it.id == frozen.id
+                        })) return@transaction false
+                    check(history.all { it.completed }) {
+                        "An unresolved title attempt already owns this event"
+                    }
+                    check(history.none { it.localIntentId == frozen.preparation.intent.id ||
+                        it.id == frozen.id }) { "A previous title intention cannot be admitted again" }
+                    db.insertOrThrow(TABLE, null, ContentValues().apply {
+                        put("account", frozen.scope.account.value); put("calendar", frozen.scope.calendar.value)
+                        put("generation", frozen.scope.generation); put("mutation", frozen.id.value)
+                        put("event", frozen.preparation.intent.base.eventId.value); put("preparation", preparation)
+                        put("adapter", frozen.format.id); put("version", frozen.format.version)
+                        put("payload", frozen.protectedPayload); put("state", TitleUpdateAttemptState.PREPARED.name)
+                    })
                 }
-            } else {
-                check(history.all { it.completed }) {
-                    "An unresolved title attempt already owns this event"
-                }
-                check(history.none { it.localIntentId == frozen.preparation.intent.id ||
-                    it.id == frozen.id }) { "A previous title intention cannot be admitted again" }
-                db.insertOrThrow(TABLE, null, ContentValues().apply {
-                    put("account", frozen.scope.account.value); put("calendar", frozen.scope.calendar.value)
-                    put("generation", frozen.scope.generation); put("mutation", frozen.id.value)
-                    put("event", frozen.preparation.intent.base.eventId.value); put("preparation", preparation)
-                    put("adapter", frozen.format.id); put("version", frozen.format.version)
-                    put("payload", frozen.protectedPayload); put("state", TitleUpdateAttemptState.PREPARED.name)
-                })
-            }
-        } }
+                true
+            } }
     }
 
     override suspend fun read(scope: CalendarScope, id: MutationId): TitleUpdateAttemptRecord? =

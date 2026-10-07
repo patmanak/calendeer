@@ -62,6 +62,7 @@ enum class CapturedCreateCleanResult { INACTIVE, UNRESOLVED, CLEAN }
 enum class CapturedCreateHandoffResult { INACTIVE, UNRESOLVED, WAITING, HANDED_OFF }
 enum class TitleUpdateAcknowledgementResult { INACTIVE, UNRESOLVED, ACKNOWLEDGED }
 enum class TitleUpdateCompletionResult { INACTIVE, UNRESOLVED, COMPLETED }
+enum class LocalTitleAttemptRetentionResult { INACTIVE, UNQUALIFIED, UNSUPPORTED, UNRESOLVED, RETAINED, HISTORICAL, CONFLICT, UNAVAILABLE }
 /** One process owner for foreground and durable worker triggers; no event content reaches UI. */
 class ImportCoordinator(
     private val context: Context,
@@ -810,6 +811,130 @@ class ImportCoordinator(
               store.admitTransaction = { false }
               projection.admitOperation = { false }
           }
+    }
+
+    /** Bind already prepared wire to the exact current owner under one access epoch.
+     * This local composition never prepares, claims, submits, inspects the service or writes
+     * the Provider. Durable PREPARED work is not authority for a subsequent dispatch.
+     */
+    suspend fun retainLocalTitleAttempt(record: TitleUpdateAttemptRecord, journal: TitleUpdateAttemptJournal,
+        port: CalendarTitleUpdateSubmissionPort): LocalTitleAttemptRetentionResult {
+        val frozen = record.frozen()
+        return mutex.withLock {
+            val target = frozen.scope
+            val intent = frozen.preparation.intent
+            val event = intent.base.eventId
+            val expected = generation
+            val policy = createPolicyRevision.get()
+            val baseActive = { authenticated && generation == expected && createPolicyRevision.get() == policy &&
+                systemCreatesEnabled(target) && hasCalendarPermissions() }
+            val active = { baseActive() && remote.format == intent.format && port.titleUpdateFormat == frozen.format }
+            suspend fun available(formats: Boolean = true): Boolean {
+                currentCoroutineContext().ensureActive()
+                fun admitted() = if (formats) active() else baseActive()
+                if (!admitted()) return false
+                val current = isCurrent(expected, target.account)
+                currentCoroutineContext().ensureActive()
+                if (!current || !admitted()) return false
+                val selected = store.selections(target.account).singleOrNull { it.scope == target }
+                currentCoroutineContext().ensureActive()
+                return selected?.enabled == true && selected.available && admitted()
+            }
+            suspend fun sqlQualification(): LocalTitleAttemptRetentionResult? {
+                if (!available()) return LocalTitleAttemptRetentionResult.INACTIVE
+                val owner = store.localEdit(target, event)
+                if (!available()) return LocalTitleAttemptRetentionResult.INACTIVE
+                if (owner?.state == LocalEditState.CONFLICT && owner.copy(state = LocalEditState.PAUSED) == intent)
+                    return LocalTitleAttemptRetentionResult.CONFLICT
+                if (owner != intent) return LocalTitleAttemptRetentionResult.UNQUALIFIED
+                val admission = store.assessLocalTitlePreparation(intent)
+                if (!available()) return LocalTitleAttemptRetentionResult.INACTIVE
+                when (admission) {
+                    LocalTitlePreparationAdmission.CONFLICT -> return LocalTitleAttemptRetentionResult.CONFLICT
+                    LocalTitlePreparationAdmission.INACTIVE -> return LocalTitleAttemptRetentionResult.INACTIVE
+                    LocalTitlePreparationAdmission.HISTORICAL -> Unit
+                    else -> return LocalTitleAttemptRetentionResult.UNQUALIFIED
+                }
+                val preparation = store.localEditPreparation(target, event)
+                if (!available()) return LocalTitleAttemptRetentionResult.INACTIVE
+                return if (preparation == frozen.preparation) null else LocalTitleAttemptRetentionResult.UNQUALIFIED
+            }
+            suspend fun sourceQualification(): LocalTitleAttemptRetentionResult? {
+                sqlQualification()?.let { return it }
+                val hold = capturedRawHold(target)
+                if (!available()) return LocalTitleAttemptRetentionResult.INACTIVE
+                if (hold.scopeBlocked) return LocalTitleAttemptRetentionResult.UNRESOLVED
+                val role = store.capturedHandoff(target, event)
+                if (!available()) return LocalTitleAttemptRetentionResult.INACTIVE
+                val content = if (role == null) {
+                    if (hold.holds(event)) return LocalTitleAttemptRetentionResult.UNRESOLVED
+                    projection.captureOwnedSimpleEdit(target, intent.base)?.content
+                } else {
+                    if (role.state != CapturedCreateHandoffState.RELEASED || !role.waiting ||
+                        role.frame.base != intent.base || role.frame.format != intent.format)
+                        return LocalTitleAttemptRetentionResult.UNRESOLVED
+                    val qualified = handoffSource(role.frame, active)
+                    if (!available()) return LocalTitleAttemptRetentionResult.INACTIVE
+                    if (!qualified) return LocalTitleAttemptRetentionResult.UNRESOLVED
+                    val observed = projection.captureCapturedHandoffCurrent(role.frame) as? CapturedHandoffCurrentObservation.Supported
+                    observed?.snapshot?.takeIf { it.frame == role.frame && !it.deleted }?.content
+                }
+                // Check access/cancellation even when a dependency returned null.
+                if (!available()) return LocalTitleAttemptRetentionResult.INACTIVE
+                if (content != intent.content) return LocalTitleAttemptRetentionResult.UNRESOLVED
+                val currentRole = store.capturedHandoff(target, event)
+                if (!available()) return LocalTitleAttemptRetentionResult.INACTIVE
+                if (currentRole != role) return LocalTitleAttemptRetentionResult.UNRESOLVED
+                if (role != null) {
+                    val qualified = handoffSource(role.frame, active)
+                    if (!available()) return LocalTitleAttemptRetentionResult.INACTIVE
+                    if (!qualified) return LocalTitleAttemptRetentionResult.UNRESOLVED
+                } else {
+                    val currentHold = capturedRawHold(target)
+                    if (!available()) return LocalTitleAttemptRetentionResult.INACTIVE
+                    if (currentHold.holds(event)) return LocalTitleAttemptRetentionResult.UNRESOLVED
+                }
+                return sqlQualification()
+            }
+            try {
+                if (!available(formats = false)) return@withLock LocalTitleAttemptRetentionResult.INACTIVE
+                if (frozen.state != TitleUpdateAttemptState.PREPARED || frozen.protectedEvidence != null)
+                    return@withLock LocalTitleAttemptRetentionResult.UNQUALIFIED
+                val format = port.titleUpdateFormat ?: return@withLock LocalTitleAttemptRetentionResult.UNSUPPORTED
+                if (format != frozen.format || remote.format != intent.format)
+                    return@withLock LocalTitleAttemptRetentionResult.UNQUALIFIED
+                if (!available()) return@withLock LocalTitleAttemptRetentionResult.INACTIVE
+                store.admitTransaction = { it == target && active() }
+                projection.admitOperation = active
+                val existing = journal.read(target, frozen.id)
+                if (!available()) return@withLock LocalTitleAttemptRetentionResult.INACTIVE
+                if (existing != null && existing.state != TitleUpdateAttemptState.PREPARED)
+                    return@withLock LocalTitleAttemptRetentionResult.UNRESOLVED
+                if (existing != null && existing != frozen) return@withLock LocalTitleAttemptRetentionResult.UNQUALIFIED
+                sourceQualification()?.let { return@withLock it }
+                // Exact repetitions still validate complete journal history inside this
+                // guarded transaction; read()==record alone never qualifies HISTORICAL.
+                val retained = journal.remember(frozen) { it == target && active() }
+                if (!available()) return@withLock LocalTitleAttemptRetentionResult.INACTIVE
+                if (!retained) return@withLock LocalTitleAttemptRetentionResult.UNRESOLVED
+                val durable = journal.read(target, frozen.id)
+                if (!available()) return@withLock LocalTitleAttemptRetentionResult.INACTIVE
+                if (durable != frozen) return@withLock LocalTitleAttemptRetentionResult.UNRESOLVED
+                // Independent databases and Provider operations have no distributed commit.
+                // Preserve a committed wire but do not report current qualification if its
+                // owner or native contents changed during retention/readback.
+                sourceQualification()?.let { return@withLock it }
+                if (!available()) return@withLock LocalTitleAttemptRetentionResult.INACTIVE
+                if (existing == null) LocalTitleAttemptRetentionResult.RETAINED else LocalTitleAttemptRetentionResult.HISTORICAL
+            } catch (cancelled: CancellationException) { throw cancelled }
+              catch (_: Exception) {
+                  currentCoroutineContext().ensureActive()
+                  if (!active()) LocalTitleAttemptRetentionResult.INACTIVE else LocalTitleAttemptRetentionResult.UNAVAILABLE
+              } finally {
+                  store.admitTransaction = { false }
+                  projection.admitOperation = { false }
+              }
+        }
     }
 
     /** Explicit preparation of a captured title edit; never dispatches or acknowledges Android. */
