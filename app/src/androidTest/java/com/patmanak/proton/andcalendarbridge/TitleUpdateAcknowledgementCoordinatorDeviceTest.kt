@@ -42,6 +42,37 @@ class TitleUpdateAcknowledgementCoordinatorDeviceTest {
         override suspend fun retainCompletion(completion: TitleUpdateCompletion, admit: (CalendarScope) -> Boolean) =
             backing.retainCompletion(completion, admit)
     }
+    private class InspectRecoveryJournal(private val source: TitleUpdateRecoveryJournal) :
+        RecoveryPort(source), TitleUpdateRecoveryJournal {
+        var guardedRetentions = 0
+        override suspend fun remember(record: TitleUpdateAttemptRecord): Unit = error("Recovery cannot prepare work")
+        override suspend fun claim(expected: TitleUpdateAttemptRecord): Boolean = error("Recovery cannot claim dispatch")
+        override suspend fun retainEvidence(expectedUnknown: TitleUpdateAttemptRecord, protectedEvidence: String): Unit =
+            error("Recovery cannot attach submission evidence")
+        override suspend fun retainVerified(result: TitleUpdateVerifiedResult, admit: (CalendarScope) -> Boolean): Boolean {
+            guardedRetentions++
+            return source.retainVerified(result, admit)
+        }
+    }
+    private class InspectPort(private val expected: TitleUpdateAttemptRecord, observed: RemoteChange.Upsert) : CalendarTitleUpdateSubmissionPort {
+        override var titleUpdateFormat: AdapterFormat? = expected.format
+        var calls = 0
+        var duringInspection: suspend () -> Unit = {}
+        var observation: TitleUpdateSubmissionObservation = TitleUpdateSubmissionObservation.Verified(
+            TitleUpdateAttemptIdentity.of(expected), observed)
+        override suspend fun prepareSubmission(id: MutationId, preparation: LocalEditPreparation): TitleUpdateAttemptRecord =
+            error("Recovery cannot prepare a submission")
+        override suspend fun submit(record: TitleUpdateAttemptRecord, journal: TitleUpdateAttemptJournal): TitleUpdateSubmissionObservation =
+            error("Recovery cannot submit")
+        override suspend fun inspect(record: TitleUpdateAttemptRecord): TitleUpdateSubmissionObservation =
+            error("Recovery cannot use unrestricted inspection")
+        override suspend fun inspect(record: TitleUpdateAttemptRecord, admit: (CalendarScope) -> Boolean): TitleUpdateSubmissionObservation {
+            assertEquals(expected, record); assertTrue(admit(record.scope))
+            assertFalse(admit(record.scope.copy(calendar = CalendarId("foreign-inspection-calendar"))))
+            calls++; duringInspection()
+            return if (admit(record.scope)) observation else TitleUpdateSubmissionObservation.Unknown
+        }
+    }
     private class Fixture(val transferred: Boolean = false) {
         private val context = ApplicationProvider.getApplicationContext<Context>()
         private val token = UUID.randomUUID().toString()
@@ -158,6 +189,13 @@ class TitleUpdateAcknowledgementCoordinatorDeviceTest {
             coordinator.completeLocalTitle(target, base.eventId, prepared.id, port)
         suspend fun recover(query: TitleUpdateWorkQuery = TitleUpdateWorkQuery(target),
             port: TitleUpdateOfflineRecoveryJournal = RecoveryPort(journal)) = coordinator.recoverLocalTitles(query, port)
+        fun removeVerifiedResult() {
+            journal.writableDatabase.execSQL("UPDATE title_update_attempts SET result=NULL WHERE mutation=?", arrayOf(prepared.id.value))
+        }
+        suspend fun inspectAndRecover(port: CalendarTitleUpdateSubmissionPort,
+            recovery: TitleUpdateRecoveryJournal = InspectRecoveryJournal(journal), network: Boolean = true,
+            query: TitleUpdateWorkQuery = TitleUpdateWorkQuery(target)) =
+            coordinator.inspectAndRecoverLocalTitles(query, recovery, port, network)
         suspend fun additionalWork(event: String, state: TitleUpdateAttemptState): TitleUpdateAttemptRecord {
             val otherIntent = intent.copy(id = MutationId("intent-$event"), base = base.copy(eventId = EventId(event)))
             val other = prepared.copy(id = MutationId("attempt-$event"), preparation = preparation.copy(intent = otherIntent))
@@ -185,6 +223,156 @@ class TitleUpdateAcknowledgementCoordinatorDeviceTest {
         assumeTrue(InstrumentationRegistry.getArguments().getString("providerFixture") == "true")
         val fixture = Fixture(transferred)
         try { fixture.seed(); fixture.block() } finally { fixture.close() }
+    }
+
+    @Test fun guardedInspectionPersistsProofThenAcknowledgesAndCompletesWithoutSending() = fixture {
+        removeVerifiedResult()
+        val port = InspectPort(unknown, verified)
+        val recovery = InspectRecoveryJournal(journal)
+        assertEquals(TitleUpdateRecoveryProgress(completed = 1), inspectAndRecover(port, recovery))
+        assertEquals(1, port.calls); assertEquals(1, recovery.guardedRetentions)
+        assertEquals(result, journal.readVerified(target, prepared.id)); assertNotNull(journal.readCompletion(target, prepared.id))
+        assertEquals(unknown, journal.read(target, prepared.id)); assertEquals(1, writes); assertNull(owner())
+        assertEquals(TitleUpdateRecoveryProgress(), inspectAndRecover(port, recovery))
+        assertEquals(1, port.calls); assertEquals(1, recovery.guardedRetentions); assertEquals(1, writes)
+    }
+
+    @Test fun guardedInspectionExplicitNetworkFalseHoldsMissingProofWithoutAdapterAccess() = fixture {
+        removeVerifiedResult()
+        val port = InspectPort(unknown, verified)
+        assertEquals(TitleUpdateRecoveryProgress(held = 1), inspectAndRecover(port, network = false))
+        assertEquals(0, port.calls); assertEquals(0, writes); assertEquals(0, captures)
+        assertNull(journal.readVerified(target, prepared.id)); assertEquals(intent, owner())
+    }
+
+    @Test fun guardedInspectionPreparedAndIncompatibleWireFormatsStayHeld() {
+        fixture {
+            val other = additionalWork("a-unsent", TitleUpdateAttemptState.PREPARED)
+            val port = InspectPort(unknown, verified)
+            val progress = inspectAndRecover(port, query = TitleUpdateWorkQuery(target, 1))
+            assertEquals(1, progress.held); assertEquals(0, progress.failed); assertEquals(0, progress.completed)
+            assertEquals(TitleUpdateWorkCursor(target, other.preparation.intent.base.eventId), progress.next)
+            assertEquals(0, port.calls); assertEquals(0, writes)
+        }
+        fixture {
+            removeVerifiedResult()
+            val port = InspectPort(unknown, verified).apply { titleUpdateFormat = AdapterFormat("incompatible-wire", 9) }
+            assertEquals(TitleUpdateRecoveryProgress(held = 1), inspectAndRecover(port))
+            assertEquals(0, port.calls); assertEquals(0, writes); assertNull(journal.readVerified(target, prepared.id))
+        }
+    }
+
+    @Test fun guardedInspectionUnknownObservationCannotAcknowledgeOrPersistProof() = fixture {
+        removeVerifiedResult()
+        val port = InspectPort(unknown, verified).apply { observation = TitleUpdateSubmissionObservation.Unknown }
+        val recovery = InspectRecoveryJournal(journal)
+        assertEquals(TitleUpdateRecoveryProgress(held = 1), inspectAndRecover(port, recovery))
+        assertEquals(1, port.calls); assertEquals(0, recovery.guardedRetentions)
+        assertEquals(0, writes); assertEquals(0, captures); assertNull(receipt())
+        assertNull(journal.readVerified(target, prepared.id)); assertEquals(unknown, journal.read(target, prepared.id))
+    }
+
+    @Test fun guardedInspectionPolicyOffAndOnStopsOriginalEpochBeforeProofAndNative() = fixture {
+        removeVerifiedResult(); additionalWork("z-held", TitleUpdateAttemptState.PREPARED)
+        val port = InspectPort(unknown, verified).apply { duringInspection = {
+            coordinator.systemCreatePolicyChanged(target, false)
+            coordinator.systemCreatePolicyChanged(target, true)
+        } }
+        val recovery = InspectRecoveryJournal(journal)
+        val progress = inspectAndRecover(port, recovery, query = TitleUpdateWorkQuery(target, 1))
+        assertTrue(progress.inactive); assertNull(progress.next); assertEquals(0, progress.completed)
+        assertEquals(1, port.calls); assertEquals(0, recovery.guardedRetentions)
+        assertNull(journal.readVerified(target, prepared.id)); assertEquals(0, writes); assertEquals(0, captures)
+    }
+
+    @Test fun guardedInspectionRevokedAccountSelectionOrPermissionCannotRetainResult() {
+        for (revocation in 0..2) fixture {
+            removeVerifiedResult()
+            val port = InspectPort(unknown, verified).apply { duringInspection = {
+                when (revocation) {
+                    0 -> account = AccountId("foreign-inspection-account")
+                    1 -> store.setEnabled(target, false)
+                    else -> permission = false
+                }
+            } }
+            val recovery = InspectRecoveryJournal(journal)
+            val progress = inspectAndRecover(port, recovery)
+            assertTrue(progress.inactive); assertNull(progress.next); assertEquals(0, progress.completed)
+            assertEquals(1, port.calls); assertEquals(0, recovery.guardedRetentions)
+            assertNull(journal.readVerified(target, prepared.id)); assertEquals(0, writes); assertEquals(0, captures)
+            assertNull(receipt())
+        }
+    }
+
+    @Test fun guardedInspectionCommitFailureKeepsUnknownThenRetryOnlyInspectsAgain() = fixture {
+        removeVerifiedResult()
+        val port = InspectPort(unknown, verified)
+        val recovery = InspectRecoveryJournal(journal)
+        journal.writableDatabase.execSQL("CREATE TRIGGER fixture_inspection_result_loss AFTER UPDATE OF result ON title_update_attempts BEGIN SELECT RAISE(ABORT,'synthetic proof loss'); END")
+        assertEquals(TitleUpdateRecoveryProgress(failed = 1), inspectAndRecover(port, recovery))
+        assertEquals(1, port.calls); assertEquals(1, recovery.guardedRetentions)
+        assertNull(journal.readVerified(target, prepared.id)); assertEquals(unknown, journal.read(target, prepared.id))
+        assertEquals(0, writes); assertEquals(0, captures); assertNull(receipt())
+        journal.writableDatabase.execSQL("DROP TRIGGER fixture_inspection_result_loss")
+        assertEquals(TitleUpdateRecoveryProgress(completed = 1), inspectAndRecover(port, recovery))
+        assertEquals(2, port.calls); assertEquals(2, recovery.guardedRetentions)
+        assertEquals(result, journal.readVerified(target, prepared.id)); assertNotNull(journal.readCompletion(target, prepared.id))
+        assertEquals(1, writes)
+    }
+
+    @Test fun guardedInspectionCancellationPropagatesWithoutTouchingLaterEntries() = fixture {
+        removeVerifiedResult(); additionalWork("z-held", TitleUpdateAttemptState.PREPARED)
+        val port = InspectPort(unknown, verified).apply { duringInspection = {
+            throw CancellationException("Synthetic inspection cancellation")
+        } }
+        val recovery = InspectRecoveryJournal(journal)
+        try { inspectAndRecover(port, recovery); fail("Cancellation must propagate") } catch (_: CancellationException) { }
+        assertEquals(1, port.calls); assertEquals(0, recovery.guardedRetentions)
+        assertNull(journal.readVerified(target, prepared.id)); assertEquals(0, writes); assertEquals(0, captures)
+        assertEquals(unknown, journal.read(target, prepared.id))
+    }
+
+    @Test fun guardedInspectionBoundedPageContinuesPastCorruptUnknownAndReturnsCursor() = fixture {
+        removeVerifiedResult()
+        val bad = additionalWork("a-corrupt", TitleUpdateAttemptState.OUTCOME_UNKNOWN)
+        additionalWork("z-held", TitleUpdateAttemptState.PREPARED)
+        journal.writableDatabase.execSQL("UPDATE title_update_attempts SET preparation='not-json' WHERE mutation=?", arrayOf(bad.id.value))
+        val port = InspectPort(unknown, verified)
+        val recovery = InspectRecoveryJournal(journal)
+        val progress = inspectAndRecover(port, recovery, query = TitleUpdateWorkQuery(target, 2))
+        assertEquals(TitleUpdateRecoveryProgress(completed = 1, failed = 1,
+            next = TitleUpdateWorkCursor(target, base.eventId)), progress)
+        assertEquals(1, port.calls); assertEquals(1, writes); assertNotNull(journal.readCompletion(target, prepared.id))
+        assertEquals(TitleUpdateRecoveryProgress(held = 1),
+            inspectAndRecover(port, recovery, query = TitleUpdateWorkQuery(target, 2, requireNotNull(progress.next))))
+        assertEquals(1, port.calls); assertEquals(1, writes)
+    }
+
+    @Test fun offlinePermissionOffAndOnDuringReadInvalidatesEpochWithoutCreateJournal() = fixture {
+        val changing = object : RecoveryPort(journal) {
+            override suspend fun read(scope: CalendarScope, id: MutationId): TitleUpdateAttemptRecord? {
+                val record = super.read(scope, id)
+                permission = false; coordinator.permissionsChanged()
+                permission = true; coordinator.permissionsChanged()
+                return record
+            }
+        }
+        val progress = recover(port = changing)
+        assertTrue(progress.inactive); assertNull(progress.next); assertEquals(0, writes); assertEquals(0, captures)
+        assertNull(receipt()); assertEquals(intent, owner())
+    }
+
+    @Test fun guardedInspectionPermissionOffAndOnInvalidatesEpochWithoutCreateJournal() = fixture {
+        removeVerifiedResult()
+        val port = InspectPort(unknown, verified).apply { duringInspection = {
+            permission = false; coordinator.permissionsChanged()
+            permission = true; coordinator.permissionsChanged()
+        } }
+        val recovery = InspectRecoveryJournal(journal)
+        val progress = inspectAndRecover(port, recovery)
+        assertTrue(progress.inactive); assertNull(progress.next)
+        assertEquals(1, port.calls); assertEquals(0, recovery.guardedRetentions)
+        assertNull(journal.readVerified(target, prepared.id)); assertEquals(0, writes); assertEquals(0, captures)
     }
 
     @Test fun offlinePageRecoversDurableProofAndCompletesWithoutRetainingNewServiceEvidence() = fixture {

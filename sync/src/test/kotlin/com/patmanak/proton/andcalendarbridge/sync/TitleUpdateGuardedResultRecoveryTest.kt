@@ -76,6 +76,31 @@ class TitleUpdateGuardedResultRecoveryTest {
         suspend fun recover(network: Boolean = true) = recovery.recover(scope, work.id, network, admit)
     }
 
+    @Test fun asynchronousAccessDenialBeforeReadsCannotInspectOrRetain() = runTest {
+        val f = Fixture()
+        assertNull(f.recovery.recover(scope, work.id, true, f.admit) { false })
+        assertEquals(0, f.reads); assertEquals(0, f.inspections); assertEquals(0, f.commits)
+    }
+    @Test fun asynchronousAccessAfterInspectionCanBlockProofBeforeGuardedRetention() = runTest {
+        val f = Fixture(); var last = ""
+        f.after = { last = it }
+        assertNull(f.recovery.recover(scope, work.id, true, f.admit) { last != "inspect" })
+        assertEquals(1, f.inspections); assertEquals(0, f.commits); assertNull(f.retained)
+    }
+    @Test fun leaseIsRecheckedAfterSuspendingOwnerAccessObservation() = runTest {
+        val f = Fixture()
+        assertNull(f.recovery.recover(scope, work.id, true, f.admit) { f.active = false; true })
+        assertEquals(0, f.reads); assertEquals(0, f.inspections); assertEquals(0, f.commits)
+    }
+    @Test fun ownerAccessCancellationPropagatesBeforeAnyWorkRead() = runTest {
+        val f = Fixture(); val cancelled = CancellationException("Synthetic owner access cancellation")
+        try {
+            f.recovery.recover(scope, work.id, true, f.admit) { throw cancelled }
+            fail("Owner access cancellation must propagate")
+        } catch (observed: CancellationException) { assertSame(cancelled, observed) }
+        assertEquals(0, f.reads); assertEquals(0, f.inspections)
+    }
+
     @Test fun defaultDenialAndExplicitRevocationPerformNoReadsOrInspection() = runTest {
         val f = Fixture()
         assertNull(f.recovery.recover(scope, work.id, allowNetwork = true))

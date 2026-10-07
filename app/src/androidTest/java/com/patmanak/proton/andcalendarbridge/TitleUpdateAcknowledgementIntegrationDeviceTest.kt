@@ -349,6 +349,57 @@ class TitleUpdateAcknowledgementIntegrationDeviceTest {
             assertEquals(before, values()); assertEquals(1, writes.get()); assertEquals(0, inspections.get())
         }
 
+        suspend fun inspectionBatchRecoversMissingProof(restoreGap: Boolean = false) {
+            journal.writableDatabase.execSQL("UPDATE title_update_attempts SET result=NULL")
+            assertNull(journal.readVerified(target, prepared.id))
+            var serviceInspections = 0
+            val port = object : CalendarTitleUpdateSubmissionPort {
+                override val titleUpdateFormat = prepared.format
+                override suspend fun prepareSubmission(id: MutationId, preparation: LocalEditPreparation): TitleUpdateAttemptRecord =
+                    error("Recovery cannot prepare a service request")
+                override suspend fun submit(record: TitleUpdateAttemptRecord, journal: TitleUpdateAttemptJournal): TitleUpdateSubmissionObservation =
+                    error("Recovery cannot send a service request")
+                override suspend fun inspect(record: TitleUpdateAttemptRecord): TitleUpdateSubmissionObservation =
+                    error("Recovery cannot use unrestricted inspection")
+                override suspend fun inspect(record: TitleUpdateAttemptRecord,
+                    admit: (CalendarScope) -> Boolean): TitleUpdateSubmissionObservation {
+                    assertEquals(unknown, record); assertTrue(admit(target)); assertFalse(admit(target.copy(generation = 8)))
+                    serviceInspections++
+                    return TitleUpdateSubmissionObservation.Verified(TitleUpdateAttemptIdentity.of(record), verified)
+                }
+            }
+            if (restoreGap) store.writableDatabase.execSQL("CREATE TRIGGER fixture_inspection_restore_gap BEFORE UPDATE OF state ON title_update_acknowledgements WHEN NEW.state='RESTORED' BEGIN SELECT RAISE(ABORT,'synthetic restoration gap'); END")
+            val first = coordinator.inspectAndRecoverLocalTitles(TitleUpdateWorkQuery(target), journal, port, allowNetwork = true)
+            assertEquals(1, serviceInspections); assertEquals(result, journal.readVerified(target, prepared.id))
+            assertEquals(unknown, journal.read(target, prepared.id)); assertEquals(1, writes.get())
+            if (restoreGap) {
+                assertEquals(TitleUpdateRecoveryProgress(held = 1), first)
+                assertEquals(TitleUpdateAcknowledgementState.PENDING, receipt()!!.state)
+                assertNull(journal.readCompletion(target, prepared.id))
+                mutateTitle("Synthetic later edit during inspection restoration gap")
+                val later = values()
+                store.writableDatabase.execSQL("DROP TRIGGER fixture_inspection_restore_gap")
+                TitleUpdateAttemptStore(context, attemptName).use { reopened ->
+                    assertEquals(TitleUpdateRecoveryProgress(completed = 1), coordinator.inspectAndRecoverLocalTitles(
+                        TitleUpdateWorkQuery(target), reopened, port, allowNetwork = true))
+                    assertEquals(result, reopened.readVerified(target, prepared.id))
+                    assertNotNull(reopened.readCompletion(target, prepared.id))
+                }
+                assertEquals(later, values()); assertEquals("1", values()[Events.DIRTY])
+                assertEquals(1, inspections.get())
+            } else {
+                assertEquals(TitleUpdateRecoveryProgress(completed = 1), first)
+                assertNotNull(journal.readCompletion(target, prepared.id))
+                assertEquals(0, inspections.get())
+            }
+            assertSqlRestored(); assertSingleOriginalRow()
+            assertEquals(1, writes.get()); assertEquals(1, serviceInspections)
+            val before = values()
+            assertEquals(TitleUpdateRecoveryProgress(), coordinator.inspectAndRecoverLocalTitles(
+                TitleUpdateWorkQuery(target), journal, port, allowNetwork = true))
+            assertEquals(before, values()); assertEquals(1, serviceInspections); assertEquals(1, writes.get())
+        }
+
         suspend fun offlineBatchRecoversCompletionGapAfterReopeningAndKeepsLaterDirtyEdit() {
             journal.writableDatabase.execSQL("CREATE TRIGGER fixture_completion_gap BEFORE UPDATE OF completion ON title_update_attempts BEGIN SELECT RAISE(ABORT,'synthetic completion gap'); END")
             val held = coordinator.recoverLocalTitles(TitleUpdateWorkQuery(target), journal)
@@ -563,6 +614,19 @@ class TitleUpdateAcknowledgementIntegrationDeviceTest {
     @Test fun twoOrdinaryTimedTitleCyclesRetainHistoryAndRecoverCompletionLoss() = fixture(allDay = false) { twoCycles() }
     @Test fun twoTransferredAllDayTitleCyclesPreserveOriginAndRecoverCompletionLoss() = fixture(allDay = true, transferred = true) { twoCycles(recoverSecond = true) }
     @Test fun twoTransferredTimedTitleCyclesPreserveOriginAndRecoverCompletionLoss() = fixture(allDay = false, transferred = true) { twoCycles() }
+
+    @Test fun ordinaryMissingTitleProofCompletesThroughInspectionBatchOnSameRow() = fixture(allDay = false) {
+        inspectionBatchRecoversMissingProof()
+    }
+    @Test fun transferredMissingTitleProofCompletesThroughInspectionBatchOnSameRow() = fixture(allDay = true, transferred = true) {
+        inspectionBatchRecoversMissingProof()
+    }
+    @Test fun ordinaryInspectionBatchReopensProofToAcknowledgementGapAndKeepsLaterDirtyEdit() = fixture(allDay = true) {
+        inspectionBatchRecoversMissingProof(restoreGap = true)
+    }
+    @Test fun transferredInspectionBatchReopensProofToAcknowledgementGapAndKeepsLaterDirtyEdit() = fixture(allDay = false, transferred = true) {
+        inspectionBatchRecoversMissingProof(restoreGap = true)
+    }
 
     @Test fun ordinaryStoredTitleProofCompletesThroughOfflineBatchOnSameRow() = fixture(allDay = false) {
         offlineBatchClosesStoredProofWithoutAnotherSend()

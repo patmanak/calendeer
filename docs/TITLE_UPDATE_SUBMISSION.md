@@ -271,6 +271,42 @@ proof for a later invocation. Cancellation and persistence failures propagate.
 The caller must not readmit an old callback after a policy off/on cycle. These
 internal guards do not activate a production UPDATE worker or advertise server CAS.
 
+## Inspection and completion in one bounded page
+
+`inspectAndRecoverLocalTitles` shares the offline page coordinator's mutex and
+acknowledgement/completion helpers. One invocation captures one session generation
+and policy revision, then processes at most fifty metadata entries sequentially.
+`TitleUpdateRecoveryJournal` combines discovery, full attempts and durable history;
+`TitleUpdateRecoveryProgress` uses the existing bounded page accounting.
+
+Each full UNKNOWN attempt must match its discovered scope/event/attempt and the
+current import format. Already durable proofs proceed without service inspection.
+For missing proofs, the guarded recovery path additionally requires explicit
+network eligibility and a compatible wire format. Network eligibility defaults
+to false and never authorizes preparation, claim, submission or response-evidence
+replacement. An unknown observation or unsupported guarded port keeps work held.
+Malformed records and thrown persistence failures are retained and counted as
+failed; later entries can proceed. Cancellation propagates.
+
+The original synchronous scope/epoch lease accompanies inspection and result
+commit. An additional suspending access checkpoint checks current account and
+selected-calendar availability around history reads, inspection, guarded retention
+and durable readback. The result must still match the initially qualified complete
+attempt before native acknowledgement; only independent response evidence is
+excluded from this comparison. Permissions and observed account changes invalidate
+the policy epoch even without a CREATE journal. Restoration of access requires a
+new invocation; an inactive page exposes no continuation.
+
+The production owner invalidates policy synchronously before deselection or loss
+of calendar availability can wait for its mutex. The synchronous commit lease
+relies on those invalidations. A direct out-of-owner SQL selection change is not
+an atomic transaction with the separate result journal; surrounding access reads
+prevent qualified success and native acknowledgement after detected revocation.
+Historical results and pending acknowledgement receipts survive interrupted
+restoration. Reopening can finish using the same receipt without another inspection
+or native write, preserving a later dirty edit. This runner remains internal and
+is not called by production workers or UI controls.
+
 ## Concurrency and integration limits
 
 The fresh GET and subsequent PUT are successive observations, **not an atomic
@@ -304,6 +340,8 @@ remain separate work.
   `ProtonGuardedTitleInspectionTest` uses synthetic adapter/facade fixtures for
   context-stage/session/access changes, mutex waits and cancellation. It qualifies
   control flow, not Proton signatures or server acceptance.
+  The owner access-check overload also exercises denial and cancellation across
+  asynchronous account/selection observations without replacing the commit lease.
 - `TitleUpdateResultStoreDeviceTest` checks result persistence, migration,
   immutable first proof, concurrent handles, corruption and transaction failures
   in isolated SQLite fixtures. No Provider or service request is involved.
@@ -330,6 +368,11 @@ remain separate work.
   Real Provider/SQLite integration covers one-page completion and reopening after
   an aborted completion commit for imported and transferred CREATE events, preserving
   later dirty edits and making no second native acknowledgement write.
+  Inspection-page fixtures additionally qualify guarded proof retention followed
+  by acknowledgement/completion, network-ineligible holds, failed commits, access
+  invalidation and bounded mixed pages. Real Provider/SQLite fixtures reopen a
+  proof-to-acknowledgement restoration gap without another synthetic service
+  inspection or native write, for imported and transferred CREATE events.
 - `TitleUpdateWorkPageTest` and `TitleUpdateWorkPageDeviceTest` check bounded
   metadata pages, lookahead, strict identities, scope isolation, binary ordering,
   reopening and insertions behind a cursor. `SystemCreatePipelineDeviceTest`

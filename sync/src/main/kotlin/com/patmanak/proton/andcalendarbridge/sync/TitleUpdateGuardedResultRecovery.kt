@@ -16,12 +16,18 @@ class TitleUpdateGuardedResultRecovery(
     private val results: TitleUpdateResultJournal,
     private val submission: CalendarTitleUpdateSubmissionPort,
 ) {
-    suspend fun recover(scope: CalendarScope, id: MutationId, allowNetwork: Boolean = false,
-        admit: (CalendarScope) -> Boolean = { false }): TitleUpdateVerifiedResult? {
+    /** The owner may additionally check asynchronous account and selection observations.
+     * This check never replaces the synchronous epoch lease passed to transport and storage.
+     */
+    suspend fun recover(scope: CalendarScope, id: MutationId, allowNetwork: Boolean,
+        admit: (CalendarScope) -> Boolean, checkAccess: suspend () -> Boolean): TitleUpdateVerifiedResult? {
         val lease = { target: CalendarScope -> target == scope && admit(scope) }
         suspend fun available(): Boolean {
             currentCoroutineContext().ensureActive()
-            return lease(scope)
+            if (!lease(scope)) return false
+            val observed = checkAccess()
+            currentCoroutineContext().ensureActive()
+            return observed && lease(scope)
         }
         if (!available()) return null
         val record = attempts.read(scope, id)?.frozen()
@@ -38,14 +44,16 @@ class TitleUpdateGuardedResultRecovery(
         val observation = submission.inspect(record, lease)
         if (!available() || observation !is TitleUpdateSubmissionObservation.Verified) return null
         val verified = TitleUpdateVerifiedResult.of(record, observation)
-        if (!results.retainVerified(verified, lease)) {
-            currentCoroutineContext().ensureActive()
-            return null
-        }
         if (!available()) return null
+        val committed = results.retainVerified(verified, lease)
+        if (!available() || !committed) return null
         val durable = results.readVerified(scope, id)
         if (!available()) return null
         check(durable == verified) { "Title recovery result is not durable" }
         return durable
     }
+
+    suspend fun recover(scope: CalendarScope, id: MutationId, allowNetwork: Boolean = false,
+        admit: (CalendarScope) -> Boolean = { false }): TitleUpdateVerifiedResult? =
+        recover(scope, id, allowNetwork, admit) { true }
 }

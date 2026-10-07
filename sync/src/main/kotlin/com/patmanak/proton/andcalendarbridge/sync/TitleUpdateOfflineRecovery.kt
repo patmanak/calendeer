@@ -11,6 +11,11 @@ interface TitleUpdateOfflineRecoveryJournal : TitleUpdateWorkJournal, TitleUpdat
     suspend fun read(scope: CalendarScope, id: MutationId): TitleUpdateAttemptRecord?
 }
 
+/** Same durable journal for page discovery, full attempts and guarded inspection results.
+ * Implementing this interface grants no preparation, claim or submission admission.
+ */
+interface TitleUpdateRecoveryJournal : TitleUpdateOfflineRecoveryJournal, TitleUpdateAttemptJournal
+
 /** Outcome for one bounded current page, never a snapshot or global completion proof.
  * A null continuation does not resolve held/failed attempts. Retry blocked work with a new
  * first-page query; concurrent insertions behind a cursor also require a fresh traversal.
@@ -32,3 +37,6 @@ data class TitleUpdateOfflineRecoveryProgress(
     }
     override fun toString() = "TitleUpdateOfflineRecoveryProgress(REDACTED)"
 }
+
+/** Shared page accounting for offline completion and optional guarded inspection. */
+typealias TitleUpdateRecoveryProgress = TitleUpdateOfflineRecoveryProgress

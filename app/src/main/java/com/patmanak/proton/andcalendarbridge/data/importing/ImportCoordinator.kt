@@ -209,12 +209,11 @@ class ImportCoordinator(
     }
 
     private fun retainObservedCreateAccount(account: AccountId?) {
-        if (creates == null) return
         val previous = createAccount.getAndSet(account)
         if (previous != null && previous != account) {
             createPolicyRevision.incrementAndGet()
             creates?.admitDispatch = { false }
-            pendingAccountPauses.add(previous)
+            if (creates != null) pendingAccountPauses.add(previous)
         }
     }
 
@@ -231,8 +230,8 @@ class ImportCoordinator(
 
     /** Retain observed permission loss even if grants return before the next explicit write. */
     private fun retainCreatePermissionLoss() {
-        if (creates == null) return
         createPolicyRevision.incrementAndGet()
+        if (creates == null) return
         pendingPermissionPause = true
         creates.admitDispatch = { false }
     }
@@ -456,9 +455,21 @@ class ImportCoordinator(
             }
         }
 
+    /** Internal inspection/recovery only. Network eligibility never grants submission admission. */
+    suspend fun inspectAndRecoverLocalTitles(query: TitleUpdateWorkQuery, journal: TitleUpdateRecoveryJournal,
+        port: CalendarTitleUpdateSubmissionPort, allowNetwork: Boolean = false): TitleUpdateRecoveryProgress = mutex.withLock {
+        recoverLocalTitlesLocked(query, journal, port, allowNetwork)
+    }
+
     /** One internal offline page. No inspection, preparation or submission capability. */
     suspend fun recoverLocalTitles(query: TitleUpdateWorkQuery,
         journal: TitleUpdateOfflineRecoveryJournal): TitleUpdateOfflineRecoveryProgress = mutex.withLock {
+        recoverLocalTitlesLocked(query, journal)
+    }
+
+    private suspend fun recoverLocalTitlesLocked(query: TitleUpdateWorkQuery,
+        journal: TitleUpdateOfflineRecoveryJournal, inspection: CalendarTitleUpdateSubmissionPort? = null,
+        allowNetwork: Boolean = false): TitleUpdateRecoveryProgress {
         val target = query.scope
         val expected = generation
         val policy = createPolicyRevision.get()
@@ -475,22 +486,26 @@ class ImportCoordinator(
             val selected = store.selections(target.account).singleOrNull { it.scope == target }
             return selected?.enabled == true && selected.available && active()
         }
-        try {
-            if (!available()) return@withLock progress(inactive = true)
+        return try {
+            if (!available()) return progress(inactive = true)
             check(journal.completionProtocol == 1) { "Incompatible title recovery journal" }
+            val recovery = if (inspection != null) {
+                check(journal is TitleUpdateRecoveryJournal) { "Incompatible title inspection journal" }
+                TitleUpdateGuardedResultRecovery(journal, journal, inspection)
+            } else null
             val page = journal.page(query)
-            if (!available()) return@withLock progress(inactive = true)
+            if (!available()) return progress(inactive = true)
             val next = page.next
             check(page.scope == target && page.entries.size <= query.limit &&
                 (next == null || (next.scope == target && next.protocol == 1 &&
                     next.afterEvent == page.entries.lastOrNull()?.eventId))) { "Invalid title recovery page" }
             for (reference in page.entries) {
-                if (!available()) return@withLock progress(inactive = true)
+                if (!available()) return progress(inactive = true)
                 // The helpers close their leases; install this invocation's same epoch again.
                 store.admitTransaction = { it == target && active() }
                 try {
                     val record = journal.read(target, reference.id)?.frozen()
-                    if (!available()) return@withLock progress(inactive = true)
+                    if (!available()) return progress(inactive = true)
                     if (record == null) { held++; continue }
                     check(record.scope == target && record.id == reference.id &&
                         record.preparation.intent.base.eventId == reference.eventId) { "Invalid title recovery binding" }
@@ -498,30 +513,32 @@ class ImportCoordinator(
                     if (record.state != TitleUpdateAttemptState.OUTCOME_UNKNOWN ||
                         record.preparation.intent.format != remote.format ||
                         store.transaction(target) { checkpoint?.format } != record.preparation.intent.format) {
-                        if (!available()) return@withLock progress(inactive = true)
+                        if (!available()) return progress(inactive = true)
                         held++; continue
                     }
-                    if (!available()) return@withLock progress(inactive = true)
-                    val result = journal.readVerified(target, reference.id)
-                    if (!available()) return@withLock progress(inactive = true)
+                    if (!available()) return progress(inactive = true)
+                    val result = journal.readVerified(target, reference.id) ?: recovery?.recover(
+                        target, reference.id, allowNetwork, admit = { it == target && active() },
+                        checkAccess = { available() })
+                    if (!available()) return progress(inactive = true)
                     if (result == null) { held++; continue }
                     check(result.record == record.copy(protectedEvidence = null)) { "Invalid title recovery result" }
                     when (acknowledgeLocalTitleLocked(target, reference.eventId, reference.id, journal, expected, policy)) {
-                        TitleUpdateAcknowledgementResult.INACTIVE -> return@withLock progress(inactive = true)
+                        TitleUpdateAcknowledgementResult.INACTIVE -> return progress(inactive = true)
                         TitleUpdateAcknowledgementResult.UNRESOLVED -> { held++; continue }
                         TitleUpdateAcknowledgementResult.ACKNOWLEDGED -> Unit
                     }
-                    if (!available()) return@withLock progress(inactive = true)
+                    if (!available()) return progress(inactive = true)
                     val completion = completeLocalTitleLocked(target, reference.eventId, reference.id, journal, expected, policy)
-                    if (!available()) return@withLock progress(inactive = true)
+                    if (!available()) return progress(inactive = true)
                     when (completion) {
-                        TitleUpdateCompletionResult.INACTIVE -> return@withLock progress(inactive = true)
+                        TitleUpdateCompletionResult.INACTIVE -> return progress(inactive = true)
                         TitleUpdateCompletionResult.UNRESOLVED -> held++
                         TitleUpdateCompletionResult.COMPLETED -> completed++
                     }
                 } catch (cancelled: CancellationException) { throw cancelled }
                   catch (_: Exception) {
-                      if (!available()) return@withLock progress(inactive = true)
+                      if (!available()) return progress(inactive = true)
                       failed++
                   }
             }

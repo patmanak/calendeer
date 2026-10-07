@@ -26,7 +26,7 @@ import org.json.JSONObject
  * Payload/evidence are opaque protected strings; this store grants no HTTP or Provider capability.
  */
 class TitleUpdateAttemptStore(context: Context, name: String = "calendar-title-update-attempt-v1.db") :
-    SQLiteOpenHelper(context, name, null, 3), TitleUpdateAttemptJournal, TitleUpdateOfflineRecoveryJournal {
+    SQLiteOpenHelper(context, name, null, 3), TitleUpdateRecoveryJournal {
     private val lock = Mutex()
     override val completionProtocol = 1
     @Volatile var admitDispatch: (CalendarScope) -> Boolean = { false }

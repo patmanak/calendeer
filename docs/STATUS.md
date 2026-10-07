@@ -62,8 +62,11 @@ per-call access lease. Proton rechecks that lease and the expected session betwe
 context reads, event readback and verification; result storage rechecks admission
 immediately before commit. Unsupported guarded ports deny without falling back
 to unrestricted experiments. A new result is returned only after exact durable
-readback. These guards are prerequisites for automatic recovery, which remains
-unwired.
+readback. An internal page runner now combines guarded inspection, durable proof,
+same-row acknowledgement and completion under the original session/policy epoch.
+It defaults to offline eligibility, never submits and does not inspect an already
+durable result. Permission/account invalidation also applies without a CREATE
+journal. The production worker remains unwired for UPDATE recovery.
 Isolated physical Provider/SQLite integration qualifies same-row acknowledgement,
 interrupted restoration and preservation of a later dirty edit. A distinct supported
 cached observation is now requeued for its exact event atomically with the first
