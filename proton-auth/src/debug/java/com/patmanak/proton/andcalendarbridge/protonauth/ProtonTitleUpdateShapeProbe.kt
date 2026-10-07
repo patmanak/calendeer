@@ -8,6 +8,8 @@ import com.patmanak.proton.andcalendarbridge.sync.TitleUpdateAttemptIdentity
 import com.patmanak.proton.andcalendarbridge.sync.TitleUpdateAttemptState
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -38,14 +40,19 @@ object ProtonTitleUpdateShapeProbe {
                     val sessions = field(adapter, "sessions") as CatalogSessionSource
                     val session = sessions.current()?.takeIf { it.userId.id == frozen.scope.account.value } ?: return@withLock
                     suspend fun sameSession(): Boolean {
-                        if (sessions.current() == session) return true
+                        currentCoroutineContext().ensureActive()
+                        val current = sessions.current()
+                        currentCoroutineContext().ensureActive()
+                        if (current == session) return true
                         result.clear(); stage("SESSION_CHANGED"); return false
                     }
                     stage("OPEN")
                     val submission = ProtonTitleUpdateSubmissionCodec(field(adapter, "protector") as EventPayloadProtector).open(frozen)
                     val original = submission.fragments.originalRow
                     stage("CONTEXT")
-                    val fresh = (field(adapter, "context") as TitleUpdateContextQualification).qualify(session, frozen.scope)
+                    val fresh = (field(adapter, "context") as TitleUpdateContextQualification).qualify(session, frozen.scope) {
+                        check(sameSession())
+                    }
                     if (!sameSession()) return@withLock
                     check("CONTEXT_SAME") { fresh == submission.context }
                     stage("EVENT_GET")

@@ -14,6 +14,8 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicInteger
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -64,6 +66,120 @@ class TitleUpdateResultStoreDeviceTest {
     private suspend fun rejects(block: suspend () -> Unit) {
         try { block(); fail("Expected retained-result rejection") }
         catch (_: IllegalStateException) { }
+    }
+
+    @Test fun guardedResultDeniedBeforeTransactionCannotPersistProof() = fixture { _, _, store ->
+        val work = unknown(store)
+        var checks = 0
+        assertFalse(store.retainVerified(result(work)) { candidate ->
+            checks++; assertEquals(scope, candidate); assertFalse(store.writableDatabase.inTransaction()); false
+        })
+        assertEquals(1, checks); assertNull(store.readVerified(scope, work.id))
+        assertEquals(work, store.read(scope, work.id))
+    }
+
+    @Test fun guardedResultForeignScopeAdmissionCannotPersistOrReplaceProof() = fixture { _, _, store ->
+        val work = unknown(store)
+        val wrongScope = scope.copy(generation = scope.generation + 1)
+        assertFalse(store.retainVerified(result(work)) { it == wrongScope })
+        assertNull(store.readVerified(scope, work.id)); assertEquals(work, store.read(scope, work.id))
+        assertTrue(store.retainVerified(result(work)) { it == scope })
+        assertFalse(store.retainVerified(result(work, "different-observation")) { it == wrongScope })
+        assertEquals(result(work), store.readVerified(scope, work.id))
+    }
+
+    @Test fun guardedResultRevocationAfterActualSqlWriteRollsBackBeforeCommit() = fixture { _, _, store ->
+        val work = unknown(store)
+        store.retainEvidence(work, evidence)
+        var checks = 0
+        var observedUncommittedWrite = false
+        rejects {
+            store.retainVerified(result(work)) { candidate ->
+                assertEquals(scope, candidate)
+                if (++checks == 1) true else {
+                    assertTrue(store.writableDatabase.inTransaction())
+                    store.writableDatabase.rawQuery("SELECT result FROM title_update_attempts", null).use {
+                        assertTrue(it.moveToFirst()); observedUncommittedWrite = !it.isNull(0)
+                    }
+                    false
+                }
+            }
+        }
+        assertEquals(2, checks); assertTrue(observedUncommittedWrite)
+        assertNull(store.readVerified(scope, work.id)); assertEquals(work.copy(protectedEvidence = evidence), store.read(scope, work.id))
+    }
+
+    @Test fun guardedIdempotentReplayChecksAdmissionAgainThroughCommit() = fixture { _, _, store ->
+        val work = unknown(store)
+        val first = result(work)
+        assertTrue(store.retainVerified(first) { it == scope })
+        assertFalse(store.retainVerified(first) { false })
+        var checks = 0
+        rejects { store.retainVerified(first) { ++checks == 1 } }
+        assertEquals(2, checks); assertEquals(first, store.readVerified(scope, work.id))
+        assertTrue(store.retainVerified(first) { it == scope })
+        rejects { store.retainVerified(result(work, "different-observed-revision")) { it == scope } }
+        assertEquals(first, store.readVerified(scope, work.id)); assertEquals(work, store.read(scope, work.id))
+    }
+
+    @Test fun guardedResultSuccessReopensWithoutChangingUnknownPreparationOrEvidence() = fixture { context, name, store ->
+        val work = unknown(store)
+        store.retainEvidence(work, evidence)
+        val first = result(work)
+        var checks = 0
+        assertTrue(store.retainVerified(first) { candidate -> checks++; candidate == scope })
+        assertEquals(2, checks)
+        store.close()
+        TitleUpdateAttemptStore(context, name).use { reopened ->
+            assertEquals(first, reopened.readVerified(scope, work.id))
+            assertEquals(work.copy(protectedEvidence = evidence), reopened.read(scope, work.id))
+            reopened.admitDispatch = { true }; assertFalse(reopened.claim(prepared))
+        }
+    }
+
+    @Test fun guardedResultCancellationAfterActualWritePropagatesAndRollsBack() = fixture { _, _, store ->
+        val work = unknown(store)
+        var checks = 0
+        var observedUncommittedWrite = false
+        try {
+            store.retainVerified(result(work)) {
+                if (++checks == 1) true else {
+                    assertTrue(store.writableDatabase.inTransaction())
+                    store.writableDatabase.rawQuery("SELECT result FROM title_update_attempts", null).use {
+                        assertTrue(it.moveToFirst()); observedUncommittedWrite = !it.isNull(0)
+                    }
+                    throw CancellationException("Synthetic result retention cancellation")
+                }
+            }
+            fail("Cancellation must propagate")
+        } catch (_: CancellationException) { }
+        assertEquals(2, checks); assertTrue(observedUncommittedWrite)
+        assertNull(store.readVerified(scope, work.id)); assertEquals(work, store.read(scope, work.id))
+        assertTrue(store.retainVerified(result(work)) { it == scope })
+    }
+
+    @Test fun guardedIndependentHelpersRetainOnlyOneAdmittedImmutableWinner() = fixture { context, name, store ->
+        val work = unknown(store)
+        TitleUpdateAttemptStore(context, name).use { other ->
+            other.readableDatabase
+            val start = CompletableDeferred<Unit>()
+            val choices = listOf(result(work), result(work, "other-admitted-observation"))
+            val checks = listOf(AtomicInteger(), AtomicInteger())
+            val wins = coroutineScope {
+                listOf(store, other).mapIndexed { index, helper -> async(Dispatchers.IO) {
+                    start.await()
+                    try {
+                        if (helper.retainVerified(choices[index]) { candidate -> checks[index].incrementAndGet(); candidate == scope }) index else -1
+                    } catch (_: IllegalStateException) { -1 }
+                } }.also { start.complete(Unit) }.map { it.await() }
+            }
+            assertEquals(1, wins.count { it >= 0 })
+            val winner = wins.single { it >= 0 }
+            assertEquals(2, checks[winner].get()); assertTrue(checks[1 - winner].get() >= 1)
+            assertEquals(choices[winner], store.readVerified(scope, work.id))
+            assertEquals(choices[winner], other.readVerified(scope, work.id))
+            assertEquals(work, store.read(scope, work.id))
+        }
     }
 
     @Test fun verifiedResultDurablyReopensWithCompleteNanosecondSnapshotAndNoDispatchAdmission() = fixture { context, name, store ->

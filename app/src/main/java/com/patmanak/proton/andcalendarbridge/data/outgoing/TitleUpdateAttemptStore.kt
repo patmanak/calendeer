@@ -186,29 +186,45 @@ class TitleUpdateAttemptStore(context: Context, name: String = "calendar-title-u
             } catch (_: Exception) { throw IllegalStateException("Invalid retained title completion") }
         }
 
+    override suspend fun retainVerified(result: TitleUpdateVerifiedResult, admit: (CalendarScope) -> Boolean): Boolean =
+        retainVerifiedWithAdmission(result, admit)
+
     override suspend fun retainVerified(result: TitleUpdateVerifiedResult) {
+        // Compatibility for explicit experiments; guarded recovery never falls back here.
+        retainVerifiedWithAdmission(result) { true }
+    }
+
+    private suspend fun retainVerifiedWithAdmission(result: TitleUpdateVerifiedResult,
+        admit: (CalendarScope) -> Boolean): Boolean {
         val frozen = TitleUpdateVerifiedResult.of(result.record,
             TitleUpdateSubmissionObservation.Verified(result.attempt, result.event))
         val encoded = encodeResult(frozen)
-        access { db -> transaction(db) {
-            val current = read(db, frozen.record.scope, frozen.record.id)
-            check(current != null && current.state == TitleUpdateAttemptState.OUTCOME_UNKNOWN &&
-                current.copy(protectedEvidence = null) == frozen.record) {
-                "A verified result requires identical unknown title work"
-            }
-            val existing = readVerified(db, current)
-            if (existing != null) {
-                check(existing == frozen) { "Verified title result is immutable" }
-            } else {
-                // The transaction holds the database writer lock across the complete comparison.
-                // Evidence can attach independently; it is intentionally not part of this CAS.
-                check(db.update(TABLE, ContentValues().apply { put("result", encoded) },
-                    "$IDENTITY AND state=? AND result IS NULL",
-                    identity(current.scope, current.id) + TitleUpdateAttemptState.OUTCOME_UNKNOWN.name) == 1) {
-                    "Verified title result was not retained"
+        return access { db ->
+            // access has acquired the IO mutex. A queued call must observe current admission,
+            // never a permission snapshot taken before waiting for that lock.
+            if (!admit(frozen.record.scope)) false else transaction(db, beforeCommit = {
+                check(admit(frozen.record.scope)) { "Verified title result lease is not current" }
+            }) {
+                val current = read(db, frozen.record.scope, frozen.record.id)
+                check(current != null && current.state == TitleUpdateAttemptState.OUTCOME_UNKNOWN &&
+                    current.copy(protectedEvidence = null) == frozen.record) {
+                    "A verified result requires identical unknown title work"
                 }
+                val existing = readVerified(db, current)
+                if (existing != null) {
+                    check(existing == frozen) { "Verified title result is immutable" }
+                } else {
+                    // The transaction holds the database writer lock across the complete comparison.
+                    // Evidence can attach independently; it is intentionally not part of this CAS.
+                    check(db.update(TABLE, ContentValues().apply { put("result", encoded) },
+                        "$IDENTITY AND state=? AND result IS NULL",
+                        identity(current.scope, current.id) + TitleUpdateAttemptState.OUTCOME_UNKNOWN.name) == 1) {
+                        "Verified title result was not retained"
+                    }
+                }
+                true
             }
-        } }
+        }
     }
 
     override suspend fun readVerified(scope: CalendarScope, id: MutationId): TitleUpdateVerifiedResult? =

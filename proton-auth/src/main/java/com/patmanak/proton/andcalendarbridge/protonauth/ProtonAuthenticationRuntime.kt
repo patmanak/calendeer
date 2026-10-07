@@ -187,11 +187,19 @@ internal object ProtonAuthenticationRuntime {
                 calendarMetadata, eventRemote, LocalTitleEventRemote { session, scope, id ->
                     ProtonChangeFeedRemote(network.apiProvider).event(session, scope.feedScope(), id.value).obj("Event")
                 }, localAddresses, localTitleCryptoPreparation(cryptoContext, eventProtector))
-            val titleContext = TitleUpdateContextQualification { session, scope ->
-                contextRefresher.refresh(session)
+            val titleContext = TitleUpdateContextQualification { session, scope, checkpoint ->
+                checkpoint()
+                // Keep each suspending read inside the caller's original inspection lease.
+                userManager.getUser(session.userId, refresh = true)
+                checkpoint()
+                userManager.getAddresses(session.userId, refresh = true)
+                checkpoint()
                 val metadata = calendarMetadata.calendar(session, scope.calendar.value)
+                checkpoint()
                 val bootstrap = eventRemote.bootstrap(session, scope.calendar.value)
+                checkpoint()
                 val addresses = localAddresses.get(session.userId)
+                checkpoint()
                 val selected = ProtonCreateContextPolicy.select(scope, metadata, bootstrap, addresses)
                 ProtonTitleUpdateSubmissionCodec.context(selected, metadata, bootstrap)
             }

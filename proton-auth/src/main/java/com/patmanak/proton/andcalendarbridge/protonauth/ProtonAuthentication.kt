@@ -12,6 +12,9 @@ import com.patmanak.proton.andcalendarbridge.sync.catalog.CalendarCatalogPort
 import com.patmanak.proton.andcalendarbridge.sync.catalog.CalendarCatalogResult
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -109,6 +112,29 @@ internal class SerializedAuthenticationPort(
         val frozen = record.frozen()
         return titleUpdateOperation { it.inspect(frozen) }
     }
+    override suspend fun inspect(record: TitleUpdateAttemptRecord,
+        admit: (CalendarScope) -> Boolean): TitleUpdateSubmissionObservation {
+        // Capture immutable input before dispatching or waiting for authentication cleanup.
+        val frozen = record.frozen()
+        return try {
+            currentCoroutineContext().ensureActive()
+            if (!admit(frozen.scope)) return TitleUpdateSubmissionObservation.Unknown
+            withContext(dispatcher) {
+                currentCoroutineContext().ensureActive()
+                if (!admit(frozen.scope)) return@withContext TitleUpdateSubmissionObservation.Unknown
+                lock.withLock {
+                    currentCoroutineContext().ensureActive()
+                    if (!authenticated || !admit(frozen.scope)) return@withLock TitleUpdateSubmissionObservation.Unknown
+                    val runtime = graph?.titleUpdates ?: return@withLock TitleUpdateSubmissionObservation.Unknown
+                    val result = runtime.inspect(frozen, admit)
+                    currentCoroutineContext().ensureActive()
+                    if (!authenticated || !admit(frozen.scope)) TitleUpdateSubmissionObservation.Unknown else result
+                }
+            }
+        } catch (cancelled: CancellationException) { throw cancelled }
+          catch (_: Exception) { currentCoroutineContext().ensureActive(); TitleUpdateSubmissionObservation.Unknown }
+    }
+
     private suspend fun <T> titleUpdateOperation(block: suspend (CalendarTitleUpdateSubmissionPort) -> T): T = withContext(dispatcher) {
         lock.withLock {
             if (!authenticated) localEditUnavailable(LocalEditPreparationFailure.AUTHENTICATION)

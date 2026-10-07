@@ -57,6 +57,13 @@ attempts, preserves corrupt entries and drops continuation after access invalida
 Acknowledgement-to-completion gaps can resume after reopening without rewriting
 the native row or consuming a later dirty edit. This path makes no service request
 and is not connected to the production worker.
+Guarded inspect-only recovery now uses an explicit network allowance and a
+per-call access lease. Proton rechecks that lease and the expected session between
+context reads, event readback and verification; result storage rechecks admission
+immediately before commit. Unsupported guarded ports deny without falling back
+to unrestricted experiments. A new result is returned only after exact durable
+readback. These guards are prerequisites for automatic recovery, which remains
+unwired.
 Isolated physical Provider/SQLite integration qualifies same-row acknowledgement,
 interrupted restoration and preservation of a later dirty edit. A distinct supported
 cached observation is now requeued for its exact event atomically with the first

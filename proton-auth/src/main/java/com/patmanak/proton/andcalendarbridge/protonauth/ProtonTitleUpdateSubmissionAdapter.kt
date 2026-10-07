@@ -3,6 +3,8 @@ package com.patmanak.proton.andcalendarbridge.protonauth
 
 import com.patmanak.proton.andcalendarbridge.sync.*
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.serialization.json.*
 import me.proton.core.network.data.ApiProvider
 import me.proton.core.network.data.protonApi.BaseRetrofitApi
@@ -13,7 +15,8 @@ import okhttp3.ResponseBody
 import retrofit2.http.*
 
 internal fun interface TitleUpdateContextQualification {
-    suspend fun qualify(session: CatalogSession, scope: CalendarScope): JsonObject
+    /** Recheck the supplied lease before and after each suspending context read. */
+    suspend fun qualify(session: CatalogSession, scope: CalendarScope, checkpoint: suspend () -> Unit): JsonObject
 }
 internal interface TitleUpdateSubmissionRemote {
     suspend fun send(session: CatalogSession, calendar: String, request: JsonObject): String
@@ -33,7 +36,7 @@ internal class ProtonTitleUpdateSubmissionAdapter(private val preparations: Cale
         // Open the historical fragments before any remote read; this is not submission admission.
         ProtonTitlePreparationCodec(protector).openLocal(frozen)
         val session = session(frozen.intent.scope)
-        val qualified = context.qualify(session, frozen.intent.scope)
+        val qualified = context.qualify(session, frozen.intent.scope) { checkSession(session) }
         checkSession(session)
         codec.seal(id, frozen, qualified)
     } catch (cancelled: CancellationException) { throw cancelled }
@@ -81,7 +84,7 @@ internal class ProtonTitleUpdateSubmissionAdapter(private val preparations: Cale
             if (freshFragments.originalRow != submission.fragments.originalRow || !freshFragments.changed)
                 return@guarded TitleUpdateSubmissionObservation.Unknown
             checkSession(session)
-            val currentContext = context.qualify(session, stored.scope)
+            val currentContext = context.qualify(session, stored.scope) { checkSession(session) }
             if (currentContext != submission.context) return@guarded TitleUpdateSubmissionObservation.Unknown
             checkSession(session)
             // The journal is the final durable admission boundary, immediately before one send.
@@ -105,11 +108,21 @@ internal class ProtonTitleUpdateSubmissionAdapter(private val preparations: Cale
         }
     }
 
-    override suspend fun inspect(record: TitleUpdateAttemptRecord): TitleUpdateSubmissionObservation {
+    override suspend fun inspect(record: TitleUpdateAttemptRecord): TitleUpdateSubmissionObservation = inspect(record) { true }
+
+    override suspend fun inspect(record: TitleUpdateAttemptRecord,
+        admit: (CalendarScope) -> Boolean): TitleUpdateSubmissionObservation {
         val frozen = record.frozen()
         return guarded {
             if (frozen.state != TitleUpdateAttemptState.OUTCOME_UNKNOWN) return@guarded TitleUpdateSubmissionObservation.Unknown
+            currentCoroutineContext().ensureActive()
+            check(admit(frozen.scope))
+            val session = session(frozen.scope)
+            val checkpoint: suspend () -> Unit = { checkInspection(session, frozen.scope, admit) }
+            // Session acquisition may suspend: revoke access before opening retained fragments.
+            checkpoint()
             val submission = codec.open(frozen)
+            checkpoint()
             frozen.protectedEvidence?.let { sealed ->
                 val text = protector.open(sealed)
                 require(text.length <= LocalEditPreparation.MAX_PAYLOAD_BYTES && UniqueJsonKeys(text).validate())
@@ -120,35 +133,54 @@ internal class ProtonTitleUpdateSubmissionAdapter(private val preparations: Cale
                 require((evidence["complete"] as? JsonPrimitive)?.takeUnless { it.isString }?.booleanOrNull != null)
                 evidence.string("body") // A response is evidence, never acknowledgement or a retry grant.
             }
-            val session = session(frozen.scope)
-            val currentContext = context.qualify(session, frozen.scope)
-            checkSession(session)
+            checkpoint()
+            val currentContext = context.qualify(session, frozen.scope, checkpoint)
+            checkpoint()
             if (currentContext != submission.context) return@guarded TitleUpdateSubmissionObservation.Unknown
+            checkpoint()
             val row = remote.event(session, frozen.scope.calendar.value, frozen.preparation.intent.base.eventId.value)
-            checkSession(session)
+            checkpoint()
             if (!ProtonTitleUpdateProfile.matchesReadback(submission.fragments.originalRow, submission.fragments, row))
                 return@guarded TitleUpdateSubmissionObservation.Unknown
+            checkpoint()
             val bootstrap = events.bootstrap(session, frozen.scope.calendar.value)
-            checkSession(session)
+            checkpoint()
             if (ProtonTitleUpdateSubmissionCodec.hash(bootstrap.toString()) != submission.context.string("bootstrap"))
                 return@guarded TitleUpdateSubmissionObservation.Unknown
-            val actual = verifier.verify(session, frozen.scope.calendar.value, bootstrap, row,
+            checkpoint()
+            val verified = verifier.verify(session, frozen.scope.calendar.value, bootstrap, row,
                 submission.fragments.originalRow.string("UID"), CreatedEventReadbackPolicy.KNOWN_EMPTY_V2)
-                ?: return@guarded TitleUpdateSubmissionObservation.Unknown
-            checkSession(session)
+            checkpoint()
+            val actual = verified ?: return@guarded TitleUpdateSubmissionObservation.Unknown
             if (actual.eventId != frozen.preparation.intent.base.eventId || actual.content != frozen.preparation.intent.content)
                 return@guarded TitleUpdateSubmissionObservation.Unknown
             TitleUpdateSubmissionObservation.Verified(TitleUpdateAttemptIdentity.of(frozen), actual)
         }
     }
-    private suspend fun session(scope: CalendarScope) = sessions.current()?.takeIf { it.userId.id == scope.account.value }
-        ?: localEditUnavailable(LocalEditPreparationFailure.AUTHENTICATION)
+    private suspend fun session(scope: CalendarScope): CatalogSession {
+        currentCoroutineContext().ensureActive()
+        val current = sessions.current()
+        currentCoroutineContext().ensureActive()
+        return current?.takeIf { it.userId.id == scope.account.value }
+            ?: localEditUnavailable(LocalEditPreparationFailure.AUTHENTICATION)
+    }
     private suspend fun checkSession(expected: CatalogSession) {
-        if (sessions.current() != expected) localEditUnavailable(LocalEditPreparationFailure.AUTHENTICATION)
+        currentCoroutineContext().ensureActive()
+        val current = sessions.current()
+        currentCoroutineContext().ensureActive()
+        if (current != expected) localEditUnavailable(LocalEditPreparationFailure.AUTHENTICATION)
+    }
+    private suspend fun checkInspection(expected: CatalogSession, scope: CalendarScope, admit: (CalendarScope) -> Boolean) {
+        currentCoroutineContext().ensureActive()
+        check(admit(scope))
+        val current = sessions.current()
+        currentCoroutineContext().ensureActive()
+        check(admit(scope))
+        if (current != expected) localEditUnavailable(LocalEditPreparationFailure.AUTHENTICATION)
     }
     private suspend fun guarded(block: suspend () -> TitleUpdateSubmissionObservation) = try { block() }
         catch (cancelled: CancellationException) { throw cancelled }
-        catch (_: Exception) { TitleUpdateSubmissionObservation.Unknown }
+        catch (_: Exception) { currentCoroutineContext().ensureActive(); TitleUpdateSubmissionObservation.Unknown }
 }
 
 internal interface ProtonTitleUpdateSubmissionApi : BaseRetrofitApi {

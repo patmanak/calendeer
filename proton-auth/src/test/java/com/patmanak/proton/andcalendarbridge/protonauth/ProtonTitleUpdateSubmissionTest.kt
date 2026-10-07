@@ -207,10 +207,11 @@ internal class TitleSubmissionFixture {
         put("SharedEvents", JsonArray(listOf(part(2, "old-clear"), part(3, "old-secret"))))
     }
     val fragments = ProtonTimestampedSharedTitle(row, part(2, "new-clear"), part(3, "new-secret"), true)
+    var protectedOpens = 0
     val protector = object : EventPayloadProtector {
         private val values = mutableMapOf<String, String>()
         override fun seal(plain: String): String = "sealed-${values.size}".also { values[it] = plain }
-        override fun open(protected: String) = requireNotNull(values[protected])
+        override fun open(protected: String): String { protectedOpens++; return requireNotNull(values[protected]) }
     }
     fun preparationFor(value: ProtonTimestampedSharedTitle) = ProtonTitlePreparationCodec(protector).sealLocal(intent, "synthetic-uid", timestamp, value)
     val preparation = preparationFor(fragments)
@@ -226,6 +227,9 @@ internal class TitleSubmissionFixture {
     fun step(name: String) { steps += name; after(name) }
     val journal = TitleSubmissionJournal(record, ::step)
     val initial = CatalogSession(UserId(scope.account.value), SessionId("synthetic-session"))
+    var sessionReads = 0
+    var afterSession: () -> Unit = {}
+    var contextStages = emptyList<String>()
     var current: CatalogSession? = initial
     var fresh = preparation
     var freshContext = context
@@ -236,7 +240,12 @@ internal class TitleSubmissionFixture {
     var verified: RemoteChange.Upsert? = intent.base.copy(revision = Revision("synthetic-updated"), content = intent.content)
     val adapter = ProtonTitleUpdateSubmissionAdapter(CalendarLocalEditPreparationPort { value, at ->
         assertEquals(intent, value); assertEquals(timestamp, at); prepares++; step("prepare"); fresh
-    }, protector, { current }, { _, _ -> step("context"); freshContext }, object : TitleUpdateSubmissionRemote {
+    }, protector, { sessionReads++; val value = current; afterSession(); value }, { _, _, checkpoint ->
+        step("context")
+        checkpoint()
+        contextStages.forEach { name -> checkpoint(); step(name); checkpoint() }
+        freshContext
+    }, object : TitleUpdateSubmissionRemote {
         override suspend fun send(session: CatalogSession, calendar: String, request: JsonObject): String {
             assertEquals(TitleUpdateAttemptState.OUTCOME_UNKNOWN, journal.stored.state)
             sends++; step("send"); sendFailure?.let { throw it }; return "{\"Code\":1001}"

@@ -139,4 +139,10 @@ interface CalendarTitleUpdateSubmissionPort {
     suspend fun prepareSubmission(id: MutationId, preparation: LocalEditPreparation): TitleUpdateAttemptRecord
     suspend fun submit(record: TitleUpdateAttemptRecord, journal: TitleUpdateAttemptJournal): TitleUpdateSubmissionObservation
     suspend fun inspect(record: TitleUpdateAttemptRecord): TitleUpdateSubmissionObservation
+    /** Per-call recovery lease, rechecked around inspection stages. Unsupported implementations
+     * deny by default and must never fall back to the unrestricted experimental overload.
+     * The caller binds the lease to one epoch; false cannot authorize later re-entry.
+     */
+    suspend fun inspect(record: TitleUpdateAttemptRecord,
+        admit: (CalendarScope) -> Boolean): TitleUpdateSubmissionObservation = TitleUpdateSubmissionObservation.Unknown
 }

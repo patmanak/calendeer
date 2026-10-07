@@ -237,8 +237,39 @@ a later dirty edit. Progress counts describe only this invocation, not global sy
 completion. Held/failed entries and insertions behind a cursor require a fresh
 first-page traversal. Access invalidation returns no continuation, and cancellation
 propagates. The production worker and UI do not invoke this internal path yet.
-Online recovery of missing proof still requires separate transport and durable-result
-admission guards before scheduling can be activated.
+The guarded inspection path below supplies the separate transport and durable-result
+admission boundaries. Connecting a page runner to production scheduling remains
+separate work.
+
+## Guarded inspection and result retention
+
+`TitleUpdateGuardedResultRecovery` requires a synchronous access callback bound to
+the original account/calendar/generation and session/policy epoch. Default denial
+performs no reads or transport. A durable historical result needs no network;
+without one, inspection additionally requires `allowNetwork=true` and a compatible
+wire format. PREPARED work remains held. Full record and result bindings are checked
+around suspensions. There is no preparation, claim, submission or native operation.
+
+The guarded `inspect(record, admit)` and `retainVerified(result, admit)` overloads
+deny by default, without falling back to the unrestricted experimental methods.
+The serialized Proton facade freezes the record before dispatcher/mutex waits and
+rechecks access after those waits and the runtime return. The adapter checks access,
+the expected session and cancellation before opening protected data and around
+context qualification, exact-event GET, bootstrap and verification. Qualification
+passes its checkpoint between refreshed user/address reads, calendar metadata,
+bootstrap and local address resolution. These checks cover application-controlled
+stages; they do not intercept every internal Core exchange or cancel an already
+started read merely because a policy callback later becomes false.
+
+Result storage checks admission after acquiring its lock and immediately before
+commit, including an identical repetition. Revocation during that transaction rolls
+back the result write without changing UNKNOWN work, preparation or response evidence.
+The first durable result remains immutable under concurrent helpers. Recovery returns
+a newly observed result only after successful guarded commit and exact journal
+readback. Revocation after commit can suppress the return while preserving historical
+proof for a later invocation. Cancellation and persistence failures propagate.
+The caller must not readmit an old callback after a policy off/on cycle. These
+internal guards do not activate a production UPDATE worker or advertise server CAS.
 
 ## Concurrency and integration limits
 
@@ -267,9 +298,18 @@ remain separate work.
 - `TitleUpdateVerifiedResultTest` checks exact full-content binding, immutable
   snapshots, inspect-only recovery, offline historical reads and failure before
   durable retention.
+- `TitleUpdateGuardedResultRecoveryTest` checks explicit network eligibility,
+  historical offline recovery, default-denied overloads, immutable epoch admission,
+  revocation across reads/commit, cancellation and exact durable readback.
+  `ProtonGuardedTitleInspectionTest` uses synthetic adapter/facade fixtures for
+  context-stage/session/access changes, mutex waits and cancellation. It qualifies
+  control flow, not Proton signatures or server acceptance.
 - `TitleUpdateResultStoreDeviceTest` checks result persistence, migration,
   immutable first proof, concurrent handles, corruption and transaction failures
   in isolated SQLite fixtures. No Provider or service request is involved.
+  Guarded retention fixtures additionally observe a real uncommitted SQL write
+  before revoking admission, verify rollback and reopening, and qualify idempotent
+  replay, cancellation and independent-helper races under the per-call lease.
 - `TitleUpdateAcknowledgementTest` checks complete receipt/preparation bindings.
   The Provider, Store and Coordinator device fixtures exercise atomic metadata
   changes, concurrent local/remote edits, lost replies, interrupted restoration,
