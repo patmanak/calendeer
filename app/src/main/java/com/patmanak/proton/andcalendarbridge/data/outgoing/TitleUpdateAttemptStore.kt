@@ -372,14 +372,28 @@ class TitleUpdateAttemptStore(context: Context, name: String = "calendar-title-u
     /** The complete frozen preparation and ciphertext must still match before durable UNKNOWN.
      * SQLite transactions arbitrate independent helpers; successful commit precedes true/dispatch.
      */
-    override suspend fun claim(expected: TitleUpdateAttemptRecord): Boolean {
+    override suspend fun claim(expected: TitleUpdateAttemptRecord): Boolean =
+        claimWithAdmission(expected) { admitDispatch(it) }
+
+    /** This invocation's lease is independent of the legacy mutable dispatch permission. */
+    override suspend fun claim(expected: TitleUpdateAttemptRecord,
+        admit: (CalendarScope) -> Boolean): Boolean = claimWithAdmission(expected, admit)
+
+    private suspend fun claimWithAdmission(expected: TitleUpdateAttemptRecord,
+        admit: (CalendarScope) -> Boolean): Boolean {
+        currentCoroutineContext().ensureActive()
         val frozen = expected.frozen()
         if (frozen.state != TitleUpdateAttemptState.PREPARED || frozen.protectedEvidence != null) return false
         val preparation = encodePreparation(frozen.preparation)
         return access { db ->
-            currentCoroutineContext().ensureActive()
-            if (!admitDispatch(frozen.scope)) false else transaction(db, beforeCommit = {
-                check(admitDispatch(frozen.scope)) { "Title update dispatch lease is not current" }
+            val operationContext = currentCoroutineContext()
+            operationContext.ensureActive()
+            val initiallyAllowed = admit(frozen.scope)
+            operationContext.ensureActive()
+            if (!initiallyAllowed) false else transaction(db, beforeCommit = {
+                val stillAllowed = admit(frozen.scope)
+                operationContext.ensureActive()
+                check(stillAllowed) { "Title update dispatch lease is not current" }
             }) {
                 val history = ownershipHistory(db, frozen.scope, frozen.preparation.intent.base.eventId)
                 val current = read(db, frozen.scope, frozen.id)

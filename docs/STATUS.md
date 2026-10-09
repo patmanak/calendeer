@@ -69,6 +69,15 @@ Access, owner or native changes stop admission between suspended steps. A commit
 wire remains in history after invalidation, without reporting current qualification.
 Offline calls recover the canonical durable wire or preserve a bare reservation;
 this path never claims, submits or acknowledges, and production UPDATE remains pending.
+The internal submission boundary now has a separate per-call dispatch lease.
+Fresh preparation checks admission around context reads and cryptographic work;
+the SQLite claim checks that lease after locking and immediately before commit.
+Unsupported guarded ports/journals deny without legacy fallback. Revocation after
+claim preserves UNKNOWN without sending; an already received response can remain
+as immutable evidence after revocation, without authorizing further inspection.
+Guarded submission never re-enters UNKNOWN work or implicitly inspects it.
+Current SQL/Provider qualification through dispatch and worker activation remain
+pending; these controls do not provide a server-side concurrency precondition.
 The system observer now reuses a retained UPDATE identity and allocates a distinct
 identity after that owner is consumed, for imported and CREATE-handoff events.
 A bounded, scope-bound metadata index lists unresolved title attempts independently

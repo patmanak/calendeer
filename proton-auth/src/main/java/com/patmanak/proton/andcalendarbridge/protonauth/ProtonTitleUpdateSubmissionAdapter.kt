@@ -94,6 +94,79 @@ internal class ProtonTitleUpdateSubmissionAdapter(private val preparations: Cale
             })
         }
 
+    override suspend fun submit(record: TitleUpdateAttemptRecord, journal: TitleUpdateAttemptJournal,
+        admit: (CalendarScope) -> Boolean): TitleUpdateSubmissionObservation {
+        val frozen = record.frozen()
+        var closed = false
+        val lease = { scope: CalendarScope ->
+            if (scope != frozen.scope || closed) false else {
+                val allowed = frozen.format == titleUpdateFormat && admit(scope)
+                if (!allowed) closed = true
+                allowed
+            }
+        }
+        suspend fun access() {
+            currentCoroutineContext().ensureActive()
+            val allowed = lease(frozen.scope)
+            currentCoroutineContext().ensureActive()
+            check(allowed) { "Title submission admission is closed" }
+        }
+        return guarded {
+            currentCoroutineContext().ensureActive()
+            if (frozen.state != TitleUpdateAttemptState.PREPARED || frozen.protectedEvidence != null)
+                return@guarded TitleUpdateSubmissionObservation.Unknown
+            access()
+            val stored = journal.read(frozen.scope, frozen.id)?.frozen()
+            access()
+            if (stored != frozen) return@guarded TitleUpdateSubmissionObservation.Unknown
+            // UNKNOWN never enters this path, including a stale PREPARED caller after claim.
+            val session = session(frozen.scope)
+            val checkpoint: suspend () -> Unit = { checkInspection(session, frozen.scope, lease) }
+            checkpoint()
+            val submission = codec.open(frozen)
+            checkpoint()
+            val fresh = preparations.prepareLocalTitle(frozen.preparation.intent, frozen.preparation.timestamp, lease)
+            checkpoint()
+            if (fresh == null || fresh.intent != frozen.preparation.intent || fresh.timestamp != frozen.preparation.timestamp ||
+                fresh.format != frozen.preparation.format) return@guarded TitleUpdateSubmissionObservation.Unknown
+            val freshFragments = ProtonTitlePreparationCodec(protector).openLocal(fresh)
+            checkpoint()
+            if (freshFragments.originalRow != submission.fragments.originalRow || !freshFragments.changed)
+                return@guarded TitleUpdateSubmissionObservation.Unknown
+            val currentContext = context.qualify(session, frozen.scope, checkpoint)
+            checkpoint()
+            if (currentContext != submission.context) return@guarded TitleUpdateSubmissionObservation.Unknown
+            val sent = TitleUpdateAttemptAdmission(journal).dispatch(frozen, lease) { unknown ->
+                // A committed UNKNOWN may remain without any transport after revocation.
+                checkpoint()
+                var response: String? = null
+                try { response = remote.send(session, frozen.scope.calendar.value, submission.request) }
+                catch (cancelled: CancellationException) { throw cancelled }
+                catch (_: Exception) { currentCoroutineContext().ensureActive() }
+                currentCoroutineContext().ensureActive()
+                val evidence = buildJsonObject {
+                    put("kind", "title-update-evidence"); put("version", 1)
+                    put("payload", TitleUpdateAttemptIdentity.of(unknown).payloadFingerprint)
+                    put("attempt", unknown.id.value); put("complete", response != null); put("body", response ?: "")
+                }
+                // Received history is retained even after access/session revocation. This does
+                // not authorize an inspection or a second send; the first body remains immutable.
+                journal.retainEvidence(unknown, protector.seal(evidence.toString()))
+                currentCoroutineContext().ensureActive()
+            }
+            checkpoint()
+            if (!sent) return@guarded TitleUpdateSubmissionObservation.Unknown
+            val latest = journal.read(frozen.scope, frozen.id)?.frozen()
+            checkpoint()
+            if (latest == null || latest.state != TitleUpdateAttemptState.OUTCOME_UNKNOWN ||
+                latest.copy(state = TitleUpdateAttemptState.PREPARED, protectedEvidence = null) != frozen)
+                return@guarded TitleUpdateSubmissionObservation.Unknown
+            val observed = inspect(latest, lease)
+            checkpoint()
+            observed
+        }
+    }
+
     override suspend fun submit(record: TitleUpdateAttemptRecord, journal: TitleUpdateAttemptJournal): TitleUpdateSubmissionObservation {
         val frozen = record.frozen()
         return guarded {
@@ -207,7 +280,9 @@ internal class ProtonTitleUpdateSubmissionAdapter(private val preparations: Cale
         check(admit(scope))
         val current = sessions.current()
         currentCoroutineContext().ensureActive()
-        check(admit(scope))
+        val allowed = admit(scope)
+        currentCoroutineContext().ensureActive()
+        check(allowed)
         if (current != expected) localEditUnavailable(LocalEditPreparationFailure.AUTHENTICATION)
     }
     private class PreparationAdmissionClosed : RuntimeException()

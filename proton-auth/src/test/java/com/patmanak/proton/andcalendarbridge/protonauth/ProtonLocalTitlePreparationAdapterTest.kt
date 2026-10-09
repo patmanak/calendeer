@@ -5,7 +5,7 @@ import com.patmanak.proton.andcalendarbridge.sync.*
 import java.time.Instant
 import java.time.LocalDate
 import kotlinx.coroutines.test.runTest
-import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.*
 import kotlinx.serialization.json.*
 import me.proton.core.crypto.common.keystore.EncryptedByteArray
 import me.proton.core.domain.entity.UserId
@@ -43,7 +43,7 @@ class ProtonLocalTitlePreparationAdapterTest {
     private fun json(value: String) = Json.parseToJsonElement(value) as JsonObject
     private fun stage(name: String) { steps += name; after(name) }
     private fun adapter(meta: JsonObject = metadata, boot: JsonObject = bootstrap, original: JsonObject = row,
-        local: List<UserAddress> = listOf(address)) = ProtonLocalTitlePreparationAdapter({
+        local: List<UserAddress> = listOf(address), guarded: Boolean = true) = ProtonLocalTitlePreparationAdapter({
             if (++sessionReads == sessionFailureAt) throw java.io.IOException("private storage detail")
             current
         }, { stage("refresh") },
@@ -60,7 +60,46 @@ class ProtonLocalTitlePreparationAdapterTest {
             assertEquals(row.string("UID"), uid); assertEquals(metadata, observedMeta); assertEquals(bootstrap, observedBoot)
             assertEquals(row, observedRow); assertEquals(listOf(address), observedLocal)
             resultTransform(LocalEditPreparation(frozen, time, LOCAL_TITLE_PREPARATION_FORMAT, "synthetic-protected"))
-        })
+        }, guardedRefresh = if (guarded) LocalTitleContextRefresh { _, checkpoint ->
+            checkpoint(); stage("refresh"); checkpoint()
+        } else null)
+    @Test fun guardedFreshPreparationCannotFallBackToAnUnguardedContextRefresher() = runTest {
+        assertNull(adapter(guarded = false).prepareLocalTitle(intent, timestamp) { true })
+        assertEquals(0, sessionReads); assertTrue(steps.isEmpty())
+    }
+    @Test fun guardedFreshPreparationUsesOnlyItsExactScope() = runTest {
+        val result = adapter().prepareLocalTitle(intent, timestamp) { it == scope }
+        assertNotNull(result)
+        assertEquals(intent, result!!.intent)
+        assertEquals(listOf("refresh", "metadata", "bootstrap", "event", "addresses", "prepare"), steps)
+    }
+    @Test fun guardedFreshPreparationDenialPrecedesSessionAndContextReads() = runTest {
+        assertNull(adapter().prepareLocalTitle(intent, timestamp) { false })
+        assertEquals(0, sessionReads); assertTrue(steps.isEmpty())
+    }
+    @Test fun guardedFreshPreparationStopsAfterEveryRevokedControlledStage() = runTest {
+        val stages = listOf("refresh", "metadata", "bootstrap", "event", "addresses", "prepare")
+        for ((index, name) in stages.withIndex()) {
+            steps.clear(); current = initial; var allowed = true
+            after = { if (it == name) allowed = false }
+            assertNull(adapter().prepareLocalTitle(intent, timestamp) { allowed })
+            assertEquals(stages.take(index + 1), steps)
+        }
+    }
+    @Test fun guardedFreshPreparationCancelledStageCannotReturnNormally() = runTest {
+        val normalReturns = java.util.concurrent.atomic.AtomicInteger()
+        supervisorScope {
+            val task = async {
+                val requestContext = currentCoroutineContext()
+                after = { if (it == "event") requestContext[Job]!!.cancel() }
+                adapter().prepareLocalTitle(intent, timestamp) { true }
+                normalReturns.incrementAndGet()
+            }
+            try { task.await(); fail("Cancellation must propagate") } catch (_: CancellationException) { }
+        }
+        assertEquals(0, normalReturns.get())
+        assertEquals(listOf("refresh", "metadata", "bootstrap", "event"), steps)
+    }
     @Test fun freshContextAndOriginalAreReadBeforeScopedPreparation() = runTest {
         val prepared = adapter().prepareLocalTitle(intent, timestamp)
         assertEquals(listOf("refresh", "metadata", "bootstrap", "event", "addresses", "prepare"), steps)

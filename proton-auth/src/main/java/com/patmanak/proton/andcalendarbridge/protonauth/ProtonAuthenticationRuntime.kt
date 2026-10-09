@@ -186,7 +186,10 @@ internal object ProtonAuthenticationRuntime {
             val titlePreparations = ProtonLocalTitlePreparationAdapter(readSession, contextRefresher,
                 calendarMetadata, eventRemote, LocalTitleEventRemote { session, scope, id ->
                     ProtonChangeFeedRemote(network.apiProvider).event(session, scope.feedScope(), id.value).obj("Event")
-                }, localAddresses, localTitleCryptoPreparation(cryptoContext, eventProtector))
+                }, localAddresses, localTitleCryptoPreparation(cryptoContext, eventProtector),
+                guardedRefresh = localTitleContextRefresh(
+                    { session -> userManager.getUser(session.userId, refresh = true) },
+                    { session -> userManager.getAddresses(session.userId, refresh = true) }))
             val titleContext = TitleUpdateContextQualification { session, scope, checkpoint ->
                 checkpoint()
                 // Keep each suspending read inside the caller's original access lease.

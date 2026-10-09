@@ -61,6 +61,56 @@ or a general permission to ignore timestamps. A matching display title or
 success response alone is insufficient. The adapter's inspection does not alter
 the journal.
 
+## Guarded dispatch and durable claim
+
+The internal `submit(record, journal, admit)` overload is distinct from the explicit
+legacy experiment. It accepts only an exact PREPARED record without response evidence
+in the current wire format. Unsupported ports deny by default, without calling the
+legacy submit method. An UNKNOWN caller or an already UNKNOWN stored record remains
+held; neither starts preparation, transport nor implicit inspection. Recovery uses
+the separate guarded inspection path.
+
+The adapter freezes the record and narrows the synchronous lease to its exact scope
+and wire format. Once denied, that invocation cannot resume when access returns.
+Session and lease checks surround protected capsule opening, fresh preparation,
+context qualification, claim, transport eligibility and authenticated readback.
+Fresh preparation uses a separate guarded overload with no legacy fallback. Its
+Proton implementation checks admission and the expected session between the Core
+user and address refresh calls, and around calendar metadata, bootstrap,
+original-event read, local addresses and cryptographic preparation. These
+checkpoints cover application-controlled stages; they do not
+intercept every internal Core exchange or cancel an already running stage merely
+because the callback subsequently becomes false.
+
+`claim(expected, admit)` is denied by unsupported journals. The SQLite implementation
+uses the callback of this invocation directly, without temporarily replacing the
+legacy mutable dispatch permission. It rechecks admission after acquiring the IO
+lock and immediately before commit, with cancellation checks even when callbacks
+return false. The complete PREPARED record and merged event ownership history must
+still qualify. Failed admission, corruption or commit failure cannot return a permit.
+The guarded admission helper calls only this overload and rechecks access after
+claim. A revocation or cancellation after commit leaves durable UNKNOWN with no
+transport and never restores PREPARED.
+
+After a transport exchange, the first received response body may be retained as
+immutable evidence even if admission or the session has changed. This historical
+write grants no readback or retry authority. Cancellation or evidence-storage
+failure can leave UNKNOWN without evidence; explicit inspection remains the recovery
+path. Further journal reads and service inspection require the same original lease
+and session. A failed claim, including a lost race, never triggers implicit inspection.
+
+The authentication facade freezes work before dispatcher/mutex waits, requires its
+authenticated runtime and forwards only the guarded overload. It restricts the lease
+to the original scope/current format and rejects verification unless every attempt
+identity field and the complete expected event content match. Cancellation propagates
+after awaited results, including null or Unknown.
+
+This synchronous-lease boundary is not yet composed with current SQL/Provider owner
+qualification through dispatch or the production worker. A suspended owner callback
+cannot re-enter the authentication facade while its submission mutex is held.
+Preparing work does not supply dispatch admission. Fresh GET followed by PUT remains
+an optimistic controlled-writer experiment, without an atomic server precondition.
+
 ## Stable preparation identity
 
 `TitleUpdatePreparationJournal` reserves an attempt identity before wire
@@ -500,6 +550,16 @@ remain separate work.
   guards, session replacement, sealing, freezing across waits, scoped callbacks,
   typed errors and cancellation. These use controlled ports/protected capsules;
   they do not establish service acceptance, native owner composition or a new PUT.
+- `TitleUpdateGuardedAdmissionTest` checks default denial, scoped claim, committed
+  UNKNOWN before send, cancellation and preservation after revocation or transport
+  failure. `TitleUpdateGuardedClaimStoreDeviceTest` checks the same admission boundary
+  on isolated SQLite: writer races, commit failure, rollback, complete ownership,
+  corruption, reopening and independence from legacy mutable admission.
+  Guarded Proton submission/facade fixtures check stage revocation, session changes,
+  unsupported fresh preparation, UNKNOWN refusal, retained response evidence,
+  cancellation and complete verified bindings. Guarded fresh-preparation fixtures
+  check each controlled context/crypto stage. These controlled ports and synthetic
+  capsules do not establish service acceptance, native owner dispatch or production activation.
 - `TitleUpdatePreparationCoordinatorDeviceTest` composes the guarded helper with
   real isolated SQL owners/journals and controlled native snapshots. It checks
   canonical identity recovery, offline reuse, conflicts, capsule substitutions,

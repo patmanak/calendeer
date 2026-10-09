@@ -5,6 +5,8 @@ import com.patmanak.proton.andcalendarbridge.sync.*
 import java.time.Instant
 import java.time.ZoneOffset
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import me.proton.core.user.domain.entity.UserAddress
@@ -20,6 +22,21 @@ internal fun freezeLocalTitleRequest(intent: LocalEditIntent, timestamp: Instant
   catch (_: Exception) { localEditUnavailable(LocalEditPreparationFailure.UNSUPPORTED) }
 internal fun interface LocalTitleEventRemote {
     suspend fun event(session: CatalogSession, scope: CalendarScope, eventId: EventId): JsonObject
+}
+internal fun interface LocalTitleContextRefresh {
+    suspend fun refresh(session: CatalogSession, checkpoint: suspend () -> Unit)
+}
+/** Shared Core user/address read ordering; guarded preparation never uses a legacy refresher. */
+internal fun localTitleContextRefresh(user: suspend (CatalogSession) -> Unit,
+    addresses: suspend (CatalogSession) -> Unit) = LocalTitleContextRefresh { session, checkpoint ->
+    suspend fun checked() {
+        currentCoroutineContext().ensureActive()
+        checkpoint()
+        currentCoroutineContext().ensureActive()
+    }
+    try {
+        checked(); user(session); checked(); addresses(session); checked()
+    } catch (failure: Exception) { currentCoroutineContext().ensureActive(); throw failure }
 }
 internal fun interface LocalTitleContextPreparation {
     suspend fun prepare(session: CatalogSession, intent: LocalEditIntent, uid: String, timestamp: Instant,
@@ -38,20 +55,45 @@ internal fun localTitleCryptoPreparation(crypto: CryptoContext, protector: Event
 internal class ProtonLocalTitlePreparationAdapter(private val sessions: CatalogSessionSource,
     private val context: EventContextRefresher, private val metadata: CreateCalendarMetadataRemote,
     private val events: EventImportRemote, private val originals: LocalTitleEventRemote,
-    private val addresses: LocalEventAddresses, private val prepare: LocalTitleContextPreparation) : CalendarLocalEditPreparationPort {
+    private val addresses: LocalEventAddresses, private val prepare: LocalTitleContextPreparation,
+    private val guardedRefresh: LocalTitleContextRefresh? = null) : CalendarLocalEditPreparationPort {
     override val localTitleFormat = LOCAL_TITLE_PREPARATION_FORMAT
-    override suspend fun prepareLocalTitle(intent: LocalEditIntent, timestamp: Instant): LocalEditPreparation = try {
+    override suspend fun prepareLocalTitle(intent: LocalEditIntent, timestamp: Instant): LocalEditPreparation =
+        checkNotNull(prepareWithAdmission(intent, timestamp, null))
+    override suspend fun prepareLocalTitle(intent: LocalEditIntent, timestamp: Instant,
+        admit: (CalendarScope) -> Boolean): LocalEditPreparation? = prepareWithAdmission(intent, timestamp, admit)
+
+    private class AdmissionClosed : RuntimeException()
+    private suspend fun prepareWithAdmission(intent: LocalEditIntent, timestamp: Instant,
+        admit: ((CalendarScope) -> Boolean)?): LocalEditPreparation? = try {
+        currentCoroutineContext().ensureActive()
         val frozen = freezeLocalTitleRequest(intent, timestamp)
+        if (admit != null && guardedRefresh == null) throw AdmissionClosed()
+        var closed = false
+        suspend fun admission() {
+            currentCoroutineContext().ensureActive()
+            val allowed = !closed && (admit?.invoke(frozen.scope) != false)
+            if (!allowed) closed = true
+            currentCoroutineContext().ensureActive()
+            if (!allowed) throw AdmissionClosed()
+        }
+        admission()
         val initial = localStorage { sessions.current() }?.takeIf { it.userId.id == frozen.scope.account.value }
             ?: localEditUnavailable(LocalEditPreparationFailure.AUTHENTICATION)
-        readContext { context.refresh(initial) }
-        checkSession(initial)
+        suspend fun checkpoint() { admission(); checkSession(initial); admission() }
+        if (admit != null) checkpoint()
+        if (admit == null) readContext { context.refresh(initial) }
+        else {
+            val refresh = guardedRefresh ?: throw AdmissionClosed()
+            readContext { refresh.refresh(initial, ::checkpoint) }
+        }
+        checkpoint()
         val calendar = snapshot(readContext { metadata.calendar(initial, frozen.scope.calendar.value) })
-        checkSession(initial)
+        checkpoint()
         val bootstrap = snapshot(readContext { events.bootstrap(initial, frozen.scope.calendar.value) })
-        checkSession(initial)
+        checkpoint()
         val row = snapshot(readContext { originals.event(initial, frozen.scope, frozen.base.eventId) })
-        checkSession(initial)
+        checkpoint()
         if (row.string("ID") != frozen.base.eventId.value || row.string("CalendarID") != frozen.scope.calendar.value ||
             bootstrap.obj("CalendarSettings").string("CalendarID") != frozen.scope.calendar.value)
             localEditUnavailable(LocalEditPreparationFailure.CONTEXT)
@@ -60,16 +102,19 @@ internal class ProtonLocalTitlePreparationAdapter(private val sessions: CatalogS
             localEditUnavailable(LocalEditPreparationFailure.CONTEXT)
         if (row.revision(bootstrap) != frozen.base.revision) localEditUnavailable(LocalEditPreparationFailure.CONFLICT)
         val local = localStorage { addresses.get(initial.userId).map { it.copy(keys = it.keys.toList()) } }
-        checkSession(initial)
+        checkpoint()
         ProtonCreateContextPolicy.select(frozen.scope, calendar, bootstrap, local)
+        if (admit != null) checkpoint()
         val result = prepare.prepare(initial, frozen, uid, timestamp, calendar, bootstrap, row, local)
-        checkSession(initial)
+        checkpoint()
         if (result.intent != frozen || result.timestamp != timestamp || result.format != localTitleFormat)
             localEditUnavailable(LocalEditPreparationFailure.CONTEXT)
         result.copy(intent = frozen)
     } catch (cancelled: CancellationException) { throw cancelled }
-      catch (failure: LocalEditPreparationException) { throw failure }
+      catch (_: AdmissionClosed) { currentCoroutineContext().ensureActive(); null }
+      catch (failure: LocalEditPreparationException) { currentCoroutineContext().ensureActive(); throw failure }
       catch (failure: CreatePreparationException) {
+          currentCoroutineContext().ensureActive()
           localEditUnavailable(when (failure.reason) {
               CreatePreparationFailure.AUTHENTICATION -> LocalEditPreparationFailure.AUTHENTICATION
               CreatePreparationFailure.PERMISSION -> LocalEditPreparationFailure.PERMISSION
@@ -81,6 +126,7 @@ internal class ProtonLocalTitlePreparationAdapter(private val sessions: CatalogS
               CreatePreparationFailure.RETRY -> LocalEditPreparationFailure.RETRY
           })
       } catch (failure: RemoteImportException) {
+          currentCoroutineContext().ensureActive()
           localEditUnavailable(when (failure.reason) {
               RemoteImportFailure.AUTHENTICATION -> LocalEditPreparationFailure.AUTHENTICATION
               RemoteImportFailure.NETWORK -> LocalEditPreparationFailure.NETWORK
@@ -91,22 +137,27 @@ internal class ProtonLocalTitlePreparationAdapter(private val sessions: CatalogS
               else -> LocalEditPreparationFailure.CONTEXT
           })
       } catch (failure: ProtonTitlePreparationException) {
+          currentCoroutineContext().ensureActive()
           localEditUnavailable(if (failure.reason == ProtonTitlePreparationFailure.STORAGE)
               LocalEditPreparationFailure.STORAGE else LocalEditPreparationFailure.UNSUPPORTED)
-      } catch (_: GateCProtectedStorageUnavailable) { localEditUnavailable(LocalEditPreparationFailure.STORAGE) }
-        catch (_: Exception) { localEditUnavailable(LocalEditPreparationFailure.CONTEXT) }
+      } catch (_: GateCProtectedStorageUnavailable) { currentCoroutineContext().ensureActive(); localEditUnavailable(LocalEditPreparationFailure.STORAGE) }
+        catch (_: Exception) { currentCoroutineContext().ensureActive(); localEditUnavailable(LocalEditPreparationFailure.CONTEXT) }
 
     private fun snapshot(value: JsonObject) = Json.parseToJsonElement(value.toString()) as JsonObject
     private suspend fun checkSession(expected: CatalogSession) {
-        if (localStorage { sessions.current() } != expected) localEditUnavailable(LocalEditPreparationFailure.AUTHENTICATION)
+        currentCoroutineContext().ensureActive()
+        val current = localStorage { sessions.current() }
+        currentCoroutineContext().ensureActive()
+        if (current != expected) localEditUnavailable(LocalEditPreparationFailure.AUTHENTICATION)
     }
     private suspend fun <T> readContext(action: suspend () -> T): T = try { action() }
         catch (cancelled: CancellationException) { throw cancelled }
+        catch (closed: AdmissionClosed) { throw closed }
         catch (failure: RemoteImportException) { throw failure }
-        catch (failure: LocalEditPreparationException) { throw failure }
-        catch (failure: Exception) { throw failure.importFailure() }
+        catch (failure: LocalEditPreparationException) { currentCoroutineContext().ensureActive(); throw failure }
+        catch (failure: Exception) { currentCoroutineContext().ensureActive(); throw failure.importFailure() }
     private suspend fun <T> localStorage(action: suspend () -> T): T = try { action() }
         catch (cancelled: CancellationException) { throw cancelled }
-        catch (failure: LocalEditPreparationException) { throw failure }
-        catch (_: Exception) { localEditUnavailable(LocalEditPreparationFailure.STORAGE) }
+        catch (failure: LocalEditPreparationException) { currentCoroutineContext().ensureActive(); throw failure }
+        catch (_: Exception) { currentCoroutineContext().ensureActive(); localEditUnavailable(LocalEditPreparationFailure.STORAGE) }
 }

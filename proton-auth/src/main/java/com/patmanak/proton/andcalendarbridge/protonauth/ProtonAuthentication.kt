@@ -133,6 +133,55 @@ internal class SerializedAuthenticationPort(
         } catch (cancelled: CancellationException) { throw cancelled }
           catch (failure: Exception) { currentCoroutineContext().ensureActive(); throw failure }
     }
+    override suspend fun submit(record: TitleUpdateAttemptRecord, journal: TitleUpdateAttemptJournal,
+        admit: (CalendarScope) -> Boolean): TitleUpdateSubmissionObservation {
+        val frozen = record.frozen()
+        var closed = false
+        val lease = { scope: CalendarScope ->
+            if (scope != frozen.scope || closed) false else {
+                val allowed = titleUpdateFormat == frozen.format && admit(scope)
+                if (!allowed) closed = true
+                allowed
+            }
+        }
+        suspend fun active(): Boolean {
+            currentCoroutineContext().ensureActive()
+            val allowed = lease(frozen.scope)
+            currentCoroutineContext().ensureActive()
+            return allowed
+        }
+        return try {
+            currentCoroutineContext().ensureActive()
+            if (frozen.state != TitleUpdateAttemptState.PREPARED || frozen.protectedEvidence != null || !active())
+                return TitleUpdateSubmissionObservation.Unknown
+            withContext(dispatcher) {
+                if (!active()) return@withContext TitleUpdateSubmissionObservation.Unknown
+                lock.withLock {
+                    currentCoroutineContext().ensureActive()
+                    if (!authenticated || !active()) return@withLock TitleUpdateSubmissionObservation.Unknown
+                    val runtime = graph?.titleUpdates ?: return@withLock TitleUpdateSubmissionObservation.Unknown
+                    if (runtime.titleUpdateFormat != frozen.format) return@withLock TitleUpdateSubmissionObservation.Unknown
+                    val runtimeLease = { scope: CalendarScope ->
+                        if (scope != frozen.scope || closed) false else {
+                            val allowed = runtime.titleUpdateFormat == frozen.format && lease(scope)
+                            if (!allowed) closed = true
+                            allowed
+                        }
+                    }
+                    val result = runtime.submit(frozen, journal, runtimeLease)
+                    if (!active() || !authenticated || runtime.titleUpdateFormat != frozen.format)
+                        return@withLock TitleUpdateSubmissionObservation.Unknown
+                    if (result is TitleUpdateSubmissionObservation.Verified &&
+                        result.attempt == TitleUpdateAttemptIdentity.of(frozen) &&
+                        result.event.eventId == frozen.preparation.intent.base.eventId &&
+                        result.event.content == frozen.preparation.intent.content) result
+                    else TitleUpdateSubmissionObservation.Unknown
+                }
+            }
+        } catch (cancelled: CancellationException) { throw cancelled }
+          catch (_: Exception) { currentCoroutineContext().ensureActive(); TitleUpdateSubmissionObservation.Unknown }
+    }
+
     override suspend fun submit(record: TitleUpdateAttemptRecord, journal: TitleUpdateAttemptJournal): TitleUpdateSubmissionObservation {
         val frozen = record.frozen()
         return titleUpdateOperation { it.submit(frozen, journal) }

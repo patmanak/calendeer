@@ -18,4 +18,10 @@ fun interface CalendarLocalEditPreparationPort {
     /** Local declaration only. Null refuses preparation; a change requires explicit reconciliation. */
     val localTitleFormat: AdapterFormat? get() = null
     suspend fun prepareLocalTitle(intent: LocalEditIntent, timestamp: Instant): LocalEditPreparation
+    /** Read-only fresh preparation with admission around controlled context and crypto stages.
+     * Unsupported implementations deny without calling the unrestricted overload. Null grants
+     * no dispatch; the lease belongs to the caller's original synchronization epoch.
+     */
+    suspend fun prepareLocalTitle(intent: LocalEditIntent, timestamp: Instant,
+        admit: (CalendarScope) -> Boolean): LocalEditPreparation? = null
 }

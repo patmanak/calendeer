@@ -5,6 +5,8 @@ import java.nio.CharBuffer
 import java.nio.ByteBuffer
 import java.nio.charset.CodingErrorAction
 import java.security.MessageDigest
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 
 enum class TitleUpdateAttemptState { PREPARED, OUTCOME_UNKNOWN }
 
@@ -104,10 +106,40 @@ interface TitleUpdateAttemptJournal {
     suspend fun remember(record: TitleUpdateAttemptRecord, admit: (CalendarScope) -> Boolean): Boolean = false
     suspend fun read(scope: CalendarScope, id: MutationId): TitleUpdateAttemptRecord?
     suspend fun claim(expected: TitleUpdateAttemptRecord): Boolean
+    /** Per-call dispatch lease through the durable UNKNOWN commit. Unsupported journals deny
+     * without invoking legacy admission. A committed UNKNOWN is never permission to retry.
+     */
+    suspend fun claim(expected: TitleUpdateAttemptRecord, admit: (CalendarScope) -> Boolean): Boolean = false
     suspend fun retainEvidence(expectedUnknown: TitleUpdateAttemptRecord, protectedEvidence: String)
 }
 
 class TitleUpdateAttemptAdmission(private val journal: TitleUpdateAttemptJournal) {
+    suspend fun dispatch(expected: TitleUpdateAttemptRecord, admit: (CalendarScope) -> Boolean,
+        send: suspend (TitleUpdateAttemptRecord) -> Unit): Boolean {
+        currentCoroutineContext().ensureActive()
+        val frozen = expected.frozen()
+        if (frozen.state != TitleUpdateAttemptState.PREPARED || frozen.protectedEvidence != null) return false
+        var closed = false
+        val lease = { scope: CalendarScope ->
+            if (scope != frozen.scope || closed) false
+            else admit(scope).also { if (!it) closed = true }
+        }
+        suspend fun active(): Boolean {
+            currentCoroutineContext().ensureActive()
+            val allowed = lease(frozen.scope)
+            currentCoroutineContext().ensureActive()
+            return allowed
+        }
+        try {
+            if (!active()) return false
+            val committed = journal.claim(frozen, lease)
+            if (!active() || !committed) return false
+            // Revocation after a successful commit preserves UNKNOWN, even without a send.
+            send(frozen.copy(state = TitleUpdateAttemptState.OUTCOME_UNKNOWN))
+            currentCoroutineContext().ensureActive()
+            return true
+        } catch (failure: Exception) { currentCoroutineContext().ensureActive(); throw failure }
+    }
     suspend fun dispatch(expected: TitleUpdateAttemptRecord, send: suspend (TitleUpdateAttemptRecord) -> Unit): Boolean {
         val frozen = expected.frozen()
         if (frozen.state != TitleUpdateAttemptState.PREPARED || frozen.protectedEvidence != null || !journal.claim(frozen)) return false
@@ -148,6 +180,12 @@ interface CalendarTitleUpdateSubmissionPort {
     suspend fun prepareSubmission(reservation: TitleUpdatePreparationReservation,
         admit: (CalendarScope) -> Boolean): TitleUpdateAttemptRecord? = null
     suspend fun submit(record: TitleUpdateAttemptRecord, journal: TitleUpdateAttemptJournal): TitleUpdateSubmissionObservation
+    /** Scoped dispatch only for exact PREPARED work. Unsupported ports deny without fallback.
+     * UNKNOWN remains held for the separate guarded inspection path. The caller supplies one
+     * epoch lease and still owns current native/SQL qualification; no production mode is granted.
+     */
+    suspend fun submit(record: TitleUpdateAttemptRecord, journal: TitleUpdateAttemptJournal,
+        admit: (CalendarScope) -> Boolean): TitleUpdateSubmissionObservation = TitleUpdateSubmissionObservation.Unknown
     suspend fun inspect(record: TitleUpdateAttemptRecord): TitleUpdateSubmissionObservation
     /** Per-call recovery lease, rechecked around inspection stages. Unsupported implementations
      * deny by default and must never fall back to the unrestricted experimental overload.
