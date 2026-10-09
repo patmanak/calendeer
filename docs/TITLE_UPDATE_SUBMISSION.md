@@ -105,11 +105,38 @@ to the original scope/current format and rejects verification unless every attem
 identity field and the complete expected event content match. Cancellation propagates
 after awaited results, including null or Unknown.
 
-This synchronous-lease boundary is not yet composed with current SQL/Provider owner
-qualification through dispatch or the production worker. A suspended owner callback
-cannot re-enter the authentication facade while its submission mutex is held.
-Preparing work does not supply dispatch admission. Fresh GET followed by PUT remains
-an optimistic controlled-writer experiment, without an atomic server precondition.
+The additional `submit(record, journal, admit, qualifySource)` overload also requires
+a suspending current-owner observation. Unsupported ports deny without using the
+three-argument or legacy overload. Source refusal closes synchronous admission for
+that invocation. The adapter checks the source around journal reads, fresh preparation
+and context qualification, before claim and after its commit. The final order before
+transport is session check, local source qualification, synchronous admission and
+cancellation checks, then send. No further awaited session lookup separates that
+local observation from transport. After response evidence retention, source changes
+prevent further inspection or a verified return without erasing the first evidence.
+During guarded readback, the source is checked before and after inspection; the
+existing session/access checkpoints within inspection are unchanged.
+
+`ImportCoordinator.submitLocalTitleAttempt` is internal and requires explicit network
+allowance. It accepts only an exact durable PREPARED wire without response evidence.
+Under its mutex it retains one generation/policy epoch, observes the account before
+calling the port, and supplies a private local-only qualification callback. This
+callback reads the selected calendar, exact SQL edit, retained capsule, baseline/cache,
+holds, native dirty contents and any transferred CREATE provenance. It uses the cached
+account witness and never calls `currentAccount`, re-enters the authentication facade
+or reacquires the coordinator mutex. The existing preparation/retention paths keep
+their fresh account observations. Transferred events still require the full original
+CREATE chain and released waiting frame; they cannot fall back to ordinary capture.
+
+Only complete, attempt-bound verification can be returned, after exact durable UNKNOWN
+and evidence readback and final local qualification. This operation does not store a
+verified result, acknowledge Android, complete the attempt or activate the worker.
+Independent SQLite databases, the Provider and the session have no distributed commit;
+these are repeated observations, not an atomic native edit precondition. A change after
+the final observation can still race transport. Preparing work does not supply dispatch
+admission. Fresh GET followed by PUT remains an optimistic controlled-writer experiment,
+without an atomic server precondition. A new physical native capture-to-PUT journey and
+production orchestration remain separate work.
 
 ## Stable preparation identity
 
@@ -498,9 +525,10 @@ Readback proves current observed contents, not authorship or immutable remote
 history. This adapter does not advertise general conflict-safe write capability.
 
 There is no production worker or UI toggle for UPDATE. The existing system
-observer continues to retain edits/deletions locally. Before activation, a
-separate owner must bind captured native work to this journal, connect UPDATE
-to production scheduling and qualify the complete service and native journey.
+observer continues to retain edits/deletions locally. The internal owner binding
+now qualifies captured work through guarded submission. Before activation, UPDATE
+must be connected to production scheduling and the complete service and native
+journey must be qualified.
 The internal completion path permits successive locally qualified title cycles;
 it does not activate production UPDATE or establish repeated service submissions.
 Conflict policy, further editable fields, recurrence, invitations and DELETE
@@ -560,6 +588,14 @@ remain separate work.
   cancellation and complete verified bindings. Guarded fresh-preparation fixtures
   check each controlled context/crypto stage. These controlled ports and synthetic
   capsules do not establish service acceptance, native owner dispatch or production activation.
+- `ProtonOwnerQualifiedTitleSubmissionTest` and its facade suite check the suspending
+  local-source contract, final post-session qualification, monotone refusal,
+  cancellation, evidence preservation and no overload fallback. These use controlled
+  ports and synthetic protected fragments. `TitleUpdateSubmissionCoordinatorDeviceTest`
+  uses isolated real SQL journals/owners and controlled native snapshots to check exact
+  wire binding, offline refusal, changed ownership, durable UNKNOWN after claim,
+  CREATE provenance corruption and absence of authentication re-entry. It grants no
+  physical Provider or new service PUT qualification.
 - `TitleUpdatePreparationCoordinatorDeviceTest` composes the guarded helper with
   real isolated SQL owners/journals and controlled native snapshots. It checks
   canonical identity recovery, offline reuse, conflicts, capsule substitutions,

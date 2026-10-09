@@ -76,8 +76,17 @@ Unsupported guarded ports/journals deny without legacy fallback. Revocation afte
 claim preserves UNKNOWN without sending; an already received response can remain
 as immutable evidence after revocation, without authorizing further inspection.
 Guarded submission never re-enters UNKNOWN work or implicitly inspects it.
-Current SQL/Provider qualification through dispatch and worker activation remain
-pending; these controls do not provide a server-side concurrency precondition.
+An internal owner-qualified submission now composes these controls with exact
+SQL ownership, retained preparation and current native contents under the original
+session/policy epoch. Its callback is local-only while the authentication mutex is
+held. Source qualification follows the last suspended session check before send.
+Source changes detected after claim and before send preserve UNKNOWN without
+transport. A verified observation requires exact durable UNKNOWN/evidence and a
+final local qualification, and does
+not persist a verified result or acknowledge Android. Isolated SQL and controlled
+native snapshots qualify this composition; a new native capture-to-PUT journey and
+worker activation remain pending. These observations across independent stores do
+not provide a distributed commit or server-side concurrency precondition.
 The system observer now reuses a retained UPDATE identity and allocates a distinct
 identity after that owner is consumed, for imported and CREATE-handoff events.
 A bounded, scope-bound metadata index lists unresolved title attempts independently

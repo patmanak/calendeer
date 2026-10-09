@@ -186,6 +186,13 @@ interface CalendarTitleUpdateSubmissionPort {
      */
     suspend fun submit(record: TitleUpdateAttemptRecord, journal: TitleUpdateAttemptJournal,
         admit: (CalendarScope) -> Boolean): TitleUpdateSubmissionObservation = TitleUpdateSubmissionObservation.Unknown
+    /** Dispatch also requires current local SQL/native ownership. The suspending callback must
+     * be local-only: do not re-enter this port or its authentication facade. Unsupported ports
+     * deny without falling back to either submission overload. No distributed/server CAS is implied.
+     */
+    suspend fun submit(record: TitleUpdateAttemptRecord, journal: TitleUpdateAttemptJournal,
+        admit: (CalendarScope) -> Boolean,
+        qualifySource: suspend (CalendarScope) -> Boolean): TitleUpdateSubmissionObservation = TitleUpdateSubmissionObservation.Unknown
     suspend fun inspect(record: TitleUpdateAttemptRecord): TitleUpdateSubmissionObservation
     /** Per-call recovery lease, rechecked around inspection stages. Unsupported implementations
      * deny by default and must never fall back to the unrestricted experimental overload.

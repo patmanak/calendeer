@@ -824,6 +824,70 @@ class ImportCoordinator(
           }
     }
 
+    /** Internal submission of already durable wire; offline by default. The local callback
+     * observes ownership without re-entering authentication while its submission lock is held.
+     * A verified observation does not acknowledge Android or durably store a verified result.
+     */
+    suspend fun submitLocalTitleAttempt(record: TitleUpdateAttemptRecord, journal: TitleUpdateAttemptJournal,
+        port: CalendarTitleUpdateSubmissionPort, allowNetwork: Boolean = false): TitleUpdateSubmissionObservation {
+        val frozen = record.frozen()
+        currentCoroutineContext().ensureActive()
+        if (!allowNetwork || frozen.state != TitleUpdateAttemptState.PREPARED || frozen.protectedEvidence != null)
+            return TitleUpdateSubmissionObservation.Unknown
+        return mutex.withLock {
+            val target = frozen.scope
+            val qualification = LocalTitleOwnerQualification(frozen.preparation, frozen.format, port,
+                generation, createPolicyRevision.get())
+            var closed = false
+            val lease = { scope: CalendarScope ->
+                if (scope != target || closed) false else qualification.active().also { if (!it) closed = true }
+            }
+            suspend fun active(): Boolean {
+                currentCoroutineContext().ensureActive()
+                val allowed = lease(target)
+                currentCoroutineContext().ensureActive()
+                return allowed
+            }
+            val source: suspend (CalendarScope) -> Boolean = { scope ->
+                currentCoroutineContext().ensureActive()
+                if (scope != target || !active()) false else {
+                    val qualified = try { qualification.localSourceQualification() == null }
+                    catch (failure: Exception) { closed = true; currentCoroutineContext().ensureActive(); throw failure }
+                    if (!qualified) closed = true
+                    currentCoroutineContext().ensureActive()
+                    val stillActive = active()
+                    qualified && stillActive
+                }
+            }
+            try {
+                // This account lookup is deliberately outside port.submit's authentication lock.
+                if (!qualification.available() || !active()) return@withLock TitleUpdateSubmissionObservation.Unknown
+                store.admitTransaction = lease
+                projection.admitOperation = { lease(target) }
+                val stored = journal.read(target, frozen.id)?.frozen()
+                if (!active() || stored != frozen || !source(target)) return@withLock TitleUpdateSubmissionObservation.Unknown
+                val result = port.submit(frozen, journal, lease, source)
+                currentCoroutineContext().ensureActive()
+                if (!active() || result !is TitleUpdateSubmissionObservation.Verified ||
+                    result.attempt != TitleUpdateAttemptIdentity.of(frozen) ||
+                    result.event.eventId != frozen.preparation.intent.base.eventId ||
+                    result.event.content != frozen.preparation.intent.content)
+                    return@withLock TitleUpdateSubmissionObservation.Unknown
+                val durable = journal.read(target, frozen.id)?.frozen()
+                if (!active() || durable == null || durable.state != TitleUpdateAttemptState.OUTCOME_UNKNOWN ||
+                    durable.protectedEvidence == null ||
+                    durable.copy(state = TitleUpdateAttemptState.PREPARED, protectedEvidence = null) != frozen || !source(target))
+                    return@withLock TitleUpdateSubmissionObservation.Unknown
+                result
+            } catch (cancelled: CancellationException) { throw cancelled }
+              catch (_: Exception) { currentCoroutineContext().ensureActive(); TitleUpdateSubmissionObservation.Unknown }
+              finally {
+                  store.admitTransaction = { false }
+                  projection.admitOperation = { false }
+              }
+        }
+    }
+
     /** Shared current owner observation; callers retain one epoch under the coordinator mutex. */
     private inner class LocalTitleOwnerQualification(private val preparation: LocalEditPreparation,
         private val format: AdapterFormat, private val port: CalendarTitleUpdateSubmissionPort,
@@ -834,18 +898,25 @@ class ImportCoordinator(
         val baseActive = { authenticated && generation == expected && createPolicyRevision.get() == policy &&
             systemCreatesEnabled(target) && hasCalendarPermissions() }
         val active = { baseActive() && remote.format == intent.format && port.titleUpdateFormat == format }
-        suspend fun available(formats: Boolean = true): Boolean {
+        suspend fun available(formats: Boolean = true): Boolean = availableWithAccount(formats) {
+            isCurrent(expected, target.account)
+        }
+        /** Only cached epoch/account and local selection reads; safe inside guarded submit. */
+        private suspend fun availableLocal(): Boolean = availableWithAccount(true) {
+            createAccount.get() == target.account
+        }
+        private suspend fun availableWithAccount(formats: Boolean, accountMatches: suspend () -> Boolean): Boolean {
             currentCoroutineContext().ensureActive()
             fun admitted() = if (formats) active() else baseActive()
             if (!admitted()) return false
-            val current = isCurrent(expected, target.account)
+            val current = accountMatches()
             currentCoroutineContext().ensureActive()
             if (!current || !admitted()) return false
             val selected = store.selections(target.account).singleOrNull { it.scope == target }
             currentCoroutineContext().ensureActive()
             return selected?.enabled == true && selected.available && admitted()
         }
-        private suspend fun sqlQualification(): LocalTitleAttemptRetentionResult? {
+        private suspend fun sqlQualification(available: suspend () -> Boolean): LocalTitleAttemptRetentionResult? {
             if (!available()) return LocalTitleAttemptRetentionResult.INACTIVE
             val owner = store.localEdit(target, event)
             if (!available()) return LocalTitleAttemptRetentionResult.INACTIVE
@@ -864,8 +935,10 @@ class ImportCoordinator(
             if (!available()) return LocalTitleAttemptRetentionResult.INACTIVE
             return if (retainedPreparation == preparation) null else LocalTitleAttemptRetentionResult.UNQUALIFIED
         }
-        suspend fun sourceQualification(): LocalTitleAttemptRetentionResult? {
-            sqlQualification()?.let { return it }
+        suspend fun sourceQualification(): LocalTitleAttemptRetentionResult? = qualifySource { available() }
+        suspend fun localSourceQualification(): LocalTitleAttemptRetentionResult? = qualifySource { availableLocal() }
+        private suspend fun qualifySource(available: suspend () -> Boolean): LocalTitleAttemptRetentionResult? {
+            sqlQualification(available)?.let { return it }
             val hold = capturedRawHold(target)
             if (!available()) return LocalTitleAttemptRetentionResult.INACTIVE
             if (hold.scopeBlocked) return LocalTitleAttemptRetentionResult.UNRESOLVED
@@ -899,7 +972,7 @@ class ImportCoordinator(
                 if (!available()) return LocalTitleAttemptRetentionResult.INACTIVE
                 if (currentHold.holds(event)) return LocalTitleAttemptRetentionResult.UNRESOLVED
             }
-            return sqlQualification()
+            return sqlQualification(available)
         }
     }
 

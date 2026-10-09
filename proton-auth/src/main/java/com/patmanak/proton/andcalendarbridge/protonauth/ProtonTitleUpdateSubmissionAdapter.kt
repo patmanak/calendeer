@@ -95,7 +95,17 @@ internal class ProtonTitleUpdateSubmissionAdapter(private val preparations: Cale
         }
 
     override suspend fun submit(record: TitleUpdateAttemptRecord, journal: TitleUpdateAttemptJournal,
-        admit: (CalendarScope) -> Boolean): TitleUpdateSubmissionObservation {
+        admit: (CalendarScope) -> Boolean): TitleUpdateSubmissionObservation =
+        submitGuarded(record, journal, admit, null)
+
+    override suspend fun submit(record: TitleUpdateAttemptRecord, journal: TitleUpdateAttemptJournal,
+        admit: (CalendarScope) -> Boolean,
+        qualifySource: suspend (CalendarScope) -> Boolean): TitleUpdateSubmissionObservation =
+        submitGuarded(record, journal, admit, qualifySource)
+
+    private suspend fun submitGuarded(record: TitleUpdateAttemptRecord, journal: TitleUpdateAttemptJournal,
+        admit: (CalendarScope) -> Boolean,
+        qualifySource: (suspend (CalendarScope) -> Boolean)?): TitleUpdateSubmissionObservation {
         val frozen = record.frozen()
         var closed = false
         val lease = { scope: CalendarScope ->
@@ -111,17 +121,31 @@ internal class ProtonTitleUpdateSubmissionAdapter(private val preparations: Cale
             currentCoroutineContext().ensureActive()
             check(allowed) { "Title submission admission is closed" }
         }
+        suspend fun source() {
+            access()
+            if (qualifySource != null) {
+                val qualified = try { qualifySource(frozen.scope) }
+                catch (failure: Exception) { closed = true; currentCoroutineContext().ensureActive(); throw failure }
+                if (!qualified) closed = true
+                // A dependency returning false after swallowing cancellation cannot end normally.
+                access()
+            }
+        }
         return guarded {
             currentCoroutineContext().ensureActive()
             if (frozen.state != TitleUpdateAttemptState.PREPARED || frozen.protectedEvidence != null)
                 return@guarded TitleUpdateSubmissionObservation.Unknown
-            access()
+            source()
             val stored = journal.read(frozen.scope, frozen.id)?.frozen()
-            access()
+            source()
             if (stored != frozen) return@guarded TitleUpdateSubmissionObservation.Unknown
             // UNKNOWN never enters this path, including a stale PREPARED caller after claim.
             val session = session(frozen.scope)
-            val checkpoint: suspend () -> Unit = { checkInspection(session, frozen.scope, lease) }
+            val checkpoint: suspend () -> Unit = {
+                checkInspection(session, frozen.scope, lease)
+                // This callback is local-only and must not re-enter the authentication facade.
+                source()
+            }
             checkpoint()
             val submission = codec.open(frozen)
             checkpoint()

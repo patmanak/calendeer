@@ -134,7 +134,17 @@ internal class SerializedAuthenticationPort(
           catch (failure: Exception) { currentCoroutineContext().ensureActive(); throw failure }
     }
     override suspend fun submit(record: TitleUpdateAttemptRecord, journal: TitleUpdateAttemptJournal,
-        admit: (CalendarScope) -> Boolean): TitleUpdateSubmissionObservation {
+        admit: (CalendarScope) -> Boolean): TitleUpdateSubmissionObservation =
+        submitGuarded(record, journal, admit, null)
+
+    override suspend fun submit(record: TitleUpdateAttemptRecord, journal: TitleUpdateAttemptJournal,
+        admit: (CalendarScope) -> Boolean,
+        qualifySource: suspend (CalendarScope) -> Boolean): TitleUpdateSubmissionObservation =
+        submitGuarded(record, journal, admit, qualifySource)
+
+    private suspend fun submitGuarded(record: TitleUpdateAttemptRecord, journal: TitleUpdateAttemptJournal,
+        admit: (CalendarScope) -> Boolean,
+        qualifySource: (suspend (CalendarScope) -> Boolean)?): TitleUpdateSubmissionObservation {
         val frozen = record.frozen()
         var closed = false
         val lease = { scope: CalendarScope ->
@@ -168,7 +178,27 @@ internal class SerializedAuthenticationPort(
                             allowed
                         }
                     }
-                    val result = runtime.submit(frozen, journal, runtimeLease)
+                    val runtimeSource: suspend (CalendarScope) -> Boolean = { scope ->
+                        currentCoroutineContext().ensureActive()
+                        val allowed = runtimeLease(scope)
+                        currentCoroutineContext().ensureActive()
+                        if (!allowed) false else {
+                            val qualified = try { checkNotNull(qualifySource)(scope) }
+                            catch (failure: Exception) { closed = true; currentCoroutineContext().ensureActive(); throw failure }
+                            if (!qualified) closed = true
+                            currentCoroutineContext().ensureActive()
+                            val stillAllowed = runtimeLease(scope)
+                            currentCoroutineContext().ensureActive()
+                            qualified && stillAllowed
+                        }
+                    }
+                    if (qualifySource != null && !runtimeSource(frozen.scope))
+                        return@withLock TitleUpdateSubmissionObservation.Unknown
+                    val result = if (qualifySource == null) runtime.submit(frozen, journal, runtimeLease)
+                        else runtime.submit(frozen, journal, runtimeLease, runtimeSource)
+                    currentCoroutineContext().ensureActive()
+                    if (qualifySource != null && !runtimeSource(frozen.scope))
+                        return@withLock TitleUpdateSubmissionObservation.Unknown
                     if (!active() || !authenticated || runtime.titleUpdateFormat != frozen.format)
                         return@withLock TitleUpdateSubmissionObservation.Unknown
                     if (result is TitleUpdateSubmissionObservation.Verified &&
