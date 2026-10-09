@@ -727,6 +727,22 @@ remain separate work.
   production snapshots, original journals, calendars and the native account are
   checked; only newly created isolated calendars/databases are cleaned up. Those
   snapshots do not prove absence of unrelated background activity between reads.
+- `CalendarTitleGuardedJourneyLiveDeviceTest` requires
+  `calendarTitleGuardedJourney=true`, an enrolled account hash and a new immutable
+  fixture token. It creates a new synthetic timed event as its remote base, then
+  captures a real title edit in a separate native namespace. Actual Proton capsule
+  and guarded wire preparation precede owner-qualified submission and exact durable
+  result retention. The `submit` phase stops before native acknowledgement. After
+  an explicit process stop, `recover` reads the same proof without a title or CREATE
+  service port, acknowledges only native metadata and completes the attempt.
+  A later dirty edit remains capturable against the new baseline; old recovery
+  never consumes that owner or sends again. `titleGuardedDropMarkers=true` removes
+  descriptive phase markers to verify that durable proof and exact owners govern
+  recovery. Event, isolated native calendar and journals remain for inspection.
+  This qualifies an ordinary imported timed profile across ordered process
+  restarts, not transferred CREATE handoff, arbitrary transport interruption,
+  Samsung editing or automatic UPDATE. Application startup can independently
+  perform network activity; the offline guarantee applies to the recovery path.
 
 Live tests must never run indiscriminately or replace an unresolved fixture with
 a new identity. Local tests do not establish service acceptance or Samsung UI

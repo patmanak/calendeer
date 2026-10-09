@@ -43,8 +43,10 @@ atomically while preserving the immutable creation evidence. A separate internal
 completion binds the first durable result to its RESTORED receipt. Immutable
 receipt history supports successive title cycles and old replay without consuming
 the next intent. The original UNKNOWN attempt remains non-resendable; unresolved
-work and corrupt history block new admission across generations. The complete native
-capture-to-UPDATE submission journey and automatic activation are unqualified.
+work and corrupt history block new admission across generations. A gated ordinary
+timed-event journey now qualifies real native capture, Proton preparation and guarded
+submission through durable proof and restarted offline recovery. Transferred CREATE
+submission journeys, broader event profiles and automatic activation remain unqualified.
 An internal offline binding now retains an already prepared title wire only for
 the exact current SQL owner, preparation capsule and complete native dirty edit.
 Transferred CREATE events require their original provenance and released waiting
@@ -95,8 +97,15 @@ controlled submission, durable results and offline acknowledgement/completion.
 Reconstruction of every SQL store and the coordinator preserves the same native
 row, later dirty edits and original CREATE provenance across restoration and
 completion gaps. This reconstruction occurs within one process; wire preparation
-and remote verification remain synthetic. A new native capture-to-Proton PUT
-journey and worker activation remain pending. These observations across independent stores do
+and remote verification remain synthetic. A separate gated live fixture qualifies
+one new ordinary timed capture-to-Proton PUT journey, retaining the full result
+before an explicit process stop. Two fresh processes complete and replay recovery
+without a title service port, preserving a later captured dirty edit even when
+descriptive phase markers are removed. The fixture retains its new synthetic
+remote event, isolated native calendar and journals. This proves recovery across
+an ordered process restart, not arbitrary interruption during transport or absence
+of the application's independent background traffic. Worker activation remains
+pending. These observations across independent stores do
 not provide a distributed commit or server-side concurrency precondition.
 The system observer now reuses a retained UPDATE identity and allocates a distinct
 identity after that owner is consumed, for imported and CREATE-handoff events.
