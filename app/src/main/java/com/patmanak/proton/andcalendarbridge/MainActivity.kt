@@ -89,7 +89,8 @@ class MainActivity : ComponentActivity() {
                                 Manifest.permission.READ_CALENDAR, Manifest.permission.WRITE_CALENDAR)) },
                             onOpenSettings = { startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
                                 Uri.parse("package:$packageName"))) })
-                        SystemCreatePanel(importState, systemCreates, preferences.systemCreates::setEnabled)
+                        SystemCreatePanel(importState, systemCreates, preferences.systemCreates::setEnabled,
+                            onTitlesMode = preferences.systemCreates::setTitlesEnabled)
                     },
                 )
             }

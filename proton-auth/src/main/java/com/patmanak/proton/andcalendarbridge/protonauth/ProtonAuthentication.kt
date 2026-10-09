@@ -99,6 +99,54 @@ internal class SerializedAuthenticationPort(
             }
         }
     }
+    override suspend fun prepareLocalTitle(intent: LocalEditIntent, timestamp: java.time.Instant,
+        admit: (CalendarScope) -> Boolean): LocalEditPreparation? {
+        currentCoroutineContext().ensureActive()
+        // Capture the complete supported intent before dispatcher/lock suspension. This
+        // overload never borrows the unrestricted runtime preparation capability.
+        val frozen = freezeLocalTitleRequest(intent, timestamp)
+        val expectedFormat = localTitleFormat
+        var closed = false
+        val lease = { scope: CalendarScope ->
+            if (scope != frozen.scope || closed) false else {
+                val allowed = localTitleFormat == expectedFormat && admit(scope)
+                if (!allowed) closed = true
+                allowed
+            }
+        }
+        suspend fun active(): Boolean {
+            currentCoroutineContext().ensureActive()
+            val allowed = lease(frozen.scope)
+            currentCoroutineContext().ensureActive()
+            return allowed
+        }
+        return try {
+            if (!active()) return null
+            withContext(dispatcher) {
+                if (!active()) return@withContext null
+                lock.withLock {
+                    currentCoroutineContext().ensureActive()
+                    if (!authenticated || !active()) return@withLock null
+                    val runtime = graph?.localEdits ?: return@withLock null
+                    if (runtime.localTitleFormat != expectedFormat) return@withLock null
+                    val runtimeLease = { scope: CalendarScope ->
+                        if (scope != frozen.scope || closed) false else {
+                            val allowed = authenticated && runtime.localTitleFormat == expectedFormat && lease(scope)
+                            if (!allowed) closed = true
+                            allowed
+                        }
+                    }
+                    val result = runtime.prepareLocalTitle(frozen, timestamp, runtimeLease)
+                    currentCoroutineContext().ensureActive()
+                    if (!active() || !authenticated || runtime.localTitleFormat != expectedFormat) return@withLock null
+                    result?.takeIf { it.intent == frozen && it.timestamp == timestamp && it.format == expectedFormat }
+                        ?.copy(intent = frozen)
+                }
+            }
+        } catch (cancelled: CancellationException) { throw cancelled }
+          catch (failure: Exception) { currentCoroutineContext().ensureActive(); throw failure }
+          finally { closed = true }
+    }
     override suspend fun prepareSubmission(draft: CalendarCreateDraft): PreparedCalendarCreate = submissionOperation { it.prepareSubmission(draft) }
     override suspend fun prepareSubmission(id: MutationId, preparation: LocalEditPreparation): TitleUpdateAttemptRecord {
         val frozen = preparation.copy(intent = LocalEditPreparation.freezeIntent(preparation.intent))

@@ -45,6 +45,29 @@ class SystemCreateWorkStoreDeviceTest {
         finally { store.close(); base.deleteDatabase(name); base.deleteSharedPreferences(preferenceName) }
     }
 
+    @Test fun titleOptInIsSeparateScopedAndNeverInheritedFromCreation() = fixture { context, name, store ->
+        store.setMode(scope, true)
+        assertFalse(store.titlesEnabled(scope))
+        store.setTitlesMode(scope, true)
+        assertTrue(store.titlesEnabled(scope))
+        for (other in listOf(scope.copy(account = AccountId("other")), scope.copy(calendar = CalendarId("other")),
+            scope.copy(generation = 1))) { store.setMode(other, true); assertFalse(store.titlesEnabled(other)) }
+        store.close()
+        SystemCreateWorkStore(context, name).use { reopened ->
+            assertTrue(reopened.titlesEnabled(scope)); assertTrue(reopened.modeEnabled(scope))
+            reopened.setTitlesMode(scope, false)
+            assertFalse(reopened.titlesEnabled(scope)); assertTrue(reopened.modeEnabled(scope))
+        }
+    }
+
+    @Test fun disablingCreationClearsTitleConsentAndReenablingDoesNotRestoreIt() = fixture { _, _, store ->
+        store.setTitlesMode(scope, true); assertFalse(store.titlesEnabled(scope))
+        store.setMode(scope, true); store.setTitlesMode(scope, true)
+        assertTrue(store.titlesEnabled(scope))
+        store.setMode(scope, false); assertFalse(store.titlesEnabled(scope))
+        store.setMode(scope, true); assertFalse(store.titlesEnabled(scope))
+    }
+
     @Test fun freshSchemaStoresOnlyIdentityAndReservationsSurviveReopen() = fixture { context, name, store ->
         val first = store.reserve(scope, 7)
         assertEquals(SystemCreateWorkStatus.PENDING, first.status)

@@ -25,6 +25,8 @@ import com.patmanak.proton.andcalendarbridge.data.outgoing.SystemCreateControlle
 import com.patmanak.proton.andcalendarbridge.data.outgoing.TitleUpdateAttemptStore
 import com.patmanak.proton.andcalendarbridge.data.outgoing.AndroidTitleRecoveryCursorStore
 import com.patmanak.proton.andcalendarbridge.data.outgoing.SystemTitleRecoveryController
+import com.patmanak.proton.andcalendarbridge.data.outgoing.SystemTitleUpdateController
+import com.patmanak.proton.andcalendarbridge.data.outgoing.CoordinatorSystemTitleOperations
 
 class BridgeApplication : Application() {
     private val authenticationScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -39,14 +41,23 @@ class BridgeApplication : Application() {
         SystemTitleRecoveryController(AndroidTitleRecoveryCursorStore(this),
             { query -> imports.recoverLocalTitles(query, titleAttempts) })
     }
+    private val titleUpdates by lazy {
+        SystemTitleUpdateController(
+            AndroidTitleRecoveryCursorStore(this, "calendar-title-owner-cursors"),
+            AndroidTitleRecoveryCursorStore(this, "calendar-title-inspection-cursors"),
+            CoordinatorSystemTitleOperations(imports, titleAttempts,
+                ProtonAuthentication.localEditPreparations(this), ProtonAuthentication.titleUpdates(this)),
+            { target -> titleRecovery.reset(target) })
+    }
     val systemCreates by lazy { SystemCreateController(this, imports, nativeCalendar, systemCreateWork,
         localCreateCaptures, createAttempts, ProtonAuthentication.createSubmissions(this), authenticationScope,
-        titleRecovery = titleRecovery) }
+        titleRecovery = titleRecovery, titleUpdates = titleUpdates) }
 
     val imports by lazy {
         ImportCoordinator(this, ImportStore(this), ProtonAuthentication.events(this),
             nativeCalendar, authenticationScope, creates = createAttempts,
-            localCreates = localCreateCaptures, systemCreatesEnabled = systemCreateWork::modeEnabled)
+            localCreates = localCreateCaptures, systemCreatesEnabled = systemCreateWork::modeEnabled,
+            systemTitlesEnabled = systemCreateWork::titlesEnabled)
     }
 
     // App-owned: activity recreation must neither repeat login nor revoke a retained session.

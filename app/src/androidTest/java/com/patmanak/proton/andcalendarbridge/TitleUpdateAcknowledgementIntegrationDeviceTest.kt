@@ -19,6 +19,8 @@ import com.patmanak.proton.andcalendarbridge.data.outgoing.TitleUpdateAttemptSto
 import com.patmanak.proton.andcalendarbridge.data.outgoing.SystemTitleRecoveryController
 import com.patmanak.proton.andcalendarbridge.data.outgoing.SystemTitleRecoveryProgress
 import com.patmanak.proton.andcalendarbridge.data.outgoing.AndroidTitleRecoveryCursorStore
+import com.patmanak.proton.andcalendarbridge.data.outgoing.CoordinatorSystemTitleOperations
+import com.patmanak.proton.andcalendarbridge.data.outgoing.SystemTitleUpdateController
 import com.patmanak.proton.andcalendarbridge.sync.*
 import com.patmanak.proton.andcalendarbridge.sync.catalog.CalendarSummary
 import java.nio.ByteBuffer
@@ -109,10 +111,11 @@ class TitleUpdateAcknowledgementIntegrationDeviceTest {
             override suspend fun fetch(request: PageRequest): RemotePage = error("Synthetic result fixture cannot download")
             override suspend fun dispatch(mutation: Mutation): DispatchResult = error("Synthetic result fixture cannot upload")
         }
+        private var titlesAllowed = false
         private fun newCoordinator() = ImportCoordinator(context, store, remote, projection, jobs, scheduler,
             creates = if (transferred) createAttempts else null,
             localCreates = if (transferred) captures else null,
-            systemCreatesEnabled = { it == target })
+            systemCreatesEnabled = { it == target }, systemTitlesEnabled = { it == target && titlesAllowed })
         var coordinator = newCoordinator()
             private set
         private var calendar = -1L
@@ -172,6 +175,185 @@ class TitleUpdateAcknowledgementIntegrationDeviceTest {
                 assertEquals(1, preparations); assertEquals(1, submissions); assertEquals(1, sends)
                 assertEquals(0, forbiddenCalls); assertEquals(0, forbiddenAccountReentries)
             }
+        }
+
+        private inner class ControlledCapsulePort : CalendarLocalEditPreparationPort {
+            override val localTitleFormat = preparation.format
+            var guardedCalls = 0
+            var forbiddenCalls = 0
+            var beforeReturn: suspend () -> Unit = {}
+            var returnNull = false
+            override suspend fun prepareLocalTitle(intent: LocalEditIntent, timestamp: Instant): LocalEditPreparation {
+                forbiddenCalls++; error("Production must never use unrestricted capsule preparation")
+            }
+            override suspend fun prepareLocalTitle(intent: LocalEditIntent, timestamp: Instant,
+                admit: (CalendarScope) -> Boolean): LocalEditPreparation? {
+                guardedCalls++
+                assertTrue(admit(target)); assertFalse(admit(target.copy(generation = 1)))
+                assertEquals(preparation.intent, intent); assertEquals(preparation.timestamp, timestamp)
+                beforeReturn()
+                return if (returnNull) null else preparation
+            }
+        }
+
+        private fun toggleTitles(enabled: Boolean) {
+            titlesAllowed = enabled
+            coordinator.systemCreatePolicyChanged(target, enabled)
+        }
+
+        private suspend fun reserveProductionIdentity() {
+            assertEquals(TitleUpdatePreparationReservation.of(prepared),
+                journal.reservePreparation(TitleUpdatePreparationReservation.of(prepared)) { it == target })
+        }
+
+        private suspend fun prepareProduction(capsule: ControlledCapsulePort, port: ControlledTitlePort,
+            timestamp: Instant = preparation.timestamp.plusSeconds(7200),
+            admission: (CalendarScope) -> Boolean = { it == target && titlesAllowed }) = coordinator.prepareSystemTitle(
+                target, base.eventId, preparation.intent.id, MutationId(UUID.randomUUID().toString()), timestamp,
+                journal, capsule, port, admission)
+
+        suspend fun productionTitleOptionOffNeverCallsPorts() {
+            val capsule = ControlledCapsulePort(); val port = ControlledTitlePort(); val before = values()
+            assertEquals(LocalTitleAttemptPreparation.Inactive, prepareProduction(capsule, port))
+            assertNull(coordinator.submitSystemTitle(prepared, journal, port) { it == target })
+            assertEquals(0, capsule.guardedCalls); assertEquals(0, capsule.forbiddenCalls)
+            assertEquals(0, port.preparations); assertEquals(0, port.submissions); assertEquals(0, port.forbiddenCalls)
+            assertNull(journal.read(target, prepared.id)); assertEquals(before, values())
+            allowSql(); assertEquals(preparation, store.localEditPreparation(target, base.eventId))
+        }
+
+        suspend fun productionTitleControllerUsesCanonicalWorkAndCompletesTheRealNativeOwner() {
+            toggleTitles(true); reserveProductionIdentity()
+            val capsule = ControlledCapsulePort(); val port = ControlledTitlePort(); val before = values()
+            val changePrefs = "system-title-integration-changes-$token"
+            val attemptPrefs = "system-title-integration-attempts-$token"
+            var wakes = 0
+            try {
+                val controller = SystemTitleUpdateController(AndroidTitleRecoveryCursorStore(context, changePrefs),
+                    AndroidTitleRecoveryCursorStore(context, attemptPrefs),
+                    CoordinatorSystemTitleOperations(coordinator, journal, capsule, port), {
+                        assertEquals(target, it); wakes++
+                    }, pageSize = 1)
+                assertEquals(SystemTitleRecoveryProgress(more = true), controller.run(target, network = true) { titlesAllowed })
+                port.assertOneExchange(); assertEquals(0, capsule.guardedCalls); assertEquals(0, capsule.forbiddenCalls)
+                assertEquals(1, wakes)
+                val admitted = unknown.copy(protectedEvidence = "synthetic-composed-title-response")
+                assertEquals(admitted, journal.read(target, prepared.id)); assertEquals(result, journal.readVerified(target, prepared.id))
+                assertEquals(preparation.timestamp, journal.read(target, prepared.id)!!.preparation.timestamp)
+                assertEquals(result, journal.readCompletion(target, prepared.id)!!.result)
+                assertSqlRestored(admitted)
+                val after = values()
+                assertEquals(before - setOf(Events.DIRTY, Events.SYNC_DATA2, Events.SYNC_DATA3),
+                    after - setOf(Events.DIRTY, Events.SYNC_DATA2, Events.SYNC_DATA3))
+                assertEquals("0", after[Events.DIRTY]); assertSingleOriginalRow(); assertEquals(1, writes.get())
+                assertEquals(SystemTitleRecoveryProgress(), controller.run(target, network = true, fresh = false) { titlesAllowed })
+                assertEquals(1, wakes); port.assertOneExchange(); assertEquals(after, values())
+                reopenOwner(); assertSqlRestored(admitted)
+                assertEquals(result, journal.readCompletion(target, prepared.id)!!.result)
+            } finally { context.deleteSharedPreferences(changePrefs); context.deleteSharedPreferences(attemptPrefs) }
+        }
+
+        suspend fun productionUnsupportedProfileNeverCallsPorts() {
+            toggleTitles(true)
+            val capsule = ControlledCapsulePort(); val port = ControlledTitlePort(); val before = values()
+            assertEquals(LocalTitleAttemptPreparation.Unsupported, prepareProduction(capsule, port))
+            assertNull(coordinator.submitSystemTitle(prepared, journal, port) { it == target && titlesAllowed })
+            assertEquals(0, capsule.guardedCalls); assertEquals(0, capsule.forbiddenCalls)
+            assertEquals(0, port.preparations); assertEquals(0, port.submissions); assertEquals(0, port.forbiddenCalls)
+            assertNull(journal.read(target, prepared.id)); assertEquals(before, values())
+            allowSql(); assertEquals(preparation, store.localEditPreparation(target, base.eventId))
+            if (transferred) assertOriginalCreateProvenance()
+        }
+
+        suspend fun productionFreshCapsuleUsesOnlyGuardedOverload(revoke: Boolean) {
+            toggleTitles(true)
+            assertEquals(1, store.writableDatabase.delete("local_edit_preparations", null, null))
+            reserveProductionIdentity()
+            val capsule = ControlledCapsulePort(); val port = ControlledTitlePort(); val before = values()
+            if (revoke) capsule.beforeReturn = { toggleTitles(false); toggleTitles(true) }
+            val outcome = prepareProduction(capsule, port, preparation.timestamp)
+            assertEquals(1, capsule.guardedCalls); assertEquals(0, capsule.forbiddenCalls)
+            assertEquals(0, port.submissions); assertEquals(0, port.sends); assertEquals(before, values())
+            allowSql()
+            if (revoke) {
+                assertEquals(LocalTitleAttemptPreparation.Inactive, outcome)
+                assertEquals(0, port.preparations); assertNull(journal.read(target, prepared.id))
+                assertNull(store.localEditPreparation(target, base.eventId))
+            } else {
+                assertEquals(LocalTitleAttemptPreparation.Prepared(prepared), outcome)
+                assertEquals(1, port.preparations); assertEquals(prepared, journal.read(target, prepared.id))
+                assertEquals(preparation, store.localEditPreparation(target, base.eventId))
+            }
+            assertEquals(intent, store.localEdit(target, base.eventId))
+            assertEquals(TitleUpdatePreparationReservation.of(prepared), journal.readPreparationReservation(target, base.eventId))
+        }
+
+        suspend fun productionRevocationBeforeClaimCannotSendAfterModeRestoration() {
+            toggleTitles(true); reserveProductionIdentity()
+            val capsule = ControlledCapsulePort(); val port = ControlledTitlePort()
+            assertEquals(LocalTitleAttemptPreparation.Prepared(prepared), prepareProduction(capsule, port))
+            val before = values()
+            port.beforeClaim = { toggleTitles(false); toggleTitles(true) }
+            assertNull(coordinator.submitSystemTitle(prepared, journal, port) { it == target && titlesAllowed })
+            assertEquals(1, port.submissions); assertEquals(0, port.sends); assertEquals(0, port.forbiddenCalls)
+            assertEquals(prepared, journal.read(target, prepared.id)); assertNull(journal.readVerified(target, prepared.id))
+            assertEquals(before, values()); assertEquals(0, writes.get())
+        }
+
+        suspend fun productionUnknownCannotBePreparedOrSubmittedAgain() {
+            toggleTitles(true); reserveProductionIdentity()
+            val capsule = ControlledCapsulePort(); val port = ControlledTitlePort()
+            assertEquals(LocalTitleAttemptPreparation.Prepared(prepared), prepareProduction(capsule, port))
+            assertEquals(result, coordinator.submitSystemTitle(prepared, journal, port) { it == target && titlesAllowed })
+            val original = journal.read(target, prepared.id)
+            assertEquals(unknown.copy(protectedEvidence = "synthetic-composed-title-response"), original)
+            val before = values()
+            assertEquals(LocalTitleAttemptPreparation.Unresolved, prepareProduction(capsule, port))
+            assertNull(coordinator.submitSystemTitle(prepared, journal, port) { it == target && titlesAllowed })
+            assertEquals(original, journal.read(target, prepared.id)); assertEquals(result, journal.readVerified(target, prepared.id))
+            port.assertOneExchange(); assertEquals(0, capsule.guardedCalls); assertEquals(0, capsule.forbiddenCalls)
+            assertEquals(before, values()); assertEquals("1", before[Events.DIRTY]); assertEquals(0, writes.get())
+            allowSql(); assertEquals(intent, store.localEdit(target, base.eventId))
+        }
+
+        suspend fun productionCancelledNullCapsuleCannotReturnNormally() {
+            toggleTitles(true)
+            assertEquals(1, store.writableDatabase.delete("local_edit_preparations", null, null))
+            val capsule = ControlledCapsulePort(); val port = ControlledTitlePort()
+            capsule.returnNull = true
+            capsule.beforeReturn = { currentCoroutineContext().cancel() }
+            var normalReturn = false
+            supervisorScope {
+                val child = async {
+                    prepareProduction(capsule, port, preparation.timestamp)
+                    normalReturn = true
+                }
+                try { child.await(); fail("Cancellation must propagate") } catch (_: CancellationException) { }
+            }
+            assertFalse(normalReturn); assertEquals(1, capsule.guardedCalls); assertEquals(0, capsule.forbiddenCalls)
+            assertEquals(0, port.preparations); assertEquals(0, port.submissions)
+            assertNull(journal.read(target, prepared.id)); assertNull(journal.readVerified(target, prepared.id))
+            allowSql(); assertNull(store.localEditPreparation(target, base.eventId)); assertEquals(intent, store.localEdit(target, base.eventId))
+        }
+
+        suspend fun productionFrozenRunLeaseCannotSurviveRevocationBetweenPreparationAndSubmission(authentication: Boolean) {
+            toggleTitles(true); reserveProductionIdentity()
+            val capsule = ControlledCapsulePort(); val port = ControlledTitlePort()
+            val lease = coordinator.systemTitleRunAdmission(target)
+            assertTrue(lease(target)); assertFalse(lease(target.copy(generation = 1)))
+            assertEquals(LocalTitleAttemptPreparation.Prepared(prepared), prepareProduction(capsule, port, admission = lease))
+            if (authentication) {
+                val prior = schedules.get()
+                coordinator.authenticationChanged(false); coordinator.authenticationChanged(true)
+                withTimeout(10_000) { while (schedules.get() == prior) delay(10) }
+            } else { toggleTitles(false); toggleTitles(true) }
+            assertFalse("The original run lease must stay closed", lease(target))
+            assertTrue("A later independent run can obtain current access", coordinator.systemTitleRunAdmission(target)(target))
+            val before = values()
+            assertNull(coordinator.submitSystemTitle(prepared, journal, port, lease))
+            assertEquals(0, port.submissions); assertEquals(0, port.sends)
+            assertEquals(prepared, journal.read(target, prepared.id)); assertNull(journal.readVerified(target, prepared.id))
+            assertEquals(before, values()); assertEquals(0, writes.get())
         }
 
         private suspend fun prepareGuarded(port: ControlledTitlePort): TitleUpdateAttemptRecord {
@@ -872,6 +1054,38 @@ class TitleUpdateAcknowledgementIntegrationDeviceTest {
 
     @Test fun ordinaryTimedGuardedSubmissionCompletesOfflineAfterOwnerReopening() = fixture(allDay = false, preparedOnly = true) {
         guardedSubmissionCompletesOfflineAfterReopening()
+    }
+    @Test fun productionTitleOptionDefaultsOffWithoutAnyAdapterCalls() = fixture(allDay = false, preparedOnly = true) {
+        productionTitleOptionOffNeverCallsPorts()
+    }
+    @Test fun optedInTimedTitleControllerRetainsCanonicalProofAndAcknowledgesSameProviderRow() = fixture(allDay = false, preparedOnly = true) {
+        productionTitleControllerUsesCanonicalWorkAndCompletesTheRealNativeOwner()
+    }
+    @Test fun productionTitleOptionRefusesAllDayProfileBeforeAnyAdapterCalls() = fixture(allDay = true, preparedOnly = true) {
+        productionUnsupportedProfileNeverCallsPorts()
+    }
+    @Test fun productionTitleOptionRefusesTransferredCreateBeforeAnyAdapterCalls() = fixture(allDay = false, transferred = true, preparedOnly = true) {
+        productionUnsupportedProfileNeverCallsPorts()
+    }
+    @Test fun productionTitleFirstCapsuleUsesGuardedPreparationOnly() = fixture(allDay = false, preparedOnly = true) {
+        productionFreshCapsuleUsesOnlyGuardedOverload(revoke = false)
+    }
+    @Test fun productionTitleRevokedAndRestoredDuringFirstCapsuleCannotRetainOrPrepareWire() = fixture(allDay = false, preparedOnly = true) {
+        productionFreshCapsuleUsesOnlyGuardedOverload(revoke = true)
+    }
+    @Test fun productionTitleRevokedAndRestoredBeforeClaimCannotSend() = fixture(allDay = false, preparedOnly = true) {
+        productionRevocationBeforeClaimCannotSendAfterModeRestoration()
+    }
+    @Test fun productionTitleUnknownRemainsInspectionOnlyWithoutAnotherPreparationOrSend() = fixture(allDay = false, preparedOnly = true) {
+        productionUnknownCannotBePreparedOrSubmittedAgain()
+    }
+    @Test fun productionTitleCancelledCapsuleReturningNullCannotReturnNormally() = fixture(allDay = false, preparedOnly = true) {
+        productionCancelledNullCapsuleCannotReturnNormally()
+    }
+    @Test fun productionTitleRunLeaseRejectsRestoredPolicyAndAuthenticationAfterPreparation() {
+        for (authentication in listOf(false, true)) fixture(allDay = false, preparedOnly = true) {
+            productionFrozenRunLeaseCannotSurviveRevocationBetweenPreparationAndSubmission(authentication)
+        }
     }
     @Test fun ordinaryAllDayGuardedSubmissionCompletesOfflineAfterOwnerReopening() = fixture(allDay = true, preparedOnly = true) {
         guardedSubmissionCompletesOfflineAfterReopening()

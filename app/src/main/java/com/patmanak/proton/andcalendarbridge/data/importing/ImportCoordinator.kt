@@ -85,6 +85,7 @@ class ImportCoordinator(
     private val creates: CreateAttemptStore? = null,
     private val localCreates: LocalCreateStore? = null,
     private val systemCreatesEnabled: (CalendarScope) -> Boolean = { false },
+    private val systemTitlesEnabled: (CalendarScope) -> Boolean = { false },
 ) {
     private val mutex = Mutex()
     private val serial = AccountSerialExecutor()
@@ -121,6 +122,18 @@ class ImportCoordinator(
         creates?.admitDispatch = { false }
         freshCapturedSubmissions.entries.removeIf { it.key.first == target }
         if (!enabled) pendingCreatePauses[target] = CreatePauseReason.CALENDAR_DISABLED
+    }
+
+    /** Capture once before the worker's first suspension. Fresh API calls cannot renew
+     * a run after logout, selection changes or policy revocation/restoration.
+     */
+    fun systemTitleRunAdmission(target: CalendarScope): (CalendarScope) -> Boolean {
+        val expected = generation
+        val policy = createPolicyRevision.get()
+        return { scope -> scope == target && authenticated && generation == expected &&
+            createPolicyRevision.get() == policy && hasCalendarPermissions() &&
+            systemCreatesEnabled(target) && systemTitlesEnabled(target) &&
+            state.value.selections.any { it.scope == target && it.enabled && it.available } }
     }
 
     suspend fun configureSystemCalendar(target: CalendarScope): Boolean = mutex.withLock {
@@ -479,9 +492,18 @@ class ImportCoordinator(
         recoverLocalTitlesLocked(query, journal)
     }
 
+    /** Opt-in network inspection only; durable historical proofs keep their offline admission. */
+    suspend fun inspectSystemTitles(query: TitleUpdateWorkQuery, journal: TitleUpdateRecoveryJournal,
+        port: CalendarTitleUpdateSubmissionPort, admission: (CalendarScope) -> Boolean,
+        proofRetained: () -> Unit): TitleUpdateRecoveryProgress = mutex.withLock {
+        recoverLocalTitlesLocked(query, journal, port, allowNetwork = true,
+            networkAdmission = admission, proofRetained = proofRetained)
+    }
+
     private suspend fun recoverLocalTitlesLocked(query: TitleUpdateWorkQuery,
         journal: TitleUpdateOfflineRecoveryJournal, inspection: CalendarTitleUpdateSubmissionPort? = null,
-        allowNetwork: Boolean = false): TitleUpdateRecoveryProgress {
+        allowNetwork: Boolean = false, networkAdmission: ((CalendarScope) -> Boolean)? = null,
+        proofRetained: () -> Unit = {}): TitleUpdateRecoveryProgress {
         val target = query.scope
         val expected = generation
         val policy = createPolicyRevision.get()
@@ -529,9 +551,23 @@ class ImportCoordinator(
                         held++; continue
                     }
                     if (!available()) return progress(inactive = true)
-                    val result = journal.readVerified(target, reference.id) ?: recovery?.recover(
-                        target, reference.id, allowNetwork, admit = { it == target && active() },
-                        checkAccess = { available() })
+                    val historical = journal.readVerified(target, reference.id)
+                    suspend fun networkAvailable(): Boolean {
+                        if (!available()) return false
+                        if (networkAdmission == null) return true
+                        if (!systemTitlesEnabled(target) || !networkAdmission(target) ||
+                            !systemTitleProfile(record.preparation.intent)) return false
+                        val role = store.capturedHandoff(target, reference.eventId)
+                        val hold = capturedRawHold(target)
+                        currentCoroutineContext().ensureActive()
+                        return role == null && !hold.scopeBlocked && !hold.holds(reference.eventId) &&
+                            active() && systemTitlesEnabled(target) && networkAdmission(target)
+                    }
+                    val result = historical ?: if (recovery != null && networkAvailable()) recovery.recover(
+                        target, reference.id, allowNetwork, admit = { it == target && active() &&
+                            (networkAdmission == null || (systemTitlesEnabled(target) && networkAdmission(target))) },
+                        checkAccess = { networkAvailable() }) else null
+                    if (historical == null && result != null) proofRetained()
                     if (!available()) return progress(inactive = true)
                     if (result == null) { held++; continue }
                     check(result.record == record.copy(protectedEvidence = null)) { "Invalid title recovery result" }
@@ -845,7 +881,8 @@ class ImportCoordinator(
 
     private suspend fun submitLocalTitleAttemptGuarded(record: TitleUpdateAttemptRecord,
         journal: TitleUpdateAttemptJournal, port: CalendarTitleUpdateSubmissionPort,
-        allowNetwork: Boolean, results: TitleUpdateResultJournal?): TitleSubmissionOutcome {
+        allowNetwork: Boolean, results: TitleUpdateResultJournal?, systemTitle: Boolean = false,
+        admission: (CalendarScope) -> Boolean = { true }): TitleSubmissionOutcome {
         val unresolved = TitleSubmissionOutcome()
         val frozen = record.frozen()
         currentCoroutineContext().ensureActive()
@@ -854,7 +891,7 @@ class ImportCoordinator(
         return mutex.withLock {
             val target = frozen.scope
             val qualification = LocalTitleOwnerQualification(frozen.preparation, frozen.format, port,
-                generation, createPolicyRevision.get())
+                generation, createPolicyRevision.get(), systemTitle, admission)
             var closed = false
             val lease = { scope: CalendarScope ->
                 if (scope != target || closed) false else qualification.active().also { if (!it) closed = true }
@@ -923,15 +960,98 @@ class ImportCoordinator(
         }
     }
 
+    private fun systemTitleProfile(intent: LocalEditIntent): Boolean =
+        intent.state == LocalEditState.PAUSED && intent.base.content.time is EventTime.Timed &&
+            intent.base.content.details == EventDetails() && intent.base.content.recurrence == null &&
+            intent.base.content.colorRgb == null && intent.content != intent.base.content &&
+            intent.content == intent.base.content.copy(title = intent.content.title)
+
+    /** Current ordinary source only, never a fallback for transferred CREATE history. */
+    private suspend fun systemTitleSource(intent: LocalEditIntent, active: () -> Boolean): Boolean {
+        currentCoroutineContext().ensureActive()
+        if (!active() || !systemTitleProfile(intent)) return false
+        val target = intent.scope
+        val event = intent.base.eventId
+        if (store.localEdit(target, event) != intent || !active()) return false
+        if (store.capturedHandoff(target, event) != null || !active()) return false
+        val hold = capturedRawHold(target)
+        if (!active() || hold.scopeBlocked || hold.holds(event)) return false
+        val observed = projection.captureOwnedSimpleEdit(target, intent.base)
+        currentCoroutineContext().ensureActive()
+        if (!active() || observed?.content != intent.content) return false
+        if (store.capturedHandoff(target, event) != null || !active()) return false
+        val after = capturedRawHold(target)
+        currentCoroutineContext().ensureActive()
+        return active() && !after.scopeBlocked && !after.holds(event) && store.localEdit(target, event) == intent && active()
+    }
+
+    /** Production-only opt-in preparation. Capsule and wire keep the original epoch and timestamp. */
+    suspend fun prepareSystemTitle(target: CalendarScope, event: EventId, owner: MutationId,
+        attempt: MutationId, timestamp: java.time.Instant, journal: TitleUpdatePreparationJournal,
+        localPort: CalendarLocalEditPreparationPort, titlePort: CalendarTitleUpdateSubmissionPort,
+        admission: (CalendarScope) -> Boolean): LocalTitleAttemptPreparation {
+        var expected = -1L
+        var policy = -1L
+        var capsule: LocalEditPreparation? = null
+        val refusal = mutex.withLock {
+            expected = generation; policy = createPolicyRevision.get()
+            val active = { authenticated && generation == expected && createPolicyRevision.get() == policy &&
+                systemCreatesEnabled(target) && systemTitlesEnabled(target) && hasCalendarPermissions() && admission(target) }
+            try {
+                if (!active() || !isCurrent(expected, target.account)) return@withLock LocalTitleAttemptPreparation.Inactive
+                store.admitTransaction = { it == target && active() }
+                projection.admitOperation = active
+                val intent = store.localEdit(target, event) ?: return@withLock LocalTitleAttemptPreparation.Unqualified
+                if (intent.id != owner || !systemTitleSource(intent, active)) return@withLock LocalTitleAttemptPreparation.Unsupported
+                val retained = store.localEditPreparation(target, event)
+                if (!active()) return@withLock LocalTitleAttemptPreparation.Inactive
+                val actualTime = retained?.timestamp ?: timestamp
+                val result = prepareLocalTitleLocked(target, event, owner, actualTime, localPort, expected, policy,
+                    systemTitle = true, admission = admission)
+                if (!active()) return@withLock LocalTitleAttemptPreparation.Inactive
+                when (result) {
+                    LocalTitlePreparationResult.RETAINED, LocalTitlePreparationResult.HISTORICAL -> Unit
+                    LocalTitlePreparationResult.INACTIVE -> return@withLock LocalTitleAttemptPreparation.Inactive
+                    LocalTitlePreparationResult.CONFLICT -> return@withLock LocalTitleAttemptPreparation.Conflict
+                    LocalTitlePreparationResult.UNSUPPORTED -> return@withLock LocalTitleAttemptPreparation.Unsupported
+                    LocalTitlePreparationResult.UNAVAILABLE -> return@withLock LocalTitleAttemptPreparation.Unavailable
+                    else -> return@withLock LocalTitleAttemptPreparation.Unqualified
+                }
+                store.admitTransaction = { it == target && active() }
+                capsule = store.localEditPreparation(target, event)
+                if (!active() || capsule?.intent != intent || capsule?.timestamp != actualTime)
+                    return@withLock LocalTitleAttemptPreparation.Unqualified
+                null
+            } catch (cancelled: CancellationException) { throw cancelled }
+              catch (_: Exception) { currentCoroutineContext().ensureActive(); LocalTitleAttemptPreparation.Unavailable }
+              finally { store.admitTransaction = { false }; projection.admitOperation = { false } }
+        }
+        if (refusal != null) return refusal
+        val prepared = capsule ?: return LocalTitleAttemptPreparation.Unresolved
+        val format = titlePort.titleUpdateFormat ?: return LocalTitleAttemptPreparation.Unsupported
+        val lease = { scope: CalendarScope -> scope == target && generation == expected &&
+            createPolicyRevision.get() == policy && admission(scope) }
+        return prepareLocalTitleAttempt(TitleUpdatePreparationReservation(attempt, prepared, format),
+            journal, titlePort, allowNetwork = true, systemTitle = true, admission = lease)
+    }
+
+    /** Production title submission; the original worker admission participates through commit. */
+    suspend fun submitSystemTitle(record: TitleUpdateAttemptRecord, journal: TitleUpdateRecoveryJournal,
+        port: CalendarTitleUpdateSubmissionPort, admission: (CalendarScope) -> Boolean): TitleUpdateVerifiedResult? =
+        submitLocalTitleAttemptGuarded(record, journal, port, true, journal, systemTitle = true,
+            admission = admission).verifiedResult
+
     /** Shared current owner observation; callers retain one epoch under the coordinator mutex. */
     private inner class LocalTitleOwnerQualification(private val preparation: LocalEditPreparation,
         private val format: AdapterFormat, private val port: CalendarTitleUpdateSubmissionPort,
-        private val expected: Long, private val policy: Long) {
+        private val expected: Long, private val policy: Long, private val systemTitle: Boolean = false,
+        private val admission: (CalendarScope) -> Boolean = { true }) {
         private val target = preparation.intent.scope
         private val intent = preparation.intent
         private val event = intent.base.eventId
         val baseActive = { authenticated && generation == expected && createPolicyRevision.get() == policy &&
-            systemCreatesEnabled(target) && hasCalendarPermissions() }
+            systemCreatesEnabled(target) && hasCalendarPermissions() && admission(target) &&
+            (!systemTitle || systemTitlesEnabled(target)) }
         val active = { baseActive() && remote.format == intent.format && port.titleUpdateFormat == format }
         suspend fun available(formats: Boolean = true): Boolean = availableWithAccount(formats) {
             isCurrent(expected, target.account)
@@ -979,6 +1099,8 @@ class ImportCoordinator(
             if (hold.scopeBlocked) return LocalTitleAttemptRetentionResult.UNRESOLVED
             val role = store.capturedHandoff(target, event)
             if (!available()) return LocalTitleAttemptRetentionResult.INACTIVE
+            if (systemTitle && (!systemTitleProfile(intent) || role != null))
+                return LocalTitleAttemptRetentionResult.UNSUPPORTED
             val content = if (role == null) {
                 if (hold.holds(event)) return LocalTitleAttemptRetentionResult.UNRESOLVED
                 projection.captureOwnedSimpleEdit(target, intent.base)?.content
@@ -1016,12 +1138,13 @@ class ImportCoordinator(
      */
     suspend fun prepareLocalTitleAttempt(candidate: TitleUpdatePreparationReservation,
         journal: TitleUpdatePreparationJournal, port: CalendarTitleUpdateSubmissionPort,
-        allowNetwork: Boolean = false): LocalTitleAttemptPreparation {
+        allowNetwork: Boolean = false, systemTitle: Boolean = false,
+        admission: (CalendarScope) -> Boolean = { true }): LocalTitleAttemptPreparation {
         val frozen = candidate.frozen()
         return mutex.withLock {
             val target = frozen.scope
             val qualification = LocalTitleOwnerQualification(frozen.preparation, frozen.format, port,
-                generation, createPolicyRevision.get())
+                generation, createPolicyRevision.get(), systemTitle, admission)
             var refusal: LocalTitleAttemptRetentionResult? = null
             val lease = { scope: CalendarScope -> scope == target && refusal == null && qualification.active() }
             try {
@@ -1134,8 +1257,10 @@ class ImportCoordinator(
 
     private suspend fun prepareLocalTitleLocked(target: CalendarScope, eventId: EventId, id: MutationId,
         timestamp: java.time.Instant, port: CalendarLocalEditPreparationPort,
-        expected: Long, policy: Long): LocalTitlePreparationResult {
-        val active = { authenticated && generation == expected && createPolicyRevision.get() == policy && hasCalendarPermissions() }
+        expected: Long, policy: Long, systemTitle: Boolean = false,
+        admission: (CalendarScope) -> Boolean = { true }): LocalTitlePreparationResult {
+        val active = { authenticated && generation == expected && createPolicyRevision.get() == policy && hasCalendarPermissions() &&
+            admission(target) && (!systemTitle || (systemCreatesEnabled(target) && systemTitlesEnabled(target))) }
         if (!isCurrent(expected, target.account) || !active()) return LocalTitlePreparationResult.INACTIVE
         store.admitTransaction = { it == target && active() }
         var captured: LocalEditIntent? = null
@@ -1152,6 +1277,10 @@ class ImportCoordinator(
                 LocalEditPreparation.freezeIntent(owner)
             } catch (_: Exception) { return LocalTitlePreparationResult.UNQUALIFIED }
             captured = frozen
+            if (systemTitle) {
+                projection.admitOperation = active
+                if (!systemTitleSource(frozen, active)) return LocalTitlePreparationResult.UNSUPPORTED
+            }
             val preparationFormat = port.localTitleFormat ?: return LocalTitlePreparationResult.UNSUPPORTED
             val admission = store.assessLocalTitlePreparation(frozen)
             if (admission != LocalTitlePreparationAdmission.ELIGIBLE) {
@@ -1159,8 +1288,10 @@ class ImportCoordinator(
                 return titlePreparationResult(admission)
             }
             // No store/auth mutex is held while the adapter runs its serialized authenticated reads.
-            val prepared = port.prepareLocalTitle(frozen, timestamp)
+            val prepared = if (systemTitle) port.prepareLocalTitle(frozen, timestamp, { it == target && active() })
+                else port.prepareLocalTitle(frozen, timestamp)
             currentCoroutineContext().ensureActive()
+            if (prepared == null) return if (active()) LocalTitlePreparationResult.UNAVAILABLE else LocalTitlePreparationResult.INACTIVE
             if (prepared.intent != frozen || prepared.timestamp != timestamp || prepared.format != preparationFormat ||
                 port.localTitleFormat != preparationFormat || remote.format != format)
                 return LocalTitlePreparationResult.UNQUALIFIED

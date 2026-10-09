@@ -18,8 +18,11 @@
     <string name="brand_back">Zurück</string>
     <string name="brand_welcome">Ihre Tage, gut verbunden.</string>
     <string name="brand_independent">Unabhängige Anwendung, nicht mit Proton verbunden.</string>
-    <string name="system_create_title">Experimentelle Erstellung</string>
-    <string name="system_create_limits">Erstellen Sie einfache Termine in Ihrer Kalender-App. Erinnerungen, Gäste, Wiederholungen und eigene Farben werden noch nicht unterstützt. Änderungen und Löschungen bleiben lokal und werden nicht an Proton gesendet.</string>
+    <string name="system_create_title">Experimentelle Systemänderungen</string>
+    <string name="system_create_limits">Erstellen Sie einfache Termine in Ihrer Kalender-App, ohne Erinnerungen, Gäste, Wiederholungen oder eigene Farben. Änderungen bleiben lokal, sofern die Titelsynchronisierung nicht ausdrücklich aktiviert ist. Löschungen werden nicht an Proton gesendet.</string>
+    <string name="system_create_mode">Erstellung im Systemkalender erlauben</string>
+    <string name="system_title_mode">Titeländerungen synchronisieren (experimentell)</string>
+    <string name="system_title_limits">Nur Titel: aus Proton importierte, nicht wiederkehrende Termine mit Uhrzeit, ohne Erinnerung oder Gäste. Ganztägige und über Android erstellte Termine sind ausgeschlossen. Änderungen an Datum, Beschreibung und Ort bleiben in Android.</string>
     <string name="system_create_pending">%1$d Erstellungen warten oder müssen geprüft werden. Ein ungewisser Versand wird nie automatisch wiederholt.</string>
     <string name="system_create_error">Die Synchronisierung benötigt eine Prüfung. Ihre Android-Daten bleiben erhalten.</string>
 </resources>

@@ -18,8 +18,11 @@
     <string name="brand_back">Wstecz</string>
     <string name="brand_welcome">Twoje dni, połączone.</string>
     <string name="brand_independent">Niezależna aplikacja, niepowiązana z Proton.</string>
-    <string name="system_create_title">Eksperymentalne tworzenie</string>
-    <string name="system_create_limits">Twórz proste wydarzenia w aplikacji kalendarza. Przypomnienia, goście, powtarzanie i własne kolory nie są jeszcze obsługiwane. Zmiany i usunięcia pozostają lokalne i nie są wysyłane do Proton.</string>
+    <string name="system_create_title">Eksperymentalne zmiany systemowe</string>
+    <string name="system_create_limits">Twórz proste wydarzenia w kalendarzu, bez przypomnień, gości, powtarzania i własnych kolorów. Zmiany pozostają lokalne, chyba że wyraźnie włączysz synchronizację tytułów. Usunięcia nie są wysyłane do Proton.</string>
+    <string name="system_create_mode">Zezwól na tworzenie z kalendarza systemowego</string>
+    <string name="system_title_mode">Synchronizuj zmiany tytułów (eksperymentalne)</string>
+    <string name="system_title_limits">Tylko tytuły: wydarzenia z godzinami importowane z Proton, bez cykliczności, przypomnień i gości. Wydarzenia całodniowe i utworzone przez Androida są wykluczone. Zmiany dat, opisów i miejsc pozostają w Androidzie.</string>
     <string name="system_create_pending">%1$d operacji oczekuje lub wymaga sprawdzenia. Niepewne wysłanie nigdy nie jest automatycznie powtarzane.</string>
     <string name="system_create_error">Synchronizacja wymaga sprawdzenia. Dane Androida są zachowane.</string>
 </resources>

@@ -126,8 +126,19 @@ class SystemCreateWorkStore(context: Context, name: String = "system-creates.db"
     /** Opt-in is scoped to the complete account/calendar/generation and defaults to disabled. */
     fun modeEnabled(scope: CalendarScope): Boolean = modes.getBoolean(modeKey(scope), false)
 
-    fun setMode(scope: CalendarScope, enabled: Boolean) {
-        check(modes.edit().putBoolean(modeKey(scope), enabled).commit()) { "System create mode was not persisted" }
+    @Synchronized fun titlesEnabled(scope: CalendarScope): Boolean =
+        modeEnabled(scope) && modes.getBoolean("titles-${modeKey(scope)}", false)
+
+    @Synchronized fun setTitlesMode(scope: CalendarScope, enabled: Boolean) {
+        check(modes.edit().putBoolean("titles-${modeKey(scope)}", enabled && modeEnabled(scope)).commit()) {
+            "System title mode was not persisted"
+        }
+    }
+
+    @Synchronized fun setMode(scope: CalendarScope, enabled: Boolean) {
+        val update = modes.edit().putBoolean(modeKey(scope), enabled)
+        if (!enabled) update.remove("titles-${modeKey(scope)}")
+        check(update.commit()) { "System create mode was not persisted" }
     }
 
     override fun toString() = "SystemCreateWorkStore(REDACTED)"

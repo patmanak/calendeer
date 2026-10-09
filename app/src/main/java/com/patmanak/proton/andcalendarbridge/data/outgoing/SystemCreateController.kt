@@ -32,6 +32,7 @@ import kotlinx.coroutines.sync.withLock
 /** Metadata only: event contents stay in the existing capture and submission boundaries. */
 data class SystemCreateUiState(
     val enabled: Set<CalendarScope> = emptySet(),
+    val titlesEnabled: Set<CalendarScope> = emptySet(),
     val pending: Map<CalendarScope, Int> = emptyMap(),
     val busy: Boolean = false,
     val failed: Boolean = false,
@@ -40,7 +41,7 @@ data class SystemCreateUiState(
 }
 
 /**
- * Explicit opt-in system CREATE trigger. Native edits/deletes are retained without uploading.
+ * Explicit opt-in system CREATE and narrow title trigger. Other edits/deletes stay retained.
  * All Provider admission stays inside ImportCoordinator's mutex; this owner never borrows or
  * modifies the mutable admission guards of its shared projection/capture dependencies.
  */
@@ -55,6 +56,7 @@ class SystemCreateController(
     private val scope: CoroutineScope,
     private val scheduler: ImportScheduler = WorkManagerImportScheduler(context),
     private val titleRecovery: SystemTitleRecoveryController? = null,
+    private val titleUpdates: SystemTitleUpdateController? = null,
 ) {
     private val context = context.applicationContext
     private val mutableState = MutableStateFlow(SystemCreateUiState())
@@ -88,7 +90,10 @@ class SystemCreateController(
                             else emptySet()
                         val revoked = previous?.active().orEmpty() - signal.active()
                         previous = signal
-                        for (target in revoked) titleRecovery?.reset(target)
+                        for (target in revoked) {
+                            titleRecovery?.reset(target)
+                            titleUpdates?.reset(target)
+                        }
                         updateObserver()
                         imports.reconcileSystemCalendarAccess()
                         publish()
@@ -111,6 +116,7 @@ class SystemCreateController(
         scope.launch {
             try {
                 titleRecovery?.reset(target)
+                titleUpdates?.reset(target)
                 updateObserver()
                 imports.configureSystemCalendar(target)
                 publish()
@@ -126,6 +132,26 @@ class SystemCreateController(
         scheduler.requestNetwork()
     }
 
+    fun setTitlesEnabled(selection: ImportStore.Selection, enabled: Boolean) {
+        val target = selection.scope
+        val current = imports.state.value
+        if (enabled && (!current.authenticated || !current.hasPermission || !work.modeEnabled(target) ||
+            current.selections.none { it.scope == target && it.enabled && it.available })) return
+        work.setTitlesMode(target, enabled)
+        epochs.computeIfAbsent(target) { AtomicLong() }.incrementAndGet()
+        // Synchronous policy revocation also reaches suspended coordinator/adapter leases.
+        imports.systemCreatePolicyChanged(target, work.modeEnabled(target))
+        scope.launch {
+            try {
+                titleUpdates?.reset(target)
+                titleRecovery?.reset(target)
+                publish()
+                request()
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { mutableState.update { it.copy(failed = true) } }
+        }
+    }
+
     /** One bounded page per selected scope; unknown outcomes never cause immediate retry loops. */
     suspend fun run(network: Boolean, fresh: Boolean = true): ImportRunResult = mutex.withLock {
         mutableState.update { it.copy(busy = true, failed = false) }
@@ -134,6 +160,7 @@ class SystemCreateController(
         try {
             for (target in activeScopes()) {
                 val epoch = epochs.computeIfAbsent(target) { AtomicLong() }.get()
+                val titleAdmission = imports.systemTitleRunAdmission(target)
                 if (!active(target, epoch)) continue
                 // A failed native scan/CREATE must not block already durable title proof.
                 // This is the same captured epoch; no new authority is acquired after a pause.
@@ -194,6 +221,11 @@ class SystemCreateController(
                 val further = after > 0 && work.page(target, after, 1).isNotEmpty()
                 saveCursor(target, "jobs", if (further) after else 0)
                 more = more || further
+                val titles = titleUpdates?.run(target, network, fresh) {
+                    active(target, epoch) && titleAdmission(target)
+                }
+                if (titles?.failed == true) mutableState.update { it.copy(failed = true) }
+                more = more || titles?.more == true
             }
             publish()
             when { retry -> ImportRunResult.RETRY; more -> ImportRunResult.CONTINUE; else -> ImportRunResult.COMPLETE }
@@ -320,7 +352,8 @@ class SystemCreateController(
         val selections = imports.state.value.selections
         val enabled = selections.map { it.scope }.filter { work.modeEnabled(it) }.toSet()
         val pending = selections.associate { it.scope to work.count(it.scope) }
-        mutableState.update { it.copy(enabled = enabled, pending = pending) }
+        val titles = selections.map { it.scope }.filter { work.titlesEnabled(it) }.toSet()
+        mutableState.update { it.copy(enabled = enabled, titlesEnabled = titles, pending = pending) }
     }
 
     @Synchronized private fun updateObserver() {

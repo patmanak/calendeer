@@ -18,8 +18,11 @@
     <string name="brand_back">Voltar</string>
     <string name="brand_welcome">Os seus dias, ligados.</string>
     <string name="brand_independent">Aplicação independente, não afiliada ao Proton.</string>
-    <string name="system_create_title">Criação experimental</string>
-    <string name="system_create_limits">Crie eventos simples na aplicação de calendário. Lembretes, convidados, repetições e cores personalizadas ainda não são suportados. Alterações e eliminações permanecem locais e não são enviadas para Proton.</string>
+    <string name="system_create_title">Alterações de sistema experimentais</string>
+    <string name="system_create_limits">Crie eventos simples no calendário, sem lembretes, convidados, repetições ou cores personalizadas. As alterações permanecem locais, exceto se ativar explicitamente a sincronização dos títulos. As eliminações não são enviadas para o Proton.</string>
+    <string name="system_create_mode">Permitir criação no calendário do sistema</string>
+    <string name="system_title_mode">Sincronizar alterações de títulos (experimental)</string>
+    <string name="system_title_limits">Apenas títulos: eventos com horário importados do Proton, sem recorrência, lembretes ou convidados. Os eventos de dia inteiro e criados através do Android estão excluídos. As alterações de datas, descrições e locais permanecem no Android.</string>
     <string name="system_create_pending">%1$d criações pendentes ou por verificar. Um envio incerto nunca é repetido automaticamente.</string>
     <string name="system_create_error">A sincronização requer atenção. Os dados Android são preservados.</string>
 </resources>

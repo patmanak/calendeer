@@ -1,12 +1,42 @@
-# Internal title UPDATE experiment
+# Title UPDATE boundary
 
 The release target remains bidirectional synchronization through Android calendar
 clients. This internal experiment qualifies a narrower service boundary: submitting
 one prepared title change for a simple personal event. A separate internal path
 conditionally acknowledges ordinary imported and transferred CREATE events after their result
-is retained. Production workers now recover already durable results offline;
-new UPDATE preparation, submission and inspection remain unavailable to workers
-and UI controls.
+is retained. Production workers recover already durable results offline. A separate
+per-calendar, default-off option activates the narrower production path below.
+
+## Opt-in production title synchronization
+
+The calendar configuration has independent creation and title switches. Title
+opt-in requires creation mode, selection, availability and calendar permissions.
+Disabling creation atomically clears title consent; enabling creation again does
+not restore it. The setting is scoped to account, calendar and generation.
+
+Production accepts ordinary imported timed events only: known-empty details, no
+color, no recurrence, and exactly a title change. All-day events, CREATE-handoff
+events, broader edits and deletion remain captured locally without upload. The
+interface explains this limit; all editing stays in the system calendar client.
+
+`SystemTitleUpdateController` processes independent durable owner and attempt
+indexes in bounded pages. It first inspects unresolved attempts, then discovers
+paused UPDATE owners. A corrupt owner cannot starve the rest of its page. A single
+worker session/policy lease is frozen before suspension and passed through guarded
+capsule preparation, canonical reservation, wire preparation, source qualification,
+claim, submission, inspection and proof retention. Restoration of access cannot
+renew an old invocation. Unsupported guarded ports deny without fallback.
+
+Reservation reuses the first attempt identity, timestamp and protected request.
+UNKNOWN is inspect-only, even when a local owner remains paused. Fresh network
+proof wakes the exhausted offline traversal once; held or failed work alone does
+not request immediate retries. Offline proof acknowledgement/completion remains
+independent of the new title flag. Exhausted indexes stay closed during other
+calendars' continuations and reopen on an ordinary fresh trigger.
+
+Fresh readback followed by PUT is not server-side compare-and-swap. A concurrent
+service edit can still race the request. This option does not qualify general
+bidirectional editing or Samsung-specific editor behavior.
 
 ## Supported work and ownership
 
@@ -137,8 +167,8 @@ Independent SQLite databases, the Provider and the session have no distributed c
 these are repeated observations, not an atomic native edit precondition. A change after
 the final observation can still race transport. Preparing work does not supply dispatch
 admission. Fresh GET followed by PUT remains an optimistic controlled-writer experiment,
-without an atomic server precondition. A new physical native capture-to-PUT journey and
-production orchestration remain separate work.
+without an atomic server precondition. The opt-in production path composes this
+boundary for its narrower ordinary timed profile.
 
 ## Stable preparation identity
 
@@ -505,7 +535,8 @@ by this controller, UNKNOWN work without proof is not inspected or resent, and
 bare preparation reservations remain intact. Existing session, selection, mode,
 permission, import-format, exact-owner and native-state guards still decide whether
 acknowledgement or completion is permitted. Experimental journals are not adopted
-by production, and automatic title submission remains a separate implementation.
+by production. Automatic title submission uses the separate opt-in controller;
+this offline controller has no network capability.
 
 ## Guarded inspection and result retention
 
@@ -570,8 +601,8 @@ an atomic transaction with the separate result journal; surrounding access reads
 prevent qualified success and native acknowledgement after detected revocation.
 Historical results and pending acknowledgement receipts survive interrupted
 restoration. Reopening can finish using the same receipt without another inspection
-or native write, preserving a later dirty edit. This runner remains internal and
-is not called by production workers or UI controls.
+or native write, preserving a later dirty edit. The production title option calls
+this runner with its frozen admission lease and narrower event profile.
 
 ## Concurrency and integration limits
 
@@ -580,17 +611,25 @@ server precondition**. A concurrent Proton change between them may be overwritte
 Readback proves current observed contents, not authorship or immutable remote
 history. This adapter does not advertise general conflict-safe write capability.
 
-There is no production title-submission worker or UPDATE UI toggle. The existing system
-observer continues to retain edits/deletions locally. The internal owner binding
-now qualifies captured work through guarded submission. Before activation, UPDATE
-must be connected to production scheduling and the complete service and native
-journey must be qualified.
-The internal completion path permits successive locally qualified title cycles;
-it does not activate production UPDATE or establish repeated service submissions.
+The separate title toggle connects a narrow ordinary imported timed-event profile
+to the existing worker. The system observer retains broader edits/deletions
+locally. Wider service/native journeys still require their own qualification.
+The completion path permits successive locally qualified title cycles; this
+does not establish repeated service submissions for every event profile.
 Conflict policy, further editable fields, recurrence, invitations and DELETE
 remain separate work.
 
 ## Repeatable verification
+
+The gated `CalendarTitleGuardedJourneyLiveDeviceTest` also accepts an explicit
+`systemTitleJourney` mode with separate fixture stores and preferences. It captures
+a new ordinary timed native edit, prepares its capsule only through the guarded
+Proton facade, then calls the production preparation/submission APIs. It retains
+the durable UNKNOWN/result before any Provider acknowledgement. Two separate
+processes recover with title capability off, preserve a later dirty edit and
+replay without another send or native write. The new synthetic remote event and
+isolated native namespace are retained. This qualifies that API/service journey,
+not automatic production-worker triggering or a Samsung editor journey.
 
 - `TitleUpdateSubmissionTest` checks commit-before-send, cancellation, transport
   failure, exact identities and observation limits with a controlled journal.

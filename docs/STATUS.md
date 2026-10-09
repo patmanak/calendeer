@@ -23,23 +23,35 @@ and WorkManager pipeline reuse the existing Proton preparation, verified readbac
 same-row acknowledgement and handoff. Read-only remains the default. Pausing or
 disabling creation closes native editing without deleting events; pending work
 stays visible with the mode off. UNKNOWN submissions can only be inspected, never
-automatically sent again. Production UPDATE/DELETE remain held locally without upload.
+automatically sent again. A separate, default-off title option now connects guarded
+preparation, submission and inspection to the existing network worker. It covers
+only ordinary imported timed events with known-empty details, no color, no
+recurrence and a title-only change. All-day, transferred CREATE, multi-field edits
+and DELETE remain held locally without upload.
 The existing local and network workers now traverse the production title journal
 offline, completing only already durable verified results. One bounded page per
 active editable calendar uses a durable scope/protocol-bound cursor. Recovery
 precedes native discovery, so a scan failure cannot block an existing proof.
 Held or failed work alone does not schedule an immediate retry; only a persisted
 continuation advances the traversal. Exhausted calendars stay closed through
-continuations from other work until a fresh trigger. Revocation discards its position. No title
-preparation, claim, submission, inspection or new proof retention is activated.
+continuations from other work until a fresh trigger. Revocation discards its position.
+The title option requires creation mode and current calendar access; disabling
+creation clears title consent. A frozen worker session/policy lease surrounds
+both network indexes and every preparation/send. New proof wakes offline recovery
+once; uncertain work never causes a resend or an immediate retry loop.
+A separate gated service journey qualifies a fresh guarded capsule and the new
+production preparation/submission APIs for one ordinary timed event. Two fresh
+processes recover and replay its durable result with title capability off,
+preserving a later dirty edit. This exercises the real Proton boundary and native
+acknowledgement in an isolated namespace; automatic editor-to-worker triggering
+still needs its own live qualification.
 Known-empty, non-recurring incoming events now use the calendar's opaque local
 owner label to preserve native editing, without a remote organizer or attendee. Ordinary and CREATE-handoff
 capture accept that profile and preserve DIRTY edits. Existing settled rows gain
 the profile on their next projection. The /e/OS event-detail editor saved a title
-that remained capturable after restart on the same row. Samsung editing and
-automatic UPDATE remain unqualified. An [internal title UPDATE experiment](TITLE_UPDATE_SUBMISSION.md)
-adds a separate protected request and durable inspection-only journal, without
-automatic UPDATE submission. Verified full-content results now
+that remained capturable after restart on the same row. Samsung editing remains
+unqualified. The [title UPDATE boundary](TITLE_UPDATE_SUBMISSION.md)
+uses a separate protected request and durable inspection-only journal. Verified full-content results now
 have immutable, attempt-bound storage and an internal inspect-only recovery path;
 retained history can be read offline without releasing the UNKNOWN attempt.
 An internal simple-event acknowledgement reserves a durable receipt, changes
@@ -54,7 +66,7 @@ the next intent. The original UNKNOWN attempt remains non-resendable; unresolved
 work and corrupt history block new admission across generations. A gated ordinary
 timed-event journey now qualifies real native capture, Proton preparation and guarded
 submission through durable proof and restarted offline recovery. Transferred CREATE
-submission journeys, broader event profiles and automatic activation remain unqualified.
+submission journeys and broader event profiles remain unqualified.
 An internal offline binding now retains an already prepared title wire only for
 the exact current SQL owner, preparation capsule and complete native dirty edit.
 Transferred CREATE events require their original provenance and released waiting
@@ -78,7 +90,7 @@ transferred work also requires its original provenance and released waiting fram
 Access, owner or native changes stop admission between suspended steps. A committed
 wire remains in history after invalidation, without reporting current qualification.
 Offline calls recover the canonical durable wire or preserve a bare reservation;
-this path never claims, submits or acknowledges, and production UPDATE remains pending.
+this preparation path never claims, submits or acknowledges by itself.
 The internal submission boundary now has a separate per-call dispatch lease.
 Fresh preparation checks admission around context reads and cryptographic work;
 the SQLite claim checks that lease after locking and immediately before commit.
@@ -112,8 +124,7 @@ without a title service port, preserving a later captured dirty edit even when
 descriptive phase markers are removed. The fixture retains its new synthetic
 remote event, isolated native calendar and journals. This proves recovery across
 an ordered process restart, not arbitrary interruption during transport or absence
-of the application's independent background traffic. Automatic title submission
-remains pending. These observations across independent stores do
+of the application's independent background traffic. These observations across independent stores do
 not provide a distributed commit or server-side concurrency precondition.
 The system observer now reuses a retained UPDATE identity and allocates a distinct
 identity after that owner is consumed, for imported and CREATE-handoff events.
@@ -136,8 +147,8 @@ readback. An internal page runner now combines guarded inspection, durable proof
 same-row acknowledgement and completion under the original session/policy epoch.
 It defaults to offline eligibility, never submits and does not inspect an already
 durable result. Permission/account invalidation also applies without a CREATE
-journal. Guarded network inspection remains disconnected from production scheduling;
-the worker uses only the offline recovery boundary.
+journal. The default-off production title option now also invokes guarded network
+inspection for its narrow profile; already durable proof needs no title opt-in.
 Isolated physical Provider/SQLite integration qualifies same-row acknowledgement,
 interrupted restoration and preservation of a later dirty edit. A distinct supported
 cached observation is now requeued for its exact event atomically with the first
@@ -173,8 +184,8 @@ sessions and imported calendars. See [identity and interface](DESIGN.md).
 
 | Module | Implemented | Not established by this slice |
 | --- | --- | --- |
-| `app` | Configuration, login, discovery, read-only imports and opt-in simple system CREATE; eight languages; durable import/create queues, Calendar Provider projection, permissions and background scheduling. | Broad Android/OEM qualification, general UPDATE/DELETE or complete event feature coverage. |
-| `sync` | Pure scoped models, bounded transactional pagination, access gates, immutable simple local CREATE/UPDATE/DELETE intents, conflict checks, uncertain-outcome write states, internal title submission contract and a separate metadata catalog controller. | General outgoing queue, automatic UPDATE submission or bidirectional reconciliation. |
+| `app` | Configuration, login, discovery, read-only imports, opt-in simple system CREATE and narrow imported title UPDATE; eight languages; durable queues, Calendar Provider projection, permissions and background scheduling. | Broad Android/OEM qualification, general UPDATE/DELETE or complete event feature coverage. |
+| `sync` | Pure scoped models, bounded transactional pagination, access gates, immutable simple local CREATE/UPDATE/DELETE intents, conflict checks, uncertain-outcome write states, title submission contract and a separate metadata catalog controller. | General outgoing queue, broader UPDATE submission or full bidirectional reconciliation. |
 | `auth` | Contako-derived secret contract and state controller, cancellation/cleanup gates, retry policy and focused tests. | Calendar bootstrap or per-calendar capability checks. |
 | `proton-auth` | Proton Core login/session integration, discovery, Calendar key bootstrap, paginated decryption, sealed change polling, bounded recurrence mapping, experimental single simple-event CREATE and internal title UPDATE transport. | All challenge variants, external-author trust resolution, complete recurrence/history coverage or general event editing. |
 
@@ -192,8 +203,8 @@ Custom per-event colors are preserved, with calendar color used only as fallback
 Received pages and bootstrap material are now Keystore-sealed before processing.
 Local decryption, deferred-event retries and projection can resume without network
 when their keys are already available; network refresh uses bounded pages
-and durable continuation. Ordinary synchronization remains read-only; outgoing
-qualification requires the explicit experimental path below. Server challenge variants
+and durable continuation. Read-only remains the default; outgoing work requires
+the explicit creation or narrow title option. Server challenge variants
 still require separate live qualification.
 New scans prioritize the past and next 30 days before completing the wider horizon.
 Their cursor retains the frozen date range, timezone and order across restarts;

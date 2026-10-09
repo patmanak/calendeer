@@ -103,6 +103,8 @@ class CalendarTitleGuardedJourneyLiveDeviceTest {
     @Test fun guardedSubmissionThenRestartedOfflineAcknowledgement() = runBlocking {
         val args = InstrumentationRegistry.getArguments()
         assumeTrue(args.getString("calendarTitleGuardedJourney") == "true")
+        val systemJourney = args.getString("systemTitleJourney") == "true"
+        val namespaceSuffix = if (systemJourney) "-system-v1" else ""
         val token = args.getString("createFixtureToken").orEmpty()
         val hash = args.getString("createAccountHash").orEmpty()
         val phase = args.getString("titleGuardedPhase").orEmpty()
@@ -112,7 +114,7 @@ class CalendarTitleGuardedJourneyLiveDeviceTest {
         compose.waitUntil(60_000) { app.imports.state.value.let {
             it.authenticated && it.selections.isNotEmpty() && !it.busy
         } }
-        val prefs = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val prefs = app.getSharedPreferences(PREFS + namespaceSuffix, Context.MODE_PRIVATE)
         val selected = app.imports.state.value.selections.filter { it.enabled && it.available }
         assertTrue("An accessible existing calendar is required", selected.isNotEmpty())
         val source = if (prefs.contains("token")) {
@@ -215,9 +217,9 @@ class CalendarTitleGuardedJourneyLiveDeviceTest {
         }
         val jobs = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         try {
-            ImportStore(app, IMPORT_DB).use { store ->
+            ImportStore(app, IMPORT_DB + namespaceSuffix).use { store ->
                 fun allowStore() { store.admitTransaction = { it == source && accessible() } }
-                TitleUpdateAttemptStore(app, TITLE_DB).use { journal ->
+                TitleUpdateAttemptStore(app, TITLE_DB + namespaceSuffix).use { journal ->
                     journal.admitDispatch = { error("The fixture never uses global title dispatch admission") }
                     if (phase == "submit" && prefs.getBoolean("title_requested", false)) {
                         val old = journal.read(source, attempt)
@@ -236,7 +238,7 @@ class CalendarTitleGuardedJourneyLiveDeviceTest {
                         }
                         if (base == null) {
                             val createPort = ProtonAuthentication.createSubmissions(app)
-                            CreateAttemptStore(app, CREATE_DB).use { creates ->
+                            CreateAttemptStore(app, CREATE_DB + namespaceSuffix).use { creates ->
                                 creates.admitDispatch = { false }
                                 try {
                                     val existing = creates.read(source, id("create_id"))
@@ -331,28 +333,49 @@ class CalendarTitleGuardedJourneyLiveDeviceTest {
                     }
                     val event = EventId(checkNotNull(prefs.getString("event", null)))
                     val coordinator = ImportCoordinator(app, store, remote, projection, jobs, scheduler,
-                        systemCreatesEnabled = { it == source && accessible() })
+                        systemCreatesEnabled = { it == source && accessible() },
+                        systemTitlesEnabled = { systemJourney && phase == "submit" && it == source && accessible() })
                     try {
                         coordinator.authenticationChanged(true)
                         withTimeout(10_000) { while (schedules.get() == 0) delay(10) }
                         if (phase == "submit") {
-                            val captured = coordinator.captureAndPrepareLocalTitle(source, event, id("intent_id"), timestamp,
-                                ProtonAuthentication.localEditPreparations(app))
-                            assertTrue("Capture and seal the real native title edit", captured in setOf(
-                                LocalTitlePreparationResult.RETAINED, LocalTitlePreparationResult.HISTORICAL))
+                            val port = GuardedPort(ProtonAuthentication.titleUpdates(app))
+                            val actualCapsule = ProtonAuthentication.localEditPreparations(app)
+                            var guardedCapsules = 0
+                            val guardedCapsule = object : CalendarLocalEditPreparationPort by actualCapsule {
+                                override suspend fun prepareLocalTitle(intent: LocalEditIntent, timestamp: Instant): LocalEditPreparation =
+                                    error("Production capsule preparation requires the current lease")
+                                override suspend fun prepareLocalTitle(intent: LocalEditIntent, timestamp: Instant,
+                                    admit: (CalendarScope) -> Boolean): LocalEditPreparation? {
+                                    guardedCapsules++
+                                    return actualCapsule.prepareLocalTitle(intent, timestamp, admit)
+                                }
+                            }
+                            val systemPrepared = if (systemJourney) {
+                                assertTrue("Capture without entering the capsule port", coordinator.captureLocalEdit(
+                                    source, event, id("intent_id")) == LocalEditCaptureResult.RETAINED)
+                                coordinator.prepareSystemTitle(source, event, id("intent_id"), attempt, timestamp,
+                                    journal, guardedCapsule, port, { it == source && accessible() })
+                            } else {
+                                val captured = coordinator.captureAndPrepareLocalTitle(source, event, id("intent_id"), timestamp, actualCapsule)
+                                assertTrue("Capture and seal the real native title edit", captured in setOf(
+                                    LocalTitlePreparationResult.RETAINED, LocalTitlePreparationResult.HISTORICAL))
+                                null
+                            }
                             allowStore()
                             val capsule = checkNotNull(store.localEditPreparation(source, event))
                             assertTrue("The complete retained local title is exact", capsule.intent.content == changed &&
                                 capsule.intent.id == id("intent_id") && capsule.timestamp == timestamp)
-                            val port = GuardedPort(ProtonAuthentication.titleUpdates(app))
-                            val prepared = coordinator.prepareLocalTitleAttempt(TitleUpdatePreparationReservation(attempt,
+                            val prepared = systemPrepared ?: coordinator.prepareLocalTitleAttempt(TitleUpdatePreparationReservation(attempt,
                                 capsule, checkNotNull(port.titleUpdateFormat)), journal, port, allowNetwork = true)
                             assertTrue("Guarded wire preparation is durable", prepared is LocalTitleAttemptPreparation.Prepared)
                             val record = (prepared as LocalTitleAttemptPreparation.Prepared).record
                             val dirty = values()
                             assertTrue("Freeze the one submission request before transport", prefs.edit()
                                 .putBoolean("title_requested", true).putInt("submit_pid", Process.myPid()).commit())
-                            val result = coordinator.submitAndRetainLocalTitleAttempt(record, journal, journal, port, allowNetwork = true)
+                            val result = if (systemJourney) coordinator.submitSystemTitle(record, journal, port,
+                                { it == source && accessible() }) else
+                                coordinator.submitAndRetainLocalTitleAttempt(record, journal, journal, port, allowNetwork = true)
                             assertTrue("Guarded submission must retain its full verified proof", result != null)
                             allowStore()
                             val unknown = checkNotNull(journal.read(source, attempt))
@@ -363,6 +386,10 @@ class CalendarTitleGuardedJourneyLiveDeviceTest {
                                 projection.writes.get() == 0 && journal.readCompletion(source, attempt) == null &&
                                 store.localEditPreparation(source, event) == capsule)
                             assertTrue("Only the guarded submission was invoked", port.submissions == 1 && port.preparations <= 1)
+                            if (systemJourney) {
+                                assertTrue("A fresh production capsule uses only the guarded overload", guardedCapsules == 1)
+                                witness("system_title_guarded_capsule", "system_title_guarded_submit")
+                            }
                             assertTrue(prefs.edit().putBoolean("submit_completed", true).commit())
                             witness("guarded_title_submit_verified", "guarded_title_unknown_durable", "guarded_title_same_row_dirty")
                         } else {
