@@ -81,12 +81,14 @@ class TitleUpdateAcknowledgementIntegrationDeviceTest {
                 return native.inspectTitleUpdateAcknowledgement(receipt)
             }
         }
-        val store = ImportStore(context, importName)
-        val journal = TitleUpdateAttemptStore(context, attemptName)
-        private val captures = LocalCreateStore(context, captureName)
-        private val createAttempts = CreateAttemptStore(context, createAttemptName)
+        var store = ImportStore(context, importName)
+            private set
+        var journal = TitleUpdateAttemptStore(context, attemptName)
+            private set
+        private var captures = LocalCreateStore(context, captureName)
+        private var createAttempts = CreateAttemptStore(context, createAttemptName)
         private var originalSubmission: LocalCreateSubmission? = null
-        private val jobs = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        private var jobs = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         private val schedules = AtomicInteger()
         private val scheduler = object : ImportScheduler {
             override fun cancel() = Unit
@@ -96,20 +98,191 @@ class TitleUpdateAcknowledgementIntegrationDeviceTest {
         }
         private val remote = object : ReadOnlyCalendarRemote {
             override val format = this@Fixture.format
-            override suspend fun currentAccount() = target.account
+            override suspend fun currentAccount(): AccountId {
+                if (submitting) forbiddenAccountReentries++
+                check(!submitting) { "Local qualification must not re-enter authentication" }
+                return target.account
+            }
             override suspend fun fetch(request: PageRequest): RemotePage = error("Synthetic result fixture cannot download")
             override suspend fun dispatch(mutation: Mutation): DispatchResult = error("Synthetic result fixture cannot upload")
         }
-        val coordinator = ImportCoordinator(context, store, remote, projection, jobs, scheduler,
+        private fun newCoordinator() = ImportCoordinator(context, store, remote, projection, jobs, scheduler,
             creates = if (transferred) createAttempts else null,
             localCreates = if (transferred) captures else null,
             systemCreatesEnabled = { it == target })
+        var coordinator = newCoordinator()
+            private set
         private var calendar = -1L
         var row = -1L
             private set
         private val uri get() = syncUri(Events.CONTENT_URI)
         var frame: CapturedCreateHandoffFrame? = null
             private set
+        private var submitting = false
+        private var forbiddenAccountReentries = 0
+
+        /** Only the remote boundary is synthetic; owner checks and claim/result commits are real. */
+        private inner class ControlledTitlePort : CalendarTitleUpdateSubmissionPort {
+            override val titleUpdateFormat = prepared.format
+            var preparations = 0
+            var submissions = 0
+            var sends = 0
+            var forbiddenCalls = 0
+            var beforeClaim: suspend () -> Unit = {}
+            var afterSend: suspend () -> Unit = {}
+            private fun forbidden(): Nothing { forbiddenCalls++; error("No unrestricted operation or service inspection") }
+            override suspend fun prepareSubmission(id: MutationId, preparation: LocalEditPreparation): TitleUpdateAttemptRecord = forbidden()
+            override suspend fun prepareSubmission(reservation: TitleUpdatePreparationReservation,
+                admit: (CalendarScope) -> Boolean): TitleUpdateAttemptRecord? {
+                assertTrue(admit(target)); assertFalse(admit(target.copy(generation = 1)))
+                assertEquals(TitleUpdatePreparationReservation.of(prepared), reservation)
+                preparations++
+                return prepared
+            }
+            override suspend fun submit(record: TitleUpdateAttemptRecord, journal: TitleUpdateAttemptJournal): TitleUpdateSubmissionObservation = forbidden()
+            override suspend fun submit(record: TitleUpdateAttemptRecord, journal: TitleUpdateAttemptJournal,
+                admit: (CalendarScope) -> Boolean): TitleUpdateSubmissionObservation = forbidden()
+            override suspend fun inspect(record: TitleUpdateAttemptRecord): TitleUpdateSubmissionObservation = forbidden()
+            override suspend fun inspect(record: TitleUpdateAttemptRecord,
+                admit: (CalendarScope) -> Boolean): TitleUpdateSubmissionObservation = forbidden()
+            override suspend fun submit(record: TitleUpdateAttemptRecord, journal: TitleUpdateAttemptJournal,
+                admit: (CalendarScope) -> Boolean,
+                qualifySource: suspend (CalendarScope) -> Boolean): TitleUpdateSubmissionObservation {
+                submissions++; submitting = true
+                try {
+                    assertEquals(prepared, record)
+                    assertTrue(admit(target)); assertFalse(admit(target.copy(generation = 1)))
+                    if (!qualifySource(target)) return TitleUpdateSubmissionObservation.Unknown
+                    beforeClaim()
+                    if (!qualifySource(target) || !journal.claim(record, admit)) return TitleUpdateSubmissionObservation.Unknown
+                    // Dispatch starts only after durable UNKNOWN and another current native read.
+                    assertEquals(unknown, journal.read(target, record.id))
+                    if (!qualifySource(target) || !admit(target)) return TitleUpdateSubmissionObservation.Unknown
+                    sends++
+                    journal.retainEvidence(unknown, "synthetic-composed-title-response")
+                    afterSend()
+                    if (!qualifySource(target) || !admit(target)) return TitleUpdateSubmissionObservation.Unknown
+                    return TitleUpdateSubmissionObservation.Verified(TitleUpdateAttemptIdentity.of(record), verified)
+                } finally { submitting = false }
+            }
+            fun assertOneExchange() {
+                assertEquals(1, preparations); assertEquals(1, submissions); assertEquals(1, sends)
+                assertEquals(0, forbiddenCalls); assertEquals(0, forbiddenAccountReentries)
+            }
+        }
+
+        private suspend fun prepareGuarded(port: ControlledTitlePort): TitleUpdateAttemptRecord {
+            check(preparedOnly)
+            assertNull(journal.read(target, prepared.id))
+            val before = values()
+            val canonical = coordinator.prepareLocalTitleAttempt(TitleUpdatePreparationReservation.of(prepared),
+                journal, port, allowNetwork = true) as LocalTitleAttemptPreparation.Prepared
+            assertEquals(prepared, canonical.record)
+            assertEquals(before, values()); assertEquals(0, writes.get()); assertEquals(0, inspections.get())
+            return canonical.record
+        }
+
+        /** Reconstruct every SQL owner/journal and coroutine runtime, keeping only the native row. */
+        private suspend fun reopenOwner() {
+            coordinator.authenticationChanged(false)
+            jobs.coroutineContext[Job]!!.cancelAndJoin()
+            store.close(); journal.close(); captures.close(); createAttempts.close()
+            store = ImportStore(context, importName); journal = TitleUpdateAttemptStore(context, attemptName)
+            captures = LocalCreateStore(context, captureName); createAttempts = CreateAttemptStore(context, createAttemptName)
+            jobs = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+            coordinator = newCoordinator()
+            val prior = schedules.get()
+            coordinator.authenticationChanged(true)
+            withTimeout(10_000) { while (schedules.get() == prior) delay(10) }
+        }
+
+        suspend fun guardedSubmissionCompletesOfflineAfterReopening(restoreGap: Boolean = false,
+            completionGap: Boolean = false) {
+            val port = ControlledTitlePort()
+            val canonical = prepareGuarded(port)
+            val before = values()
+            val retained = coordinator.submitAndRetainLocalTitleAttempt(canonical, journal, journal, port, allowNetwork = true)
+            assertEquals(result, retained); port.assertOneExchange()
+            assertEquals(before, values()); assertEquals("1", before[Events.DIRTY])
+            assertEquals(0, writes.get()); assertEquals(0, inspections.get()); assertSingleOriginalRow()
+            allowSql(); assertEquals(intent, store.localEdit(target, base.eventId))
+            assertEquals(preparation, store.localEditPreparation(target, base.eventId)); assertNull(receipt())
+            assertOriginalCreateProvenance()
+            val evidenced = unknown.copy(protectedEvidence = "synthetic-composed-title-response")
+            reopenOwner()
+            assertEquals(evidenced, journal.read(target, canonical.id)); assertEquals(result, journal.readVerified(target, canonical.id))
+            assertEquals(before, values()); assertNull(journal.readCompletion(target, canonical.id))
+            // Neither offline wire reuse nor replay of PREPARED may re-enter the port.
+            assertEquals(LocalTitleAttemptPreparation.Unresolved, coordinator.prepareLocalTitleAttempt(
+                TitleUpdatePreparationReservation.of(canonical), journal, port))
+            assertNull(coordinator.submitAndRetainLocalTitleAttempt(canonical, journal, journal, port, allowNetwork = true))
+            port.assertOneExchange()
+            if (restoreGap) store.writableDatabase.execSQL("CREATE TRIGGER composed_restore_gap BEFORE DELETE ON local_edits BEGIN SELECT RAISE(ABORT,'synthetic restoration gap'); END")
+            if (completionGap) journal.writableDatabase.execSQL("CREATE TRIGGER composed_completion_gap BEFORE UPDATE OF completion ON title_update_attempts BEGIN SELECT RAISE(ABORT,'synthetic completion gap'); END")
+            val first = coordinator.recoverLocalTitles(TitleUpdateWorkQuery(target), journal)
+            if (restoreGap || completionGap) {
+                assertEquals(TitleUpdateOfflineRecoveryProgress(held = 1), first)
+                assertEquals(1, writes.get()); assertEquals(0, inspections.get())
+                assertNull(journal.readCompletion(target, canonical.id))
+                assertEquals(if (restoreGap) TitleUpdateAcknowledgementState.PENDING else TitleUpdateAcknowledgementState.RESTORED,
+                    receipt()!!.state)
+                mutateTitle("Synthetic later edit across composed recovery gap")
+                val later = values()
+                if (restoreGap) store.writableDatabase.execSQL("DROP TRIGGER composed_restore_gap")
+                if (completionGap) journal.writableDatabase.execSQL("DROP TRIGGER composed_completion_gap")
+                reopenOwner()
+                assertEquals(TitleUpdateOfflineRecoveryProgress(completed = 1),
+                    coordinator.recoverLocalTitles(TitleUpdateWorkQuery(target), journal))
+                assertEquals(later, values()); assertEquals("1", values()[Events.DIRTY])
+                assertEquals(if (restoreGap) 1 else 0, inspections.get())
+            } else {
+                assertEquals(TitleUpdateOfflineRecoveryProgress(completed = 1), first)
+                val after = values()
+                assertEquals("0", after[Events.DIRTY])
+                val metadata = setOf(Events.DIRTY, Events.SYNC_DATA2, Events.SYNC_DATA3)
+                assertEquals(before.filterKeys { it !in metadata }, after.filterKeys { it !in metadata })
+                assertEquals(digest("revision-v1", verified.revision.value), after[Events.SYNC_DATA2])
+                assertEquals("calendeer-projection-receipt-v1:${receipt()!!.receipt.projection.nonce}", after[Events.SYNC_DATA3])
+                mutateTitle("Synthetic later edit after composed completion")
+            }
+            assertSqlRestored(evidenced); assertOriginalCreateProvenance(); assertSingleOriginalRow()
+            assertEquals(TitleUpdateCompletion.of(result, receipt()!!), journal.readCompletion(target, canonical.id))
+            val later = values()
+            val nextId = MutationId("synthetic-next-composed-owner")
+            if (transferred) captureTransferred(nextId) else
+                assertEquals(LocalEditCaptureResult.RETAINED, coordinator.captureLocalEdit(target, base.eventId, nextId))
+            allowSql()
+            val next = store.localEdit(target, base.eventId)!!
+            assertEquals(nextId, next.id); assertEquals(verified, next.base); assertEquals(later[Events.TITLE], next.content.title)
+            assertEquals(TitleUpdateOfflineRecoveryProgress(), coordinator.recoverLocalTitles(TitleUpdateWorkQuery(target), journal))
+            assertEquals(TitleUpdateAcknowledgementResult.ACKNOWLEDGED, acknowledge())
+            assertEquals(TitleUpdateCompletionResult.COMPLETED, complete())
+            allowSql(); assertEquals(next, store.localEdit(target, base.eventId))
+            assertEquals(later, values()); assertEquals(1, writes.get()); port.assertOneExchange()
+        }
+
+        suspend fun guardedSubmissionPreservesChangedNativeSource(afterSend: Boolean) {
+            val port = ControlledTitlePort()
+            val canonical = prepareGuarded(port)
+            var changeCalls = 0
+            val laterTitle = "Synthetic newer edit during guarded dispatch"
+            val change: suspend () -> Unit = { changeCalls++; mutateTitle(laterTitle) }
+            if (afterSend) port.afterSend = change else port.beforeClaim = change
+            assertNull(coordinator.submitAndRetainLocalTitleAttempt(canonical, journal, journal, port, allowNetwork = true))
+            val later = values()
+            assertEquals(1, changeCalls); assertEquals(laterTitle, later[Events.TITLE])
+            val historical = if (afterSend) unknown.copy(protectedEvidence = "synthetic-composed-title-response") else canonical
+            assertEquals(historical, journal.read(target, canonical.id)); assertNull(journal.readVerified(target, canonical.id))
+            assertEquals(0, writes.get()); assertEquals(0, inspections.get()); assertNull(receipt())
+            reopenOwner()
+            assertEquals(TitleUpdateOfflineRecoveryProgress(held = 1), coordinator.recoverLocalTitles(TitleUpdateWorkQuery(target), journal))
+            assertEquals(later, values()); assertEquals(laterTitle, values()[Events.TITLE])
+            assertEquals("1", values()[Events.DIRTY]); assertSingleOriginalRow()
+            allowSql(); assertEquals(intent, store.localEdit(target, base.eventId)); assertEquals(preparation, store.localEditPreparation(target, base.eventId))
+            assertEquals(1, port.preparations); assertEquals(1, port.submissions); assertEquals(if (afterSend) 1 else 0, port.sends)
+            assertEquals(0, port.forbiddenCalls); assertEquals(0, forbiddenAccountReentries)
+            assertOriginalCreateProvenance()
+        }
 
         private fun syncUri(value: Uri): Uri = native.accountFor(target.account).let { account -> value.buildUpon()
             .appendQueryParameter(CalendarContract.CALLER_IS_SYNCADAPTER, "true")
@@ -613,13 +786,13 @@ class TitleUpdateAcknowledgementIntegrationDeviceTest {
             assertEquals(1, writes.get()); assertEquals(1, inspections.get())
         }
 
-        suspend fun assertSqlRestored() {
+        suspend fun assertSqlRestored(expectedUnknown: TitleUpdateAttemptRecord = unknown) {
             allowSql()
             assertEquals(verified, store.projectedBaseline(target, base.eventId))
             assertEquals(verified, store.transaction(target) { remote(base.eventId) })
             assertNull(store.localEdit(target, base.eventId)); assertNull(store.localEditPreparation(target, base.eventId))
             assertEquals(TitleUpdateAcknowledgementState.RESTORED, receipt()!!.state)
-            assertEquals(unknown, journal.read(target, prepared.id)); assertEquals(result, journal.readVerified(target, prepared.id))
+            assertEquals(expectedUnknown, journal.read(target, prepared.id)); assertEquals(result, journal.readVerified(target, prepared.id))
             if (transferred) {
                 val current = store.capturedHandoff(target, base.eventId)!!
                 assertEquals(CapturedCreateHandoffState.RELEASED, current.state); assertFalse(current.waiting)
@@ -654,6 +827,43 @@ class TitleUpdateAcknowledgementIntegrationDeviceTest {
         assumeTrue(AndroidCalendarProjection(context).hasPermissions())
         val fixture = Fixture(context, allDay, transferred, preparedOnly)
         try { fixture.seed(); fixture.block() } finally { fixture.close() }
+    }
+
+    @Test fun ordinaryTimedGuardedSubmissionCompletesOfflineAfterOwnerReopening() = fixture(allDay = false, preparedOnly = true) {
+        guardedSubmissionCompletesOfflineAfterReopening()
+    }
+    @Test fun ordinaryAllDayGuardedSubmissionCompletesOfflineAfterOwnerReopening() = fixture(allDay = true, preparedOnly = true) {
+        guardedSubmissionCompletesOfflineAfterReopening()
+    }
+    @Test fun transferredTimedGuardedSubmissionCompletesOfflineWithOriginalCreateProvenance() = fixture(allDay = false, transferred = true, preparedOnly = true) {
+        guardedSubmissionCompletesOfflineAfterReopening()
+    }
+    @Test fun transferredAllDayGuardedSubmissionCompletesOfflineWithOriginalCreateProvenance() = fixture(allDay = true, transferred = true, preparedOnly = true) {
+        guardedSubmissionCompletesOfflineAfterReopening()
+    }
+    @Test fun ordinaryGuardedSubmissionRecoversNativeAcknowledgementGapAndKeepsLaterEdit() = fixture(allDay = false, preparedOnly = true) {
+        guardedSubmissionCompletesOfflineAfterReopening(restoreGap = true)
+    }
+    @Test fun transferredGuardedSubmissionRecoversNativeAcknowledgementGapAndKeepsLaterEdit() = fixture(allDay = true, transferred = true, preparedOnly = true) {
+        guardedSubmissionCompletesOfflineAfterReopening(restoreGap = true)
+    }
+    @Test fun ordinaryGuardedSubmissionRecoversCompletionGapWithoutAnotherNativeWrite() = fixture(allDay = true, preparedOnly = true) {
+        guardedSubmissionCompletesOfflineAfterReopening(completionGap = true)
+    }
+    @Test fun transferredGuardedSubmissionRecoversCompletionGapWithoutAnotherNativeWrite() = fixture(allDay = false, transferred = true, preparedOnly = true) {
+        guardedSubmissionCompletesOfflineAfterReopening(completionGap = true)
+    }
+    @Test fun ordinaryGuardedSubmissionRefusesNativeChangeBeforeClaim() = fixture(allDay = false, preparedOnly = true) {
+        guardedSubmissionPreservesChangedNativeSource(afterSend = false)
+    }
+    @Test fun transferredGuardedSubmissionRefusesNativeChangeBeforeClaim() = fixture(allDay = true, transferred = true, preparedOnly = true) {
+        guardedSubmissionPreservesChangedNativeSource(afterSend = false)
+    }
+    @Test fun ordinaryGuardedSubmissionKeepsEvidenceAndLaterEditAfterSend() = fixture(allDay = true, preparedOnly = true) {
+        guardedSubmissionPreservesChangedNativeSource(afterSend = true)
+    }
+    @Test fun transferredGuardedSubmissionKeepsEvidenceAndLaterEditAfterSend() = fixture(allDay = false, transferred = true, preparedOnly = true) {
+        guardedSubmissionPreservesChangedNativeSource(afterSend = true)
     }
 
     @Test fun ordinaryPreparedTitleWireRetainsExactNativeOwnerWithoutClaimOrAcknowledgement() = fixture(allDay = false, preparedOnly = true) {

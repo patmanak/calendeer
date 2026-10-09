@@ -656,6 +656,17 @@ remain separate work.
   These fixtures also qualify event-scoped requeueing, rollback after that queue
   update, reopening, incoming same-row offline projection and historical replay.
   A later native dirty edit remains protected during the incoming drain.
+  The integration fixture also starts from a real native capture without seeded
+  wire, UNKNOWN state or result, then composes guarded preparation and controlled
+  submission with result retention and offline acknowledgement/completion. Timed
+  and all-day imported and transferred CREATE profiles preserve every native
+  column except the three acknowledgement metadata fields. Reconstructing all
+  four SQL stores and the coordinator within the same process qualifies durable
+  recovery of restoration and completion gaps, immutable CREATE provenance and
+  preservation of a later captured owner. Real native changes before claim deny
+  dispatch; changes after the controlled exchange preserve UNKNOWN/evidence and
+  deny result retention. This does not establish process-death recovery, Proton
+  cryptography, a new service PUT or production worker activation.
 - `TitleUpdateCompletionTest`, `TitleUpdateCompletionJournalDeviceTest` and
   `TitleUpdateAcknowledgementHistoryDeviceTest` check closure bindings, migration,
   immutable history, default-denied admission, corruption and rollback. Real

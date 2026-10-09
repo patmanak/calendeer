@@ -89,9 +89,14 @@ complete durable readback before returning it. Fresh account and local owner
 checks surround retention and readback after the authentication call has returned.
 Revocation after commit preserves the historical proof without reporting current
 qualification; UNKNOWN remains non-resendable. This helper neither acknowledges
-Android nor completes the attempt. Isolated SQL and controlled
-native snapshots qualify this composition; a new native capture-to-PUT journey and
-worker activation remain pending. These observations across independent stores do
+Android nor completes the attempt. Real Provider/SQLite integration additionally
+composes captured imported and transferred CREATE edits with guarded preparation,
+controlled submission, durable results and offline acknowledgement/completion.
+Reconstruction of every SQL store and the coordinator preserves the same native
+row, later dirty edits and original CREATE provenance across restoration and
+completion gaps. This reconstruction occurs within one process; wire preparation
+and remote verification remain synthetic. A new native capture-to-Proton PUT
+journey and worker activation remain pending. These observations across independent stores do
 not provide a distributed commit or server-side concurrency precondition.
 The system observer now reuses a retained UPDATE identity and allocates a distinct
 identity after that owner is consumed, for imported and CREATE-handoff events.
