@@ -10,16 +10,24 @@ import kotlinx.coroutines.ensureActive
  */
 class TitleUpdatePreparationRecovery(private val journal: TitleUpdatePreparationJournal,
     private val port: CalendarTitleUpdateSubmissionPort) {
-    suspend fun prepare(candidate: TitleUpdatePreparationReservation, allowNetwork: Boolean = false,
-        admit: (CalendarScope) -> Boolean): TitleUpdateAttemptRecord? {
+    /** Additional owner/account observations surround suspended work; they never replace
+     * the synchronous scope/format/epoch lease passed to storage and preparation.
+     */
+    suspend fun prepare(candidate: TitleUpdatePreparationReservation, allowNetwork: Boolean,
+        admit: (CalendarScope) -> Boolean, checkAccess: suspend () -> Boolean): TitleUpdateAttemptRecord? {
         val frozen = candidate.frozen()
         val lease = { scope: CalendarScope -> scope == frozen.scope &&
             port.titleUpdateFormat == frozen.format && admit(scope) }
         suspend fun active(): Boolean {
             currentCoroutineContext().ensureActive()
-            val permitted = lease(frozen.scope)
+            val initial = lease(frozen.scope)
             currentCoroutineContext().ensureActive()
-            return permitted
+            if (!initial) return false
+            val observed = checkAccess()
+            currentCoroutineContext().ensureActive()
+            val current = lease(frozen.scope)
+            currentCoroutineContext().ensureActive()
+            return observed && current
         }
         fun qualified(record: TitleUpdateAttemptRecord?, reservation: TitleUpdatePreparationReservation): TitleUpdateAttemptRecord? =
             record?.frozen()?.takeIf { it.state == TitleUpdateAttemptState.PREPARED &&
@@ -50,4 +58,8 @@ class TitleUpdatePreparationRecovery(private val journal: TitleUpdatePreparation
         } catch (cancelled: CancellationException) { throw cancelled }
           catch (failure: Exception) { currentCoroutineContext().ensureActive(); throw failure }
     }
+
+    suspend fun prepare(candidate: TitleUpdatePreparationReservation, allowNetwork: Boolean = false,
+        admit: (CalendarScope) -> Boolean): TitleUpdateAttemptRecord? =
+        prepare(candidate, allowNetwork, admit) { true }
 }

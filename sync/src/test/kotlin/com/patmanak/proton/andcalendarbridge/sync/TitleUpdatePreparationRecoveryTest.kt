@@ -268,4 +268,80 @@ class TitleUpdatePreparationRecoveryTest {
             assertTrue(port.requests.isEmpty()); assertFalse(journal.calls.contains("remember")); assertEquals(other, journal.durable)
         }
     }
+
+    @Test fun asyncAccessInitialDenialDoesNotReserveReadOrPrepare() = runTest {
+        val journal = Journal(canonical); val port = Port(candidate.format, wire)
+        var checks = 0
+        assertNull(recovery(journal, port).prepare(candidate, true, ::admitted) { checks++; false })
+        assertEquals(1, checks); assertTrue(journal.calls.isEmpty()); assertTrue(port.requests.isEmpty())
+    }
+
+    @Test fun asyncAccessDenialAfterEveryAwaitStopsTheNextStepAndPreservesCommittedWire() = runTest {
+        for (stage in listOf("reserve", "read", "prepare", "remember", "readback")) {
+            var available = true
+            val journal = Journal(canonical); val port = Port(candidate.format, wire)
+            when (stage) {
+                "reserve" -> journal.reserveHook = { available = false }
+                "read" -> journal.readHook = { available = false }
+                "prepare" -> port.hook = { available = false }
+                "remember" -> journal.rememberHook = { journal.durable = it; available = false; true }
+                "readback" -> journal.readHook = { if (it > 1) available = false }
+            }
+            assertNull(recovery(journal, port).prepare(candidate, true, ::admitted) { available })
+            when (stage) {
+                "reserve" -> { assertEquals(listOf("reserve"), journal.calls); assertTrue(port.requests.isEmpty()) }
+                "read" -> { assertEquals(listOf("reserve", "read"), journal.calls); assertTrue(port.requests.isEmpty()) }
+                "prepare" -> { assertEquals(listOf("reserve", "read"), journal.calls); assertEquals(listOf(canonical), port.requests) }
+                "remember" -> { assertEquals("remember", journal.calls.last()); assertEquals(wire, journal.durable) }
+                "readback" -> { assertEquals("read", journal.calls.last()); assertEquals(wire, journal.durable) }
+            }
+        }
+    }
+
+    @Test fun asyncAccessCancellationReturningFalseMustThrowBeforeNormalReturn() = runTest {
+        val journal = Journal(canonical); val port = Port(candidate.format, wire)
+        val normalReturns = AtomicInteger(); val cancellations = AtomicInteger()
+        supervisorScope {
+            val request = async {
+                try {
+                    recovery(journal, port).prepare(candidate, true, ::admitted) {
+                        currentCoroutineContext().cancel(CancellationException("Synthetic access cancellation")); false
+                    }
+                    normalReturns.incrementAndGet()
+                } catch (cancelled: CancellationException) { cancellations.incrementAndGet(); throw cancelled }
+            }
+            try { request.await(); fail("Cancellation must propagate") } catch (_: CancellationException) { }
+        }
+        assertEquals(0, normalReturns.get()); assertEquals(1, cancellations.get())
+        assertTrue(journal.calls.isEmpty()); assertTrue(port.requests.isEmpty())
+    }
+
+    @Test fun asyncAccessFailurePropagatesWithoutJournalOrPortCalls() = runTest {
+        val journal = Journal(canonical); val port = Port(candidate.format, wire)
+        val failure = IllegalStateException("Synthetic account lookup failure")
+        try { recovery(journal, port).prepare(candidate, true, ::admitted) { throw failure }; fail("Access failure must propagate") }
+        catch (actual: IllegalStateException) { assertSame(failure, actual) }
+        assertTrue(journal.calls.isEmpty()); assertTrue(port.requests.isEmpty())
+    }
+
+    @Test fun asyncAccessSuccessCannotReviveAnEpochRevokedDuringTheCheck() = runTest {
+        val journal = Journal(canonical); val port = Port(candidate.format, wire)
+        var epoch = 1
+        val initialEpoch = epoch
+        assertNull(recovery(journal, port).prepare(candidate, true, { admitted(it) && epoch == initialEpoch }) {
+            epoch++; true
+        })
+        assertTrue(journal.calls.isEmpty()); assertTrue(port.requests.isEmpty())
+    }
+
+    @Test fun asyncAccessSuccessPreservesCanonicalPreparationAndOfflineReadback() = runTest {
+        val journal = Journal(canonical); val port = Port(candidate.format, wire)
+        var checks = 0
+        assertEquals(wire, recovery(journal, port).prepare(candidate, true, ::admitted) { checks++; true })
+        assertTrue(checks >= 6); assertEquals(listOf(canonical), port.requests)
+        val before = checks
+        assertEquals(wire, recovery(journal, port).prepare(candidate, false, ::admitted) { checks++; true })
+        assertTrue(checks > before); assertEquals(listOf(canonical), port.requests)
+        assertEquals(wire, journal.durable)
+    }
 }

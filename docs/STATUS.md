@@ -61,7 +61,14 @@ completion. The additive migration preserves historical attempts. An internal
 preparation helper now composes the reservation with guarded Proton preparation,
 reuses durable wire offline and explicitly reads the first winner after a race.
 Session/access checks cover context reads and sealing; typed errors and cancellation
-propagate. Current SQL/Android owner orchestration and production UPDATE remain pending.
+propagate. An internal coordinator now binds this preparation to the exact current
+SQL owner, retained capsule and native dirty contents under one session/policy epoch.
+Ordinary imported events and transferred CREATE events reuse the same qualification;
+transferred work also requires its original provenance and released waiting frame.
+Access, owner or native changes stop admission between suspended steps. A committed
+wire remains in history after invalidation, without reporting current qualification.
+Offline calls recover the canonical durable wire or preserve a bare reservation;
+this path never claims, submits or acknowledges, and production UPDATE remains pending.
 The system observer now reuses a retained UPDATE identity and allocates a distinct
 identity after that owner is consumed, for imported and CREATE-handoff events.
 A bounded, scope-bound metadata index lists unresolved title attempts independently

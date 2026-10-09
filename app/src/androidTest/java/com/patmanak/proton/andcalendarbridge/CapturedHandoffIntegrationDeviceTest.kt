@@ -33,6 +33,75 @@ import org.junit.runner.RunWith
 /** Native Provider and three real journals; controlled incoming data, no network upload. */
 @RunWith(AndroidJUnit4::class)
 class CapturedHandoffIntegrationDeviceTest {
+    private class TitlePreparationPort(private val wire: TitleUpdateAttemptRecord,
+        private val duringPreparation: suspend () -> Unit = {}) : CalendarTitleUpdateSubmissionPort {
+        var calls = 0
+        override val titleUpdateFormat = wire.format
+        override suspend fun prepareSubmission(id: MutationId, preparation: LocalEditPreparation): TitleUpdateAttemptRecord =
+            error("No unrestricted title preparation")
+        override suspend fun prepareSubmission(reservation: TitleUpdatePreparationReservation,
+            admit: (CalendarScope) -> Boolean): TitleUpdateAttemptRecord? {
+            check(admit(reservation.scope)); calls++; duringPreparation()
+            return wire.copy(id = reservation.id)
+        }
+        override suspend fun submit(record: TitleUpdateAttemptRecord, journal: TitleUpdateAttemptJournal): TitleUpdateSubmissionObservation =
+            error("No title dispatch")
+        override suspend fun inspect(record: TitleUpdateAttemptRecord): TitleUpdateSubmissionObservation = error("No title inspection")
+    }
+    private suspend fun Fixture.withTitlePreparation(block: suspend (TitleUpdatePreparationReservation,
+        TitleUpdateAttemptRecord, com.patmanak.proton.andcalendarbridge.data.outgoing.TitleUpdateAttemptStore) -> Unit) {
+        transferred(); incoming(verifiedEvent); titleMode = true
+        mutate(ContentValues().apply { put(Events.TITLE, "Synthetic handoff title edit"); put(Events.DIRTY, 1) })
+        assertEquals(CapturedCreateReconciliationResult.RETAINED, reconcileTransferred())
+        val preparation = LocalEditPreparation(checkNotNull(edit()), timestamp,
+            AdapterFormat("controlled-handoff-title-preparation", 1), "synthetic-handoff-title-capsule")
+        allowStore(); assertTrue(store.retainLocalEditPreparation(preparation))
+        val wire = TitleUpdateAttemptRecord(MutationId("synthetic-handoff-title-attempt"), preparation,
+            AdapterFormat("controlled-handoff-title-wire", 1), "synthetic-handoff-title-wire")
+        val name = "handoff-title-preparation-${UUID.randomUUID()}.db"
+        try {
+            com.patmanak.proton.andcalendarbridge.data.outgoing.TitleUpdateAttemptStore(context, name).use {
+                block(TitleUpdatePreparationReservation.of(wire), wire, it)
+            }
+        } finally { context.deleteDatabase(name) }
+    }
+    @Test fun guardedTitlePreparationUsesTransferredProvenanceAndPreservesNativeRow() = fixture {
+        withTitlePreparation { candidate, wire, attempts ->
+            val before = providerSnapshot(); val original = record(); val currentRole = role()
+            val port = TitlePreparationPort(wire)
+            assertEquals(LocalTitleAttemptPreparation.Prepared(wire),
+                coordinator.prepareLocalTitleAttempt(candidate, attempts, port, allowNetwork = true))
+            assertEquals(1, port.calls); assertEquals(wire, attempts.read(target, wire.id))
+            assertEquals(before, providerSnapshot()); assertEquals(original, record()); assertEquals(currentRole, role())
+            assertEquals(LocalTitleAttemptPreparation.Prepared(wire),
+                coordinator.prepareLocalTitleAttempt(candidate.copy(id = MutationId("another-proposed-id")), attempts, port))
+            assertEquals(1, port.calls); assertEquals(before, providerSnapshot()); assertEquals(1, sends)
+        }
+    }
+    @Test fun guardedTitlePreparationHoldsTransferredWorkAfterProvenanceLoss() = fixture {
+        withTitlePreparation { candidate, wire, attempts ->
+            val before = providerSnapshot(); val owner = edit()
+            val port = TitlePreparationPort(wire) { journal.writableDatabase.execSQL("DELETE FROM local_create_submissions") }
+            assertEquals(LocalTitleAttemptPreparation.Unresolved,
+                coordinator.prepareLocalTitleAttempt(candidate, attempts, port, allowNetwork = true))
+            assertEquals(1, port.calls); assertNull(attempts.read(target, wire.id))
+            assertEquals(candidate, attempts.readPreparationReservation(target, wire.preparation.intent.base.eventId))
+            assertEquals(before, providerSnapshot()); assertEquals(owner, edit()); assertEquals(1, sends)
+        }
+    }
+    @Test fun guardedTitlePreparationPreservesALaterTransferredNativeEdit() = fixture {
+        withTitlePreparation { candidate, wire, attempts ->
+            val owner = edit()
+            val port = TitlePreparationPort(wire) {
+                mutate(ContentValues().apply { put(Events.TITLE, "Synthetic later handoff edit"); put(Events.DIRTY, 1) })
+            }
+            assertEquals(LocalTitleAttemptPreparation.Unresolved,
+                coordinator.prepareLocalTitleAttempt(candidate, attempts, port, allowNetwork = true))
+            assertEquals(1, port.calls); assertNull(attempts.read(target, wire.id)); assertEquals(owner, edit())
+            assertEquals("Synthetic later handoff edit", field(Events.TITLE)); assertEquals("1", field(Events.DIRTY))
+            assertTrue(role()!!.waiting); assertEquals(1, sends)
+        }
+    }
     @Test fun cleanOriginalCanTransferWithoutAnotherAcknowledgementOrSubmission() = fixture {
         ready(); acknowledge(); incoming(verifiedEvent)
         val before = providerSnapshot()
@@ -367,7 +436,9 @@ class CapturedHandoffIntegrationDeviceTest {
             override fun continueWork(network: Boolean) { continuations.incrementAndGet() }
         }
         private var jobs = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-        var coordinator = ImportCoordinator(context, store, remote, attachmentProjection, jobs, scheduler, creates = creates, localCreates = journal)
+        var titleMode = false
+        var coordinator = ImportCoordinator(context, store, remote, attachmentProjection, jobs, scheduler,
+            creates = creates, localCreates = journal, systemCreatesEnabled = { titleMode })
         suspend fun seed() {
             val summary = CalendarSummary(target.calendar, "Calendeer preparation integration fixture")
             store.remember(target.account, listOf(summary)); store.setEnabled(target, true)
@@ -506,7 +577,8 @@ class CapturedHandoffIntegrationDeviceTest {
             coordinator.authenticationChanged(false); jobs.coroutineContext[Job]!!.cancelAndJoin(); journal.close()
             store.close(); creates.close(); store = ImportStore(context, importName); creates = CreateAttemptStore(context, dispatchName)
             journal = LocalCreateStore(context, journalName); jobs = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-            coordinator = ImportCoordinator(context, store, remote, attachmentProjection, jobs, scheduler, creates = creates, localCreates = journal); start()
+            coordinator = ImportCoordinator(context, store, remote, attachmentProjection, jobs, scheduler,
+                creates = creates, localCreates = journal, systemCreatesEnabled = { titleMode }); start()
         }
         suspend fun close() {
             coordinator.authenticationChanged(false); jobs.coroutineContext[Job]!!.cancelAndJoin()

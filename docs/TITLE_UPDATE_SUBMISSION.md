@@ -89,8 +89,9 @@ wire, a future caller may repeat read-only preparation with the same identity;
 this does not promise one cryptographic execution. Once a wire exists, the caller
 must read it instead of preparing again. A competing different wire is rejected,
 and the caller must explicitly read the winner rather than report its own wire
-as retained. An internal helper now composes this journal with guarded preparation;
-current SQL/Android owner orchestration and production UPDATE remain separate.
+as retained. An internal helper composes this journal with guarded preparation;
+the internal coordinator supplies current SQL/Android qualification. Production
+UPDATE remains separate.
 
 ## Guarded preparation and retained-wire recovery
 
@@ -122,10 +123,43 @@ exceptions propagate instead of becoming historical success. Access and cancella
 are rechecked after every awaited result, including null and the final readback.
 
 This helper performs no claim, PUT, remote inspection or native acknowledgement.
-Historical wire replay does not refresh remote rights. The caller must provide
-an epoch-bound lease and qualify the current SQL/Android owner around preparation;
-the pure helper cannot inspect those sources. That owner composition and production
-worker activation remain unqualified.
+Historical wire replay does not refresh remote rights. The caller supplies
+an epoch-bound lease and qualifies the current SQL/Android owner around preparation;
+the pure helper cannot inspect those sources. Its explicit asynchronous `checkAccess`
+overload checks additional observations before and after suspended work, including
+null results and the final durable read. This check supplements the synchronous
+scope/format/epoch lease passed to storage and preparation. The existing overload
+remains available for callers that supply their own qualification.
+
+### Current native edit qualification
+
+`ImportCoordinator.prepareLocalTitleAttempt` composes this helper with the same
+private owner qualification used by `retainLocalTitleAttempt`. The complete
+retained SQL intent, baseline, capsule and native dirty contents must still match
+the candidate. Imported events use their owned simple snapshot. Transferred CREATE
+events require the original capture/dispatch/attachment provenance, a released
+waiting handoff frame and the matching specialized native observation. Missing or
+changed provenance never falls back to ordinary capture.
+
+One session/policy epoch covers the invocation. Account, selection, permission,
+calendar editing mode and adapter formats are checked alongside the complete
+source around reservation, wire reads, guarded preparation, retention and durable
+readback. The first observed refusal remains binding for the invocation. A restored
+permission or a later source cannot substitute a new owner. Cancellation propagates;
+typed preparation failures become bounded outcomes without rewriting the local
+intent or marking its SQL owner conflicted merely from a port exception.
+
+The returned `Prepared` contains only the canonical durable record, which may use
+the first reservation's ID rather than the caller's proposed ID. Network preparation
+defaults to disabled: a bare reservation remains unresolved with no
+preparation call. UNKNOWN stays held. If the source changes during preparation,
+no returned wire is retained; if it changes during commit or readback, retained
+history remains but the invocation cannot report `Prepared`.
+
+Provider observations, SQL ownership and the wire journal have no distributed
+transaction. These surrounding checks qualify measured observations, not an atomic
+snapshot or authority to dispatch. The API makes no claim, PUT, service inspection
+or native acknowledgement, and remains disconnected from the production worker.
 
 ## Local binding of prepared work
 
@@ -456,7 +490,8 @@ remain separate work.
   uncommitted reservation must roll back; idempotent replay rechecks admission.
   These fixtures use isolated SQLite and synthetic capsules, without service or
   native operations, and do not qualify network preparation or production wiring.
-- `TitleUpdatePreparationRecoveryTest` checks offline wire reuse, canonical IDs,
+- `TitleUpdatePreparationRecoveryTest` checks asynchronous access refusal and cancellation,
+  offline wire reuse, canonical IDs,
   explicit network eligibility, unsupported guarded ports, exact successful readback,
   concurrent winners, UNKNOWN transitions, revocation and cancellation after null.
   `TitleUpdatePreparationRecoveryDeviceTest` combines the helper and real isolated
@@ -465,6 +500,15 @@ remain separate work.
   guards, session replacement, sealing, freezing across waits, scoped callbacks,
   typed errors and cancellation. These use controlled ports/protected capsules;
   they do not establish service acceptance, native owner composition or a new PUT.
+- `TitleUpdatePreparationCoordinatorDeviceTest` composes the guarded helper with
+  real isolated SQL owners/journals and controlled native snapshots. It checks
+  canonical identity recovery, offline reuse, conflicts, capsule substitutions,
+  access revocation, changes during preparation/commit/readback, typed failures
+  and cancellation. The guarded title scenarios in `CapturedHandoffIntegrationDeviceTest`
+  additionally use the real Calendar Provider and original CREATE provenance,
+  checking unchanged rows, offline replay, lost provenance and later native edits.
+  Their preparation ports are synthetic; they establish local owner composition,
+  not Proton service acceptance, dispatch or production worker activation.
 - `TitleUpdateGuardedPreparationStoreDeviceTest` qualifies immutable guarded
   PREPARED retention, default denial, complete history across generations,
   UNKNOWN holds, corruption and rollback after observable writes or cancellation.
