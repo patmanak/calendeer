@@ -53,6 +53,12 @@ through commit, including exact repetitions, without borrowing dispatch authorit
 Durable readback rechecks ownership and native contents; conflicts or later edits
 remain held. This path does not prepare wire, claim, send, inspect the service or
 acknowledge Android, and is not connected to the production worker.
+The title journal now reserves a stable attempt identity before wire preparation.
+Identical concurrent proposals recover the first identity after reopening; bare
+reservations hold the event across generations. Retention and claim share that
+ownership view, preserve the first wire and release a cycle only through qualified
+completion. The additive migration preserves historical attempts. Connecting this
+local reservation to guarded network preparation and production UPDATE remains pending.
 The system observer now reuses a retained UPDATE identity and allocates a distinct
 identity after that owner is consumed, for imported and CREATE-handoff events.
 A bounded, scope-bound metadata index lists unresolved title attempts independently

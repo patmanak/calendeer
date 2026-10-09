@@ -61,6 +61,37 @@ or a general permission to ignore timestamps. A matching display title or
 success response alone is insufficient. The adapter's inspection does not alter
 the journal.
 
+## Stable preparation identity
+
+`TitleUpdatePreparationJournal` reserves an attempt identity before wire
+preparation. The complete retained preparation capsule and current wire format
+are immutable. Identical concurrent proposals receive the first durable identity,
+even if they proposed different IDs. A compatible legacy PREPARED record owns
+that identity when adopted; its first protected wire is preserved.
+
+The schema-four migration adds an empty reservation table. Version-three attempts,
+protected bytes, results and completions are untouched; earlier versions retain
+their existing migration rules. Reservation, both retention overloads and dispatch
+claim share a fully qualified ownership view under the writer transaction. A bare
+reservation holds the event across generations. An exact matching reservation
+can receive its first PREPARED wire, but another identity or capsule cannot bypass
+it. Both cross-references are checked by scope and identity, independently of the
+event discovery indexes. Corruption or disagreement between reservation and attempt
+remains blocking.
+Only the corresponding full, valid completion releases logical ownership for a
+new cycle; the reservation and original UNKNOWN work stay in history.
+
+Reservation checks its per-call lease after lock acquisition and immediately
+before commit, including repetitions. Reading by exact scope and event can recover
+the identity after reopening, but grants no preparation or dispatch authority.
+UNKNOWN references are readable history and cannot be reserved again. Without a
+wire, a future caller may repeat read-only preparation with the same identity;
+this does not promise one cryptographic execution. Once a wire exists, the caller
+must read it instead of preparing again. A competing different wire is rejected,
+and the caller must explicitly read the winner rather than report its own wire
+as retained. This local journal is not yet connected to guarded network preparation
+or the production UPDATE worker.
+
 ## Local binding of prepared work
 
 `ImportCoordinator.retainLocalTitleAttempt` binds an already prepared wire record
@@ -381,6 +412,15 @@ remain separate work.
   Guarded retention fixtures additionally observe a real uncommitted SQL write
   before revoking admission, verify rollback and reopening, and qualify idempotent
   replay, cancellation and independent-helper races under the per-call lease.
+- `TitleUpdatePreparationReservationTest` checks complete identity bindings,
+  strict bounds, redacted diagnostics and default-denied unsupported journals.
+  `TitleUpdatePreparationReservationStoreDeviceTest` checks independent writers,
+  canonical identity after reopening, legacy adoption, bare and UNKNOWN holds,
+  first-wire immutability, completion qualification, corrupt history and migrations
+  from all earlier journal versions. Revocation and cancellation after an observable
+  uncommitted reservation must roll back; idempotent replay rechecks admission.
+  These fixtures use isolated SQLite and synthetic capsules, without service or
+  native operations, and do not qualify network preparation or production wiring.
 - `TitleUpdateGuardedPreparationStoreDeviceTest` qualifies immutable guarded
   PREPARED retention, default denial, complete history across generations,
   UNKNOWN holds, corruption and rollback after observable writes or cancellation.

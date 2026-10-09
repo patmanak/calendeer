@@ -26,7 +26,7 @@ import org.json.JSONObject
  * Payload/evidence are opaque protected strings; this store grants no HTTP or Provider capability.
  */
 class TitleUpdateAttemptStore(context: Context, name: String = "calendar-title-update-attempt-v1.db") :
-    SQLiteOpenHelper(context, name, null, 3), TitleUpdateRecoveryJournal {
+    SQLiteOpenHelper(context, name, null, 4), TitleUpdateRecoveryJournal, TitleUpdatePreparationJournal {
     private val lock = Mutex()
     override val completionProtocol = 1
     @Volatile var admitDispatch: (CalendarScope) -> Boolean = { false }
@@ -83,10 +83,27 @@ class TitleUpdateAttemptStore(context: Context, name: String = "calendar-title-u
             )
         """.trimIndent())
         db.execSQL("CREATE UNIQUE INDEX title_update_unresolved_event ON $TABLE(account,calendar,event) WHERE completion IS NULL")
+        createReservationTable(db)
+    }
+
+    private fun createReservationTable(db: SQLiteDatabase) {
+        db.execSQL("""CREATE TABLE $RESERVATIONS (
+            account TEXT NOT NULL, calendar TEXT NOT NULL,
+            generation INTEGER NOT NULL CHECK(generation >= 0),
+            mutation TEXT NOT NULL, event TEXT NOT NULL, preparation TEXT NOT NULL,
+            adapter TEXT NOT NULL, version INTEGER NOT NULL CHECK(version > 0),
+            PRIMARY KEY(account,calendar,generation,mutation)
+        )""".trimIndent())
+        db.execSQL("CREATE INDEX title_update_preparation_event ON $RESERVATIONS(account,calendar,event)")
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        check(oldVersion in 1..2 && newVersion == 3) { "Explicit title update journal migration required" }
+        check(oldVersion in 1..3 && newVersion == 4) { "Explicit title update journal migration required" }
+        if (oldVersion == 3) {
+            // Existing attempts, protected bytes, results and completions stay untouched.
+            createReservationTable(db)
+            return
+        }
         // SQLiteOpenHelper owns the migration transaction. Copy opaque bytes without interpreting
         // them; neither an existing verified result nor a state name establishes completion.
         if (oldVersion == 1) db.execSQL("ALTER TABLE $TABLE ADD COLUMN result TEXT")
@@ -98,6 +115,54 @@ class TitleUpdateAttemptStore(context: Context, name: String = "calendar-title-u
             adapter,version,payload,state,evidence,result,NULL FROM title_update_attempts_legacy""".trimIndent())
         db.execSQL("DROP TABLE title_update_attempts_legacy")
     }
+
+    override suspend fun reservePreparation(candidate: TitleUpdatePreparationReservation,
+        admit: (CalendarScope) -> Boolean): TitleUpdatePreparationReservation? {
+        val frozen = candidate.frozen()
+        return access { db ->
+            if (!admit(frozen.scope)) null else transaction(db, beforeCommit = {
+                check(admit(frozen.scope)) { "Title preparation reservation lease is not current" }
+            }) {
+                val history = ownershipHistory(db, frozen.scope, frozen.eventId)
+                val owner = history.singleOrNull { !it.completed }
+                val canonical = if (owner != null) {
+                    if (owner.scope != frozen.scope) return@transaction null
+                    val attempt = read(db, owner.scope, owner.id)
+                    if (attempt?.state == TitleUpdateAttemptState.OUTCOME_UNKNOWN) return@transaction null
+                    val retained = readReservation(db, owner.scope, owner.id)
+                        ?: TitleUpdatePreparationReservation.of(checkNotNull(attempt))
+                    // A proposed UUID is ignored only after complete ownership equality.
+                    if (retained.preparation != frozen.preparation || retained.format != frozen.format)
+                        return@transaction null
+                    retained
+                } else {
+                    if (history.any { it.id == frozen.id || it.localIntentId == frozen.preparation.intent.id } ||
+                        read(db, frozen.scope, frozen.id) != null || readReservation(db, frozen.scope, frozen.id) != null)
+                        return@transaction null
+                    frozen
+                }
+                if (readReservation(db, canonical.scope, canonical.id) == null) {
+                    // Adoption of legacy PREPARED work keeps its ID and first wire intact.
+                    db.insertOrThrow(RESERVATIONS, null, ContentValues().apply {
+                        put("account", canonical.scope.account.value); put("calendar", canonical.scope.calendar.value)
+                        put("generation", canonical.scope.generation); put("mutation", canonical.id.value)
+                        put("event", canonical.eventId.value); put("preparation", encodePreparation(canonical.preparation))
+                        put("adapter", canonical.format.id); put("version", canonical.format.version)
+                    })
+                }
+                canonical
+            }
+        }
+    }
+
+    override suspend fun readPreparationReservation(scope: CalendarScope,
+        eventId: EventId): TitleUpdatePreparationReservation? = access { db -> transaction(db) {
+        val owner = ownershipHistory(db, scope, eventId).singleOrNull { !it.completed }
+            ?: return@transaction null
+        if (owner.scope != scope) return@transaction null
+        readReservation(db, owner.scope, owner.id)
+            ?: TitleUpdatePreparationReservation.of(checkNotNull(read(db, owner.scope, owner.id)))
+    } }
 
     override suspend fun remember(record: TitleUpdateAttemptRecord) {
         rememberPrepared(record, { true }, guarded = false)
@@ -119,8 +184,16 @@ class TitleUpdateAttemptStore(context: Context, name: String = "calendar-title-u
             if (!admit(frozen.scope)) false else transaction(db, beforeCommit = {
                 check(admit(frozen.scope)) { "Title preparation lease is not current" }
             }) {
-                val history = eventHistory(db, frozen.scope, frozen.preparation.intent.base.eventId)
+                val completeHistory = ownershipHistory(db, frozen.scope, frozen.preparation.intent.base.eventId)
                 val existing = read(db, frozen.scope, frozen.id)
+                val reservation = readReservation(db, frozen.scope, frozen.id)
+                if (guarded && reservation != null && !reservation.matches(frozen)) return@transaction false
+                check(reservation == null || reservation.matches(frozen)) { "Title preparation reservation is immutable" }
+                // The exact bare reservation may become its first PREPARED record. All other
+                // unresolved ownership and historical identity checks remain unchanged.
+                val history = if (existing == null && reservation != null) completeHistory.filterNot {
+                    !it.completed && it.scope == frozen.scope && it.id == frozen.id
+                } else completeHistory
                 if (existing != null) {
                     // Guarded binding cannot use the legacy tolerance for UNKNOWN or release
                     // a history hold. Even exact repetitions qualify the complete event history.
@@ -308,7 +381,7 @@ class TitleUpdateAttemptStore(context: Context, name: String = "calendar-title-u
             if (!admitDispatch(frozen.scope)) false else transaction(db, beforeCommit = {
                 check(admitDispatch(frozen.scope)) { "Title update dispatch lease is not current" }
             }) {
-                val history = eventHistory(db, frozen.scope, frozen.preparation.intent.base.eventId)
+                val history = ownershipHistory(db, frozen.scope, frozen.preparation.intent.base.eventId)
                 val current = read(db, frozen.scope, frozen.id)
                 val admitted = current == frozen && history.singleOrNull {
                     it.scope == frozen.scope && it.id == frozen.id && !it.completed
@@ -352,6 +425,65 @@ class TitleUpdateAttemptStore(context: Context, name: String = "calendar-title-u
 
     private data class History(val scope: CalendarScope, val id: MutationId,
         val localIntentId: MutationId, val completed: Boolean)
+
+    /** Reservation and wire tables share one writer transaction and one ownership view.
+     * Only fully qualified completion releases a reservation; a bare reservation is a hold.
+     * Discard each decoded capsule after qualification rather than keeping payload history.
+     */
+    private fun ownershipHistory(db: SQLiteDatabase, scope: CalendarScope, event: EventId): List<History> {
+        val attempts = eventHistory(db, scope, event)
+        // The event index is discovery, not proof. A moved reservation index cannot
+        // hide a disagreement with an attempt that is still indexed under this event.
+        for (attempt in attempts) {
+            readReservation(db, attempt.scope, attempt.id)?.let { reservation ->
+                check(reservation.matches(checkNotNull(read(db, attempt.scope, attempt.id)))) {
+                    "Title wire and reservation disagree"
+                }
+            }
+        }
+        val reservations = db.query(RESERVATIONS, arrayOf("generation", "mutation"),
+            "account=? AND calendar=? AND event=?", arrayOf(scope.account.value, scope.calendar.value, event.value),
+            null, null, null).use { rows -> buildList {
+            while (rows.moveToNext()) {
+                check(rows.getType(0) == Cursor.FIELD_TYPE_INTEGER && rows.getType(1) == Cursor.FIELD_TYPE_STRING) {
+                    "Invalid title reservation history identity"
+                }
+                val retainedScope = scope.copy(generation = rows.getLong(0))
+                val id = MutationId(rows.getString(1))
+                val reservation = checkNotNull(readReservation(db, retainedScope, id))
+                check(reservation.eventId == event)
+                // Also check the reverse link independently of the wire's event index.
+                val record = read(db, retainedScope, id)
+                val completed = if (record != null) {
+                    check(reservation.matches(record)) {
+                        "Title reservation and wire disagree"
+                    }
+                    checkNotNull(attempts.singleOrNull { it.scope == retainedScope && it.id == id }).completed
+                } else false
+                add(History(retainedScope, id, reservation.preparation.intent.id, completed))
+            }
+        } }
+        val combined = (attempts + reservations).distinct()
+        check(combined.count { !it.completed } <= 1 &&
+            combined.map { it.id }.distinct().size == combined.size &&
+            combined.map { it.localIntentId }.distinct().size == combined.size) {
+            "Title preparation ownership is inconsistent"
+        }
+        return combined
+    }
+
+    private fun readReservation(db: SQLiteDatabase, scope: CalendarScope,
+        id: MutationId): TitleUpdatePreparationReservation? = db.query(RESERVATIONS,
+        arrayOf("event", "preparation", "adapter", "version"), IDENTITY, identity(scope, id), null, null, null).use { row ->
+        if (!row.moveToFirst()) null else try {
+            require((0..3).all { row.getType(it) == if (it == 3) Cursor.FIELD_TYPE_INTEGER else Cursor.FIELD_TYPE_STRING })
+            val preparation = decodePreparation(row.getString(1))
+            require(encodePreparation(preparation) == row.getString(1))
+            val value = TitleUpdatePreparationReservation(id, preparation, AdapterFormat(row.getString(2), version(row, 3))).frozen()
+            require(value.scope == scope && value.eventId.value == row.getString(0))
+            value
+        } catch (_: Exception) { throw IllegalStateException("Invalid retained title preparation reservation") }
+    }
 
     /** A non-null column alone must never release the event hold. Validate every historical
      * proof under the writer transaction, including history in earlier generations. Discard each
@@ -482,6 +614,7 @@ class TitleUpdateAttemptStore(context: Context, name: String = "calendar-title-u
     override fun toString() = "TitleUpdateAttemptStore(redacted)"
     private companion object {
         const val TABLE = "title_update_attempts"
+        const val RESERVATIONS = "title_update_preparation_reservations"
         const val IDENTITY = "account=? AND calendar=? AND generation=? AND mutation=?"
         val PREPARATION_FIELDS = setOf("schema", "id", "account", "calendar", "generation", "intentAdapter", "intentVersion",
             "intentState", "event", "revision", "base", "newTitle", "timestamp", "preparationAdapter", "preparationVersion", "preparationPayload")
