@@ -104,6 +104,35 @@ internal class SerializedAuthenticationPort(
         val frozen = preparation.copy(intent = LocalEditPreparation.freezeIntent(preparation.intent))
         return titleUpdateOperation { it.prepareSubmission(id, frozen) }
     }
+    override suspend fun prepareSubmission(reservation: TitleUpdatePreparationReservation,
+        admit: (CalendarScope) -> Boolean): TitleUpdateAttemptRecord? {
+        val frozen = reservation.frozen()
+        suspend fun active(): Boolean {
+            currentCoroutineContext().ensureActive()
+            val allowed = frozen.format == titleUpdateFormat && admit(frozen.scope)
+            currentCoroutineContext().ensureActive()
+            return allowed
+        }
+        try {
+            if (!active()) return null
+            return withContext(dispatcher) {
+                if (!active()) return@withContext null
+                lock.withLock {
+                    currentCoroutineContext().ensureActive()
+                    if (!authenticated || !active()) return@withLock null
+                    val runtime = graph?.titleUpdates ?: return@withLock null
+                    if (runtime.titleUpdateFormat != frozen.format) return@withLock null
+                    val lease = { scope: CalendarScope -> scope == frozen.scope &&
+                        runtime.titleUpdateFormat == frozen.format && admit(scope) }
+                    val result = runtime.prepareSubmission(frozen, lease)
+                    if (!active() || !authenticated || runtime.titleUpdateFormat != frozen.format) return@withLock null
+                    result?.frozen()?.takeIf { frozen.matches(it) && it.state == TitleUpdateAttemptState.PREPARED &&
+                        it.protectedEvidence == null }
+                }
+            }
+        } catch (cancelled: CancellationException) { throw cancelled }
+          catch (failure: Exception) { currentCoroutineContext().ensureActive(); throw failure }
+    }
     override suspend fun submit(record: TitleUpdateAttemptRecord, journal: TitleUpdateAttemptJournal): TitleUpdateSubmissionObservation {
         val frozen = record.frozen()
         return titleUpdateOperation { it.submit(frozen, journal) }

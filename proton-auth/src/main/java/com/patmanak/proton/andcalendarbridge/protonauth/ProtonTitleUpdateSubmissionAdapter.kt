@@ -31,22 +31,54 @@ internal class ProtonTitleUpdateSubmissionAdapter(private val preparations: Cale
     override val titleUpdateFormat = TITLE_UPDATE_SUBMISSION_FORMAT
     private val codec = ProtonTitleUpdateSubmissionCodec(protector)
 
-    override suspend fun prepareSubmission(id: MutationId, preparation: LocalEditPreparation): TitleUpdateAttemptRecord = try {
+    override suspend fun prepareSubmission(id: MutationId, preparation: LocalEditPreparation): TitleUpdateAttemptRecord =
+        checkNotNull(prepareWire(id, preparation, null))
+
+    override suspend fun prepareSubmission(reservation: TitleUpdatePreparationReservation,
+        admit: (CalendarScope) -> Boolean): TitleUpdateAttemptRecord? {
+        val frozen = reservation.frozen()
+        currentCoroutineContext().ensureActive()
+        if (frozen.format != titleUpdateFormat) return null
+        return prepareWire(frozen.id, frozen.preparation, admit)
+    }
+
+    private suspend fun prepareWire(id: MutationId, preparation: LocalEditPreparation,
+        admit: ((CalendarScope) -> Boolean)?): TitleUpdateAttemptRecord? = try {
         val frozen = preparation.copy(intent = LocalEditPreparation.freezeIntent(preparation.intent))
-        // Open the historical fragments before any remote read; this is not submission admission.
-        ProtonTitlePreparationCodec(protector).openLocal(frozen)
+        currentCoroutineContext().ensureActive()
+        if (admit != null && !admit(frozen.intent.scope)) throw PreparationAdmissionClosed()
+        // Keep the explicit legacy experiment's protected-storage failure ordering.
+        if (admit == null) ProtonTitlePreparationCodec(protector).openLocal(frozen)
         val session = session(frozen.intent.scope)
-        val qualified = context.qualify(session, frozen.intent.scope) { checkSession(session) }
-        checkSession(session)
-        codec.seal(id, frozen, qualified)
+        val checkpoint: suspend () -> Unit = {
+            if (admit == null) checkSession(session) else checkPreparation(session, frozen.intent.scope, admit)
+        }
+        checkpoint()
+        if (admit != null) {
+            ProtonTitlePreparationCodec(protector).openLocal(frozen)
+            checkpoint()
+        }
+        val qualified = context.qualify(session, frozen.intent.scope, checkpoint)
+        checkpoint()
+        val record = codec.seal(id, frozen, qualified)
+        checkpoint()
+        record
     } catch (cancelled: CancellationException) { throw cancelled }
-      catch (failure: LocalEditPreparationException) { throw failure }
-      catch (failure: CreatePreparationException) { localEditUnavailable(LocalEditPreparationFailure.valueOf(failure.reason.name)) }
+      catch (_: PreparationAdmissionClosed) { currentCoroutineContext().ensureActive(); null }
+      catch (failure: LocalEditPreparationException) { currentCoroutineContext().ensureActive(); throw failure }
+      catch (failure: CreatePreparationException) {
+          currentCoroutineContext().ensureActive()
+          localEditUnavailable(LocalEditPreparationFailure.valueOf(failure.reason.name))
+      }
       catch (failure: ProtonTitlePreparationException) {
+          currentCoroutineContext().ensureActive()
           localEditUnavailable(if (failure.reason == ProtonTitlePreparationFailure.STORAGE)
               LocalEditPreparationFailure.STORAGE else LocalEditPreparationFailure.UNSUPPORTED)
-      } catch (_: GateCProtectedStorageUnavailable) { localEditUnavailable(LocalEditPreparationFailure.STORAGE) }
+      } catch (_: GateCProtectedStorageUnavailable) {
+          currentCoroutineContext().ensureActive(); localEditUnavailable(LocalEditPreparationFailure.STORAGE)
+      }
         catch (failure: Exception) {
+            currentCoroutineContext().ensureActive()
             val imported = when (failure) {
                 is RemoteImportException -> failure
                 is ApiException, is java.io.IOException -> failure.importFailure()
@@ -176,6 +208,17 @@ internal class ProtonTitleUpdateSubmissionAdapter(private val preparations: Cale
         val current = sessions.current()
         currentCoroutineContext().ensureActive()
         check(admit(scope))
+        if (current != expected) localEditUnavailable(LocalEditPreparationFailure.AUTHENTICATION)
+    }
+    private class PreparationAdmissionClosed : RuntimeException()
+    private suspend fun checkPreparation(expected: CatalogSession, scope: CalendarScope,
+        admit: (CalendarScope) -> Boolean) {
+        currentCoroutineContext().ensureActive()
+        if (!admit(scope)) throw PreparationAdmissionClosed()
+        val current = sessions.current()
+        currentCoroutineContext().ensureActive()
+        if (!admit(scope)) throw PreparationAdmissionClosed()
+        currentCoroutineContext().ensureActive()
         if (current != expected) localEditUnavailable(LocalEditPreparationFailure.AUTHENTICATION)
     }
     private suspend fun guarded(block: suspend () -> TitleUpdateSubmissionObservation) = try { block() }

@@ -141,6 +141,12 @@ sealed interface TitleUpdateSubmissionObservation {
 interface CalendarTitleUpdateSubmissionPort {
     val titleUpdateFormat: AdapterFormat?
     suspend fun prepareSubmission(id: MutationId, preparation: LocalEditPreparation): TitleUpdateAttemptRecord
+    /** Read-only preparation under one scope/epoch lease; unsupported ports deny without
+     * invoking unrestricted preparation. The reserved identity and complete capsule must
+     * remain exact, and no dispatch or native acknowledgement is authorized.
+     */
+    suspend fun prepareSubmission(reservation: TitleUpdatePreparationReservation,
+        admit: (CalendarScope) -> Boolean): TitleUpdateAttemptRecord? = null
     suspend fun submit(record: TitleUpdateAttemptRecord, journal: TitleUpdateAttemptJournal): TitleUpdateSubmissionObservation
     suspend fun inspect(record: TitleUpdateAttemptRecord): TitleUpdateSubmissionObservation
     /** Per-call recovery lease, rechecked around inspection stages. Unsupported implementations

@@ -189,7 +189,7 @@ internal object ProtonAuthenticationRuntime {
                 }, localAddresses, localTitleCryptoPreparation(cryptoContext, eventProtector))
             val titleContext = TitleUpdateContextQualification { session, scope, checkpoint ->
                 checkpoint()
-                // Keep each suspending read inside the caller's original inspection lease.
+                // Keep each suspending read inside the caller's original access lease.
                 userManager.getUser(session.userId, refresh = true)
                 checkpoint()
                 userManager.getAddresses(session.userId, refresh = true)

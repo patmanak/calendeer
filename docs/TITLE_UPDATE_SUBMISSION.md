@@ -89,8 +89,43 @@ wire, a future caller may repeat read-only preparation with the same identity;
 this does not promise one cryptographic execution. Once a wire exists, the caller
 must read it instead of preparing again. A competing different wire is rejected,
 and the caller must explicitly read the winner rather than report its own wire
-as retained. This local journal is not yet connected to guarded network preparation
-or the production UPDATE worker.
+as retained. An internal helper now composes this journal with guarded preparation;
+current SQL/Android owner orchestration and production UPDATE remain separate.
+
+## Guarded preparation and retained-wire recovery
+
+The guarded `prepareSubmission(reservation, admit)` overload denies unsupported
+ports by default, without invoking unrestricted preparation. Proton freezes the
+reserved identity and complete capsule before dispatcher, mutex or session waits.
+Admission precedes opening historical protected fragments, then the expected
+session and lease are checked around context qualification and wire sealing.
+The shared runtime checkpoints cover refreshed user/address reads, calendar
+metadata, bootstrap and local address resolution. These application-controlled
+checks do not intercept every internal Core exchange or cancel an already started
+read when a policy callback subsequently becomes false.
+
+The authentication facade restricts the runtime callback to the reserved scope
+and current format. It rejects incompatible returned work and rechecks access
+after the runtime returns, even when it returns null. Revocation denies the
+preparation; authentication, network, retry and storage errors remain typed,
+including explicit legacy experiments. Cancellation always propagates.
+
+`TitleUpdatePreparationRecovery` first reserves the canonical identity and reads
+its exact durable record. An existing PREPARED wire is returned without preparation,
+and UNKNOWN never becomes preparation admission. With a bare reservation,
+`allowNetwork` defaults to false. Explicit eligibility may call only guarded
+preparation, validate the complete reservation binding and retain through the
+guarded journal. A successful retention requires exact wire readback. After a
+lost race, explicit readback may return the other helper's immutable first wire;
+the losing generated wire is never reported as retained. Corruption or persistence
+exceptions propagate instead of becoming historical success. Access and cancellation
+are rechecked after every awaited result, including null and the final readback.
+
+This helper performs no claim, PUT, remote inspection or native acknowledgement.
+Historical wire replay does not refresh remote rights. The caller must provide
+an epoch-bound lease and qualify the current SQL/Android owner around preparation;
+the pure helper cannot inspect those sources. That owner composition and production
+worker activation remain unqualified.
 
 ## Local binding of prepared work
 
@@ -421,6 +456,15 @@ remain separate work.
   uncommitted reservation must roll back; idempotent replay rechecks admission.
   These fixtures use isolated SQLite and synthetic capsules, without service or
   native operations, and do not qualify network preparation or production wiring.
+- `TitleUpdatePreparationRecoveryTest` checks offline wire reuse, canonical IDs,
+  explicit network eligibility, unsupported guarded ports, exact successful readback,
+  concurrent winners, UNKNOWN transitions, revocation and cancellation after null.
+  `TitleUpdatePreparationRecoveryDeviceTest` combines the helper and real isolated
+  SQLite for reopening, failed wire commits, independent writers and UNKNOWN races.
+  `ProtonGuardedTitlePreparationTest` and its facade fixtures check context-stage
+  guards, session replacement, sealing, freezing across waits, scoped callbacks,
+  typed errors and cancellation. These use controlled ports/protected capsules;
+  they do not establish service acceptance, native owner composition or a new PUT.
 - `TitleUpdateGuardedPreparationStoreDeviceTest` qualifies immutable guarded
   PREPARED retention, default denial, complete history across generations,
   UNKNOWN holds, corruption and rollback after observable writes or cancellation.
