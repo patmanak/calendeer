@@ -32,6 +32,76 @@ import org.junit.runner.RunWith
 /** Real isolated Provider and durable journals with a controlled submission port; no Proton IO. */
 @RunWith(AndroidJUnit4::class)
 class SystemCreatePipelineDeviceTest {
+    @Test fun titleRecoveryRunsBeforeNativeDiscoveryInBothOfflineAndOnlinePasses() {
+        for (network in listOf(false, true)) fixture {
+            var pages = 0
+            installTitleRecovery { query ->
+                assertEquals(target, query.scope); assertEquals(1, query.limit)
+                assertNull(work.read(target, row)); assertNull(field(Events.SYNC_DATA5))
+                assertEquals(0, preparations); assertEquals(0, sends)
+                pages++
+                TitleUpdateOfflineRecoveryProgress(held = 1)
+            }
+            assertEquals(ImportRunResult.COMPLETE, controller.run(network))
+            assertEquals(1, pages)
+            assertNotNull(work.read(target, row))
+            assertEquals(if (network) 1 else 0, sends)
+        }
+    }
+
+    @Test fun titlePageFailureIsVisibleAndOnlyItsCursorRequestsContinuation() = fixture {
+        var pages = 0
+        val next = TitleUpdateWorkCursor(target, EventId("held-title-fixture"))
+        installTitleRecovery { query ->
+            pages++
+            if (pages == 1) {
+                assertNull(query.cursor)
+                TitleUpdateOfflineRecoveryProgress(failed = 1, next = next)
+            } else {
+                assertEquals(next, query.cursor)
+                TitleUpdateOfflineRecoveryProgress(held = 1)
+            }
+        }
+        assertEquals(ImportRunResult.CONTINUE, controller.run(network = false))
+        assertEquals(1, pages); assertTrue(controller.state.value.failed)
+        assertEquals(ImportRunResult.COMPLETE, controller.run(network = false))
+        assertEquals(2, pages); assertFalse(controller.state.value.failed)
+        assertEquals(0, sends); assertEquals(0, preparations)
+    }
+
+    @Test fun disabledModeDoesNotDiscoverTitleRecoveryOrNativeWork() = fixture {
+        var pages = 0
+        installTitleRecovery { pages++; TitleUpdateOfflineRecoveryProgress() }
+        work.setMode(target, false)
+        val before = providerSnapshot()
+        assertEquals(ImportRunResult.COMPLETE, controller.run(network = true))
+        assertEquals(0, pages); assertNull(work.read(target, row))
+        assertEquals(before, providerSnapshot()); assertEquals(0, sends)
+    }
+
+    @Test fun accessLostDuringTitleRecoveryStopsTheFollowingNativeScan() = fixture {
+        var pages = 0
+        installTitleRecovery {
+            pages++; work.setMode(target, false)
+            TitleUpdateOfflineRecoveryProgress(next = TitleUpdateWorkCursor(target, EventId("held-title-fixture")))
+        }
+        val before = providerSnapshot()
+        assertEquals(ImportRunResult.COMPLETE, controller.run(network = true))
+        assertEquals(1, pages); assertNull(work.read(target, row)); assertEquals(before, providerSnapshot())
+        assertEquals(0, preparations); assertEquals(0, sends)
+    }
+
+    @Test fun resumedWorkerDoesNotRestartTitlesWhileOtherLocalWorkRemainsHeld() = fixture {
+        var pages = 0
+        installTitleRecovery { pages++; TitleUpdateOfflineRecoveryProgress(held = 1) }
+        assertEquals(ImportRunResult.COMPLETE, controller.run(network = false, fresh = true))
+        assertEquals(SystemCreateWorkStatus.CAPTURED, work.read(target, row)!!.status)
+        repeat(3) { assertEquals(ImportRunResult.COMPLETE, controller.run(network = false, fresh = false)) }
+        assertEquals(1, pages); assertEquals(0, sends)
+        assertEquals(ImportRunResult.COMPLETE, controller.run(network = false, fresh = true))
+        assertEquals(2, pages)
+    }
+
     @Test fun offlineCaptureThenOnlineCreateAttachesAcknowledgesAndHandsOffTheSameRow() = fixture {
         val original = providerSnapshot()
         assertEquals(ImportRunResult.COMPLETE, controller.run(network = false))
@@ -348,12 +418,18 @@ class SystemCreatePipelineDeviceTest {
                     else CreateSubmissionObservation.Unknown
             }
         }
+        private var titleRecovery: SystemTitleRecoveryController? = null
         var coordinator = newCoordinator()
         var controller = newController()
         private fun newCoordinator() = ImportCoordinator(context, store, remote, projection, jobs, scheduler,
             creates = attempts, localCreates = captures, systemCreatesEnabled = work::modeEnabled)
         private fun newController() = SystemCreateController(context, coordinator, projection, work, captures,
-            attempts, port, jobs, scheduler)
+            attempts, port, jobs, scheduler, titleRecovery = titleRecovery)
+
+        fun installTitleRecovery(recover: suspend (TitleUpdateWorkQuery) -> TitleUpdateOfflineRecoveryProgress) {
+            titleRecovery = SystemTitleRecoveryController(AndroidTitleRecoveryCursorStore(context), recover, pageSize = 1)
+            controller = newController()
+        }
 
         suspend fun seed() {
             val summary = CalendarSummary(target.calendar, "Controlled system creation fixture")

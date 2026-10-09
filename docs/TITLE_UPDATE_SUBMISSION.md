@@ -4,7 +4,9 @@ The release target remains bidirectional synchronization through Android calenda
 clients. This internal experiment qualifies a narrower service boundary: submitting
 one prepared title change for a simple personal event. A separate internal path
 conditionally acknowledges ordinary imported and transferred CREATE events after their result
-is retained. UPDATE remains unavailable to production workers and UI controls.
+is retained. Production workers now recover already durable results offline;
+new UPDATE preparation, submission and inspection remain unavailable to workers
+and UI controls.
 
 ## Supported work and ownership
 
@@ -471,10 +473,39 @@ its historical proof. This replay does not write native metadata again and prese
 a later dirty edit. Progress counts describe only this invocation, not global sync
 completion. Held/failed entries and insertions behind a cursor require a fresh
 first-page traversal. Access invalidation returns no continuation, and cancellation
-propagates. The production worker and UI do not invoke this internal path yet.
-The guarded inspection path below supplies the separate transport and durable-result
-admission boundaries. Connecting a page runner to production scheduling remains
-separate work.
+propagates. The production worker now invokes this offline path through
+`SystemTitleRecoveryController`, using the production title journal rather than
+isolated experiment journals. The guarded inspection path below supplies separate
+transport and durable-result admission boundaries and remains disconnected.
+
+### Production scheduling
+
+The existing local and network import workers share the system-creation owner.
+For each current selected editable calendar, offline title recovery runs before
+native change discovery under the same owner epoch. A native scan or CREATE failure
+cannot prevent recovery of an existing durable proof. No title service port is
+provided to the recovery controller, and the journal's dispatch gate stays closed.
+
+Each controller invocation processes at most twenty-five entries per calendar scope. The local cursor is
+committed before continuation is reported and binds the full account/calendar/
+generation scope and protocol through a framed digest. It survives reopening,
+and persists exhaustion through worker retries and continuations. An exhausted
+calendar restarts only on a fresh ordinary trigger, not because another calendar,
+import or CREATE still has pages. Explicit mode changes and access revocation
+discard the old position.
+Current metadata order is owned by SQLite; opaque IDs are never sorted in the JVM.
+Only a valid continuation requests another worker pass. Held/failed entries alone
+do not trigger immediate retries, and a malformed page or cursor remains visible
+as a bounded failure. Cursor persistence failure grants no continuation. Later
+ordinary triggers can start a fresh first-page traversal, including insertions
+behind an earlier cursor. Cancellation propagates across every suspended boundary.
+
+This activates completion recovery only. New title attempts are not generated
+by this controller, UNKNOWN work without proof is not inspected or resent, and
+bare preparation reservations remain intact. Existing session, selection, mode,
+permission, import-format, exact-owner and native-state guards still decide whether
+acknowledgement or completion is permitted. Experimental journals are not adopted
+by production, and automatic title submission remains a separate implementation.
 
 ## Guarded inspection and result retention
 
@@ -549,7 +580,7 @@ server precondition**. A concurrent Proton change between them may be overwritte
 Readback proves current observed contents, not authorship or immutable remote
 history. This adapter does not advertise general conflict-safe write capability.
 
-There is no production worker or UI toggle for UPDATE. The existing system
+There is no production title-submission worker or UPDATE UI toggle. The existing system
 observer continues to retain edits/deletions locally. The internal owner binding
 now qualifies captured work through guarded submission. Before activation, UPDATE
 must be connected to production scheduling and the complete service and native

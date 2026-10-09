@@ -22,11 +22,12 @@ class CalendarImportWorker(context: Context, parameters: WorkerParameters) : Cor
                 state.destination == AuthenticationDestination.AUTHENTICATED
             }
         } }, run = {
+            val fresh = runAttemptCount == 0 && !inputData.getBoolean("resume", false)
             val incoming = try {
-                app.imports.run(network, fresh = runAttemptCount == 0 && !inputData.getBoolean("resume", false))
+                app.imports.run(network, fresh = fresh)
             } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
               catch (_: Exception) { ImportRunResult.RETRY }
-            val outgoing = app.systemCreates.run(network)
+            val outgoing = app.systemCreates.run(network, fresh = fresh)
             when {
                 outgoing == ImportRunResult.RETRY || incoming == ImportRunResult.RETRY -> ImportRunResult.RETRY
                 outgoing == ImportRunResult.CONTINUE || incoming == ImportRunResult.CONTINUE -> ImportRunResult.CONTINUE

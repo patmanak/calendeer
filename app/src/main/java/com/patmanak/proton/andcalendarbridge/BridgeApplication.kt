@@ -22,6 +22,9 @@ import com.patmanak.proton.andcalendarbridge.data.outgoing.CreateAttemptStore
 import com.patmanak.proton.andcalendarbridge.data.outgoing.LocalCreateStore
 import com.patmanak.proton.andcalendarbridge.data.outgoing.SystemCreateWorkStore
 import com.patmanak.proton.andcalendarbridge.data.outgoing.SystemCreateController
+import com.patmanak.proton.andcalendarbridge.data.outgoing.TitleUpdateAttemptStore
+import com.patmanak.proton.andcalendarbridge.data.outgoing.AndroidTitleRecoveryCursorStore
+import com.patmanak.proton.andcalendarbridge.data.outgoing.SystemTitleRecoveryController
 
 class BridgeApplication : Application() {
     private val authenticationScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -29,8 +32,16 @@ class BridgeApplication : Application() {
     private val localCreateCaptures by lazy { LocalCreateStore(this) }
     private val nativeCalendar by lazy { AndroidCalendarProjection(this) }
     private val systemCreateWork by lazy { SystemCreateWorkStore(this) }
+    // Production history only. Experimental fixtures keep their isolated journals.
+    // No title transport or dispatch admission is exposed to this offline traversal.
+    private val titleAttempts by lazy { TitleUpdateAttemptStore(this) }
+    private val titleRecovery by lazy {
+        SystemTitleRecoveryController(AndroidTitleRecoveryCursorStore(this),
+            { query -> imports.recoverLocalTitles(query, titleAttempts) })
+    }
     val systemCreates by lazy { SystemCreateController(this, imports, nativeCalendar, systemCreateWork,
-        localCreateCaptures, createAttempts, ProtonAuthentication.createSubmissions(this), authenticationScope) }
+        localCreateCaptures, createAttempts, ProtonAuthentication.createSubmissions(this), authenticationScope,
+        titleRecovery = titleRecovery) }
 
     val imports by lazy {
         ImportCoordinator(this, ImportStore(this), ProtonAuthentication.events(this),

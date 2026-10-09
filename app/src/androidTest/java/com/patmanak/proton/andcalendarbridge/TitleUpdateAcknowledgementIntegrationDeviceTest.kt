@@ -16,6 +16,9 @@ import com.patmanak.proton.andcalendarbridge.data.importing.*
 import com.patmanak.proton.andcalendarbridge.data.outgoing.CreateAttemptStore
 import com.patmanak.proton.andcalendarbridge.data.outgoing.LocalCreateStore
 import com.patmanak.proton.andcalendarbridge.data.outgoing.TitleUpdateAttemptStore
+import com.patmanak.proton.andcalendarbridge.data.outgoing.SystemTitleRecoveryController
+import com.patmanak.proton.andcalendarbridge.data.outgoing.SystemTitleRecoveryProgress
+import com.patmanak.proton.andcalendarbridge.data.outgoing.AndroidTitleRecoveryCursorStore
 import com.patmanak.proton.andcalendarbridge.sync.*
 import com.patmanak.proton.andcalendarbridge.sync.catalog.CalendarSummary
 import java.nio.ByteBuffer
@@ -580,6 +583,44 @@ class TitleUpdateAcknowledgementIntegrationDeviceTest {
             assertEquals(before, values()); assertEquals(1, writes.get()); assertEquals(0, inspections.get())
         }
 
+        suspend fun scheduledOfflineRecoveryPreservesLaterEdit(completionGap: Boolean) {
+            val cursorName = "title-recovery-integration-$token"
+            fun recovery() = SystemTitleRecoveryController(AndroidTitleRecoveryCursorStore(context, cursorName),
+                { query -> coordinator.recoverLocalTitles(query, journal) })
+            try {
+                journal.admitDispatch = { error("Offline scheduling cannot claim an attempt") }
+                val before = values()
+                if (completionGap) journal.writableDatabase.execSQL("CREATE TRIGGER scheduled_completion_gap BEFORE UPDATE OF completion ON title_update_attempts BEGIN SELECT RAISE(ABORT,'synthetic completion gap'); END")
+                assertEquals(SystemTitleRecoveryProgress(), recovery().run(target) { true })
+                assertEquals(1, writes.get()); assertEquals(0, inspections.get())
+                assertEquals("0", values()[Events.DIRTY])
+                val metadata = setOf(Events.DIRTY, Events.SYNC_DATA2, Events.SYNC_DATA3)
+                assertEquals(before.filterKeys { it !in metadata }, values().filterKeys { it !in metadata })
+                assertEquals(TitleUpdateAcknowledgementState.RESTORED, receipt()!!.state)
+                allowSql(); assertNull(store.localEdit(target, base.eventId))
+                if (completionGap) {
+                    assertNull(journal.readCompletion(target, prepared.id))
+                    journal.writableDatabase.execSQL("DROP TRIGGER scheduled_completion_gap")
+                } else assertNotNull(journal.readCompletion(target, prepared.id))
+                mutateTitle("Synthetic later edit across scheduled recovery")
+                val later = values()
+                reopenOwner()
+                journal.admitDispatch = { error("Reopened offline scheduling cannot claim an attempt") }
+                assertEquals(SystemTitleRecoveryProgress(), recovery().run(target) { true })
+                assertEquals(later, values()); assertEquals(1, writes.get()); assertEquals(0, inspections.get())
+                assertSqlRestored(); assertOriginalCreateProvenance(); assertSingleOriginalRow()
+                assertEquals(TitleUpdateCompletion.of(result, receipt()!!), journal.readCompletion(target, prepared.id))
+                val nextId = MutationId("synthetic-next-scheduled-owner")
+                if (transferred) captureTransferred(nextId) else
+                    assertEquals(LocalEditCaptureResult.RETAINED, coordinator.captureLocalEdit(target, base.eventId, nextId))
+                allowSql(); val nextOwner = store.localEdit(target, base.eventId)
+                assertEquals(SystemTitleRecoveryProgress(), recovery().run(target) { true })
+                allowSql(); assertEquals(nextOwner, store.localEdit(target, base.eventId))
+                assertEquals(later, values()); assertEquals(1, writes.get()); assertEquals(0, inspections.get())
+                assertNull(AndroidTitleRecoveryCursorStore(context, cursorName).read(target))
+            } finally { context.deleteSharedPreferences(cursorName) }
+        }
+
         suspend fun inspectionBatchRecoversMissingProof(restoreGap: Boolean = false) {
             journal.writableDatabase.execSQL("UPDATE title_update_attempts SET result=NULL")
             assertNull(journal.readVerified(target, prepared.id))
@@ -908,6 +949,13 @@ class TitleUpdateAcknowledgementIntegrationDeviceTest {
     }
     @Test fun transferredInspectionBatchReopensProofToAcknowledgementGapAndKeepsLaterDirtyEdit() = fixture(allDay = false, transferred = true) {
         inspectionBatchRecoversMissingProof(restoreGap = true)
+    }
+
+    @Test fun scheduledOfflineTitleProofKeepsSameRowAndNextOwnerAfterReopening() = fixture(allDay = false) {
+        scheduledOfflineRecoveryPreservesLaterEdit(completionGap = false)
+    }
+    @Test fun scheduledTransferredTitleRecoveryClosesCompletionGapWithoutConsumingLaterOwner() = fixture(allDay = true, transferred = true) {
+        scheduledOfflineRecoveryPreservesLaterEdit(completionGap = true)
     }
 
     @Test fun ordinaryStoredTitleProofCompletesThroughOfflineBatchOnSameRow() = fixture(allDay = false) {

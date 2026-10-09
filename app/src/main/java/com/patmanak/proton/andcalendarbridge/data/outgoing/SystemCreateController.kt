@@ -54,6 +54,7 @@ class SystemCreateController(
     private val port: CalendarCreateSubmissionPort,
     private val scope: CoroutineScope,
     private val scheduler: ImportScheduler = WorkManagerImportScheduler(context),
+    private val titleRecovery: SystemTitleRecoveryController? = null,
 ) {
     private val context = context.applicationContext
     private val mutableState = MutableStateFlow(SystemCreateUiState())
@@ -75,10 +76,19 @@ class SystemCreateController(
     fun start() {
         if (!started.compareAndSet(false, true)) return
         scope.launch {
+            var previous: Signal? = null
             imports.state.map { current -> Signal(current.authenticated, current.hasPermission,
                 current.selections.map { ScopeSignal(it.scope, it.enabled, it.available, work.modeEnabled(it.scope)) }) }
-                .distinctUntilChanged().collect {
+                .distinctUntilChanged().collect { signal ->
                     try {
+                        // Initial session/catalog hydration must preserve a restarted traversal.
+                        // A subsequently revoked selection abandons its old page position only.
+                        fun Signal.active() = if (authenticated && permission) selections
+                            .filter { it.selected && it.available && it.mode }.map { it.scope }.toSet()
+                            else emptySet()
+                        val revoked = previous?.active().orEmpty() - signal.active()
+                        previous = signal
+                        for (target in revoked) titleRecovery?.reset(target)
                         updateObserver()
                         imports.reconcileSystemCalendarAccess()
                         publish()
@@ -100,6 +110,7 @@ class SystemCreateController(
         imports.systemCreatePolicyChanged(target, enabled)
         scope.launch {
             try {
+                titleRecovery?.reset(target)
                 updateObserver()
                 imports.configureSystemCalendar(target)
                 publish()
@@ -116,13 +127,19 @@ class SystemCreateController(
     }
 
     /** One bounded page per selected scope; unknown outcomes never cause immediate retry loops. */
-    suspend fun run(network: Boolean): ImportRunResult = mutex.withLock {
+    suspend fun run(network: Boolean, fresh: Boolean = true): ImportRunResult = mutex.withLock {
         mutableState.update { it.copy(busy = true, failed = false) }
         var more = false
         var retry = false
         try {
             for (target in activeScopes()) {
                 val epoch = epochs.computeIfAbsent(target) { AtomicLong() }.get()
+                if (!active(target, epoch)) continue
+                // A failed native scan/CREATE must not block already durable title proof.
+                // This is the same captured epoch; no new authority is acquired after a pause.
+                val recovered = titleRecovery?.run(target, fresh) { active(target, epoch) }
+                if (recovered?.failed == true) mutableState.update { it.copy(failed = true) }
+                more = more || recovered?.more == true
                 if (!active(target, epoch)) continue
                 if (!imports.configureSystemCalendar(target)) { retry = true; continue }
                 val discovered = imports.discoverSystemChanges(target, cursor(target, "scan"), PAGE_SIZE)

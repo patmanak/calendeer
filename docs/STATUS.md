@@ -24,6 +24,14 @@ same-row acknowledgement and handoff. Read-only remains the default. Pausing or
 disabling creation closes native editing without deleting events; pending work
 stays visible with the mode off. UNKNOWN submissions can only be inspected, never
 automatically sent again. Production UPDATE/DELETE remain held locally without upload.
+The existing local and network workers now traverse the production title journal
+offline, completing only already durable verified results. One bounded page per
+active editable calendar uses a durable scope/protocol-bound cursor. Recovery
+precedes native discovery, so a scan failure cannot block an existing proof.
+Held or failed work alone does not schedule an immediate retry; only a persisted
+continuation advances the traversal. Exhausted calendars stay closed through
+continuations from other work until a fresh trigger. Revocation discards its position. No title
+preparation, claim, submission, inspection or new proof retention is activated.
 Known-empty, non-recurring incoming events now use the calendar's opaque local
 owner label to preserve native editing, without a remote organizer or attendee. Ordinary and CREATE-handoff
 capture accept that profile and preserve DIRTY edits. Existing settled rows gain
@@ -31,7 +39,7 @@ the profile on their next projection. The /e/OS event-detail editor saved a titl
 that remained capturable after restart on the same row. Samsung editing and
 automatic UPDATE remain unqualified. An [internal title UPDATE experiment](TITLE_UPDATE_SUBMISSION.md)
 adds a separate protected request and durable inspection-only journal, without
-automatic UPDATE or worker activation. Verified full-content results now
+automatic UPDATE submission. Verified full-content results now
 have immutable, attempt-bound storage and an internal inspect-only recovery path;
 retained history can be read offline without releasing the UNKNOWN attempt.
 An internal simple-event acknowledgement reserves a durable receipt, changes
@@ -104,8 +112,8 @@ without a title service port, preserving a later captured dirty edit even when
 descriptive phase markers are removed. The fixture retains its new synthetic
 remote event, isolated native calendar and journals. This proves recovery across
 an ordered process restart, not arbitrary interruption during transport or absence
-of the application's independent background traffic. Worker activation remains
-pending. These observations across independent stores do
+of the application's independent background traffic. Automatic title submission
+remains pending. These observations across independent stores do
 not provide a distributed commit or server-side concurrency precondition.
 The system observer now reuses a retained UPDATE identity and allocates a distinct
 identity after that owner is consumed, for imported and CREATE-handoff events.
@@ -118,7 +126,7 @@ It retains one session/policy epoch across the page, holds PREPARED or unproven
 attempts, preserves corrupt entries and drops continuation after access invalidation.
 Acknowledgement-to-completion gaps can resume after reopening without rewriting
 the native row or consuming a later dirty edit. This path makes no service request
-and is not connected to the production worker.
+and is now called by the production worker through its offline recovery controller.
 Guarded inspect-only recovery now uses an explicit network allowance and a
 per-call access lease. Proton rechecks that lease and the expected session between
 context reads, event readback and verification; result storage rechecks admission
@@ -128,7 +136,8 @@ readback. An internal page runner now combines guarded inspection, durable proof
 same-row acknowledgement and completion under the original session/policy epoch.
 It defaults to offline eligibility, never submits and does not inspect an already
 durable result. Permission/account invalidation also applies without a CREATE
-journal. The production worker remains unwired for UPDATE recovery.
+journal. Guarded network inspection remains disconnected from production scheduling;
+the worker uses only the offline recovery boundary.
 Isolated physical Provider/SQLite integration qualifies same-row acknowledgement,
 interrupted restoration and preservation of a later dirty edit. A distinct supported
 cached observation is now requeued for its exact event atomically with the first
