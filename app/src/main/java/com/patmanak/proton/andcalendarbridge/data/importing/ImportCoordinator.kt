@@ -824,16 +824,33 @@ class ImportCoordinator(
           }
     }
 
+    /** Internal submission followed by guarded result retention under the same original epoch. */
+    suspend fun submitAndRetainLocalTitleAttempt(record: TitleUpdateAttemptRecord,
+        attempts: TitleUpdateAttemptJournal, results: TitleUpdateResultJournal,
+        port: CalendarTitleUpdateSubmissionPort, allowNetwork: Boolean = false): TitleUpdateVerifiedResult? =
+        submitLocalTitleAttemptGuarded(record, attempts, port, allowNetwork, results).verifiedResult
+
     /** Internal submission of already durable wire; offline by default. The local callback
      * observes ownership without re-entering authentication while its submission lock is held.
      * A verified observation does not acknowledge Android or durably store a verified result.
      */
     suspend fun submitLocalTitleAttempt(record: TitleUpdateAttemptRecord, journal: TitleUpdateAttemptJournal,
-        port: CalendarTitleUpdateSubmissionPort, allowNetwork: Boolean = false): TitleUpdateSubmissionObservation {
+        port: CalendarTitleUpdateSubmissionPort, allowNetwork: Boolean = false): TitleUpdateSubmissionObservation =
+        submitLocalTitleAttemptGuarded(record, journal, port, allowNetwork, null).observation
+
+    private class TitleSubmissionOutcome(
+        val observation: TitleUpdateSubmissionObservation = TitleUpdateSubmissionObservation.Unknown,
+        val verifiedResult: TitleUpdateVerifiedResult? = null,
+    )
+
+    private suspend fun submitLocalTitleAttemptGuarded(record: TitleUpdateAttemptRecord,
+        journal: TitleUpdateAttemptJournal, port: CalendarTitleUpdateSubmissionPort,
+        allowNetwork: Boolean, results: TitleUpdateResultJournal?): TitleSubmissionOutcome {
+        val unresolved = TitleSubmissionOutcome()
         val frozen = record.frozen()
         currentCoroutineContext().ensureActive()
         if (!allowNetwork || frozen.state != TitleUpdateAttemptState.PREPARED || frozen.protectedEvidence != null)
-            return TitleUpdateSubmissionObservation.Unknown
+            return unresolved
         return mutex.withLock {
             val target = frozen.scope
             val qualification = LocalTitleOwnerQualification(frozen.preparation, frozen.format, port,
@@ -859,29 +876,47 @@ class ImportCoordinator(
                     qualified && stillActive
                 }
             }
+            suspend fun currentSource(): Boolean {
+                if (!active()) return false
+                // port.submit has returned and released its authentication mutex. Fresh account
+                // observations are safe here and cannot replace this invocation's original epoch.
+                val qualified = qualification.available() && source(target)
+                if (!qualified) closed = true
+                val stillActive = active()
+                return qualified && stillActive
+            }
             try {
                 // This account lookup is deliberately outside port.submit's authentication lock.
-                if (!qualification.available() || !active()) return@withLock TitleUpdateSubmissionObservation.Unknown
+                if (!qualification.available() || !active()) return@withLock unresolved
                 store.admitTransaction = lease
                 projection.admitOperation = { lease(target) }
                 val stored = journal.read(target, frozen.id)?.frozen()
-                if (!active() || stored != frozen || !source(target)) return@withLock TitleUpdateSubmissionObservation.Unknown
+                if (!active() || stored != frozen || !source(target)) return@withLock unresolved
                 val result = port.submit(frozen, journal, lease, source)
                 currentCoroutineContext().ensureActive()
                 if (!active() || result !is TitleUpdateSubmissionObservation.Verified ||
                     result.attempt != TitleUpdateAttemptIdentity.of(frozen) ||
                     result.event.eventId != frozen.preparation.intent.base.eventId ||
                     result.event.content != frozen.preparation.intent.content)
-                    return@withLock TitleUpdateSubmissionObservation.Unknown
+                    return@withLock unresolved
                 val durable = journal.read(target, frozen.id)?.frozen()
                 if (!active() || durable == null || durable.state != TitleUpdateAttemptState.OUTCOME_UNKNOWN ||
                     durable.protectedEvidence == null ||
                     durable.copy(state = TitleUpdateAttemptState.PREPARED, protectedEvidence = null) != frozen || !source(target))
-                    return@withLock TitleUpdateSubmissionObservation.Unknown
-                result
+                    return@withLock unresolved
+                if (results == null) return@withLock TitleSubmissionOutcome(result)
+                if (!currentSource()) return@withLock unresolved
+                val verified = TitleUpdateVerifiedResult.of(durable, result)
+                val committed = results.retainVerified(verified, lease)
+                // Recheck even false/null results: a dependency may have swallowed cancellation.
+                if (!currentSource() || !committed) return@withLock unresolved
+                val retained = results.readVerified(target, frozen.id)
+                if (!currentSource() || retained != verified) return@withLock unresolved
+                TitleSubmissionOutcome(result, retained)
             } catch (cancelled: CancellationException) { throw cancelled }
-              catch (_: Exception) { currentCoroutineContext().ensureActive(); TitleUpdateSubmissionObservation.Unknown }
+              catch (_: Exception) { currentCoroutineContext().ensureActive(); unresolved }
               finally {
+                  closed = true
                   store.admitTransaction = { false }
                   projection.admitOperation = { false }
               }

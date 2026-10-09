@@ -285,6 +285,31 @@ revision or substituted work cannot replace it. Its version-two migration adds
 result storage without changing original attempts, preparation or evidence.
 Decoded results are validated again against their owning record.
 
+`ImportCoordinator.submitAndRetainLocalTitleAttempt` adds result retention to the
+owner-qualified submission path. It shares the same private core, mutex and original
+generation/policy epoch with the observation-only entry point; it does not release
+that ownership and acquire another lease between submission and storage. Only an
+exact complete Verified observation backed by the identical durable UNKNOWN wire
+and response evidence can reach result retention.
+
+After the submission facade returns, fresh account observations are safe again.
+The helper requalifies the account, selected calendar, SQL owner, capsule and native
+contents before guarded `retainVerified(result, lease)`, after its return even when
+false, and after reading the retained proof. It returns only a complete equal result,
+including the observed revision. Refusal, storage failure or substituted/null
+readback returns no qualified proof; there is no fallback to an older result or
+unrestricted retention. Cancellation propagates even if a dependency returns false
+or null. The invocation's lease expires on exit.
+
+A committed proof remains historical if access or the source changes before the
+qualified return. The first immutable result is preserved if another observation
+wins a race; a different revision cannot replace it. Unsupported guarded result
+storage can leave an already submitted UNKNOWN attempt with response evidence and
+no result, requiring the separate inspection-only recovery path. Neither this helper
+nor the observation-only entry point resubmits UNKNOWN, acknowledges Android,
+completes the attempt or activates a worker. Independent SQL/Provider observations
+still have no distributed commit or atomic server precondition.
+
 `TitleUpdateResultRecovery` first reads retained history without network access.
 If no proof exists, it only inspects the UNKNOWN attempt and returns a verified
 result after durable retention. Failure or cancellation propagates; there is no
@@ -596,6 +621,13 @@ remain separate work.
   wire binding, offline refusal, changed ownership, durable UNKNOWN after claim,
   CREATE provenance corruption and absence of authentication re-entry. It grants no
   physical Provider or new service PUT qualification.
+- `TitleUpdateSubmissionResultCoordinatorDeviceTest` checks real isolated SQL result
+  retention after controlled submission: exact reopening, unsupported guarded
+  storage, rollback and deferred commit failure, post-commit revocation, independent
+  owner/native changes, revision races, substituted readback and cancellation. It
+  checks that the observation-only API still stores no result and that completed
+  invocations close their leases. Native snapshots and transport are controlled;
+  this suite does not establish physical Provider or new Proton PUT compatibility.
 - `TitleUpdatePreparationCoordinatorDeviceTest` composes the guarded helper with
   real isolated SQL owners/journals and controlled native snapshots. It checks
   canonical identity recovery, offline reuse, conflicts, capsule substitutions,

@@ -82,8 +82,14 @@ session/policy epoch. Its callback is local-only while the authentication mutex 
 held. Source qualification follows the last suspended session check before send.
 Source changes detected after claim and before send preserve UNKNOWN without
 transport. A verified observation requires exact durable UNKNOWN/evidence and a
-final local qualification, and does
-not persist a verified result or acknowledge Android. Isolated SQL and controlled
+final local qualification. The observation-only entry point does not persist a
+verified result or acknowledge Android. An additional internal submission helper
+retains the exact verified result under that same original epoch, then requires
+complete durable readback before returning it. Fresh account and local owner
+checks surround retention and readback after the authentication call has returned.
+Revocation after commit preserves the historical proof without reporting current
+qualification; UNKNOWN remains non-resendable. This helper neither acknowledges
+Android nor completes the attempt. Isolated SQL and controlled
 native snapshots qualify this composition; a new native capture-to-PUT journey and
 worker activation remain pending. These observations across independent stores do
 not provide a distributed commit or server-side concurrency precondition.

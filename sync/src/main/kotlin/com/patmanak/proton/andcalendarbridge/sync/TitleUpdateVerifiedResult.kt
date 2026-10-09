@@ -37,7 +37,7 @@ class TitleUpdateVerifiedResult private constructor(
  */
 interface TitleUpdateResultJournal {
     suspend fun retainVerified(result: TitleUpdateVerifiedResult)
-    /** Recovery-only admission, checked before mutation and immediately before durable commit,
+    /** Per-call proof retention, checked before mutation and immediately before durable commit,
      * including idempotent repetitions. Unsupported implementations return false without using
      * unrestricted retention. Revocation during a transaction must roll it back; failure and
      * cancellation propagate. The caller must retain the original epoch through this callback.
