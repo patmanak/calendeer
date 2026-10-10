@@ -23,7 +23,7 @@
     <string name="auth_human_title">Menselijke verificatie</string>
     <string name="auth_human_help">De vereiste verificatie kon niet worden weergegeven. Annuleer en probeer het later opnieuw.</string>
     <string name="auth_connected_title">Account verbonden</string>
-    <string name="auth_connected_help">Je account is verbonden. Kies kalenders op het startscherm om ondersteunde gebeurtenissen alleen-lezen in Android te importeren.</string>
+    <string name="auth_connected_help">Je account is verbonden. Kies kalenders op het startscherm om ondersteunde gebeurtenissen in Android te importeren, standaard alleen-lezen.</string>
     <string name="auth_input_required">Vul alle verplichte velden in.</string>
     <string name="auth_rejected">De inloggegevens of code zijn geweigerd. Probeer het opnieuw.</string>
     <string name="auth_already_connected">Dit account is al verbonden.</string>

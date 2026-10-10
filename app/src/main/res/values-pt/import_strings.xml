@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="import_title">Importar para Android</string>
-    <string name="import_read_only">Os calendários selecionados são copiados para Android em modo só de leitura. Nada é enviado para o Proton.</string>
+    <string name="import_read_only">Os calendários selecionados são copiados para Android. Por predefinição nada é enviado para o Proton. Só criações e alterações de títulos suportadas podem ser enviadas após ativar as respetivas opções.</string>
     <string name="import_privacy">O conteúdo dos eventos é guardado no calendário Android e pode ser lido por outras aplicações com acesso aos calendários.</string>
-    <string name="import_permission_help">O Android precisa de permissões de leitura e escrita dos calendários para criar e atualizar estas cópias locais, mesmo que o Proton permaneça só de leitura.</string>
+    <string name="import_permission_help">O Android precisa de acesso de leitura e escrita aos calendários para manter as cópias locais. Esta permissão por si só não ativa o envio de alterações para o Proton.</string>
     <string name="import_allow">Permitir acesso aos calendários</string>
     <string name="import_settings">Abrir definições da aplicação</string>
     <string name="import_no_calendars">Carregue a lista para escolher os calendários a importar.</string>
@@ -38,5 +38,5 @@
     <string name="import_recurrence_limits">São importadas as recorrências comuns e as alterações de uma ocorrência. As formas não suportadas ficam pendentes.</string>
     <string name="import_status_create_pending">Algumas alterações do calendário estão em espera para evitar eventos duplicados.</string>
     <string name="import_local_changes">Alterações do Android preservadas: %1$d · Conflitos registados: %2$d</string>
-    <string name="import_local_changes_help">Estas alterações capturadas não são enviadas para o Proton. As atualizações dos eventos afetados no Android estão suspensas; as versões são preservadas para resolução posterior.</string>
+    <string name="import_local_changes_help">Estas versões locais são conservadas para resolução. Só as alterações de títulos suportadas podem ser enviadas com a opção experimental ativada; outras alterações e eliminações permanecem locais.</string>
 </resources>

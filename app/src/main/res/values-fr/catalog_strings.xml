@@ -8,7 +8,7 @@
     <string name="catalog_refresh">Actualiser les calendriers</string>
     <string name="catalog_retry_wait">Patientez avant une nouvelle actualisation.</string>
     <string name="catalog_untitled">Calendrier sans titre</string>
-    <string name="catalog_sync_unavailable">Choisissez ci-dessous les calendriers à importer en lecture seule. L’édition dans Android et l’envoi vers Proton ne sont pas encore disponibles.</string>
+    <string name="catalog_sync_unavailable">Lecture seule par défaut. Les créations simples et les modifications de titre compatibles nécessitent leurs options expérimentales respectives ; les autres modifications et suppressions restent locales.</string>
     <string name="catalog_auth_required">Reconnectez votre compte pour charger les calendriers.</string>
     <string name="catalog_unreachable">Proton est inaccessible. Vérifiez votre connexion et l’accès au réseau de cette application.</string>
     <string name="catalog_timeout">Le chargement des calendriers a dépassé le délai prévu. Réessayez.</string>

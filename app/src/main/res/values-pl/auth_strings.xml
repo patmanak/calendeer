@@ -23,7 +23,7 @@
     <string name="auth_human_title">Weryfikacja człowieka</string>
     <string name="auth_human_help">Nie można wyświetlić wymaganej weryfikacji. Anuluj i spróbuj później.</string>
     <string name="auth_connected_title">Konto połączone</string>
-    <string name="auth_connected_help">Konto jest połączone. Wybierz kalendarze na ekranie głównym, aby importować obsługiwane wydarzenia do Androida tylko do odczytu.</string>
+    <string name="auth_connected_help">Konto jest połączone. Wybierz kalendarze na ekranie głównym, aby importować obsługiwane wydarzenia do Androida, domyślnie tylko do odczytu.</string>
     <string name="auth_input_required">Wypełnij wszystkie wymagane pola.</string>
     <string name="auth_rejected">Dane logowania lub kod zostały odrzucone. Spróbuj ponownie.</string>
     <string name="auth_already_connected">To konto jest już połączone.</string>

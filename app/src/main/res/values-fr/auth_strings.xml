@@ -23,7 +23,7 @@
     <string name="auth_human_title">Vérification humaine</string>
     <string name="auth_human_help">La vérification requise ne peut pas être affichée. Annulez et réessayez plus tard.</string>
     <string name="auth_connected_title">Compte connecté</string>
-    <string name="auth_connected_help">Votre compte est connecté. Sur l’écran d’accueil, choisissez les calendriers dont importer les événements pris en charge dans Android en lecture seule.</string>
+    <string name="auth_connected_help">Votre compte est connecté. Sur l’écran d’accueil, choisissez les calendriers dont importer les événements pris en charge dans Android, en lecture seule par défaut.</string>
     <string name="auth_input_required">Remplissez tous les champs requis.</string>
     <string name="auth_rejected">Les identifiants ou le code ont été refusés. Réessayez.</string>
     <string name="auth_already_connected">Ce compte est déjà connecté.</string>

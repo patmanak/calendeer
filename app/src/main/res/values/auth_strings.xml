@@ -23,7 +23,7 @@
     <string name="auth_human_title">Human verification</string>
     <string name="auth_human_help">The required verification could not be displayed. Cancel and try again later.</string>
     <string name="auth_connected_title">Account connected</string>
-    <string name="auth_connected_help">Your account is connected. Choose calendars on the home screen to import supported events into Android in read-only mode.</string>
+    <string name="auth_connected_help">Your account is connected. Choose calendars on the home screen to import supported events into Android, read-only by default.</string>
     <string name="auth_input_required">Enter all required fields.</string>
     <string name="auth_rejected">The credentials or verification code were rejected. Try again.</string>
     <string name="auth_already_connected">This account is already connected.</string>

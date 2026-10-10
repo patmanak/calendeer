@@ -176,12 +176,12 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
         val existing = calendarRow(scope, account) ?: return@operation
         val uri = syncUri(Calendars.CONTENT_URI, account)
         val identity = calendarSelection(scope, account)
+        val values = ContentValues().apply { put(Calendars.CALENDAR_ACCESS_LEVEL, Calendars.CAL_ACCESS_READ) }
         val operations = arrayListOf(assertion(uri, identity, existing),
-            ContentProviderOperation.newUpdate(uri).withSelection(identity.sql, identity.args)
-                .withValue(Calendars.CALENDAR_ACCESS_LEVEL, Calendars.CAL_ACCESS_READ)
-                .withExpectedCount(1).build())
+            calendarConfigurationOperation(uri, identity, existing, values))
         requirePermissions()
         val result = checkedBatch(operations)
+        requirePermissions()
         if (result[0].count != 1 || result[1].count != 1)
             fail(CalendarProjectionFailure.PROVIDER_UNAVAILABLE)
     }
@@ -219,16 +219,38 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
             }
             operations += ContentProviderOperation.newInsert(uri).withValues(values).build()
         } else {
-            operations += ContentProviderOperation.newUpdate(uri).withSelection(identity.sql, identity.args)
-                .withValues(values).withExpectedCount(1).build()
+            operations += calendarConfigurationOperation(uri, identity, existing, values)
         }
         requirePermissions()
         val result = checkedBatch(operations)
+        requirePermissions()
         if (result[0].count != (if (existing == null) 0 else 1) ||
             (existing != null && result[1].count != 1)) fail(CalendarProjectionFailure.PROVIDER_UNAVAILABLE)
         val id = existing ?: result[1].uri?.let(ContentUris::parseId)
             ?: fail(CalendarProjectionFailure.PROVIDER_UNAVAILABLE)
         return EnsuredCalendar(id, created = existing == null)
+    }
+
+    /** CalendarProvider can notify the root URI even for an unchanged UPDATE, waking
+     * the Events observer and scheduling another configuration pass. An unchanged
+     * configuration is still qualified atomically with the row/owner assertion in
+     * its batch; it must not be reported from a stale read or rewrite the Provider.
+     */
+    private fun calendarConfigurationOperation(uri: Uri, identity: Selection, row: Long,
+        values: ContentValues): ContentProviderOperation {
+        requirePermissions()
+        val keys = values.keySet().toTypedArray()
+        val columns = arrayOf(Calendars._ID, Calendars.CAL_SYNC1) + keys
+        val matches = resolver.query(uri, columns, identity.sql, identity.args, null)
+            ?.use { cursor ->
+                if (cursor.count != 1 || !cursor.moveToFirst() || cursor.getLong(0) != row ||
+                    cursor.getString(1) != OWNER_MARKER) fail(CalendarProjectionFailure.IDENTITY_CONFLICT)
+                keys.indices.all { index -> cursor.getString(index + 2) == values.getAsString(keys[index]) }
+            } ?: fail(CalendarProjectionFailure.PROVIDER_UNAVAILABLE)
+        requirePermissions()
+        val builder = if (matches) ContentProviderOperation.newAssertQuery(uri)
+            else ContentProviderOperation.newUpdate(uri)
+        return builder.withSelection(identity.sql, identity.args).withValues(values).withExpectedCount(1).build()
     }
 
     override val projectionReceiptProtocol: Int = 1

@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="import_title">In Android importieren</string>
-    <string name="import_read_only">Ausgewählte Kalender werden schreibgeschützt nach Android kopiert. Es wird nichts zu Proton hochgeladen.</string>
+    <string name="import_read_only">Ausgewählte Kalender werden nach Android kopiert. Standardmäßig wird nichts an Proton gesendet. Nur unterstützte Neuerstellungen und Titeländerungen können nach Aktivierung ihrer jeweiligen Optionen gesendet werden.</string>
     <string name="import_privacy">Ereignisinhalte werden im Android-Kalender gespeichert und können von anderen Apps mit Kalenderzugriff gelesen werden.</string>
-    <string name="import_permission_help">Android benötigt Lese- und Schreibrechte für Kalender, um diese lokalen Kopien zu erstellen und zu aktualisieren. Proton bleibt schreibgeschützt.</string>
+    <string name="import_permission_help">Android benötigt Lese- und Schreibzugriff auf Kalender, um lokale Kopien zu verwalten. Diese Berechtigung allein aktiviert keinen Versand von Änderungen an Proton.</string>
     <string name="import_allow">Kalenderzugriff erlauben</string>
     <string name="import_settings">App-Einstellungen öffnen</string>
     <string name="import_no_calendars">Lade die Kalenderliste, um Kalender für den Import auszuwählen.</string>
@@ -38,5 +38,5 @@
     <string name="import_recurrence_limits">Gängige Wiederholungsregeln und Änderungen einzelner Vorkommen werden importiert. Nicht unterstützte Formen bleiben ausstehend.</string>
     <string name="import_status_create_pending">Einige Kalenderänderungen werden zurückgehalten, um doppelte Termine zu vermeiden.</string>
     <string name="import_local_changes">Aufbewahrte Android-Änderungen: %1$d · Erfasste Konflikte: %2$d</string>
-    <string name="import_local_changes_help">Diese erfassten Änderungen werden nicht an Proton gesendet. Aktualisierungen der betroffenen Android-Termine sind angehalten; die Versionen bleiben für eine spätere Konfliktlösung erhalten.</string>
+    <string name="import_local_changes_help">Diese lokalen Versionen werden zur Klärung aufbewahrt. Nur unterstützte Titeländerungen können mit aktivierter experimenteller Option gesendet werden; andere Änderungen und Löschungen bleiben lokal.</string>
 </resources>

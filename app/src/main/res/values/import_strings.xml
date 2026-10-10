@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="import_title">Import into Android</string>
-    <string name="import_read_only">Selected calendars are copied to Android in read-only mode. Nothing is uploaded to Proton.</string>
+    <string name="import_read_only">Selected calendars are copied to Android. Nothing is sent to Proton by default. Only supported creations and title changes can be sent after enabling their respective options.</string>
     <string name="import_privacy">Event contents are stored in Android Calendar and can be read by other apps with calendar access.</string>
-    <string name="import_permission_help">Android read and write calendar permissions are needed to create and update these local copies, even though Proton stays read-only.</string>
+    <string name="import_permission_help">Android read and write calendar access is required to maintain local copies. This permission alone does not enable sending changes to Proton.</string>
     <string name="import_allow">Allow calendar access</string>
     <string name="import_settings">Open app settings</string>
     <string name="import_no_calendars">Load the calendar list to choose calendars for import.</string>
@@ -38,5 +38,5 @@
     <string name="import_recurrence_limits">Common recurrence rules and single-occurrence changes are imported. Unsupported recurrence forms remain pending.</string>
     <string name="import_status_create_pending">Some calendar changes are on hold to avoid duplicate events.</string>
     <string name="import_local_changes">Retained Android changes: %1$d · Recorded conflicts: %2$d</string>
-    <string name="import_local_changes_help">These captured changes are not sent to Proton. Updates to the affected Android events are on hold; retained versions are kept for later resolution.</string>
+    <string name="import_local_changes_help">These local versions are retained for resolution. Only eligible title changes can be sent with the experimental option enabled; other edits and deletions stay local.</string>
 </resources>

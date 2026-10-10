@@ -39,12 +39,32 @@ The title option requires creation mode and current calendar access; disabling
 creation clears title consent. A frozen worker session/policy lease surrounds
 both network indexes and every preparation/send. New proof wakes offline recovery
 once; uncertain work never causes a resend or an immediate retry loop.
+Fresh ordinary title acknowledgement now recognizes an exact imported echo of its
+own durable verified result. The SQL owner may differ only by its conflict marker;
+original baseline, capsule, source provenance and the complete cached result,
+including revision, must match. Deferred or distinct observations still block a
+new receipt. This consumes proof without resetting conflict dispatch or sending
+again. Once a receipt exists, later observations remain retained for reconciliation.
+It is not general conflict resolution or atomic server protection.
+An interrupted ordinary projection may leave a redundant receipt whose target
+and previous base both equal the title intent's original baseline. Only that
+exact unrepresented plan may coexist with title acknowledgement. It stays durable
+while acknowledgement is pending and is consumed atomically with SQL restoration
+after the native proof. This does not report the interrupted projection as applied;
+different targets, revisions, formats or representations remain blocking.
 A separate gated service journey qualifies a fresh guarded capsule and the new
 production preparation/submission APIs for one ordinary timed event. Two fresh
 processes recover and replay its durable result with title capability off,
 preserving a later dirty edit. This exercises the real Proton boundary and native
-acknowledgement in an isolated namespace; automatic editor-to-worker triggering
-still needs its own live qualification.
+acknowledgement in an isolated namespace. A separate system-editor journey reached
+automatic native capture, production submission and a durable verified Proton
+result. Its initial final acknowledgement failed on the self-echo and redundant
+projection-receipt guards above. After correction, normal workers recovered the
+same retained proof and acknowledged the same native row without a new attempt.
+A fresh-process replay preserved the immutable history and clean row, created no
+new attempt and restored the original calendar write options.
+The complete uninterrupted editor-to-completion journey on the corrected build
+still needs a fresh live qualification.
 Known-empty, non-recurring incoming events now use the calendar's opaque local
 owner label to preserve native editing, without a remote organizer or attendee. Ordinary and CREATE-handoff
 capture accept that profile and preserve DIRTY edits. Existing settled rows gain
@@ -1202,6 +1222,14 @@ the [permission policy](PERMISSIONS.md). Pausing or signing out retains previous
 projected local events; there is no automatic destructive purge.
 Network failures offer an explicit shortcut to the bridge's Android settings,
 because a device can block this app's traffic despite its `INTERNET` grant.
+Calendar access configuration now avoids rewriting unchanged Provider attributes.
+An unchanged row is still verified by identity, ownership and configuration
+assertions in the Provider batch. This prevents unchanged access reconciliation
+from waking the Events observer repeatedly. Physical tests reproduced the old
+notification behavior and verified silence after the correction, real name/color/
+mode transitions and lease revocation. Provider, system CREATE and title-option UI
+regressions also passed. In-app guidance in all eight languages now describes
+read-only defaults and the separate experimental CREATE/title options.
 An opt-in debug test checks anonymous Proton reachability through the production
 transport; this does not establish account login or Calendar access.
 

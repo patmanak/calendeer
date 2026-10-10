@@ -8,7 +8,7 @@
     <string name="catalog_refresh">Kalender aktualisieren</string>
     <string name="catalog_retry_wait">Warte vor der nächsten Aktualisierung.</string>
     <string name="catalog_untitled">Unbenannter Kalender</string>
-    <string name="catalog_sync_unavailable">Wähle unten Kalender für den schreibgeschützten Import. Bearbeitung in Android und Uploads zu Proton sind noch nicht verfügbar.</string>
+    <string name="catalog_sync_unavailable">Standardmäßig schreibgeschützt. Einfache Neuerstellungen und unterstützte Titeländerungen benötigen ihre jeweiligen experimentellen Optionen; andere Änderungen und Löschungen bleiben lokal.</string>
     <string name="catalog_auth_required">Verbinde dein Konto erneut, um Kalender zu laden.</string>
     <string name="catalog_unreachable">Proton ist nicht erreichbar. Prüfe deine Verbindung und den Netzwerkzugriff dieser App.</string>
     <string name="catalog_timeout">Das Laden der Kalender hat zu lange gedauert. Versuche es erneut.</string>

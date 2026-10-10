@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="import_title">Importeren in Android</string>
-    <string name="import_read_only">Geselecteerde kalenders worden alleen-lezen naar Android gekopieerd. Er wordt niets naar Proton geüpload.</string>
+    <string name="import_read_only">Geselecteerde kalenders worden naar Android gekopieerd. Standaard wordt niets naar Proton verzonden. Alleen ondersteunde nieuwe afspraken en titelwijzigingen kunnen worden verzonden nadat hun eigen opties zijn ingeschakeld.</string>
     <string name="import_privacy">Gebeurtenisinhoud wordt opgeslagen in de Android-kalender en kan worden gelezen door andere apps met kalendertoegang.</string>
-    <string name="import_permission_help">Android heeft lees- en schrijfrechten voor kalenders nodig om deze lokale kopieën te maken en bij te werken, terwijl Proton alleen-lezen blijft.</string>
+    <string name="import_permission_help">Android heeft lees- en schrijftoegang tot kalenders nodig om lokale kopieën bij te houden. Deze toestemming alleen schakelt het verzenden van wijzigingen naar Proton niet in.</string>
     <string name="import_allow">Kalendertoegang toestaan</string>
     <string name="import_settings">App-instellingen openen</string>
     <string name="import_no_calendars">Laad de kalenderlijst om kalenders voor import te kiezen.</string>
@@ -38,5 +38,5 @@
     <string name="import_recurrence_limits">Gangbare herhalingsregels en wijzigingen aan één afspraak worden geïmporteerd. Niet-ondersteunde vormen blijven in behandeling.</string>
     <string name="import_status_create_pending">Sommige kalenderwijzigingen worden uitgesteld om dubbele afspraken te voorkomen.</string>
     <string name="import_local_changes">Bewaarde Android-wijzigingen: %1$d · Vastgelegde conflicten: %2$d</string>
-    <string name="import_local_changes_help">Deze vastgelegde wijzigingen worden niet naar Proton verzonden. Updates van de betrokken Android-afspraken zijn gepauzeerd; de versies blijven bewaard totdat de conflicten kunnen worden opgelost.</string>
+    <string name="import_local_changes_help">Deze lokale versies blijven bewaard voor latere afhandeling. Alleen ondersteunde titelwijzigingen kunnen worden verzonden met de experimentele optie ingeschakeld; andere wijzigingen en verwijderingen blijven lokaal.</string>
 </resources>

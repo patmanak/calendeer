@@ -23,7 +23,7 @@
     <string name="auth_human_title">Menschliche Verifizierung</string>
     <string name="auth_human_help">Die erforderliche Verifizierung konnte nicht angezeigt werden. Brich ab und versuche es später erneut.</string>
     <string name="auth_connected_title">Konto verbunden</string>
-    <string name="auth_connected_help">Dein Konto ist verbunden. Wähle auf der Startseite Kalender aus, um unterstützte Ereignisse schreibgeschützt in Android zu importieren.</string>
+    <string name="auth_connected_help">Ihr Konto ist verbunden. Wählen Sie auf der Startseite Kalender aus, um unterstützte Ereignisse nach Android zu importieren, standardmäßig schreibgeschützt.</string>
     <string name="auth_input_required">Fülle alle Pflichtfelder aus.</string>
     <string name="auth_rejected">Anmeldedaten oder Code wurden abgelehnt. Versuche es erneut.</string>
     <string name="auth_already_connected">Dieses Konto ist bereits verbunden.</string>

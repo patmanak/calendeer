@@ -664,9 +664,17 @@ class ImportCoordinator(
             if (!retained.receipt.matches(result) || store.titleUpdateAcknowledgement(target, eventId, attempt) != retained ||
                 journal.readVerified(target, attempt) != result)
                 return TitleUpdateAcknowledgementResult.UNRESOLVED
-            if (reservation.fresh && (store.localEdit(target, eventId) != intent ||
-                store.localEditPreparation(target, eventId) != result.record.preparation))
-                return TitleUpdateAcknowledgementResult.UNRESOLVED
+            if (reservation.fresh) {
+                val owner = store.localEdit(target, eventId)
+                // The SQL receipt already qualified this owner before the native write.
+                // An echo or later observation may change only its conflict marker;
+                // identity and all snapshots must stay exact.
+                val echoedOwner = retained.receipt.handoff == null && owner?.state == LocalEditState.CONFLICT &&
+                    owner.copy(state = LocalEditState.PAUSED) == intent
+                if ((owner != intent && !echoedOwner) ||
+                    store.localEditPreparation(target, eventId) != result.record.preparation)
+                    return TitleUpdateAcknowledgementResult.UNRESOLVED
+            }
             if (reservation.fresh && retained.receipt.handoff?.let { frame ->
                     store.capturedHandoff(target, eventId) != CapturedCreateHandoffRecord(frame,
                         CapturedCreateHandoffState.RELEASED, waiting = true)

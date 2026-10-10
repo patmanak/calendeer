@@ -15,7 +15,7 @@ unless identified in [current status](STATUS.md). Execution plans remain private
 | Unsupported events | Safely identified events are deferred individually, with encrypted evidence and visible partial status. | Extend supported mappings and preserve the distinction from malformed envelopes or unavailable keys, which still block their page. |
 | Recurrences | Native read-only masters, additional/excluded dates and single moved/cancelled exceptions; durable series dependencies and explicit limits. | Broader rule/OEM qualification and recurrence writes. See the supported subset in READ_ONLY_IMPORT.md. |
 | Reminders and participants | Bounded personal DISPLAY reminders and verified read-only participants; durable replacement and settings refresh. | External-author trust integration, real invitation journeys and broad local notification qualification; no implicit invitation replies. |
-| Local writes | No production capture, outgoing persistence or Proton dispatch. | Durable capture, supported-field preservation, reconciliation, effective rights and operation-specific service qualification. |
+| Local writes | Opt-in experimental simple CREATE and a separate default-off title-only UPDATE option use durable capture, protected attempts, production workers and same-row acknowledgement. Unknown submissions are inspect-only. Other edits and DELETE are held locally. | Automatic client-to-worker qualification, broader editable fields and profiles, conflict recovery and operation-specific service qualification. |
 
 The first writable scope is existing calendars owned by the connected account,
 with simple events and qualified fields. Calendar-container creation/deletion,
@@ -108,8 +108,9 @@ atomicity across operations or calendars.
 
 The local content hash currently used as a revision is not a server-side write
 precondition. A read followed by a write cannot prevent an intervening remote
-change. UPDATE/DELETE remain disabled until an atomic condition or a separately
-reviewed conflict strategy with explicitly accepted guarantees is qualified.
+change. General UPDATE/DELETE require an atomic condition or a separately
+reviewed conflict strategy with explicitly accepted guarantees. The current
+experimental title-only option does not provide atomic conflict protection.
 CREATE also needs a qualified way to identify an accepted request after response
 loss. A client UID is only a correlation candidate until its service semantics
 are proven; do not assume uniqueness or retry idempotency.
@@ -124,7 +125,7 @@ errors require recovery, not an unbounded immediate retry loop.
 
 | Situation | Safe default and acceptance condition |
 | --- | --- |
-| Offline local edit plus remote edit | Preserve base, local and remote variants; block upload. No last-write-wins or automatic merge in the first writable slice. |
+| Offline local edit plus remote edit | Preserve observed base, local and remote variants. Prefer the last modification only after trustworthy comparable edit times establish an order; capture/processing time cannot substitute for edit time. Missing, equal or uncertain timestamps retain the conflict. Automatic resolution is not yet qualified. |
 | Remote delete plus local edit | Keep the local draft; do not resurrect the event. A separate explicit decision may create a new event after CREATE qualification. |
 | Local delete plus remote edit | Preserve the remote variant and deletion intent; do not delete the newer remote version. |
 | Lost create/update/delete acknowledgement | Resolve via qualified remote evidence or retain unknown outcome; no blind retry and no early success. |

@@ -8,7 +8,7 @@
     <string name="catalog_refresh">Odśwież kalendarze</string>
     <string name="catalog_retry_wait">Poczekaj przed kolejnym odświeżeniem.</string>
     <string name="catalog_untitled">Kalendarz bez nazwy</string>
-    <string name="catalog_sync_unavailable">Wybierz poniżej kalendarze do importu tylko do odczytu. Edycja w Androidzie i wysyłanie do Proton nie są jeszcze dostępne.</string>
+    <string name="catalog_sync_unavailable">Domyślnie tylko do odczytu. Tworzenie prostych wydarzeń i obsługiwane zmiany tytułów wymagają odpowiednich opcji eksperymentalnych; inne zmiany i usunięcia pozostają lokalne.</string>
     <string name="catalog_auth_required">Połącz konto ponownie, aby wczytać kalendarze.</string>
     <string name="catalog_unreachable">Nie można połączyć się z Proton. Sprawdź połączenie i dostęp tej aplikacji do sieci.</string>
     <string name="catalog_timeout">Upłynął limit czasu wczytywania kalendarzy. Spróbuj ponownie.</string>

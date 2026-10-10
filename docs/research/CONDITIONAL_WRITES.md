@@ -5,10 +5,10 @@ contract or live conditional-write qualification. No account/device operation,
 upstream build or protocol mutation was performed for that source audit.
 A subsequent debug-only read-only inspection is described separately below.
 
-## Decision
+## Atomic-write requirement
 
-Keep UPDATE and DELETE submission unavailable in the current adapter. The
-inspected official clients provide useful mutation builders and cryptography,
+Do not advertise atomic conflict protection for UPDATE or DELETE in the current
+adapter. The inspected official clients provide useful mutation builders and cryptography,
 but do not establish an atomic server comparison against Calendeer's captured
 base. A fresh GET followed by a PUT leaves a race with another writer. Neither
 UID nor iCalendar SEQUENCE resolves it. Do not represent these endpoints as an
@@ -17,7 +17,10 @@ implementation of a conditional-write contract.
 This is **absence of a demonstrated mechanism in the inspected client paths**,
 not a claim that Proton's server cannot support one. A documented, supported
 precondition or an authoritative server implementation is still needed before
-enabling outgoing edits with the current conflict guarantees.
+advertising outgoing edits with the current conflict guarantees. The current
+development build exposes a separate experimental title-only UPDATE option;
+its guarded preflight is not an atomic conditional write. See the current
+qualification limits below and [implementation status](../STATUS.md).
 
 ## Resolved public references
 
@@ -213,4 +216,9 @@ endpoint. HTTP's conditional-request rules describe server evaluation of a
 precondition, not mere header presence on a prior GET; no supported Proton
 precondition for the batch sync endpoint has been established here.
 [HTTP conditional requests](https://www.rfc-editor.org/rfc/rfc9110.html#section-13.1.1)
-UPDATE/DELETE remain unavailable; live conditional submissions remain NOT RUN.
+The experimental title-only UPDATE pipeline checks the observed base before
+submission, retains uncertain outcomes without resending and preserves detected
+local conflicts. This check and the subsequent write are separate requests: they
+do not establish atomic protection against a concurrent Proton edit. DELETE and
+broader UPDATE remain unavailable. Live conditional submissions remain NOT RUN;
+the existing title submission journeys do not qualify a conditional-write protocol.

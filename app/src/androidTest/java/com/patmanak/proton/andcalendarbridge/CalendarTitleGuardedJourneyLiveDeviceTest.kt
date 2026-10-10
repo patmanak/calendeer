@@ -104,7 +104,15 @@ class CalendarTitleGuardedJourneyLiveDeviceTest {
         val args = InstrumentationRegistry.getArguments()
         assumeTrue(args.getString("calendarTitleGuardedJourney") == "true")
         val systemJourney = args.getString("systemTitleJourney") == "true"
-        val namespaceSuffix = if (systemJourney) "-system-v1" else ""
+        val automaticSource = args.getString("automaticTitleSource") == "true"
+        val requestedCalendarName = args.getString("titleSourceCalendarName").orEmpty()
+        assertTrue("Automatic source enrollment requires the explicit system journey and dedicated QA calendar",
+            !automaticSource || (systemJourney && requestedCalendarName == "Calendeer QA Automatic Worker"))
+        val namespaceSuffix = when {
+            automaticSource -> "-system-worker-v1"
+            systemJourney -> "-system-v1"
+            else -> ""
+        }
         val token = args.getString("createFixtureToken").orEmpty()
         val hash = args.getString("createAccountHash").orEmpty()
         val phase = args.getString("titleGuardedPhase").orEmpty()
@@ -115,8 +123,10 @@ class CalendarTitleGuardedJourneyLiveDeviceTest {
             it.authenticated && it.selections.isNotEmpty() && !it.busy
         } }
         val prefs = app.getSharedPreferences(PREFS + namespaceSuffix, Context.MODE_PRIVATE)
-        val selected = app.imports.state.value.selections.filter { it.enabled && it.available }
+        val selected = app.imports.state.value.selections.filter { it.enabled && it.available &&
+            (!automaticSource || it.summary.title == requestedCalendarName) }
         assertTrue("An accessible existing calendar is required", selected.isNotEmpty())
+        assertTrue("The dedicated QA calendar must resolve uniquely", !automaticSource || selected.size == 1)
         val source = if (prefs.contains("token")) {
             assertTrue("Never replace an enrolled fixture", prefs.getString("token", null) == token &&
                 prefs.getString("account_hash", null) == hash)
@@ -126,15 +136,20 @@ class CalendarTitleGuardedJourneyLiveDeviceTest {
             assertTrue("Recovery cannot enroll a new fixture", phase == "submit")
             selected.first().scope
         }
+        assertTrue("Never move an enrolled automatic source to another calendar", !automaticSource ||
+            (selected.single().scope == source && (!prefs.contains("token") ||
+                prefs.getString("source_calendar_name", null) == requestedCalendarName)))
         assertTrue("Authorize the exact account before mutation", ProtonCreateSubmissionProbe.matchesAccount(app, source.account, hash))
         fun accessible() = app.imports.state.value.let { state -> state.authenticated && state.hasPermission &&
-            state.selections.any { it.scope == source && it.enabled && it.available } }
+            state.selections.any { it.scope == source && it.enabled && it.available &&
+                (!automaticSource || it.summary.title == requestedCalendarName) } }
         assertTrue("The frozen calendar remains accessible", accessible())
         assertTrue("This isolated import fixture uses the initial logical generation", source.generation == 0L)
         if (!prefs.contains("token")) {
             val generation = (UUID.randomUUID().mostSignificantBits and Long.MAX_VALUE).coerceAtLeast(1)
             assertTrue("Freeze all identities before creating or preparing anything", prefs.edit()
                 .putString("token", token).putString("account_hash", hash)
+                .putString("source_calendar_name", if (automaticSource) requestedCalendarName else null)
                 .putString("account", source.account.value).putString("calendar", source.calendar.value)
                 .putLong("generation", source.generation).putLong("physical_generation", generation)
                 .putString("create_id", UUID.randomUUID().toString()).putString("intent_id", UUID.randomUUID().toString())

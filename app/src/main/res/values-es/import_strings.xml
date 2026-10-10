@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="import_title">Importar a Android</string>
-    <string name="import_read_only">Los calendarios seleccionados se copian en Android en modo de solo lectura. No se envía nada a Proton.</string>
+    <string name="import_read_only">Los calendarios seleccionados se copian en Android. Por defecto no se envía nada a Proton. Solo se pueden enviar creaciones y cambios de título compatibles tras activar sus respectivas opciones.</string>
     <string name="import_privacy">El contenido de los eventos se guarda en el calendario de Android y otras aplicaciones con acceso al calendario pueden leerlo.</string>
-    <string name="import_permission_help">Android necesita permisos de lectura y escritura del calendario para crear y actualizar estas copias locales, aunque Proton siga en modo de solo lectura.</string>
+    <string name="import_permission_help">Android necesita acceso de lectura y escritura al calendario para mantener las copias locales. Este permiso por sí solo no activa el envío de cambios a Proton.</string>
     <string name="import_allow">Permitir acceso al calendario</string>
     <string name="import_settings">Abrir ajustes de la aplicación</string>
     <string name="import_no_calendars">Carga la lista para elegir los calendarios que se importarán.</string>
@@ -38,5 +38,5 @@
     <string name="import_recurrence_limits">Se importan las recurrencias habituales y los cambios de una sola ocurrencia. Las formas no compatibles quedan pendientes.</string>
     <string name="import_status_create_pending">Algunos cambios del calendario están en espera para evitar eventos duplicados.</string>
     <string name="import_local_changes">Cambios de Android conservados: %1$d · Conflictos registrados: %2$d</string>
-    <string name="import_local_changes_help">Estos cambios capturados no se envían a Proton. Las actualizaciones de los eventos afectados en Android están suspendidas; las versiones se conservan para resolver los conflictos más adelante.</string>
+    <string name="import_local_changes_help">Estas versiones locales se conservan para su resolución. Solo los cambios de título compatibles se pueden enviar con la opción experimental activada; los demás cambios y borrados permanecen locales.</string>
 </resources>

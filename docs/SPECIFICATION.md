@@ -119,7 +119,7 @@ release. Private decision tracking is not part of the public repository.
 | Recurrences/invitations | No writes until exact semantics are supported. | Masters, exceptions, attendees, replies and shared calendars need dedicated qualification. |
 | Containers | Discover/select existing calendars. | Container creation/deletion is outside the initial slice. |
 | Offline horizon | Target 90 days past / 365 days future; bounded fetch batches. | Extend progressively; no automatic retention purge initially. |
-| Conflicts | Preserve both variants and block upload for explicit resolution. | No implicit last-write-wins. |
+| Conflicts | Preserve variants; prefer the last modification when trustworthy, comparable modification times establish an order. Otherwise retain the conflict for explicit resolution. | Qualify timestamp provenance, offline edits, clock uncertainty and ties before automatic last-modification-wins. Capture/processing time is not edit time. |
 | Mode/rights changes | Retain/suspend pending edits; reconcile in-flight outcomes. | Re-enabling writes must not silently discard or replay retained changes. |
 | Reminders | System app delivers supported local reminders. | Calendeer synchronizes reminder data only; it posts no event, sync or error notifications. |
 | Logout | No destructive purge before pending-change handling exists. | Define explicit retention/removal choices before enabling logout. |
@@ -219,7 +219,7 @@ must retain stable identities without recreating user events or losing mappings.
 | RES-02 | Given a multipage import, when stopped after page persistence but before projection/checkpoint completion and later resumed, then every expected fixture event appears once and incomplete coverage is not reported complete. | Crash-injection integration |
 | RES-03 | Given two overlapping pages and a server-side change between requests, when pagination and reconciliation finish, then the known fixture's final state is represented without false deletions. | Adapter contract |
 | RES-04 | Given a recurrence master before the window and an exception inside it, when the window is loaded, then supported occurrences match the independent expected dates/timezones, including a DST boundary. | Domain/provider integration |
-| RES-05 | If bidirectional: given an offline Android edit and a remote edit to the same event, when connectivity returns, then both are retained until the selected conflict policy resolves them; no blind overwrite is reported as success. | Integration; policy pending |
+| RES-05 | If bidirectional: given an offline Android edit and a remote edit to the same event, when connectivity returns, then both observed variants are retained until resolution. Last-modification-wins requires trustworthy comparable edit times; absent or ambiguous ordering stays blocked. No blind overwrite is reported as success. | Integration; timestamp qualification pending |
 | RES-06 | If bidirectional: given a remotely accepted create whose acknowledgement is lost, when execution retries, then reconciliation avoids a duplicate or explicitly blocks unresolved work. | Contract/live-service evidence |
 | RES-07 | Given a provider write succeeded just before a crash, when replay resumes, then the mapping is recovered, no duplicate is added and the import is not echoed back as a new edit. | Provider integration |
 | RES-08 | Given a revoked permission or unusable session, when sync is triggered, then affected work is retained and marked blocked without destructive cleanup or an endless immediate retry loop. | Integration/device |
@@ -292,7 +292,7 @@ this consequence in onboarding. Backup, local encryption and cleanup need design
    planning. Clarify calendar-container creation separately from event creation.
 2. Supported fields, shared/subscribed calendars, recurrence/exceptions,
    reminders, attendee/invitation operations and behavior for unsupported edits.
-3. Conflict/deletion policy for editable calendars; default mode for newly
+3. Timestamp qualification and unresolved conflict/deletion cases for editable calendars; default mode for newly
    selected calendars; handling of retained changes across mode/permission
    transitions and unexpected local edits in read-only mode.
 4. Initial and maximum loaded horizon, preload/retention policy, account count,

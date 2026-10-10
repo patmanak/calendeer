@@ -8,7 +8,7 @@
     <string name="catalog_refresh">Kalenders vernieuwen</string>
     <string name="catalog_retry_wait">Wacht voordat je opnieuw vernieuwt.</string>
     <string name="catalog_untitled">Naamloze kalender</string>
-    <string name="catalog_sync_unavailable">Kies hieronder kalenders voor alleen-lezen import. Bewerken in Android en uploaden naar Proton zijn nog niet beschikbaar.</string>
+    <string name="catalog_sync_unavailable">Standaard alleen-lezen. Eenvoudige nieuwe afspraken en ondersteunde titelwijzigingen vereisen hun eigen experimentele opties; andere wijzigingen en verwijderingen blijven lokaal.</string>
     <string name="catalog_auth_required">Verbind je account opnieuw om kalenders te laden.</string>
     <string name="catalog_unreachable">Proton is niet bereikbaar. Controleer je verbinding en de netwerktoegang voor deze app.</string>
     <string name="catalog_timeout">Het laden van de kalenders duurde te lang. Probeer het opnieuw.</string>

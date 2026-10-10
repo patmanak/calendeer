@@ -8,7 +8,7 @@
     <string name="catalog_refresh">Refresh calendars</string>
     <string name="catalog_retry_wait">Wait before refreshing again.</string>
     <string name="catalog_untitled">Untitled calendar</string>
-    <string name="catalog_sync_unavailable">Choose calendars for read-only import below. Editing in Android and uploads to Proton are not available yet.</string>
+    <string name="catalog_sync_unavailable">Read-only by default. Simple creations and eligible title changes require their respective experimental options; other edits and deletions stay local.</string>
     <string name="catalog_auth_required">Reconnect your account to load calendars.</string>
     <string name="catalog_unreachable">Proton cannot be reached. Check your connection and this app’s network access.</string>
     <string name="catalog_timeout">Loading calendars timed out. Try again.</string>

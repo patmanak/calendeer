@@ -42,7 +42,7 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class TitleUpdateAcknowledgementIntegrationDeviceTest {
     private class Fixture(val context: Context, allDay: Boolean, val transferred: Boolean = false,
-        private val preparedOnly: Boolean = false) {
+        private val preparedOnly: Boolean = false, private val pendingProjection: String? = null) {
         private val token = UUID.randomUUID().toString()
         val target = CalendarScope(AccountId("title-ack-integration-$token"), CalendarId("fixture"), 0)
         private val importName = "title-ack-integration-$token.db"
@@ -69,10 +69,14 @@ class TitleUpdateAcknowledgementIntegrationDeviceTest {
         val native = AndroidCalendarProjection(context)
         val writes = AtomicInteger()
         val inspections = AtomicInteger()
+        var beforeFreshAcknowledgement: (suspend () -> Unit)? = null
+        var rejectFreshAcknowledgement = false
         var afterFreshAcknowledgement: (suspend () -> Unit)? = null
         private val projection = object : CalendarProjection by native {
             override suspend fun acknowledgeTitleUpdate(receipt: TitleUpdateAcknowledgementReceipt): AppliedTitleUpdateAcknowledgement? {
                 writes.incrementAndGet()
+                beforeFreshAcknowledgement?.invoke()
+                if (rejectFreshAcknowledgement) return null
                 val witness = native.acknowledgeTitleUpdate(receipt)
                 if (witness != null) {
                     val hook = afterFreshAcknowledgement
@@ -126,6 +130,7 @@ class TitleUpdateAcknowledgementIntegrationDeviceTest {
             private set
         private var submitting = false
         private var forbiddenAccountReentries = 0
+        private var ordinaryReceipt: ProjectionReceipt? = null
 
         /** Only the remote boundary is synthetic; owner checks and claim/result commits are real. */
         private inner class ControlledTitlePort : CalendarTitleUpdateSubmissionPort {
@@ -490,10 +495,33 @@ class TitleUpdateAcknowledgementIntegrationDeviceTest {
                 arrayOf(calendar.toString()), null)!!.use {
                 assertEquals(1, it.count); assertTrue(it.moveToFirst()); row = it.getLong(0)
             }
+            if (pendingProjection != null) {
+                check(!transferred && !preparedOnly)
+                val pending = when (pendingProjection) {
+                    "redundant", "representation" -> base
+                    "revision" -> base.copy(revision = Revision("synthetic-pending-projection-revision"))
+                    "content" -> base.copy(content = base.content.copy(description = "Synthetic different pending description"))
+                    else -> error("Unknown pending projection profile")
+                }
+                store.transaction(target) { putRemote(pending); putProjection(ProjectionIntent(target, pending)) }
+                ordinaryReceipt = store.prepareProjection(ProjectionIntent(target, pending), format,
+                    if (pendingProjection == "representation") ProjectedEventReference.direct(pending) else null)
+                assertEquals(base, ordinaryReceipt!!.previousBase)
+                assertEquals(ordinaryReceipt, store.projectionReceipt(target, base.eventId))
+                // Prepare without applying: the native row and previous baseline remain original.
+                store.transaction(target) { putRemote(base) }
+                assertEquals(base, store.projectedBaseline(target, base.eventId))
+            }
             mutateTitle(local.title)
             coordinator.authenticationChanged(true)
             withTimeout(10_000) { while (schedules.get() == 0) delay(10) }
-            if (transferred) captureTransferred(firstId) else
+            if (pendingProjection in setOf("content", "representation")) {
+                // The coordinator conservatively refuses ambiguous projection recovery. Stage
+                // its already captured SQL owner to test the independent ACK admission boundary.
+                allowSql(); native.admitOperation = { true }
+                assertEquals(local, native.captureOwnedSimpleEdit(target, base)!!.content)
+                assertEquals(intent, store.captureLocalEdit(intent))
+            } else if (transferred) captureTransferred(firstId) else
                 assertEquals(LocalEditCaptureResult.RETAINED, coordinator.captureLocalEdit(target, base.eventId, firstId))
             allowSql()
             assertEquals(intent, store.localEdit(target, base.eventId))
@@ -505,6 +533,178 @@ class TitleUpdateAcknowledgementIntegrationDeviceTest {
             journal.remember(prepared); journal.admitDispatch = { it == target }; assertTrue(journal.claim(prepared))
             journal.admitDispatch = { error("Native acknowledgement must never admit another send") }
             journal.retainVerified(result)
+        }
+
+        /** A real ordinary preparation is not an applied projection. Only exact redundant
+         * work may be retired, atomically with SQL restoration after the native ACK proof.
+         */
+        suspend fun pendingOrdinaryProjectionAcknowledgement(reject: String? = null) {
+            val old = checkNotNull(ordinaryReceipt)
+            allowSql()
+            journal.retainEvidence(unknown, "synthetic-redundant-projection-response-evidence")
+            val durableUnknown = checkNotNull(journal.read(target, prepared.id))
+            store.transaction(target) { putRemote(verified) }
+            assertEquals(intent.copy(state = LocalEditState.CONFLICT), store.localEdit(target, base.eventId))
+            when (reject) {
+                null, "native", "profile" -> Unit
+                "deferred" -> store.transaction(target) {
+                    (this as StagedSyncTransaction).defer(DeferredCalendarEvent(base.eventId, verified.revision,
+                        format, DeferredEventReason.UNVERIFIED_CONTENT, "synthetic-deferred-projection"))
+                }
+                "owner" -> assertEquals(1, store.writableDatabase.update("local_edits", ContentValues().apply {
+                    put("mutation", "synthetic-different-local-owner")
+                }, null, null))
+                "capsule" -> assertEquals(1, store.writableDatabase.update("local_edit_preparations", ContentValues().apply {
+                    put("payload", "synthetic-different-sealed-capsule")
+                }, null, null))
+                "proof" -> journal.writableDatabase.execSQL("UPDATE title_update_attempts SET result=NULL")
+                else -> error("Unknown redundant projection rejection")
+            }
+            reopenOwner(); allowSql()
+            journal.admitDispatch = { error("Pending projection recovery must never claim another send") }
+            val owner = store.localEdit(target, base.eventId)
+            val invalidSource = reject == "owner" || reject == "capsule"
+            val rawCapsule = if (invalidSource) rawLocalPreparationSnapshot() else null
+            val capsule = if (invalidSource) null else store.localEditPreparation(target, base.eventId)
+            if (reject == "owner") {
+                var decodingRefused = false
+                try { store.localEditPreparation(target, base.eventId) }
+                catch (_: IllegalStateException) { decodingRefused = true }
+                assertTrue("A capsule with a different owner must fail closed during decoding", decodingRefused)
+            }
+            val retainedResult = journal.readVerified(target, prepared.id)
+            val before = values()
+            assertEquals(old, store.projectionReceipt(target, base.eventId))
+            assertNull(receipt())
+            var pendingObserved = false
+            beforeFreshAcknowledgement = {
+                allowSql()
+                assertEquals(TitleUpdateAcknowledgementState.PENDING, receipt()!!.state)
+                assertEquals(old, store.projectionReceipt(target, base.eventId))
+                assertEquals(before, values())
+                pendingObserved = true
+            }
+            rejectFreshAcknowledgement = reject == "native"
+            if (reject == null) {
+                assertEquals(TitleUpdateAcknowledgementResult.ACKNOWLEDGED, acknowledge())
+                assertTrue("The ordinary receipt must survive reservation until the native write", pendingObserved)
+                allowSql(); assertNull(store.projectionReceipt(target, base.eventId))
+                assertEquals(TitleUpdateCompletionResult.COMPLETED, complete())
+                val clean = values()
+                assertEquals(before - setOf(Events.DIRTY, Events.SYNC_DATA2, Events.SYNC_DATA3),
+                    clean - setOf(Events.DIRTY, Events.SYNC_DATA2, Events.SYNC_DATA3))
+                assertEquals("0", clean[Events.DIRTY]); assertSqlRestored(durableUnknown)
+                val completion = checkNotNull(journal.readCompletion(target, prepared.id))
+                assertEquals(result, completion.result)
+                reopenOwner()
+                assertEquals(TitleUpdateAcknowledgementResult.ACKNOWLEDGED, acknowledge())
+                assertEquals(TitleUpdateCompletionResult.COMPLETED, complete())
+                allowSql(); assertNull(store.projectionReceipt(target, base.eventId))
+                assertEquals(completion, journal.readCompletion(target, prepared.id))
+                assertEquals(clean, values()); assertEquals(1, writes.get())
+            } else {
+                assertEquals(TitleUpdateAcknowledgementResult.UNRESOLVED, acknowledge())
+                assertEquals(TitleUpdateCompletionResult.UNRESOLVED, complete())
+                allowSql()
+                assertEquals(old, store.projectionReceipt(target, base.eventId))
+                assertEquals(owner, store.localEdit(target, base.eventId))
+                if (invalidSource) assertEquals(rawCapsule, rawLocalPreparationSnapshot())
+                else assertEquals(capsule, store.localEditPreparation(target, base.eventId))
+                assertEquals(base, store.projectedBaseline(target, base.eventId))
+                assertNull(journal.readCompletion(target, prepared.id)); assertEquals(before, values())
+                if (reject == "native") {
+                    assertTrue(pendingObserved)
+                    assertEquals(TitleUpdateAcknowledgementState.PENDING, receipt()!!.state)
+                    val pendingAck = receipt()
+                    reopenOwner()
+                    assertEquals(TitleUpdateAcknowledgementResult.UNRESOLVED, acknowledge())
+                    allowSql(); assertEquals(old, store.projectionReceipt(target, base.eventId))
+                    assertEquals(pendingAck, receipt()); assertEquals(before, values())
+                    assertEquals(1, writes.get()); assertEquals(1, inspections.get())
+                } else { assertFalse(pendingObserved); assertNull(receipt()); assertEquals(0, writes.get()) }
+            }
+            assertSingleOriginalRow()
+            assertEquals(durableUnknown, journal.read(target, prepared.id))
+            assertEquals(retainedResult, journal.readVerified(target, prepared.id))
+        }
+
+        /** Deliberately mismatched source rows cannot always pass the domain decoder.
+         * Compare every bounded stored field instead of treating decoding as fixture success.
+         */
+        private fun rawLocalPreparationSnapshot(): List<Pair<String, String>> {
+            val columns = listOf("scope", "mutation", "event", "adapter", "version", "base", "local", "state",
+                "timestamp", "prep_adapter", "prep_version", "payload")
+            val selected = columns.joinToString(",") { "CASE WHEN length(CAST($it AS BLOB))<=16384 THEN CAST($it AS TEXT) END" }
+            return store.readableDatabase.rawQuery("SELECT $selected FROM local_edit_preparations WHERE " +
+                "scope=(SELECT scope FROM calendars WHERE account=? AND calendar=? AND generation=?) AND event=? LIMIT 2",
+                arrayOf(target.account.value, target.calendar.value, target.generation.toString(), base.eventId.value)).use { row ->
+                assertTrue("Require exactly one retained synthetic capsule", row.count == 1 && row.moveToFirst())
+                columns.mapIndexed { index, column ->
+                    assertFalse("Require a complete bounded capsule snapshot", row.isNull(index))
+                    column to row.getString(index)
+                }
+            }
+        }
+
+        suspend fun redundantProjectionDeletionRollsBackWithBaselineAndRecoversByInspection() {
+            val old = checkNotNull(ordinaryReceipt)
+            check(pendingProjection == "redundant")
+            allowSql()
+            journal.retainEvidence(unknown, "synthetic-redundant-projection-rollback-evidence")
+            val durableUnknown = checkNotNull(journal.read(target, prepared.id))
+            store.transaction(target) { putRemote(verified) }
+            val owner = checkNotNull(store.localEdit(target, base.eventId))
+            assertEquals(intent.copy(state = LocalEditState.CONFLICT), owner)
+            val before = values()
+            var reserved = false
+            beforeFreshAcknowledgement = {
+                allowSql()
+                assertEquals(TitleUpdateAcknowledgementState.PENDING, receipt()!!.state)
+                assertEquals(old, store.projectionReceipt(target, base.eventId))
+                // Persistent trigger, isolated to this fixture database. Abort the same SQL
+                // transaction after it retired the redundant receipt but before base advance.
+                store.writableDatabase.execSQL("CREATE TRIGGER fixture_redundant_projection_restore_loss " +
+                    "BEFORE UPDATE ON projection_bases BEGIN SELECT RAISE(ABORT,'synthetic baseline restore loss'); END")
+                reserved = true
+            }
+            assertEquals(TitleUpdateAcknowledgementResult.UNRESOLVED, acknowledge())
+            assertTrue(reserved)
+            allowSql()
+            val pendingAck = checkNotNull(receipt())
+            val clean = values()
+            assertEquals(TitleUpdateAcknowledgementState.PENDING, pendingAck.state)
+            assertEquals(before + mapOf(Events.DIRTY to "0",
+                Events.SYNC_DATA2 to digest("revision-v1", verified.revision.value),
+                Events.SYNC_DATA3 to "calendeer-projection-receipt-v1:${pendingAck.receipt.projection.nonce}"), clean)
+            assertNotEquals(before[Events.SYNC_DATA3], clean[Events.SYNC_DATA3])
+            assertEquals(old, store.projectionReceipt(target, base.eventId))
+            assertEquals(owner, store.localEdit(target, base.eventId))
+            assertEquals(preparation, store.localEditPreparation(target, base.eventId))
+            assertEquals(base, store.projectedBaseline(target, base.eventId))
+            assertNull(journal.readCompletion(target, prepared.id))
+            assertEquals(1, writes.get()); assertEquals(0, inspections.get()); assertSingleOriginalRow()
+
+            reopenOwner(); allowSql()
+            journal.admitDispatch = { error("SQL rollback recovery must never claim another send") }
+            assertEquals(old, store.projectionReceipt(target, base.eventId))
+            assertEquals(pendingAck, receipt()); assertEquals(clean, values())
+            // Absence of IF EXISTS also verifies that the failure survived database reopening.
+            store.writableDatabase.execSQL("DROP TRIGGER fixture_redundant_projection_restore_loss")
+            assertEquals(TitleUpdateAcknowledgementResult.ACKNOWLEDGED, acknowledge())
+            assertEquals(TitleUpdateCompletionResult.COMPLETED, complete())
+            allowSql(); assertNull(store.projectionReceipt(target, base.eventId))
+            assertSqlRestored(durableUnknown)
+            val completed = checkNotNull(journal.readCompletion(target, prepared.id))
+            assertEquals(result, completed.result)
+            assertEquals(clean, values()); assertSingleOriginalRow()
+            assertEquals(1, writes.get()); assertEquals(1, inspections.get())
+            assertEquals(TitleUpdateAcknowledgementResult.ACKNOWLEDGED, acknowledge())
+            assertEquals(TitleUpdateCompletionResult.COMPLETED, complete())
+            allowSql(); assertNull(store.projectionReceipt(target, base.eventId))
+            assertEquals(completed, journal.readCompletion(target, prepared.id))
+            assertEquals(durableUnknown, journal.read(target, prepared.id))
+            assertEquals(result, journal.readVerified(target, prepared.id))
+            assertEquals(clean, values()); assertEquals(1, writes.get()); assertEquals(1, inspections.get())
         }
 
         private suspend fun seedTransferred() {
@@ -1009,6 +1209,80 @@ class TitleUpdateAcknowledgementIntegrationDeviceTest {
             assertEquals(1, writes.get()); assertEquals(1, inspections.get())
         }
 
+        /** Incoming self-echo can arrive before a receipt exists. Its observation must never
+         * re-send the UNKNOWN request or silently reset an arbitrary conflict to PAUSED.
+         */
+        suspend fun verifiedSelfEchoBeforeFreshAcknowledgement(rejectedObservation: String? = null) {
+            check(!transferred && !preparedOnly && base.content.time is EventTime.Timed)
+            allowSql()
+            assertEquals(intent, store.localEdit(target, base.eventId))
+            assertEquals(preparation, store.localEditPreparation(target, base.eventId))
+            assertNull(receipt())
+            journal.retainEvidence(unknown, "synthetic-retained-response-evidence")
+            val durableUnknown = checkNotNull(journal.read(target, prepared.id))
+            val durableResult = checkNotNull(journal.readVerified(target, prepared.id))
+            val dirty = values()
+            assertEquals("1", dirty[Events.DIRTY]); assertEquals(local.title, dirty[Events.TITLE])
+            allowSql()
+            store.transaction(target) { putRemote(result.event) }
+            assertEquals(intent.copy(state = LocalEditState.CONFLICT), store.localEdit(target, base.eventId))
+            assertEquals(preparation, store.localEditPreparation(target, base.eventId))
+            when (rejectedObservation) {
+                null -> Unit
+                "revision" -> store.transaction(target) {
+                    putRemote(verified.copy(revision = Revision("synthetic-unrelated-revision")))
+                }
+                "content" -> store.transaction(target) {
+                    putRemote(verified.copy(content = local.copy(description = "Synthetic unrelated remote content")))
+                }
+                "tombstone" -> store.transaction(target) {
+                    putRemote(RemoteChange.Deleted(base.eventId, Revision("synthetic-remote-tombstone")))
+                }
+                "deferred" -> store.transaction(target) {
+                    (this as StagedSyncTransaction).defer(DeferredCalendarEvent(base.eventId, verified.revision,
+                        format, DeferredEventReason.UNVERIFIED_CONTENT, "synthetic-sealed-unverified-observation"))
+                }
+                "absent" -> assertEquals(1, store.writableDatabase.delete("records",
+                    "scope=(SELECT scope FROM calendars WHERE account=? AND calendar=? AND generation=?) AND event=?",
+                    arrayOf(target.account.value, target.calendar.value, target.generation.toString(), base.eventId.value)))
+                else -> error("Unknown synthetic observation case")
+            }
+            // The acknowledgement must survive reopening and qualify the conflict from durable
+            // exact proof, capsule and cached observation, not from in-memory submission state.
+            reopenOwner()
+            allowSql()
+            val conflicted = store.localEdit(target, base.eventId)
+            assertEquals(intent.copy(state = LocalEditState.CONFLICT), conflicted)
+            assertNull(receipt()); assertEquals(dirty, values()); assertEquals(0, writes.get())
+            if (rejectedObservation != null) {
+                assertEquals(TitleUpdateAcknowledgementResult.UNRESOLVED, acknowledge())
+                assertEquals(TitleUpdateCompletionResult.UNRESOLVED, complete())
+                allowSql()
+                assertEquals(conflicted, store.localEdit(target, base.eventId))
+                assertEquals(preparation, store.localEditPreparation(target, base.eventId))
+                assertNull(receipt()); assertNull(journal.readCompletion(target, prepared.id))
+                assertEquals(dirty, values()); assertEquals(0, writes.get())
+            } else {
+                assertEquals(TitleUpdateAcknowledgementResult.ACKNOWLEDGED, acknowledge())
+                assertEquals(TitleUpdateCompletionResult.COMPLETED, complete())
+                val clean = values()
+                val metadata = setOf(Events.DIRTY, Events.SYNC_DATA2, Events.SYNC_DATA3)
+                assertEquals(dirty - metadata, clean - metadata)
+                assertEquals("0", clean[Events.DIRTY]); assertEquals(1, writes.get())
+                assertSingleOriginalRow(); assertSqlRestored(durableUnknown)
+                val completed = checkNotNull(journal.readCompletion(target, prepared.id))
+                assertEquals(durableResult, completed.result)
+                reopenOwner()
+                assertEquals(TitleUpdateAcknowledgementResult.ACKNOWLEDGED, acknowledge())
+                assertEquals(TitleUpdateCompletionResult.COMPLETED, complete())
+                assertEquals(completed, journal.readCompletion(target, prepared.id))
+                assertEquals(clean, values()); assertEquals(1, writes.get())
+                assertSqlRestored(durableUnknown)
+            }
+            assertEquals(durableUnknown, journal.read(target, prepared.id))
+            assertEquals(durableResult, journal.readVerified(target, prepared.id))
+        }
+
         suspend fun assertSqlRestored(expectedUnknown: TitleUpdateAttemptRecord = unknown) {
             allowSql()
             assertEquals(verified, store.projectedBaseline(target, base.eventId))
@@ -1043,17 +1317,49 @@ class TitleUpdateAcknowledgementIntegrationDeviceTest {
         }
     }
 
-    private fun fixture(allDay: Boolean, transferred: Boolean = false, preparedOnly: Boolean = false,
+    private fun fixture(allDay: Boolean, transferred: Boolean = false, preparedOnly: Boolean = false, pendingProjection: String? = null,
         block: suspend Fixture.() -> Unit) = runBlocking {
         assumeTrue(InstrumentationRegistry.getArguments().getString("providerFixture") == "true")
         val context = ApplicationProvider.getApplicationContext<Context>()
         assumeTrue(AndroidCalendarProjection(context).hasPermissions())
-        val fixture = Fixture(context, allDay, transferred, preparedOnly)
+        val fixture = Fixture(context, allDay, transferred, preparedOnly, pendingProjection)
         try { fixture.seed(); fixture.block() } finally { fixture.close() }
     }
 
     @Test fun ordinaryTimedGuardedSubmissionCompletesOfflineAfterOwnerReopening() = fixture(allDay = false, preparedOnly = true) {
         guardedSubmissionCompletesOfflineAfterReopening()
+    }
+    @Test fun exactVerifiedSelfEchoBeforeReceiptRecoversConflictedOwnerWithoutAnotherSend() = fixture(allDay = false) {
+        verifiedSelfEchoBeforeFreshAcknowledgement()
+    }
+    @Test fun redundantOrdinaryProjectionSurvivesReservationAndRetiresOnlyAfterNativeTitleProof() =
+        fixture(allDay = false, pendingProjection = "redundant") { pendingOrdinaryProjectionAcknowledgement() }
+    @Test fun redundantOrdinaryProjectionAndTitleReceiptBothSurviveFailedNativeAcknowledgement() =
+        fixture(allDay = false, pendingProjection = "redundant") { pendingOrdinaryProjectionAcknowledgement("native") }
+    @Test fun redundantOrdinaryProjectionRetirementRollsBackAfterNativeProofAndRecoversWithoutAnotherWrite() =
+        fixture(allDay = false, pendingProjection = "redundant") { redundantProjectionDeletionRollsBackWithBaselineAndRecoversByInspection() }
+    @Test fun nonredundantOrdinaryProjectionProfilesCannotBeRetiredByTitleAcknowledgement() {
+        for (profile in listOf("revision", "content", "representation"))
+            fixture(allDay = false, pendingProjection = profile) { pendingOrdinaryProjectionAcknowledgement("profile") }
+    }
+    @Test fun redundantOrdinaryProjectionCannotBypassDifferentOwnerCapsuleDeferredOrMissingProof() {
+        for (rejected in listOf("owner", "capsule", "deferred", "proof"))
+            fixture(allDay = false, pendingProjection = "redundant") { pendingOrdinaryProjectionAcknowledgement(rejected) }
+    }
+    @Test fun selfEchoWithDifferentRevisionCannotAcknowledgeConflictedOwner() = fixture(allDay = false) {
+        verifiedSelfEchoBeforeFreshAcknowledgement("revision")
+    }
+    @Test fun selfEchoWithDifferentContentCannotAcknowledgeConflictedOwner() = fixture(allDay = false) {
+        verifiedSelfEchoBeforeFreshAcknowledgement("content")
+    }
+    @Test fun tombstoneCannotQualifyAsVerifiedSelfEcho() = fixture(allDay = false) {
+        verifiedSelfEchoBeforeFreshAcknowledgement("tombstone")
+    }
+    @Test fun deferredObservationBlocksOtherwiseExactVerifiedSelfEcho() = fixture(allDay = false) {
+        verifiedSelfEchoBeforeFreshAcknowledgement("deferred")
+    }
+    @Test fun absentCachedObservationCannotQualifyConflictedSelfEcho() = fixture(allDay = false) {
+        verifiedSelfEchoBeforeFreshAcknowledgement("absent")
     }
     @Test fun productionTitleOptionDefaultsOffWithoutAnyAdapterCalls() = fixture(allDay = false, preparedOnly = true) {
         productionTitleOptionOffNeverCallsPorts()

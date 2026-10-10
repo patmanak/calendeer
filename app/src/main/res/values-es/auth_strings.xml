@@ -23,7 +23,7 @@
     <string name="auth_human_title">Verificación humana</string>
     <string name="auth_human_help">No se ha podido mostrar la verificación necesaria. Cancela e inténtalo más tarde.</string>
     <string name="auth_connected_title">Cuenta conectada</string>
-    <string name="auth_connected_help">Tu cuenta está conectada. Elige calendarios en la pantalla de inicio para importar eventos compatibles a Android en modo de solo lectura.</string>
+    <string name="auth_connected_help">Tu cuenta está conectada. Elige calendarios en la pantalla de inicio para importar eventos compatibles a Android, en modo de solo lectura por defecto.</string>
     <string name="auth_input_required">Completa todos los campos obligatorios.</string>
     <string name="auth_rejected">Las credenciales o el código fueron rechazados. Inténtalo de nuevo.</string>
     <string name="auth_already_connected">Esta cuenta ya está conectada.</string>

@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="import_title">Importuj do Androida</string>
-    <string name="import_read_only">Wybrane kalendarze są kopiowane do Androida tylko do odczytu. Nic nie jest wysyłane do Proton.</string>
+    <string name="import_read_only">Wybrane kalendarze są kopiowane do Androida. Domyślnie nic nie jest wysyłane do Proton. Tylko obsługiwane tworzenie wydarzeń i zmiany tytułów mogą być wysyłane po włączeniu odpowiednich opcji.</string>
     <string name="import_privacy">Treść wydarzeń jest zapisywana w kalendarzu Androida i może być odczytana przez inne aplikacje z dostępem do kalendarzy.</string>
-    <string name="import_permission_help">Android wymaga uprawnień odczytu i zapisu kalendarzy do tworzenia i aktualizowania kopii lokalnych, mimo że dostęp do Proton pozostaje tylko do odczytu.</string>
+    <string name="import_permission_help">Android wymaga dostępu do odczytu i zapisu kalendarzy, aby utrzymywać kopie lokalne. Samo to uprawnienie nie włącza wysyłania zmian do Proton.</string>
     <string name="import_allow">Zezwól na dostęp do kalendarzy</string>
     <string name="import_settings">Otwórz ustawienia aplikacji</string>
     <string name="import_no_calendars">Wczytaj listę, aby wybrać kalendarze do importu.</string>
@@ -38,5 +38,5 @@
     <string name="import_recurrence_limits">Importowane są typowe reguły cykliczne i zmiany pojedynczych wystąpień. Nieobsługiwane formy pozostają oczekujące.</string>
     <string name="import_status_create_pending">Niektóre zmiany w kalendarzu są wstrzymane, aby uniknąć powielania wydarzeń.</string>
     <string name="import_local_changes">Zachowane zmiany Androida: %1$d · Zarejestrowane konflikty: %2$d</string>
-    <string name="import_local_changes_help">Te zapisane zmiany nie są wysyłane do Proton. Aktualizacje powiązanych wydarzeń w Androidzie są wstrzymane; wersje są zachowane do późniejszego rozwiązania konfliktów.</string>
+    <string name="import_local_changes_help">Te lokalne wersje są zachowane do późniejszego rozstrzygnięcia. Tylko obsługiwane zmiany tytułów mogą być wysyłane po włączeniu opcji eksperymentalnej; inne zmiany i usunięcia pozostają lokalne.</string>
 </resources>
