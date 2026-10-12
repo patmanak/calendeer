@@ -3,6 +3,9 @@ package com.patmanak.proton.andcalendarbridge
 import androidx.activity.ComponentActivity
 import androidx.compose.material3.Text
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -28,13 +31,16 @@ class CalendeerScreenDeviceTest {
     private val mode = mutableStateOf(ThemeMode.LIGHT)
     private val settingsEnabled = mutableStateOf(true)
     private val verificationRequired = mutableStateOf(false)
-    private fun start() {
+    private fun start(fontScale: Float? = null) {
         compose.setContent {
+            val density = LocalDensity.current
+            CompositionLocalProvider(LocalDensity provides Density(density.density, fontScale ?: density.fontScale)) {
             BridgeTheme(mode.value == ThemeMode.DARK) {
                 BridgeScreen(mode.value, { mode.value = it }, AppLanguage.SYSTEM, {},
                     authenticationContent = { Text("Synthetic connection") },
                     calendarContent = { Text("Synthetic calendars") }, signedIn = signedIn.value,
                     settingsEnabled = settingsEnabled.value, verificationRequired = verificationRequired.value)
+            }
             }
         }
     }
@@ -44,20 +50,20 @@ class CalendeerScreenDeviceTest {
         compose.onNodeWithText("Synthetic connection").performScrollTo().assertIsDisplayed()
         compose.onNodeWithText("Synthetic calendars").assertDoesNotExist()
         compose.onNodeWithText(compose.activity.getString(R.string.appearance)).assertDoesNotExist()
-        compose.onNodeWithTag("brand_settings").performScrollTo().performClick()
+        compose.onNodeWithTag("brand_settings").performClick()
         compose.onNodeWithText("Synthetic connection").assertDoesNotExist()
         compose.onNodeWithText(compose.activity.getString(R.string.appearance)).performScrollTo().assertIsDisplayed()
-        compose.onNodeWithTag("brand_settings").performScrollTo().performClick()
+        compose.onNodeWithTag("brand_settings").performClick()
         compose.onNodeWithText("Synthetic connection").performScrollTo().assertIsDisplayed()
     }
     @Test fun signedInHomeKeepsAccountActionsInSettingsAndReturnsToCalendars() {
         signedIn.value = true; start()
         compose.onNodeWithText("Synthetic calendars").performScrollTo().assertIsDisplayed()
         compose.onNodeWithText("Synthetic connection").assertDoesNotExist()
-        compose.onNodeWithTag("brand_settings").performScrollTo().performClick()
+        compose.onNodeWithTag("brand_settings").performClick()
         compose.onNodeWithText("Synthetic connection").performScrollTo().assertIsDisplayed()
         compose.onNodeWithText("Synthetic calendars").assertDoesNotExist()
-        compose.onNodeWithTag("brand_settings").performScrollTo().performClick()
+        compose.onNodeWithTag("brand_calendars").performClick()
         compose.onNodeWithText("Synthetic calendars").performScrollTo().assertIsDisplayed()
     }
     @Test fun signingOutFromSettingsReturnsToConnection() {
@@ -74,7 +80,7 @@ class CalendeerScreenDeviceTest {
         compose.onNodeWithText(compose.activity.getString(R.string.appearance)).performScrollTo().performClick()
         compose.onNodeWithText(compose.activity.getString(R.string.theme_dark)).performClick()
         compose.runOnIdle { assertEquals(ThemeMode.DARK, mode.value) }
-        compose.onNodeWithTag("brand_settings").performScrollTo().performClick()
+        compose.onNodeWithTag("brand_settings").performClick()
         compose.onNodeWithText("Synthetic connection").performScrollTo().assertIsDisplayed()
     }
     @Test fun activeAuthenticationCannotBeHiddenBySettingsNavigation() {
@@ -87,7 +93,7 @@ class CalendeerScreenDeviceTest {
         signedIn.value = true; settingsEnabled.value = false; verificationRequired.value = true; start()
         compose.onNodeWithText("Synthetic connection").performScrollTo().assertIsDisplayed()
         compose.onNodeWithText("Synthetic calendars").assertDoesNotExist()
-        compose.onNodeWithTag("brand_settings").performScrollTo().assertIsNotEnabled()
+        compose.onNodeWithTag("brand_settings").assertIsNotEnabled()
         compose.runOnIdle { verificationRequired.value = false; settingsEnabled.value = true }
         compose.onNodeWithText("Synthetic calendars").performScrollTo().assertIsDisplayed()
     }
@@ -101,5 +107,48 @@ class CalendeerScreenDeviceTest {
         compose.onNodeWithText("Synthetic connection").performScrollTo().assertIsDisplayed()
         compose.runOnIdle { verificationRequired.value = false; settingsEnabled.value = true }
         compose.onNodeWithText(compose.activity.getString(R.string.theme_dark)).assertDoesNotExist()
+    }
+
+    @Test fun cleanupCannotBeHiddenByCalendarNavigation() {
+        signedIn.value = true; start()
+        compose.onNodeWithTag("brand_settings").performClick()
+        compose.runOnIdle { settingsEnabled.value = false }
+        compose.onNodeWithTag("brand_calendars").assertIsNotEnabled()
+        compose.onNodeWithTag("brand_settings").assertIsNotEnabled()
+        compose.onNodeWithText("Synthetic connection").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Synthetic calendars").assertDoesNotExist()
+        compose.onNodeWithText(compose.activity.getString(R.string.appearance)).assertDoesNotExist()
+    }
+
+    @Test fun incomingAuthenticationWorkDismissesAnOpenPreferenceDialog() {
+        signedIn.value = true; start()
+        compose.onNodeWithTag("brand_settings").performClick()
+        compose.onNodeWithText(compose.activity.getString(R.string.appearance)).performScrollTo().performClick()
+        compose.onNodeWithText(compose.activity.getString(R.string.theme_dark)).assertIsDisplayed()
+        compose.runOnIdle { settingsEnabled.value = false }
+        compose.onNodeWithText(compose.activity.getString(R.string.theme_dark)).assertDoesNotExist()
+        compose.onNodeWithText("Synthetic connection").performScrollTo().assertIsDisplayed()
+        compose.runOnIdle { settingsEnabled.value = true }
+        compose.onNodeWithText(compose.activity.getString(R.string.theme_dark)).assertDoesNotExist()
+    }
+
+    @Test fun signedOutAuthenticationChallengeCannotStayBehindSettings() {
+        start()
+        compose.onNodeWithTag("brand_settings").performClick()
+        compose.onNodeWithText(compose.activity.getString(R.string.appearance)).performScrollTo().assertIsDisplayed()
+        compose.runOnIdle { settingsEnabled.value = false }
+        compose.onNodeWithText("Synthetic connection").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText(compose.activity.getString(R.string.appearance)).assertDoesNotExist()
+        compose.onNodeWithTag("brand_settings").assertIsNotEnabled()
+    }
+
+    @Test fun largeTextKeepsDarkSettingsAndLanguageChoicesReachable() {
+        signedIn.value = true; mode.value = ThemeMode.DARK; start(fontScale = 1.8f)
+        compose.onNodeWithTag("brand_settings").performClick()
+        compose.onNodeWithTag("preference_language").performScrollTo().performClick()
+        compose.onNodeWithText(AppLanguage.FRENCH.nativeLabel).performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText(compose.activity.getString(R.string.close)).performClick()
+        compose.onNodeWithTag("brand_calendars").performClick()
+        compose.onNodeWithText("Synthetic calendars").performScrollTo().assertIsDisplayed()
     }
 }

@@ -85,7 +85,7 @@ fun CalendarCatalogPanel(
     }
 }
 
-private fun failureResource(failure: CalendarCatalogFailure?): Int = when (failure) {
+internal fun failureResource(failure: CalendarCatalogFailure?): Int = when (failure) {
     CalendarCatalogFailure.AUTHENTICATION_REQUIRED -> R.string.catalog_auth_required
     CalendarCatalogFailure.UNREACHABLE -> R.string.catalog_unreachable
     CalendarCatalogFailure.TIMED_OUT -> R.string.catalog_timeout

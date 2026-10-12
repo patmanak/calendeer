@@ -9,9 +9,11 @@ import android.provider.Settings
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -20,6 +22,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -30,6 +33,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalView
@@ -126,20 +130,47 @@ internal fun AuthenticationContent(
         (state.destination == AuthenticationDestination.SIGN_IN && state.isSubmitting)
     )) { cancel() }
     AuthenticationWindowProtection(state.destination)
-    Column(modifier.fillMaxWidth().imePadding(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text(stringResource(titleResource(state)), style = MaterialTheme.typography.titleLarge,
-            modifier = Modifier.semantics { heading() })
-        val description = when (state.destination) {
-            AuthenticationDestination.SIGN_IN -> R.string.auth_sign_in_help
-            AuthenticationDestination.CODE -> R.string.auth_code_help
-            AuthenticationDestination.PASSWORD -> if (state.passwordPurpose == PasswordPurpose.MAILBOX)
-                R.string.auth_mailbox_help else R.string.auth_unlock_help
-            AuthenticationDestination.SECURITY_KEY_UNSUPPORTED -> R.string.auth_security_key_help
-            AuthenticationDestination.HUMAN_VERIFICATION_UNAVAILABLE -> R.string.auth_human_help
-            AuthenticationDestination.AUTHENTICATED -> R.string.auth_connected_help
-            AuthenticationDestination.RESTORING -> R.string.auth_restoring_help
+    val connected = state.destination == AuthenticationDestination.AUTHENTICATED
+    Column(modifier.fillMaxWidth().imePadding(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(stringResource(if (connected) R.string.auth_redesign_account else titleResource(state)),
+                style = if (connected) MaterialTheme.typography.titleMedium else MaterialTheme.typography.titleLarge,
+                modifier = Modifier.semantics { heading() })
+            if (connected) Text(stringResource(R.string.auth_redesign_connected),
+                style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+            val description = when (state.destination) {
+                AuthenticationDestination.SIGN_IN -> R.string.auth_redesign_sign_in_help
+                AuthenticationDestination.CODE -> R.string.auth_redesign_code_help
+                AuthenticationDestination.PASSWORD -> if (state.passwordPurpose == PasswordPurpose.MAILBOX)
+                    R.string.auth_redesign_mailbox_help else R.string.auth_redesign_unlock_help
+                AuthenticationDestination.SECURITY_KEY_UNSUPPORTED -> R.string.auth_security_key_help
+                AuthenticationDestination.HUMAN_VERIFICATION_UNAVAILABLE -> R.string.auth_human_help
+                AuthenticationDestination.AUTHENTICATED -> R.string.auth_redesign_connected_help
+                AuthenticationDestination.RESTORING -> R.string.auth_restoring_help
+            }
+            Text(stringResource(description), style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        Text(stringResource(description), color = MaterialTheme.colorScheme.onSurfaceVariant)
+        if (state.message != null || state.isRetryBlocked) {
+            Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.errorContainer,
+                contentColor = MaterialTheme.colorScheme.onErrorContainer, modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    state.message?.let { message ->
+                        Text(stringResource(messageResource(message)), style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.testTag(AuthenticationTags.MESSAGE).semantics { liveRegion = LiveRegionMode.Polite })
+                    }
+                    if (state.isRetryBlocked) Text(stringResource(R.string.auth_retry_wait),
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
+                    if (state.message == AuthenticationMessage.OFFLINE) {
+                        TextButton(onClick = { clearInputs(); onOpenAppSettings() },
+                            modifier = Modifier.heightIn(min = 48.dp).testTag(AuthenticationTags.APP_SETTINGS)) {
+                            Text(stringResource(R.string.auth_open_app_settings))
+                        }
+                    }
+                }
+            }
+        }
         if (state.destination == AuthenticationDestination.SIGN_IN) {
             OutlinedTextField(
                 shape = RoundedCornerShape(14.dp),
@@ -169,22 +200,18 @@ internal fun AuthenticationContent(
                 modifier = Modifier.fillMaxWidth().testTag(AuthenticationTags.SECRET).semantics { password() },
             )
         }
-        state.message?.let { message ->
-            Text(stringResource(messageResource(message)), color = MaterialTheme.colorScheme.error,
-                modifier = Modifier.testTag(AuthenticationTags.MESSAGE).semantics { liveRegion = LiveRegionMode.Polite })
-        }
-        if (state.message == AuthenticationMessage.OFFLINE) {
-            TextButton(onClick = { clearInputs(); onOpenAppSettings() },
-                modifier = Modifier.heightIn(min = 48.dp).testTag(AuthenticationTags.APP_SETTINGS)) {
-                Text(stringResource(R.string.auth_open_app_settings))
+        if (state.isSubmitting || state.destination == AuthenticationDestination.RESTORING) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                Text(stringResource(when {
+                    state.isCleanupInProgress -> R.string.auth_cleaning
+                    state.destination == AuthenticationDestination.RESTORING -> R.string.auth_redesign_restoring
+                    else -> R.string.auth_working
+                }), style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
             }
-        }
-        if (state.isRetryBlocked) Text(stringResource(R.string.auth_retry_wait),
-            modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
-        if (state.isSubmitting) {
-            CircularProgressIndicator(Modifier.size(24.dp))
-            Text(stringResource(if (state.isCleanupInProgress) R.string.auth_cleaning else R.string.auth_working),
-                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
         }
         if (state.destination in INPUT_DESTINATIONS && !state.isCleanupRequired) {
             Button(onClick = ::submit, enabled = canSubmit, shape = RoundedCornerShape(14.dp),
@@ -195,7 +222,8 @@ internal fun AuthenticationContent(
         }
         if (state.destination != AuthenticationDestination.SIGN_IN || state.isSubmitting || state.isCleanupRequired) {
             TextButton(onClick = ::cancel, enabled = !state.isCleanupInProgress,
-                modifier = Modifier.heightIn(min = 48.dp).testTag(AuthenticationTags.CANCEL)) {
+                modifier = Modifier.align(if (connected) Alignment.Start else Alignment.CenterHorizontally)
+                    .heightIn(min = 48.dp).testTag(AuthenticationTags.CANCEL)) {
                 Text(stringResource(when {
                     state.isCleanupRequired && !state.isCleanupInProgress -> R.string.auth_cleanup_retry
                     state.destination == AuthenticationDestination.AUTHENTICATED -> R.string.auth_sign_out

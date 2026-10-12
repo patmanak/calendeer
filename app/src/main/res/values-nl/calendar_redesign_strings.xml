@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="calendar_dashboard_intro">Kies welke agenda’s in Android verschijnen.</string>
+    <string name="calendar_dashboard_sync">Nu synchroniseren</string>
+    <string name="calendar_dashboard_refresh">Agendalijst vernieuwen</string>
+    <string name="calendar_dashboard_options">Opties en details</string>
+    <string name="calendar_dashboard_close_options">Opties sluiten</string>
+    <string name="calendar_dashboard_ready">Ondersteunde afspraken geïmporteerd</string>
+    <string name="calendar_dashboard_waiting">Wijzigingen in afwachting</string>
+    <string name="calendar_dashboard_working">Bezig met synchroniseren…</string>
+    <string name="calendar_dashboard_attention">Aandacht nodig</string>
+    <string name="calendar_dashboard_unavailable">Agenda niet beschikbaar</string>
+    <string name="calendar_dashboard_configuring">Agenda voorbereiden…</string>
+    <string name="calendar_dashboard_details">Synchronisatiedetails</string>
+    <string name="calendar_dashboard_usage">Hoe synchronisatie werkt</string>
+    <string name="calendar_dashboard_editing">Wijzigingen vanuit Android</string>
+    <string name="calendar_dashboard_history">Sommige oudere wijzigingen konden niet worden gecontroleerd.</string>
+    <string name="calendar_dashboard_held">%1$d afspraken wachten op ondersteuning of controle</string>
+    <string name="calendar_dashboard_pending">%1$d updates wachten op Android</string>
+    <string name="calendar_dashboard_local">%1$d opgeslagen lokale wijzigingen · %2$d conflicten</string>
+    <string name="calendar_dashboard_outgoing">%1$d wijzigingen wachten op verzending of controle</string>
+    <string name="calendar_dashboard_read_only">Alleen-lezen</string>
+    <string name="calendar_dashboard_create_mode">Afspraken maken toegestaan</string>
+    <string name="calendar_dashboard_title_mode">Afspraken maken en titels wijzigen toegestaan</string>
+</resources>

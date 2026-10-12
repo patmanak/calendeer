@@ -23,9 +23,7 @@ import androidx.compose.runtime.getValue
 import com.patmanak.proton.andcalendarbridge.ui.BridgeScreen
 import com.patmanak.proton.andcalendarbridge.ui.auth.AuthenticationPanel
 import com.patmanak.proton.andcalendarbridge.ui.auth.HumanVerificationPanel
-import com.patmanak.proton.andcalendarbridge.ui.calendars.CalendarCatalogPanel
-import com.patmanak.proton.andcalendarbridge.ui.calendars.CalendarImportPanel
-import com.patmanak.proton.andcalendarbridge.ui.calendars.SystemCreatePanel
+import com.patmanak.proton.andcalendarbridge.ui.calendars.CalendarDashboard
 import com.patmanak.proton.andcalendarbridge.protonauth.ProtonAuthentication
 import com.patmanak.proton.andcalendarbridge.ui.locale.AndroidLanguagePreferenceStore
 import com.patmanak.proton.andcalendarbridge.ui.theme.BridgeTheme
@@ -82,14 +80,13 @@ class MainActivity : ComponentActivity() {
                         }
                     },
                     calendarContent = {
-                        CalendarCatalogPanel(catalogState, catalog::refresh)
-                        CalendarImportPanel(importState, preferences.imports::setEnabled,
+                        CalendarDashboard(catalogState, importState, systemCreates, catalog::refresh, preferences.imports::setEnabled,
                             preferences.imports::requestSync,
                             onRequestPermission = { calendarPermissions.launch(arrayOf(
                                 Manifest.permission.READ_CALENDAR, Manifest.permission.WRITE_CALENDAR)) },
                             onOpenSettings = { startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-                                Uri.parse("package:$packageName"))) })
-                        SystemCreatePanel(importState, systemCreates, preferences.systemCreates::setEnabled,
+                                Uri.parse("package:$packageName"))) },
+                            onMode = preferences.systemCreates::setEnabled,
                             onTitlesMode = preferences.systemCreates::setTitlesEnabled)
                     },
                 )

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="auth_redesign_account">Proton-account</string>
+    <string name="auth_redesign_connected">Verbonden</string>
+    <string name="auth_redesign_sign_in_help">Log in met je Proton-account.</string>
+    <string name="auth_redesign_code_help">Voer de code uit je authenticator-app in.</string>
+    <string name="auth_redesign_mailbox_help">Voer je afzonderlijke mailboxwachtwoord in.</string>
+    <string name="auth_redesign_unlock_help">Voer je Proton-wachtwoord in om de verbinding te ontgrendelen.</string>
+    <string name="auth_redesign_connected_help">Kies op het startscherm welke agenda’s je wilt importeren.</string>
+    <string name="auth_redesign_restoring">Verbinding controleren…</string>
+</resources>

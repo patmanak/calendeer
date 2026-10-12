@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="calendar_dashboard_intro">Scegli quali calendari visualizzare in Android.</string>
+    <string name="calendar_dashboard_sync">Sincronizza ora</string>
+    <string name="calendar_dashboard_refresh">Aggiorna elenco calendari</string>
+    <string name="calendar_dashboard_options">Opzioni e dettagli</string>
+    <string name="calendar_dashboard_close_options">Chiudi opzioni</string>
+    <string name="calendar_dashboard_ready">Eventi compatibili importati</string>
+    <string name="calendar_dashboard_waiting">Modifiche in attesa</string>
+    <string name="calendar_dashboard_working">Sincronizzazione in corso…</string>
+    <string name="calendar_dashboard_attention">Da verificare</string>
+    <string name="calendar_dashboard_unavailable">Calendario non disponibile</string>
+    <string name="calendar_dashboard_configuring">Preparazione del calendario…</string>
+    <string name="calendar_dashboard_details">Dettagli di sincronizzazione</string>
+    <string name="calendar_dashboard_usage">Come funziona la sincronizzazione</string>
+    <string name="calendar_dashboard_editing">Modifiche da Android</string>
+    <string name="calendar_dashboard_history">Alcune vecchie modifiche non sono state verificate.</string>
+    <string name="calendar_dashboard_held">%1$d eventi in attesa di supporto o verifica</string>
+    <string name="calendar_dashboard_pending">%1$d aggiornamenti in attesa per Android</string>
+    <string name="calendar_dashboard_local">%1$d modifiche locali salvate · %2$d conflitti</string>
+    <string name="calendar_dashboard_outgoing">%1$d modifiche in attesa di invio o verifica</string>
+    <string name="calendar_dashboard_read_only">Sola lettura</string>
+    <string name="calendar_dashboard_create_mode">Creazione di eventi consentita</string>
+    <string name="calendar_dashboard_title_mode">Creazione e modifiche dei titoli consentite</string>
+</resources>

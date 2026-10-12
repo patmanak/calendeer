@@ -22,6 +22,7 @@ import com.patmanak.proton.andcalendarbridge.auth.AuthenticationFlowPort
 import com.patmanak.proton.andcalendarbridge.auth.AuthenticationMonotonicClock
 import com.patmanak.proton.andcalendarbridge.auth.AuthenticationSecret
 import com.patmanak.proton.andcalendarbridge.auth.AuthenticationStep
+import com.patmanak.proton.andcalendarbridge.auth.PasswordPurpose
 import com.patmanak.proton.andcalendarbridge.ui.auth.AuthenticationPanel
 import com.patmanak.proton.andcalendarbridge.ui.auth.AuthenticationTags
 import kotlinx.coroutines.CoroutineScope
@@ -121,9 +122,35 @@ class AuthenticationUiDeviceTest {
         compose.runOnIdle { controller.submitSignIn("fixture".toCharArray(), "fixture".toCharArray()) }
         compose.onNodeWithTag(AuthenticationTags.USERNAME).assertDoesNotExist()
         compose.onNodeWithTag(AuthenticationTags.SECRET).assertDoesNotExist()
-        compose.onNodeWithText(compose.activity.getString(R.string.auth_connected_help)).assertExists()
+        compose.onNodeWithText(compose.activity.getString(R.string.auth_redesign_account)).assertExists()
+        compose.onNodeWithText(compose.activity.getString(R.string.auth_redesign_connected)).assertExists()
+        compose.onNodeWithText(compose.activity.getString(R.string.auth_redesign_connected_help)).assertExists()
         compose.onNodeWithTag(AuthenticationTags.APP_SETTINGS).assertDoesNotExist()
         compose.runOnIdle { assertEquals(AuthenticationDestination.AUTHENTICATED, controller.state.value.destination) }
+    }
+
+    @Test fun mailboxUnlockKeepsSecretsMaskedAndConnectedAccountOnlySignsOutOnExplicitAction() {
+        port.result = AuthenticationStep.PasswordRequired(PasswordPurpose.MAILBOX)
+        start()
+        compose.runOnIdle { controller.submitSignIn("fixture".toCharArray(), "fixture".toCharArray()) }
+        compose.onNodeWithText(compose.activity.getString(R.string.auth_redesign_mailbox_help)).assertExists()
+        compose.onNodeWithTag(AuthenticationTags.USERNAME).assertDoesNotExist()
+        assertEmpty(AuthenticationTags.SECRET)
+        compose.onNodeWithTag(AuthenticationTags.SECRET).performTextInput("fixture-mailbox-password")
+        compose.onNodeWithTag(AuthenticationTags.SECRET)
+            .assert(SemanticsMatcher.keyIsDefined(SemanticsProperties.Password))
+        port.result = AuthenticationStep.Authenticated
+        compose.onNodeWithTag(AuthenticationTags.SUBMIT).performClick()
+        compose.onNodeWithTag(AuthenticationTags.SECRET).assertDoesNotExist()
+        compose.onNodeWithTag(AuthenticationTags.SUBMIT).assertDoesNotExist()
+        compose.runOnIdle {
+            assertEquals(AuthenticationDestination.AUTHENTICATED, controller.state.value.destination)
+            assertEquals(0, port.cancelCalls)
+        }
+        compose.onNodeWithTag(AuthenticationTags.CANCEL).performClick()
+        assertEmpty(AuthenticationTags.USERNAME)
+        assertEmpty(AuthenticationTags.SECRET)
+        compose.runOnIdle { assertEquals(1, port.cancelCalls) }
     }
 
     @Test fun serverRetryDelayDisablesAnotherSubmission() {
@@ -159,6 +186,7 @@ class AuthenticationUiDeviceTest {
         var result: AuthenticationStep = AuthenticationStep.Failure(AuthenticationFailure.REJECTED)
         var failCleanup = false
         var signInCalls = 0
+        var cancelCalls = 0
         override suspend fun restore(): AuthenticationStep = AuthenticationStep.SignIn
         override suspend fun signIn(username: AuthenticationSecret, password: AuthenticationSecret): AuthenticationStep {
             username.consume { }
@@ -174,6 +202,6 @@ class AuthenticationUiDeviceTest {
             password.consume { }
             return result
         }
-        override suspend fun cancel() { check(!failCleanup) }
+        override suspend fun cancel() { cancelCalls++; check(!failCleanup) }
     }
 }

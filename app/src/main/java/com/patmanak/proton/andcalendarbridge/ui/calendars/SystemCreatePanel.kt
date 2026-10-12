@@ -43,7 +43,7 @@ fun SystemCreatePanel(imports: ImportUiState, state: SystemCreateUiState,
 }
 
 @Composable
-private fun ModeToggle(label: String, checked: Boolean, enabled: Boolean, tag: String,
+internal fun ModeToggle(label: String, checked: Boolean, enabled: Boolean, tag: String,
     onCheckedChange: (Boolean) -> Unit) {
     Row(Modifier.fillMaxWidth().heightIn(min = 48.dp)
         .toggleable(checked, enabled = enabled, role = Role.Switch, onValueChange = onCheckedChange).testTag(tag),

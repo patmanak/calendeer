@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="ui_settings_intro">Tutte le impostazioni in un unico posto.</string>
+    <string name="ui_account">Account</string>
+    <string name="ui_personalization">Aspetto e lingua</string>
+    <string name="ui_about">Informazioni</string>
+    <string name="ui_version">Versione %1$s</string>
+    <string name="ui_about_bridge">Calendeer collega Proton Calendar alle app calendario di Android. Scegli cosa sincronizzare in Calendari.</string>
+</resources>

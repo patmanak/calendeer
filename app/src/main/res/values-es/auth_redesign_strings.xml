@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="auth_redesign_account">Cuenta de Proton</string>
+    <string name="auth_redesign_connected">Conectada</string>
+    <string name="auth_redesign_sign_in_help">Inicia sesión con tu cuenta de Proton.</string>
+    <string name="auth_redesign_code_help">Introduce el código de tu aplicación de autenticación.</string>
+    <string name="auth_redesign_mailbox_help">Introduce tu contraseña independiente del buzón.</string>
+    <string name="auth_redesign_unlock_help">Introduce tu contraseña de Proton para desbloquear la conexión.</string>
+    <string name="auth_redesign_connected_help">Elige los calendarios que quieras importar en la pantalla de inicio.</string>
+    <string name="auth_redesign_restoring">Comprobando la conexión…</string>
+</resources>

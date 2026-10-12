@@ -207,6 +207,14 @@ The connection form, signed-in calendar controls and settings are separate
 destinations. Authentication challenges take priority over navigation and open
 preference dialogs. Branding preserves the Android application ID, existing
 sessions and imported calendars. See [identity and interface](DESIGN.md).
+The authenticated interface now uses labeled Calendars and Settings navigation.
+A single card per calendar combines synchronization state and selection, with
+independent write options and detailed explanations behind an explicit expansion.
+Held work, conflicts and failures stay visible when collapsed. Settings groups
+account actions, appearance, language and About; login uses shorter guidance and
+a dedicated error surface. Navigation changes no consent and schedules no work.
+Protected authentication states take priority even when settings was opened before
+sign-in. The presentation changes do not extend supported event edits.
 
 | Module | Implemented | Not established by this slice |
 | --- | --- | --- |

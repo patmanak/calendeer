@@ -1,43 +1,24 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 package com.patmanak.proton.andcalendarbridge.ui
 
-import androidx.compose.foundation.clickable
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.RadioButton
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.heading
@@ -48,6 +29,7 @@ import com.patmanak.proton.andcalendarbridge.R
 import com.patmanak.proton.andcalendarbridge.ui.locale.AppLanguage
 import com.patmanak.proton.andcalendarbridge.ui.theme.ThemeMode
 
+/** Navigation only. Opening a destination never changes calendar consent or schedules work. */
 @Composable
 fun BridgeScreen(
     themeMode: ThemeMode,
@@ -62,116 +44,131 @@ fun BridgeScreen(
 ) {
     var openPicker by rememberSaveable { mutableStateOf<String?>(null) }
     var settingsOpen by rememberSaveable(signedIn) { mutableStateOf(false) }
-    LaunchedEffect(verificationRequired) {
-        if (verificationRequired) openPicker = null
-    }
-    BackHandler(settingsOpen && openPicker == null) { settingsOpen = false }
-    Scaffold(containerColor = MaterialTheme.colorScheme.background) { insets ->
-        Box(Modifier.fillMaxSize().padding(insets), contentAlignment = Alignment.TopCenter) {
-            Column(
-                Modifier.widthIn(max = 640.dp).fillMaxWidth().verticalScroll(rememberScrollState())
-                    .padding(horizontal = 24.dp, vertical = 28.dp),
-                verticalArrangement = Arrangement.spacedBy(24.dp),
-            ) {
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text(stringResource(R.string.app_name), style = MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.SemiBold, modifier = Modifier.semantics { heading() })
-                    }
-                    TextButton(onClick = { settingsOpen = !settingsOpen }, enabled = settingsEnabled,
-                        modifier = Modifier.heightIn(min = 48.dp).testTag("brand_settings")) {
-                        Text(stringResource(if (settingsOpen) R.string.brand_back else R.string.brand_settings))
-                    }
+    val canConfigure = settingsEnabled && !verificationRequired
+    LaunchedEffect(canConfigure) { if (!canConfigure) openPicker = null }
+    BackHandler(settingsOpen && openPicker == null && canConfigure) { settingsOpen = false }
+    Scaffold(
+        containerColor = MaterialTheme.colorScheme.background,
+        bottomBar = {
+            if (signedIn) NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
+                NavigationBarItem(selected = !settingsOpen, enabled = canConfigure,
+                    onClick = { settingsOpen = false }, modifier = Modifier.testTag("brand_calendars"),
+                    icon = { Icon(painterResource(R.drawable.ui_calendar), contentDescription = null) },
+                    label = { Text(stringResource(R.string.calendars_heading)) })
+                NavigationBarItem(selected = settingsOpen, enabled = canConfigure,
+                    onClick = { settingsOpen = true }, modifier = Modifier.testTag("brand_settings"),
+                    icon = { Icon(painterResource(R.drawable.ui_settings), contentDescription = null) },
+                    label = { Text(stringResource(R.string.brand_settings)) })
+            }
+        },
+    ) { insets ->
+        Column(Modifier.fillMaxSize().padding(insets), horizontalAlignment = Alignment.CenterHorizontally) {
+            Row(Modifier.widthIn(max = 720.dp).fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Image(painterResource(R.drawable.calendeer_mascot), contentDescription = null,
+                    contentScale = ContentScale.Fit, modifier = Modifier.size(40.dp))
+                Text(stringResource(R.string.app_name), style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                if (!signedIn) TextButton(onClick = { settingsOpen = !settingsOpen }, enabled = canConfigure,
+                    modifier = Modifier.heightIn(min = 48.dp).testTag("brand_settings")) {
+                    Text(stringResource(if (settingsOpen) R.string.brand_back else R.string.brand_settings))
                 }
-                if (!signedIn && !settingsOpen) {
-                    Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Image(painterResource(R.drawable.calendeer_mascot), contentDescription = null,
-                            contentScale = ContentScale.Fit, modifier = Modifier.size(152.dp))
-                        Text(stringResource(R.string.brand_welcome), style = MaterialTheme.typography.headlineSmall,
-                            fontWeight = FontWeight.SemiBold)
-                        Text(stringResource(R.string.app_subtitle), style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                }
-                if (verificationRequired || (!signedIn && !settingsOpen) || (signedIn && settingsOpen)) {
-                Card(
-                    shape = RoundedCornerShape(24.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                ) {
-                    Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        authenticationContent()
-                    }
-                }
-                }
-                if (signedIn && !settingsOpen && !verificationRequired) {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                        Image(painterResource(R.drawable.calendeer_mascot), contentDescription = null,
-                            contentScale = ContentScale.Fit, modifier = Modifier.size(64.dp))
-                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            SectionTitle(stringResource(R.string.calendars_heading))
-                            Text(stringResource(R.string.app_subtitle), style = MaterialTheme.typography.bodyMedium,
+            }
+            // A full-height scrolling body keeps controls reachable with the IME and large text.
+            Column(Modifier.weight(1f).widthIn(max = 720.dp).fillMaxWidth()
+                .verticalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = 20.dp),
+                verticalArrangement = Arrangement.spacedBy(24.dp)) {
+                when {
+                    verificationRequired || !settingsEnabled -> ContentCard { authenticationContent() }
+                    settingsOpen -> {
+                        PageHeading(stringResource(R.string.brand_settings), stringResource(R.string.ui_settings_intro))
+                        if (signedIn) {
+                            SectionTitle(stringResource(R.string.ui_account))
+                            ContentCard { authenticationContent() }
+                        }
+                        SectionTitle(stringResource(R.string.ui_personalization))
+                        Card(shape = RoundedCornerShape(24.dp), colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surface)) {
+                            PreferenceRow(stringResource(R.string.appearance), themeLabel(themeMode), canConfigure,
+                                "preference_theme") { openPicker = "theme" }
+                            HorizontalDivider(Modifier.padding(horizontal = 20.dp), color = MaterialTheme.colorScheme.outlineVariant)
+                            PreferenceRow(stringResource(R.string.language), languageLabel(language), canConfigure,
+                                "preference_language") { openPicker = "language" }
+                        }
+                        SectionTitle(stringResource(R.string.ui_about))
+                        ContentCard {
+                            val context = LocalContext.current
+                            val version = remember(context) {
+                                @Suppress("DEPRECATION")
+                                context.packageManager.getPackageInfo(context.packageName, 0).versionName.orEmpty()
+                            }
+                            Text(stringResource(R.string.ui_version, version), style = MaterialTheme.typography.bodyMedium)
+                            Text(stringResource(R.string.ui_about_bridge), style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(stringResource(R.string.brand_independent), style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
-                    Card(shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.surface,
-                    )) {
-                        Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            calendarContent()
+                    signedIn -> calendarContent()
+                    else -> {
+                        Column(Modifier.fillMaxWidth().padding(vertical = 12.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                            Image(painterResource(R.drawable.calendeer_mascot), contentDescription = null,
+                                modifier = Modifier.size(112.dp), contentScale = ContentScale.Fit)
+                            Text(stringResource(R.string.brand_welcome), style = MaterialTheme.typography.headlineSmall,
+                                fontWeight = FontWeight.SemiBold, modifier = Modifier.semantics { heading() })
+                            Text(stringResource(R.string.app_subtitle), style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
+                        ContentCard { authenticationContent() }
                     }
                 }
-                }
-                if (settingsOpen && !verificationRequired) {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    SectionTitle(stringResource(R.string.preferences_heading))
-                    Card(shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.surface,
-                    )) {
-                        PreferenceRow(stringResource(R.string.appearance), themeLabel(themeMode)) { openPicker = "theme" }
-                        HorizontalDivider(Modifier.padding(horizontal = 20.dp), color = MaterialTheme.colorScheme.outlineVariant)
-                        PreferenceRow(stringResource(R.string.language), languageLabel(language)) { openPicker = "language" }
-                    }
-                    Text(stringResource(R.string.preferences_scope), style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-                }
-                Text(stringResource(R.string.brand_independent), style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text(stringResource(R.string.development_notice), style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(Modifier.height(4.dp))
             }
         }
     }
-    when (if (verificationRequired) null else openPicker) {
-        "theme" -> ChoiceDialog(
-            stringResource(R.string.appearance), ThemeMode.entries, themeMode, { themeLabel(it) },
-            onDismiss = { openPicker = null },
-        ) { openPicker = null; onThemeChange(it) }
-        "language" -> ChoiceDialog(
-            stringResource(R.string.language), AppLanguage.entries, language, { languageLabel(it) },
-            onDismiss = { openPicker = null },
-        ) { openPicker = null; onLanguageChange(it) }
+    when (if (canConfigure) openPicker else null) {
+        "theme" -> ChoiceDialog(stringResource(R.string.appearance), ThemeMode.entries, themeMode, { themeLabel(it) },
+            onDismiss = { openPicker = null }) { openPicker = null; onThemeChange(it) }
+        "language" -> ChoiceDialog(stringResource(R.string.language), AppLanguage.entries, language, { languageLabel(it) },
+            onDismiss = { openPicker = null }) { openPicker = null; onLanguageChange(it) }
     }
 }
 
 @Composable
-private fun SectionTitle(text: String) {
-    Text(text, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold,
+private fun PageHeading(title: String, subtitle: String) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(title, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.semantics { heading() })
+        Text(subtitle, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+@Composable
+private fun SectionTitle(title: String) {
+    Text(title, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.semantics { heading() })
 }
 
 @Composable
-private fun PreferenceRow(title: String, value: String, onClick: () -> Unit) {
-    Column(
-        Modifier.fillMaxWidth().clickable(role = Role.Button, onClick = onClick)
-            .heightIn(min = 72.dp).padding(horizontal = 20.dp, vertical = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp),
-    ) {
-        Text(title, style = MaterialTheme.typography.bodyLarge)
-        Text(value, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary)
+private fun ContentCard(content: @Composable ColumnScope.() -> Unit) {
+    Card(shape = RoundedCornerShape(24.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+        Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp), content = content)
+    }
+}
+
+@Composable
+private fun PreferenceRow(title: String, value: String, enabled: Boolean, tag: String, onClick: () -> Unit) {
+    Row(Modifier.fillMaxWidth().clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+        .heightIn(min = 80.dp).testTag(tag).padding(horizontal = 20.dp, vertical = 16.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(title, style = MaterialTheme.typography.bodyLarge)
+            Text(value, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary)
+        }
+        Icon(painterResource(R.drawable.ui_chevron), contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(20.dp))
     }
 }
 

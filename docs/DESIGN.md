@@ -24,9 +24,32 @@ Settings contains appearance, language and the existing connected-account action
 Returning from settings restores the main destination; sign-out returns to login.
 No event editor or calendar browsing interface is added.
 
+Authenticated navigation uses two labeled destinations, Calendars and Settings.
+Calendars combines discovery, synchronization and write preferences into one card
+per persisted calendar. Each card shows its color, name, current status and sync
+switch. A separate Options and details action reveals its independent CREATE and
+title consent switches, supported profiles and synchronization details. Opening a
+card or destination does not enable writes or trigger synchronization. Newly
+discovered calendars remain noninteractive until their scope is persisted.
+Synchronize now and Refresh calendar list remain distinct actions.
+
+Pending Android projections, held events, history gaps, local conflicts and
+outgoing work remain visible with options collapsed, including for paused
+calendars. Import completion is never presented as full bidirectional convergence.
+Permission requests and failures remain actionable. Longer explanations live in
+expandable help rather than repeating throughout the main view.
+
+Settings groups Account, Appearance and language, and About. Version and
+independent-project information belong in About. Login uses a short introduction,
+one form and a dedicated error surface; it does not restore entered credentials.
+Controls use at least 48dp targets, scrollable content and text labels in addition
+to icons or color. Light and dark appearances retain violet accents on neutral
+surfaces. Navigation and preference dialogs close or disable when authentication
+requires attention, including when settings was opened before sign-in.
+
 Each calendar reports retained Android change and recorded conflict counts when
-its local UPDATE/DELETE journal is nonempty. A short explanation states that these
-captured changes are not uploaded and affected Android event updates are on hold.
+its local UPDATE/DELETE journal is nonempty. Its details explain that unsupported
+changes remain local, with the separate narrow title option described explicitly.
 Counts remain visible for paused/unavailable calendars and without calendar
 permission, but disappear on sign-out. Zero counts hide the entire explanation.
 No event contents, event identifiers or resolution actions are presented. This

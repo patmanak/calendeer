@@ -139,7 +139,7 @@ fun CalendarImportPanel(
     }
 }
 
-private fun statusResource(status: String): Int = when (status) {
+internal fun statusResource(status: String): Int = when (status) {
     "PAUSED" -> R.string.import_status_paused
     "PENDING" -> R.string.import_status_pending
     "CREATE_PENDING" -> R.string.import_status_create_pending

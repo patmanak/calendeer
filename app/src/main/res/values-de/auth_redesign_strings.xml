@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="auth_redesign_account">Proton-Konto</string>
+    <string name="auth_redesign_connected">Verbunden</string>
+    <string name="auth_redesign_sign_in_help">Melde dich mit deinem Proton-Konto an.</string>
+    <string name="auth_redesign_code_help">Gib den Code aus deiner Authentifizierungs-App ein.</string>
+    <string name="auth_redesign_mailbox_help">Gib dein separates Postfach-Passwort ein.</string>
+    <string name="auth_redesign_unlock_help">Gib dein Proton-Passwort ein, um die Verbindung zu entsperren.</string>
+    <string name="auth_redesign_connected_help">Wähle auf der Startseite die zu importierenden Kalender.</string>
+    <string name="auth_redesign_restoring">Verbindung wird geprüft…</string>
+</resources>
