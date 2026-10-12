@@ -108,11 +108,7 @@ class CalendarTitleGuardedJourneyLiveDeviceTest {
         val requestedCalendarName = args.getString("titleSourceCalendarName").orEmpty()
         assertTrue("Automatic source enrollment requires the explicit system journey and dedicated QA calendar",
             !automaticSource || (systemJourney && requestedCalendarName == "Calendeer QA Automatic Worker"))
-        val namespaceSuffix = when {
-            automaticSource -> "-system-worker-v1"
-            systemJourney -> "-system-v1"
-            else -> ""
-        }
+        val namespace = TitleJourneyNamespace.create(automaticSource, systemJourney, args.getString("titleJourneyLabel"))
         val token = args.getString("createFixtureToken").orEmpty()
         val hash = args.getString("createAccountHash").orEmpty()
         val phase = args.getString("titleGuardedPhase").orEmpty()
@@ -122,14 +118,14 @@ class CalendarTitleGuardedJourneyLiveDeviceTest {
         compose.waitUntil(60_000) { app.imports.state.value.let {
             it.authenticated && it.selections.isNotEmpty() && !it.busy
         } }
-        val prefs = app.getSharedPreferences(PREFS + namespaceSuffix, Context.MODE_PRIVATE)
+        val prefs = app.getSharedPreferences(namespace.sourcePreferences, Context.MODE_PRIVATE)
         val selected = app.imports.state.value.selections.filter { it.enabled && it.available &&
             (!automaticSource || it.summary.title == requestedCalendarName) }
         assertTrue("An accessible existing calendar is required", selected.isNotEmpty())
         assertTrue("The dedicated QA calendar must resolve uniquely", !automaticSource || selected.size == 1)
         val source = if (prefs.contains("token")) {
             assertTrue("Never replace an enrolled fixture", prefs.getString("token", null) == token &&
-                prefs.getString("account_hash", null) == hash)
+                prefs.getString("account_hash", null) == hash && prefs.getString("journey_label", null) == namespace.label)
             CalendarScope(AccountId(checkNotNull(prefs.getString("account", null))),
                 CalendarId(checkNotNull(prefs.getString("calendar", null))), prefs.getLong("generation", -1))
         } else {
@@ -149,6 +145,7 @@ class CalendarTitleGuardedJourneyLiveDeviceTest {
             val generation = (UUID.randomUUID().mostSignificantBits and Long.MAX_VALUE).coerceAtLeast(1)
             assertTrue("Freeze all identities before creating or preparing anything", prefs.edit()
                 .putString("token", token).putString("account_hash", hash)
+                .putString("journey_label", namespace.label)
                 .putString("source_calendar_name", if (automaticSource) requestedCalendarName else null)
                 .putString("account", source.account.value).putString("calendar", source.calendar.value)
                 .putLong("generation", source.generation).putLong("physical_generation", generation)
@@ -232,9 +229,9 @@ class CalendarTitleGuardedJourneyLiveDeviceTest {
         }
         val jobs = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         try {
-            ImportStore(app, IMPORT_DB + namespaceSuffix).use { store ->
+            ImportStore(app, namespace.sourceImportDatabase).use { store ->
                 fun allowStore() { store.admitTransaction = { it == source && accessible() } }
-                TitleUpdateAttemptStore(app, TITLE_DB + namespaceSuffix).use { journal ->
+                TitleUpdateAttemptStore(app, namespace.sourceTitleDatabase).use { journal ->
                     journal.admitDispatch = { error("The fixture never uses global title dispatch admission") }
                     if (phase == "submit" && prefs.getBoolean("title_requested", false)) {
                         val old = journal.read(source, attempt)
@@ -253,7 +250,7 @@ class CalendarTitleGuardedJourneyLiveDeviceTest {
                         }
                         if (base == null) {
                             val createPort = ProtonAuthentication.createSubmissions(app)
-                            CreateAttemptStore(app, CREATE_DB + namespaceSuffix).use { creates ->
+                            CreateAttemptStore(app, namespace.sourceCreateDatabase).use { creates ->
                                 creates.admitDispatch = { false }
                                 try {
                                     val existing = creates.read(source, id("create_id"))
@@ -483,10 +480,6 @@ class CalendarTitleGuardedJourneyLiveDeviceTest {
             }
             return hash.digest().joinToString("") { "%02x".format(it) }
         }
-        private const val PREFS = "calendar-title-guarded-journey-v1"
-        private const val IMPORT_DB = "calendar-title-guarded-journey-import-v1.db"
-        private const val CREATE_DB = "calendar-title-guarded-journey-create-v1.db"
-        private const val TITLE_DB = "calendar-title-guarded-journey-attempt-v1.db"
         private val ACK_FIELDS = setOf(Events.DIRTY, Events.SYNC_DATA2, Events.SYNC_DATA3)
     }
 }

@@ -63,8 +63,14 @@ projection-receipt guards above. After correction, normal workers recovered the
 same retained proof and acknowledged the same native row without a new attempt.
 A fresh-process replay preserved the immutable history and clean row, created no
 new attempt and restored the original calendar write options.
-The complete uninterrupted editor-to-completion journey on the corrected build
-still needs a fresh live qualification.
+A fresh uninterrupted journey on the corrected build now qualifies an external
+system editor saving a title, production workers generating the attempt and
+verified Proton result, and same-row Android acknowledgement and completion.
+A new-process replay preserved the exact immutable history and clean row without
+a new attempt, then restored the original calendar write options. Fixture-only
+namespaces allow independent retained journeys without resetting earlier evidence
+or production journals. Periodic work was sampled, but no running periodic worker
+was observed; this does not qualify autonomous periodic delivery or broader edits.
 Known-empty, non-recurring incoming events now use the calendar's opaque local
 owner label to preserve native editing, without a remote organizer or attendee. Ordinary and CREATE-handoff
 capture accept that profile and preserve DIRTY edits. Existing settled rows gain

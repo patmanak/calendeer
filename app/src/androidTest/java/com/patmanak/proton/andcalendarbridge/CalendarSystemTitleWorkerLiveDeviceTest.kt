@@ -64,12 +64,15 @@ class CalendarSystemTitleWorkerLiveDeviceTest {
         val app = compose.activity.application as BridgeApplication
         compose.waitUntil(60_000) { app.imports.state.value.let { it.authenticated && it.selections.isNotEmpty() && (phase == "DIAG" || !it.busy) } }
         val automaticSource = args.getString("automaticTitleSource") == "true"
+        val namespace = TitleJourneyNamespace.create(automaticSource, args.getString("systemTitleJourney") == "true",
+            args.getString("titleJourneyLabel"))
         val requestedCalendarName = args.getString("titleSourceCalendarName").orEmpty()
         assertTrue("Automatic source requires the dedicated QA calendar name", !automaticSource ||
             requestedCalendarName == "Calendeer QA Automatic Worker")
-        val source = app.getSharedPreferences(if (automaticSource) AUTOMATIC_SOURCE_PREFS else SOURCE_PREFS, Context.MODE_PRIVATE)
+        val source = app.getSharedPreferences(namespace.workerSourcePreferences, Context.MODE_PRIVATE)
         assertTrue("Require the existing qualified service fixture", source.getString("token", null) == token &&
-            source.getString("account_hash", null) == accountHash && source.getInt("content_profile", -1) == 1)
+            source.getString("account_hash", null) == accountHash && source.getInt("content_profile", -1) == 1 &&
+            source.getString("journey_label", null) == namespace.label)
         fun sourceValue(key: String) = checkNotNull(source.getString(key, null)) { "Missing enrolled source field" }
         val target = CalendarScope(AccountId(sourceValue("account")), CalendarId(sourceValue("calendar")), source.getLong("generation", -1))
         val event = EventId(sourceValue("event"))
@@ -90,7 +93,7 @@ class CalendarSystemTitleWorkerLiveDeviceTest {
             assertTrue("Require the exact frozen automatic source calendar", source.getString("source_calendar_name", null) == requestedCalendarName &&
                 app.imports.state.value.selections.count { it.enabled && it.available && it.summary.title == requestedCalendarName } == 1)
             val sourceAttempt = MutationId(sourceValue("attempt_id"))
-            TitleUpdateAttemptStore(app, AUTOMATIC_SOURCE_TITLE_DB).use { journal ->
+            TitleUpdateAttemptStore(app, namespace.sourceTitleDatabase).use { journal ->
                 val record = journal.read(target, sourceAttempt)
                 val result = journal.readVerified(target, sourceAttempt)
                 val completion = journal.readCompletion(target, sourceAttempt)
@@ -103,13 +106,13 @@ class CalendarSystemTitleWorkerLiveDeviceTest {
         }
         if (phase == "DIAG") {
             diagnostics(app, target, event, originalContent)
-            titleDiagnostics(app, target, event, originalContent, expectedContent, token, accountHash, automaticSource)
+            titleDiagnostics(app, target, event, originalContent, expectedContent, token, accountHash, automaticSource, namespace)
             return@runBlocking // No scheduler, mode, editor or coordinator mutation in this path.
         }
         val projection = AndroidCalendarProjection(app)
         assertTrue("Calendar permissions are required", projection.hasPermissions())
         projection.admitOperation = ::accessible
-        val prefs = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val prefs = app.getSharedPreferences(namespace.workerPreferences, Context.MODE_PRIVATE)
         val manager = WorkManager.getInstance(app)
         fun networkWork() = manager.getWorkInfosForUniqueWork(NETWORK_WORK).get()
         var periodicRunningObserved = false
@@ -158,6 +161,7 @@ class CalendarSystemTitleWorkerLiveDeviceTest {
                 val resumeBeforeEditor = prefs.contains("token")
                 if (resumeBeforeEditor) {
                     assertTrue("Only an unchanged enrolled pre-editor run can resume", prefs.getString("token", null) == token &&
+                        prefs.getString("journey_label", null) == namespace.label &&
                         prefs.getString("account_hash", null) == accountHash && prefs.getBoolean("automatic_source", false) == automaticSource &&
                         prefs.getString("account", null) == target.account.value && prefs.getString("calendar", null) == target.calendar.value &&
                         prefs.getLong("generation", -1) == target.generation && prefs.getString("event", null) == event.value &&
@@ -206,6 +210,7 @@ class CalendarSystemTitleWorkerLiveDeviceTest {
                     status("system_title_pre_editor_resume")
                 } else assertTrue("Freeze fixture and original flags before enabling either mode", prefs.edit()
                     .putString("token", token).putString("account_hash", accountHash)
+                    .putString("journey_label", namespace.label)
                     .putBoolean("automatic_source", automaticSource)
                     .putString("account", target.account.value).putString("calendar", target.calendar.value)
                     .putLong("generation", target.generation).putString("event", event.value)
@@ -276,6 +281,7 @@ class CalendarSystemTitleWorkerLiveDeviceTest {
             } else if (phase == "RECOVER") {
                 assertTrue("RECOVER only resumes the exact previously edited, incomplete fixture",
                     prefs.getString("token", null) == token && prefs.getString("account_hash", null) == accountHash &&
+                        prefs.getString("journey_label", null) == namespace.label &&
                         prefs.getBoolean("automatic_source", false) == automaticSource &&
                         prefs.getString("account", null) == target.account.value && prefs.getString("calendar", null) == target.calendar.value &&
                         prefs.getLong("generation", -1) == target.generation && prefs.getString("event", null) == event.value &&
@@ -364,7 +370,7 @@ class CalendarSystemTitleWorkerLiveDeviceTest {
                         assertTrue("Keep the enrolled session and modes during automatic recovery", accessible() && modes() == (true to true))
                         if (System.nanoTime() >= nextRecoveryDiagnostic) {
                             diagnostics(app, target, event, originalContent)
-                            titleDiagnostics(app, target, event, originalContent, expectedContent, token, accountHash, automaticSource)
+                            titleDiagnostics(app, target, event, originalContent, expectedContent, token, accountHash, automaticSource, namespace)
                             nextRecoveryDiagnostic = System.nanoTime() + 30_000_000_000L
                         }
                         TitleUpdateAttemptStore(app).use { journal ->
@@ -398,6 +404,7 @@ class CalendarSystemTitleWorkerLiveDeviceTest {
                 restore = false // Successful recovery preserves the modes only until REPLAY restores them.
             } else {
                 assertTrue("REPLAY requires this completed enrolled worker journey", prefs.getString("token", null) == token &&
+                    prefs.getString("journey_label", null) == namespace.label &&
                     prefs.getString("account_hash", null) == accountHash && prefs.getBoolean("worker_verified", false) &&
                     prefs.getBoolean("automatic_source", false) == automaticSource &&
                     prefs.getString("account", null) == target.account.value && prefs.getString("calendar", null) == target.calendar.value &&
@@ -433,9 +440,11 @@ class CalendarSystemTitleWorkerLiveDeviceTest {
      * A failed read is invalid, not evidence that the corresponding durable stage is absent.
      */
     private suspend fun titleDiagnostics(app: BridgeApplication, scope: CalendarScope, event: EventId,
-        original: EventContent, requested: EventContent, token: String, accountHash: String, automaticSource: Boolean) {
-        val prefs = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        original: EventContent, requested: EventContent, token: String, accountHash: String, automaticSource: Boolean,
+        namespace: TitleJourneyNamespace) {
+        val prefs = app.getSharedPreferences(namespace.workerPreferences, Context.MODE_PRIVATE)
         assertTrue("Detailed diagnostics require the exact enrolled worker fixture", prefs.getString("token", null) == token &&
+            prefs.getString("journey_label", null) == namespace.label &&
             prefs.getString("account_hash", null) == accountHash && prefs.getBoolean("automatic_source", false) == automaticSource &&
             prefs.getString("account", null) == scope.account.value && prefs.getString("calendar", null) == scope.calendar.value &&
             prefs.getLong("generation", -1) == scope.generation && prefs.getString("event", null) == event.value &&
@@ -979,10 +988,6 @@ class CalendarSystemTitleWorkerLiveDeviceTest {
         Bundle().apply { putBoolean(name, value) })
 
     private companion object {
-        const val SOURCE_PREFS = "calendar-title-guarded-journey-v1-system-v1"
-        const val AUTOMATIC_SOURCE_PREFS = "calendar-title-guarded-journey-v1-system-worker-v1"
-        const val AUTOMATIC_SOURCE_TITLE_DB = "calendar-title-guarded-journey-attempt-v1.db-system-worker-v1"
-        const val PREFS = "calendar-system-title-worker-v1"
         const val NETWORK_WORK = "calendar-import-network"
         const val LOCAL_WORK = "calendar-import-local"
         const val PERIODIC_WORK = "calendar-import-periodic"
