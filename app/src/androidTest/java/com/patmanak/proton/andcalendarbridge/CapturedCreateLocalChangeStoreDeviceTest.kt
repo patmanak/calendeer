@@ -152,6 +152,13 @@ class CapturedCreateLocalChangeStoreDeviceTest {
         val before = rawRows(store, "records")
         assertEquals(LocalEditState.CONFLICT, store.retainCapturedLocalChange(current(), mutation))
         assertEquals(before, rawRows(store, "records")); assertEquals(1, rawPending(store))
+        val archive = store.conflictArchives(ConflictArchiveQuery(scope)).entries.single()
+        val unreadable = store.conflictObservations(ConflictObservationQuery(archive)).entries.single()
+        assertEquals(ConflictObservationKind.UNREADABLE, unreadable.kind)
+        assertNull(unreadable.change); assertNull(unreadable.deferredReason); assertNull(unreadable.observedAt)
+        store.readableDatabase.rawQuery("SELECT payload,revision FROM conflict_observations WHERE archive_id=?", arrayOf(archive.id.toString())).use {
+            assertTrue(it.moveToFirst()); assertEquals("unreadable-remote-evidence", it.getString(0)); assertTrue(it.isNull(1))
+        }
         val deferred = DeferredCalendarEvent(first.change.eventId, first.change.revision, format,
             DeferredEventReason.UNVERIFIED_CONTENT, "synthetic-sealed-evidence")
         store.transaction(scope) { (this as StagedSyncTransaction).defer(deferred) }
@@ -261,7 +268,10 @@ class CapturedCreateLocalChangeStoreDeviceTest {
         reject { store.retainCapturedLocalChange(current(), mutation) }
         store.admitTransaction = { true }
         assertEquals(LocalEditState.PAUSED, store.localEdit(scope, first.change.eventId)?.state)
+        assertTrue(store.conflictArchives(ConflictArchiveQuery(scope)).entries.isEmpty())
         assertEquals(1, rawPending(store)); assertEquals(LocalEditState.CONFLICT, store.retainCapturedLocalChange(current(), mutation))
+        val archive = store.conflictArchives(ConflictArchiveQuery(scope)).entries.single()
+        assertEquals(ConflictObservationKind.UNREADABLE, store.conflictObservations(ConflictObservationQuery(archive)).entries.single().kind)
     }
 
     @Test fun cancellationBeforeCommitLeavesNoIntentAfterReopen() = fixture { context, name, store ->

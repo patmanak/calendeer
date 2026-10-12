@@ -46,6 +46,14 @@ including revision, must match. Deferred or distinct observations still block a
 new receipt. This consumes proof without resetting conflict dispatch or sending
 again. Once a receipt exists, later observations remain retained for reconciliation.
 It is not general conflict resolution or atomic server protection.
+Local [conflict archives](CONFLICT_ARCHIVE.md) now preserve the original base and
+first local capture with distinct verified, deleted, deferred or unreadable evidence
+in the same import transaction. Calendar options offer paginated offline
+consultation, without resolution, retry, acknowledgement or network refresh.
+The additive archive migration seeds existing conflicts from their still-available cache; it cannot
+recover previously overwritten versions. Archives survive owner cleanup. Session,
+permission and scope guards clear presentation data on invalidation. Collection
+timestamps do not establish an edit order or a last-modification-wins policy.
 An interrupted ordinary projection may leave a redundant receipt whose target
 and previous base both equal the title intent's original baseline. Only that
 exact unrepresented plan may coexist with title acknowledgement. It stays durable

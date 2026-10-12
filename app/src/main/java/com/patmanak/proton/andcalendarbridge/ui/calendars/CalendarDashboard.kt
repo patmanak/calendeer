@@ -41,6 +41,7 @@ fun CalendarDashboard(
     onMode: (ImportStore.Selection, Boolean) -> Unit,
     onTitlesMode: (ImportStore.Selection, Boolean) -> Unit,
     modifier: Modifier = Modifier,
+    onOpenConflicts: (ImportStore.Selection) -> Unit = {},
 ) {
     if (!imports.authenticated) return
     Column(modifier.fillMaxWidth().testTag(CalendarDashboardTags.PANEL),
@@ -64,7 +65,7 @@ fun CalendarDashboard(
             modifier = Modifier.testTag(CalendarDashboardTags.OUTGOING_ERROR).semantics { liveRegion = LiveRegionMode.Polite })
         imports.selections.forEach { selection ->
             key(selection.scope) {
-                CalendarCard(selection, imports, creates, onSetEnabled, onMode, onTitlesMode)
+                CalendarCard(selection, imports, creates, onSetEnabled, onMode, onTitlesMode, onOpenConflicts)
             }
         }
         // A newly discovered row needs a persisted scope before its controls can be offered.
@@ -145,6 +146,7 @@ private fun CalendarCard(
     onSetEnabled: (ImportStore.Selection, Boolean) -> Unit,
     onMode: (ImportStore.Selection, Boolean) -> Unit,
     onTitlesMode: (ImportStore.Selection, Boolean) -> Unit,
+    onOpenConflicts: (ImportStore.Selection) -> Unit,
 ) {
     var expanded by rememberSaveable { mutableStateOf(false) }
     val createEnabled = selection.scope in creates.enabled
@@ -215,6 +217,10 @@ private fun CalendarCard(
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 CalendarDetails(selection)
+                TextButton(onClick = { onOpenConflicts(selection) },
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag(ConflictArchiveTags.OPEN)) {
+                    Text(stringResource(R.string.conflict_archive_open))
+                }
             }
         }
     }

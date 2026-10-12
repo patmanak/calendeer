@@ -465,7 +465,7 @@ class CapturedCreateAcknowledgementStoreDeviceTest {
                 old.version = 11
                 for (table in tables) before[table] = rows(old, table)
             }
-            assertEquals(17, store.writableDatabase.version)
+            assertEquals(19, store.writableDatabase.version)
             store.writableDatabase.rawQuery("PRAGMA synchronous", null).use { assertTrue(it.moveToFirst()); assertEquals(2, it.getInt(0)) }
             for (table in tables) {
                 val after = rawRows(store, table)

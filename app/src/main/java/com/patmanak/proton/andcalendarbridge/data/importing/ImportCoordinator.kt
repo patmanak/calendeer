@@ -74,7 +74,7 @@ sealed interface LocalTitleAttemptPreparation {
     data object Conflict : LocalTitleAttemptPreparation
     data object Unavailable : LocalTitleAttemptPreparation
 }
-/** One process owner for foreground and durable worker triggers; no event content reaches UI. */
+/** One process owner for foreground/workers and explicitly requested, offline conflict history. */
 class ImportCoordinator(
     private val context: Context,
     val store: ImportStore,
@@ -94,6 +94,20 @@ class ImportCoordinator(
     private val deltaEngine = (remote as? CalendarDeltaRemote)?.let { DeltaImportEngine(store, it, serial) }
     private val mutableState = MutableStateFlow(ImportUiState())
     val state = mutableState.asStateFlow()
+    private val mutableConflictArchiveEpoch = MutableStateFlow(0L)
+    /** Invalidates presentation memory even when a brief session/permission loss is conflated. */
+    val conflictArchiveEpoch = mutableConflictArchiveEpoch.asStateFlow()
+    /** Inspection never renews server rights or grants mutation/acknowledgement authority. */
+    val conflictArchiveReader: ConflictArchiveReader = object : ConflictArchiveReader {
+        override suspend fun list(query: ConflictArchiveQuery): ConflictArchiveRead<ConflictArchivePage> =
+            readConflictArchive(query.scope) { store.conflictArchives(query) }
+        override suspend fun detail(ref: ConflictArchiveRef): ConflictArchiveRead<ConflictArchiveDetail> =
+            readConflictArchive(ref.scope) { store.conflictArchive(ref) }
+        override suspend fun observations(query: ConflictObservationQuery): ConflictArchiveRead<ConflictObservationPage> =
+            readConflictArchive(query.ref.scope) {
+                if (store.conflictArchive(query.ref) == null) null else store.conflictObservations(query)
+            }
+    }
     @Volatile private var authenticated = false
     @Volatile private var generation = 0L
     private val createPolicyRevision = AtomicLong()
@@ -118,7 +132,7 @@ class ImportCoordinator(
 
     /** Synchronous invalidation also covers a disable/re-enable during adapter IO. */
     fun systemCreatePolicyChanged(target: CalendarScope, enabled: Boolean) {
-        createPolicyRevision.incrementAndGet()
+        advanceCreatePolicy()
         creates?.admitDispatch = { false }
         freshCapturedSubmissions.entries.removeIf { it.key.first == target }
         if (!enabled) pendingCreatePauses[target] = CreatePauseReason.CALENDAR_DISABLED
@@ -233,10 +247,15 @@ class ImportCoordinator(
         check(generation == expected) { "CREATE session changed" }
     }
 
+    private fun advanceCreatePolicy() {
+        createPolicyRevision.incrementAndGet()
+        mutableConflictArchiveEpoch.update { it + 1 }
+    }
+
     private fun retainObservedCreateAccount(account: AccountId?) {
         val previous = createAccount.getAndSet(account)
         if (previous != null && previous != account) {
-            createPolicyRevision.incrementAndGet()
+            advanceCreatePolicy()
             creates?.admitDispatch = { false }
             if (creates != null) pendingAccountPauses.add(previous)
         }
@@ -255,7 +274,7 @@ class ImportCoordinator(
 
     /** Retain observed permission loss even if grants return before the next explicit write. */
     private fun retainCreatePermissionLoss() {
-        createPolicyRevision.incrementAndGet()
+        advanceCreatePolicy()
         if (creates == null) return
         pendingPermissionPause = true
         creates.admitDispatch = { false }
@@ -351,6 +370,7 @@ class ImportCoordinator(
         if (authenticated == value) return
         authenticated = value
         generation++
+        mutableConflictArchiveEpoch.update { it + 1 }
         freshCapturedSubmissions.clear()
         creates?.admitDispatch = { false }
         scope.launch {
@@ -384,7 +404,7 @@ class ImportCoordinator(
         val present = catalog.calendars.map { it.id }.toSet()
         val missing = state.value.selections.filter { it.scope.account == account && it.scope.calendar !in present }
         if (missing.isNotEmpty()) {
-            createPolicyRevision.incrementAndGet()
+            advanceCreatePolicy()
             for (selected in missing) pendingCreatePauses.putIfAbsent(selected.scope, CreatePauseReason.CALENDAR_UNAVAILABLE)
         }
         try {
@@ -797,6 +817,36 @@ class ImportCoordinator(
             if (captured.state == LocalEditState.CONFLICT) LocalEditCaptureResult.CONFLICT else LocalEditCaptureResult.RETAINED
         } catch (cancelled: CancellationException) { throw cancelled }
           catch (_: Exception) { LocalEditCaptureResult.UNAVAILABLE }
+          finally {
+              store.admitTransaction = { false }
+              projection.admitOperation = { false }
+          }
+    }
+
+    /** Local SQL history only. A missing dossier still passes the final session/cancellation gate. */
+    private suspend fun <T : Any> readConflictArchive(target: CalendarScope,
+        read: suspend () -> T?): ConflictArchiveRead<T> = mutex.withLock {
+        val expected = generation
+        val policy = createPolicyRevision.get()
+        val active = { authenticated && generation == expected && createPolicyRevision.get() == policy && hasCalendarPermissions() }
+        try {
+            currentCoroutineContext().ensureActive()
+            val currentBefore = isCurrent(expected, target.account)
+            currentCoroutineContext().ensureActive()
+            if (!currentBefore || !active()) return@withLock ConflictArchiveRead.Inactive
+            store.admitTransaction = { it == target && active() }
+            val known = store.selections(target.account).any { it.scope == target }
+            val value = if (known) read() else null
+            currentCoroutineContext().ensureActive()
+            val currentAfter = isCurrent(expected, target.account)
+            currentCoroutineContext().ensureActive()
+            if (!currentAfter || !active()) return@withLock ConflictArchiveRead.Inactive
+            if (value == null) ConflictArchiveRead.Unqualified else ConflictArchiveRead.Available(value)
+        } catch (cancelled: CancellationException) { throw cancelled }
+          catch (_: Exception) {
+              currentCoroutineContext().ensureActive()
+              if (active()) ConflictArchiveRead.Unavailable else ConflictArchiveRead.Inactive
+          }
           finally {
               store.admitTransaction = { false }
               projection.admitOperation = { false }
@@ -2461,7 +2511,7 @@ class ImportCoordinator(
 
     fun setEnabled(selection: ImportStore.Selection, enabled: Boolean) {
         if (!enabled) {
-            createPolicyRevision.incrementAndGet()
+            advanceCreatePolicy()
             pendingCreatePauses.putIfAbsent(selection.scope, CreatePauseReason.CALENDAR_DISABLED)
             creates?.admitDispatch = { false }
         }

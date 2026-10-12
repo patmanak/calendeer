@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="conflict_archive_title">Archivo de conflictos</string>
+    <string name="conflict_archive_open">Ver conflictos archivados</string>
+    <string name="conflict_archive_close">Cerrar</string>
+    <string name="conflict_archive_notice">Solo historial local. Esta vista no envía cambios. Las versiones guardadas pueden diferir del contenido actual del calendario.</string>
+    <string name="conflict_archive_back">Volver a la lista</string>
+    <string name="conflict_archive_refresh">Actualizar historial local</string>
+    <string name="conflict_archive_record">Registro %1$d</string>
+    <string name="conflict_archive_local_delete">Eliminación local guardada</string>
+    <string name="conflict_archive_local_edit">Cambio local guardado</string>
+    <string name="conflict_archive_base">Versión de base guardada</string>
+    <string name="conflict_archive_delete_help">La acción local fue una eliminación. Estos campos se guardaron con esa acción y no son una vista previa de restauración.</string>
+    <string name="conflict_archive_observations">Observaciones guardadas</string>
+    <string name="conflict_archive_observations_help">Son datos históricos, no el estado actual del servidor. Las fechas de recopilación no son fechas de edición.</string>
+    <string name="conflict_archive_loading">Leyendo el historial local…</string>
+    <string name="conflict_archive_no_observations">No hay observaciones en esta página.</string>
+    <string name="conflict_archive_empty">No hay conflictos archivados en esta página.</string>
+    <string name="conflict_archive_inactive">Historial inaccesible. Comprueba la conexión a tu cuenta y el permiso de calendario.</string>
+    <string name="conflict_archive_missing">Este registro ya no está disponible.</string>
+    <string name="conflict_archive_unknown_calendar">Este calendario ya no se conoce localmente.</string>
+    <string name="conflict_archive_unavailable">No se pudo leer el historial local.</string>
+    <string name="conflict_archive_next">Página siguiente</string>
+    <string name="conflict_archive_all_day">Todo el día: %1$s – %2$s</string>
+    <string name="conflict_archive_timed">%1$s – %2$s (%3$s)</string>
+    <string name="conflict_archive_untitled">Evento sin título</string>
+    <string name="conflict_archive_location">Ubicación</string>
+    <string name="conflict_archive_description">Descripción</string>
+    <string name="conflict_archive_cached">Observación histórica en caché</string>
+    <string name="conflict_archive_received">Observación recibida por el puente</string>
+    <string name="conflict_archive_collected">Recopilada: %1$s</string>
+    <string name="conflict_archive_recorded_remote">Versión remota guardada</string>
+    <string name="conflict_archive_remote_deleted">Se registró una eliminación remota explícita.</string>
+    <string name="conflict_archive_unverified">Observación sin verificar: no se puede mostrar su contenido.</string>
+    <string name="conflict_archive_unsupported">Observación no compatible: no se puede mostrar su contenido.</string>
+    <string name="conflict_archive_unobserved">No se observó ninguna versión remota. Esto no significa que se haya eliminado el evento.</string>
+    <string name="conflict_archive_partial_comparison">Solo se muestran el título, las fechas del evento, la descripción y la ubicación. Que estos campos coincidan no significa que las versiones completas sean idénticas.</string>
+    <string name="conflict_archive_hidden_properties">Se conservan otras propiedades que no se muestran aquí, como el color, la repetición, los recordatorios o las personas.</string>
+    <string name="conflict_archive_unknown_details">Se desconocen los datos de recordatorios, organizador y asistentes de esta versión.</string>
+    <string name="conflict_archive_event_date_unavailable">No se pueden mostrar las fechas del evento.</string>
+    <string name="conflict_archive_collection_date_unavailable">No se puede mostrar la fecha de recopilación.</string>
+    <string name="conflict_archive_unreadable">Se conservó una observación ilegible de la caché. No se puede verificar ni mostrar su contenido.</string>
+</resources>

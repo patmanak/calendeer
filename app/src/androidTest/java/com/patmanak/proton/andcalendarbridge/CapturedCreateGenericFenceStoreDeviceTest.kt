@@ -211,7 +211,7 @@ class CapturedCreateGenericFenceStoreDeviceTest {
         val before = snapshot(store)
         store.close()
         ImportStore(context, name).use { reopened ->
-            assertEquals(17, reopened.writableDatabase.version)
+            assertEquals(19, reopened.writableDatabase.version)
             blocked(reopened); unchanged(reopened, before); assertEquals(1, pending(reopened))
         }
     }

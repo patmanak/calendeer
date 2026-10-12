@@ -9,6 +9,7 @@ import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.patmanak.proton.andcalendarbridge.data.importing.ImportStore
+import com.patmanak.proton.andcalendarbridge.data.importing.ProjectionRepresentationCodec
 import com.patmanak.proton.andcalendarbridge.sync.*
 import com.patmanak.proton.andcalendarbridge.sync.catalog.CalendarSummary
 import java.time.Instant
@@ -275,12 +276,16 @@ class TitleUpdateAcknowledgementStoreDeviceTest {
         assertEquals(1, rowCount(store, "local_edits")); assertEquals(1, rowCount(store, "local_edit_preparations"))
     }
 
-    @Test fun freshReservationRejectsInactiveIncompatibleAndInitiallyConflictedWork() = fixture { store, _ ->
+    @Test fun freshReservationRejectsInactiveIncompatibleAndDistinctConflictedWork() = fixture { store, _ ->
         store.setEnabled(scope, false); assertNull(store.prepareTitleUpdateAcknowledgement(result()))
         store.setEnabled(scope, true)
         store.transaction(scope) { checkpoint = PageCheckpoint(scope, format.copy(version = 3)) }
         assertNull(store.prepareTitleUpdateAcknowledgement(result()))
-        store.transaction(scope) { checkpoint = PageCheckpoint(scope, format); putRemote(updated) }
+        store.transaction(scope) {
+            checkpoint = PageCheckpoint(scope, format)
+            putRemote(updated.copy(revision = Revision("synthetic-distinct-concurrent-result")))
+        }
+        assertEquals(LocalEditState.CONFLICT, store.localEdit(scope, base.eventId)?.state)
         assertNull(store.prepareTitleUpdateAcknowledgement(result()))
         assertEquals(0, rowCount(store, "title_update_acknowledgements"))
     }
@@ -383,11 +388,14 @@ class TitleUpdateAcknowledgementStoreDeviceTest {
     }
 
     @Test fun additiveVersionFifteenMigrationPreservesOriginalOwnerPreparationAndRemote() = fixture { store, name ->
+        store.writableDatabase.execSQL("DROP TRIGGER conflict_archive_scope_delete")
+        store.writableDatabase.execSQL("DROP TABLE conflict_observations")
+        store.writableDatabase.execSQL("DROP TABLE conflict_archives")
         store.writableDatabase.execSQL("DROP TABLE title_update_acknowledgement_history")
         store.writableDatabase.execSQL("DROP TABLE title_update_acknowledgements")
         store.writableDatabase.version = 15; store.close()
         ImportStore(context, name).use { reopened ->
-            assertEquals(17, reopened.readableDatabase.version)
+            assertEquals(19, reopened.readableDatabase.version)
             sourceIntact(reopened); assertEquals(base, reopened.transaction(scope) { remote(base.eventId) })
             assertNull(reopened.titleUpdateAcknowledgement(scope, base.eventId)); assertTrue(reserve(reopened).fresh)
         }
@@ -401,13 +409,43 @@ class TitleUpdateAcknowledgementStoreDeviceTest {
         sourceIntact(store)
     }
 
-    @Test fun capturedProvenanceAndUnresolvedOrdinaryProjectionCannotBeBypassed() = fixture { store, _ ->
+    @Test fun capturedProvenanceAndDistinctOrdinaryProjectionCannotBeBypassed() = fixture { store, _ ->
         store.writableDatabase.execSQL("INSERT INTO captured_create_handoffs(scope,event,nonce,protocol,ack_nonce,ack_fingerprint,fingerprint,state,waiting) SELECT scope,event,?,1,?,?,?,'PENDING',0 FROM projection_bases",
             arrayOf(UUID.randomUUID().toString(), UUID.randomUUID().toString(), "synthetic-ack", "synthetic-frame"))
-        assertNull(store.prepareTitleUpdateAcknowledgement(result()))
+        assertNull(store.prepareTitleUpdateAcknowledgement(result())); sourceIntact(store)
         store.writableDatabase.execSQL("DELETE FROM captured_create_handoffs")
         store.writableDatabase.execSQL("INSERT INTO projection_receipts(scope,event,nonce,payload,adapter,version,previous_base,protocol) SELECT scope,event,?,payload,?,2,payload,1 FROM projection_bases",
             arrayOf(UUID.randomUUID().toString(), format.id))
-        assertNull(store.prepareTitleUpdateAcknowledgement(result())); sourceIntact(store)
+        val original = checkNotNull(store.projectionReceipt(scope, base.eventId))
+        val payload = store.readableDatabase.rawQuery("SELECT payload FROM projection_receipts", null).use {
+            check(it.moveToFirst()); it.getString(0)
+        }
+        val otherRevision = JSONObject(payload).put("revision", "synthetic-distinct-revision").toString()
+        val otherContent = JSONObject(payload).put("title", "Synthetic distinct projection").toString()
+        val represented = ProjectionRepresentationCodec.encode(ProjectedEventReference.direct(base))
+        val distinctProfiles = listOf(
+            ContentValues().apply { put("payload", otherRevision) },
+            ContentValues().apply { put("payload", otherContent) },
+            ContentValues().apply { put("previous_base", otherRevision) },
+            ContentValues().apply { put("representation", represented) },
+            ContentValues().apply { put("previous_representation", represented) },
+        )
+        val reset = ContentValues().apply {
+            put("payload", payload); put("previous_base", payload)
+            putNull("representation"); putNull("previous_representation")
+        }
+        for (profile in distinctProfiles) {
+            store.writableDatabase.update("projection_receipts", reset, null, null)
+            store.writableDatabase.update("projection_receipts", profile, null, null)
+            val pending = checkNotNull(store.projectionReceipt(scope, base.eventId))
+            assertNull(store.prepareTitleUpdateAcknowledgement(result()))
+            assertNull(store.titleUpdateAcknowledgement(scope, base.eventId))
+            assertEquals(pending, store.projectionReceipt(scope, base.eventId)); sourceIntact(store)
+        }
+        store.writableDatabase.update("projection_receipts", reset, null, null)
+        val reserved = reserve(store)
+        assertEquals(TitleUpdateAcknowledgementState.PENDING, reserved.record.state)
+        assertTrue(reserved.record.receipt.matches(result()))
+        assertEquals(original, store.projectionReceipt(scope, base.eventId)); sourceIntact(store)
     }
 }

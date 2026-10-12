@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="conflict_archive_title">Archiwum konfliktów</string>
+    <string name="conflict_archive_open">Przeglądaj archiwum konfliktów</string>
+    <string name="conflict_archive_close">Zamknij</string>
+    <string name="conflict_archive_notice">Tylko lokalna historia. Ten widok nie wysyła zmian. Zachowane wersje mogą różnić się od bieżącej zawartości kalendarzy.</string>
+    <string name="conflict_archive_back">Powrót do listy</string>
+    <string name="conflict_archive_refresh">Odśwież lokalną historię</string>
+    <string name="conflict_archive_record">Wpis %1$d</string>
+    <string name="conflict_archive_local_delete">Zachowane lokalne usunięcie</string>
+    <string name="conflict_archive_local_edit">Zachowana lokalna zmiana</string>
+    <string name="conflict_archive_base">Zachowana wersja bazowa</string>
+    <string name="conflict_archive_delete_help">Lokalną akcją było usunięcie. Te pola zachowano wraz z akcją i nie stanowią podglądu przywracania.</string>
+    <string name="conflict_archive_observations">Zapisane obserwacje</string>
+    <string name="conflict_archive_observations_help">To dane historyczne, a nie bieżący stan serwera. Daty zebrania nie są datami edycji.</string>
+    <string name="conflict_archive_loading">Odczytywanie lokalnej historii…</string>
+    <string name="conflict_archive_no_observations">Brak obserwacji na tej stronie.</string>
+    <string name="conflict_archive_empty">Brak zarchiwizowanych konfliktów na tej stronie.</string>
+    <string name="conflict_archive_inactive">Historia jest niedostępna. Sprawdź połączenie z kontem i uprawnienie do kalendarza.</string>
+    <string name="conflict_archive_missing">Ten wpis nie jest już dostępny.</string>
+    <string name="conflict_archive_unknown_calendar">Ten kalendarz nie jest już znany lokalnie.</string>
+    <string name="conflict_archive_unavailable">Nie udało się odczytać lokalnej historii.</string>
+    <string name="conflict_archive_next">Następna strona</string>
+    <string name="conflict_archive_all_day">Cały dzień: %1$s – %2$s</string>
+    <string name="conflict_archive_timed">%1$s – %2$s (%3$s)</string>
+    <string name="conflict_archive_untitled">Wydarzenie bez tytułu</string>
+    <string name="conflict_archive_location">Miejsce</string>
+    <string name="conflict_archive_description">Opis</string>
+    <string name="conflict_archive_cached">Historyczna obserwacja z pamięci podręcznej</string>
+    <string name="conflict_archive_received">Obserwacja odebrana przez aplikację</string>
+    <string name="conflict_archive_collected">Zebrano: %1$s</string>
+    <string name="conflict_archive_recorded_remote">Zapisana wersja zdalna</string>
+    <string name="conflict_archive_remote_deleted">Zapisano jawne zdalne usunięcie.</string>
+    <string name="conflict_archive_unverified">Niezweryfikowana obserwacja: nie można wyświetlić treści.</string>
+    <string name="conflict_archive_unsupported">Nieobsługiwana obserwacja: nie można wyświetlić treści.</string>
+    <string name="conflict_archive_unobserved">Nie zaobserwowano wersji zdalnej. Nie oznacza to usunięcia wydarzenia.</string>
+    <string name="conflict_archive_partial_comparison">Wyświetlane są tylko tytuł, daty wydarzenia, opis i miejsce. Zgodność tych pól nie oznacza, że pełne wersje są identyczne.</string>
+    <string name="conflict_archive_hidden_properties">Inne właściwości są zachowane, ale niewyświetlane, na przykład kolor, cykliczność, przypomnienia lub osoby.</string>
+    <string name="conflict_archive_unknown_details">Informacje o przypomnieniach, organizatorze i uczestnikach są nieznane w tej wersji.</string>
+    <string name="conflict_archive_event_date_unavailable">Nie można wyświetlić dat wydarzenia.</string>
+    <string name="conflict_archive_collection_date_unavailable">Nie można wyświetlić daty zebrania.</string>
+    <string name="conflict_archive_unreadable">Zachowano nieczytelną obserwację z pamięci podręcznej. Nie można zweryfikować ani wyświetlić jej treści.</string>
+</resources>

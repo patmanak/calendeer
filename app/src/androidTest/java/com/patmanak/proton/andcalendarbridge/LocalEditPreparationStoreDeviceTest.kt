@@ -204,13 +204,16 @@ class LocalEditPreparationStoreDeviceTest {
         store.transaction(scope) { (this as StagedSyncTransaction).received = receipt }
         store.close()
         raw(name) {
+            it.execSQL("DROP TRIGGER conflict_archive_scope_delete")
+            it.execSQL("DROP TABLE conflict_observations")
+            it.execSQL("DROP TABLE conflict_archives")
             it.execSQL("DROP TABLE local_edit_preparations")
             it.execSQL("DROP TABLE title_update_acknowledgement_history")
             it.execSQL("DROP TABLE title_update_acknowledgements")
             it.version = 13
         }
         ImportStore(context, name).use { upgraded ->
-            assertEquals(17, upgraded.readableDatabase.version)
+            assertEquals(19, upgraded.readableDatabase.version)
             assertEquals(edit(), upgraded.localEdit(scope, base.eventId)); assertEquals(base, upgraded.projectedBaseline(scope, base.eventId))
             assertEquals(receipt, upgraded.transaction(scope) { (this as StagedSyncTransaction).received })
             assertNull(upgraded.localEditPreparation(scope, base.eventId)); assertTrue(upgraded.retainLocalEditPreparation(preparation()))

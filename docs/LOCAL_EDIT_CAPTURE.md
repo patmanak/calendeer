@@ -96,9 +96,17 @@ requeues cannot reopen a retained intent for projection.
 
 Identical retained work is idempotent. A different ID or changed content for that
 event is refused; there is no coalescing, automatic conflict resolution or reopening.
-Both states block upload. Generic outgoing mutation storage remains unavailable.
+Both states block generic upload. The separately qualified, opt-in title-only
+pipeline described in [status](STATUS.md) uses its own exact-owner guards and
+durable proof; it does not reopen general conflict dispatch. Generic outgoing
+mutation storage remains unavailable.
 Lease loss, cancellation and database failures before commit roll back the entire
 capture or import/conflict transaction.
+
+[Conflict archives](CONFLICT_ARCHIVE.md) retain the original base/capture and
+distinct observed remote variants beyond the replaceable latest-record cache.
+They can be consulted locally from calendar options without resolving or sending
+the intention. A return to the original base does not erase prior evidence.
 
 ## Local deletion snapshots
 

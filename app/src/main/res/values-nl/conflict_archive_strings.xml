@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="conflict_archive_title">Conflictenarchief</string>
+    <string name="conflict_archive_open">Bekijk gearchiveerde conflicten</string>
+    <string name="conflict_archive_close">Sluiten</string>
+    <string name="conflict_archive_notice">Alleen lokale geschiedenis. Deze weergave verstuurt geen wijzigingen. Bewaarde versies kunnen afwijken van de huidige agenda-inhoud.</string>
+    <string name="conflict_archive_back">Terug naar de lijst</string>
+    <string name="conflict_archive_refresh">Lokale geschiedenis vernieuwen</string>
+    <string name="conflict_archive_record">Dossier %1$d</string>
+    <string name="conflict_archive_local_delete">Bewaarde lokale verwijdering</string>
+    <string name="conflict_archive_local_edit">Bewaarde lokale wijziging</string>
+    <string name="conflict_archive_base">Bewaarde basisversie</string>
+    <string name="conflict_archive_delete_help">De lokale actie was een verwijdering. Deze velden zijn bij die actie bewaard en vormen geen herstelvoorbeeld.</string>
+    <string name="conflict_archive_observations">Vastgelegde waarnemingen</string>
+    <string name="conflict_archive_observations_help">Dit zijn historische gegevens, niet de huidige serverstatus. Verzameltijden zijn geen bewerkingstijden.</string>
+    <string name="conflict_archive_loading">Lokale geschiedenis lezen…</string>
+    <string name="conflict_archive_no_observations">Geen waarneming op deze pagina.</string>
+    <string name="conflict_archive_empty">Geen gearchiveerd conflict op deze pagina.</string>
+    <string name="conflict_archive_inactive">Geschiedenis niet toegankelijk. Controleer de accountverbinding en agendatoestemming.</string>
+    <string name="conflict_archive_missing">Dit dossier is niet meer beschikbaar.</string>
+    <string name="conflict_archive_unknown_calendar">Deze agenda is lokaal niet meer bekend.</string>
+    <string name="conflict_archive_unavailable">De lokale geschiedenis kon niet worden gelezen.</string>
+    <string name="conflict_archive_next">Volgende pagina</string>
+    <string name="conflict_archive_all_day">Hele dag: %1$s – %2$s</string>
+    <string name="conflict_archive_timed">%1$s – %2$s (%3$s)</string>
+    <string name="conflict_archive_untitled">Gebeurtenis zonder titel</string>
+    <string name="conflict_archive_location">Locatie</string>
+    <string name="conflict_archive_description">Beschrijving</string>
+    <string name="conflict_archive_cached">Historische waarneming uit de cache</string>
+    <string name="conflict_archive_received">Door de brug ontvangen waarneming</string>
+    <string name="conflict_archive_collected">Verzameld: %1$s</string>
+    <string name="conflict_archive_recorded_remote">Vastgelegde externe versie</string>
+    <string name="conflict_archive_remote_deleted">Een expliciete externe verwijdering is vastgelegd.</string>
+    <string name="conflict_archive_unverified">Ongeverifieerde waarneming: de inhoud kan niet worden weergegeven.</string>
+    <string name="conflict_archive_unsupported">Niet-ondersteunde waarneming: de inhoud kan niet worden weergegeven.</string>
+    <string name="conflict_archive_unobserved">Geen externe versie waargenomen. Dat betekent niet dat de gebeurtenis is verwijderd.</string>
+    <string name="conflict_archive_partial_comparison">Alleen titel, gebeurtenisdatums, beschrijving en locatie worden getoond. Gelijke velden betekenen niet dat de volledige versies identiek zijn.</string>
+    <string name="conflict_archive_hidden_properties">Andere eigenschappen blijven bewaard maar worden hier niet getoond, zoals kleur, herhaling, herinneringen of personen.</string>
+    <string name="conflict_archive_unknown_details">Details over herinneringen, organisator en deelnemers zijn in deze versie onbekend.</string>
+    <string name="conflict_archive_event_date_unavailable">De gebeurtenisdatums kunnen niet worden weergegeven.</string>
+    <string name="conflict_archive_collection_date_unavailable">De verzameldatum kan niet worden weergegeven.</string>
+    <string name="conflict_archive_unreadable">Een onleesbare waarneming uit de cache is bewaard. De inhoud kan niet worden gecontroleerd of weergegeven.</string>
+</resources>

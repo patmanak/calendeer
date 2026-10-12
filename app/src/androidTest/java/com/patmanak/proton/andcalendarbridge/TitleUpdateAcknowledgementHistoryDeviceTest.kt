@@ -170,10 +170,13 @@ class TitleUpdateAcknowledgementHistoryDeviceTest {
     @Test fun legacyVersionSixteenRestoredSlotIsArchivedWithoutReencodingBeforeRotation() = fixture { store, name ->
         val first = cycle(base, 1); stage(store, first); val archived = settle(store, first)
         val canonical = rows(store, "title_update_acknowledgements").single()[3]
+        store.writableDatabase.execSQL("DROP TRIGGER conflict_archive_scope_delete")
+        store.writableDatabase.execSQL("DROP TABLE conflict_observations")
+        store.writableDatabase.execSQL("DROP TABLE conflict_archives")
         store.writableDatabase.execSQL("DROP TABLE title_update_acknowledgement_history")
         store.writableDatabase.version = 16; store.close()
         ImportStore(context, name).use { reopened ->
-            assertEquals(17, reopened.readableDatabase.version)
+            assertEquals(19, reopened.readableDatabase.version)
             assertTrue(rows(reopened, "title_update_acknowledgement_history").isEmpty())
             assertEquals(canonical, rows(reopened, "title_update_acknowledgements").single()[3])
             val next = cycle(first.result.event, 2); stage(reopened, next); assertTrue(reserve(reopened, next).fresh)
@@ -210,10 +213,13 @@ class TitleUpdateAcknowledgementHistoryDeviceTest {
     @Test fun legacyVersionSixteenPendingReceiptRemainsUnarchivedAndImmutable() = fixture { store, name ->
         val first = cycle(base, 1); stage(store, first); val pending = reserve(store, first)
         val canonical = rows(store, "title_update_acknowledgements")
+        store.writableDatabase.execSQL("DROP TRIGGER conflict_archive_scope_delete")
+        store.writableDatabase.execSQL("DROP TABLE conflict_observations")
+        store.writableDatabase.execSQL("DROP TABLE conflict_archives")
         store.writableDatabase.execSQL("DROP TABLE title_update_acknowledgement_history")
         store.writableDatabase.version = 16; store.close()
         ImportStore(context, name).use { reopened ->
-            assertEquals(17, reopened.readableDatabase.version)
+            assertEquals(19, reopened.readableDatabase.version)
             assertEquals(canonical, rows(reopened, "title_update_acknowledgements"))
             assertTrue(rows(reopened, "title_update_acknowledgement_history").isEmpty())
             assertEquals(pending.copy(fresh = false), reserve(reopened, first))

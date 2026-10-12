@@ -20,6 +20,18 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.material3.Surface
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import com.patmanak.proton.andcalendarbridge.sync.CalendarScope
+import com.patmanak.proton.andcalendarbridge.ui.calendars.ConflictArchivePanel
 import com.patmanak.proton.andcalendarbridge.ui.BridgeScreen
 import com.patmanak.proton.andcalendarbridge.ui.auth.AuthenticationPanel
 import com.patmanak.proton.andcalendarbridge.ui.auth.HumanVerificationPanel
@@ -52,6 +64,14 @@ class MainActivity : ComponentActivity() {
             val importState by preferences.imports.state.collectAsState()
             val systemCreates by preferences.systemCreates.state.collectAsState()
             val authenticationState by authentication.state.collectAsState()
+            val archiveEpoch by preferences.imports.conflictArchiveEpoch.collectAsState()
+            // Event history stays in ephemeral memory and never crosses an authentication epoch.
+            var archiveScope by remember(archiveEpoch) { mutableStateOf<CalendarScope?>(null) }
+            val archiveAllowed = !verification.isRequired && !authenticationState.isSubmitting &&
+                !authenticationState.isCleanupRequired && importState.authenticated && importState.hasPermission &&
+                authenticationState.destination == com.patmanak.proton.andcalendarbridge.auth.AuthenticationDestination.AUTHENTICATED &&
+                archiveScope?.let { target -> importState.selections.any { it.scope == target } } == true
+            LaunchedEffect(archiveAllowed, archiveScope) { if (!archiveAllowed) archiveScope = null }
             SideEffect {
                 val style = if (darkTheme) SystemBarStyle.dark(Color.TRANSPARENT)
                     else SystemBarStyle.light(Color.TRANSPARENT, Color.TRANSPARENT)
@@ -87,9 +107,19 @@ class MainActivity : ComponentActivity() {
                             onOpenSettings = { startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
                                 Uri.parse("package:$packageName"))) },
                             onMode = preferences.systemCreates::setEnabled,
-                            onTitlesMode = preferences.systemCreates::setTitlesEnabled)
+                            onTitlesMode = preferences.systemCreates::setTitlesEnabled,
+                            onOpenConflicts = { selection -> archiveScope = selection.scope })
                     },
                 )
+                if (archiveAllowed) archiveScope?.let { target ->
+                    Dialog(onDismissRequest = { archiveScope = null }) {
+                        Surface(shape = androidx.compose.foundation.shape.RoundedCornerShape(24.dp)) {
+                            ConflictArchivePanel(target, preferences.imports.conflictArchiveReader,
+                                onClose = { archiveScope = null },
+                                modifier = Modifier.fillMaxWidth().heightIn(max = 640.dp))
+                        }
+                    }
+                }
             }
         }
     }

@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="conflict_archive_title">Konfliktarchiv</string>
+    <string name="conflict_archive_open">Konfliktarchiv ansehen</string>
+    <string name="conflict_archive_close">Schließen</string>
+    <string name="conflict_archive_notice">Nur lokaler Verlauf. Diese Ansicht sendet keine Änderungen. Gespeicherte Versionen können vom aktuellen Kalenderinhalt abweichen.</string>
+    <string name="conflict_archive_back">Zurück zur Liste</string>
+    <string name="conflict_archive_refresh">Lokalen Verlauf neu laden</string>
+    <string name="conflict_archive_record">Eintrag %1$d</string>
+    <string name="conflict_archive_local_delete">Gespeicherte lokale Löschung</string>
+    <string name="conflict_archive_local_edit">Gespeicherte lokale Änderung</string>
+    <string name="conflict_archive_base">Gespeicherter Ausgangsstand</string>
+    <string name="conflict_archive_delete_help">Die lokale Aktion war eine Löschung. Diese Felder wurden dabei gespeichert und sind keine Vorschau einer Wiederherstellung.</string>
+    <string name="conflict_archive_observations">Gespeicherte Beobachtungen</string>
+    <string name="conflict_archive_observations_help">Dies sind historische Daten, nicht der aktuelle Serverstand. Erfassungsdaten sind keine Bearbeitungsdaten.</string>
+    <string name="conflict_archive_loading">Lokaler Verlauf wird gelesen…</string>
+    <string name="conflict_archive_no_observations">Keine Beobachtung auf dieser Seite.</string>
+    <string name="conflict_archive_empty">Kein archivierter Konflikt auf dieser Seite.</string>
+    <string name="conflict_archive_inactive">Verlauf nicht zugänglich. Prüfe die Kontoverbindung und die Kalenderberechtigung.</string>
+    <string name="conflict_archive_missing">Dieser Eintrag ist nicht mehr verfügbar.</string>
+    <string name="conflict_archive_unknown_calendar">Dieser Kalender ist lokal nicht mehr bekannt.</string>
+    <string name="conflict_archive_unavailable">Der lokale Verlauf konnte nicht gelesen werden.</string>
+    <string name="conflict_archive_next">Nächste Seite</string>
+    <string name="conflict_archive_all_day">Ganztägig: %1$s – %2$s</string>
+    <string name="conflict_archive_timed">%1$s – %2$s (%3$s)</string>
+    <string name="conflict_archive_untitled">Unbenannter Termin</string>
+    <string name="conflict_archive_location">Ort</string>
+    <string name="conflict_archive_description">Beschreibung</string>
+    <string name="conflict_archive_cached">Historische Beobachtung aus dem Cache</string>
+    <string name="conflict_archive_received">Von der Brücke empfangene Beobachtung</string>
+    <string name="conflict_archive_collected">Erfasst: %1$s</string>
+    <string name="conflict_archive_recorded_remote">Gespeicherte entfernte Version</string>
+    <string name="conflict_archive_remote_deleted">Eine ausdrückliche entfernte Löschung wurde gespeichert.</string>
+    <string name="conflict_archive_unverified">Ungeprüfte Beobachtung: Der Inhalt kann nicht angezeigt werden.</string>
+    <string name="conflict_archive_unsupported">Nicht unterstützte Beobachtung: Der Inhalt kann nicht angezeigt werden.</string>
+    <string name="conflict_archive_unobserved">Keine entfernte Version beobachtet. Das bedeutet nicht, dass der Termin gelöscht wurde.</string>
+    <string name="conflict_archive_partial_comparison">Nur Titel, Termindaten, Beschreibung und Ort werden angezeigt. Gleiche Felder bedeuten nicht, dass die vollständigen Versionen identisch sind.</string>
+    <string name="conflict_archive_hidden_properties">Weitere Eigenschaften sind gespeichert, werden hier aber nicht angezeigt, etwa Farbe, Wiederholung, Erinnerungen oder Personen.</string>
+    <string name="conflict_archive_unknown_details">Angaben zu Erinnerungen, Organisator und Teilnehmenden sind in dieser Version unbekannt.</string>
+    <string name="conflict_archive_event_date_unavailable">Die Termindaten können nicht angezeigt werden.</string>
+    <string name="conflict_archive_collection_date_unavailable">Das Erfassungsdatum kann nicht angezeigt werden.</string>
+    <string name="conflict_archive_unreadable">Eine unlesbare Beobachtung aus dem Cache wurde gespeichert. Ihr Inhalt kann nicht geprüft oder angezeigt werden.</string>
+</resources>

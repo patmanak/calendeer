@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="conflict_archive_title">Arquivo de conflitos</string>
+    <string name="conflict_archive_open">Consultar conflitos arquivados</string>
+    <string name="conflict_archive_close">Fechar</string>
+    <string name="conflict_archive_notice">Apenas histórico local. Esta vista não envia alterações. As versões guardadas podem diferir do conteúdo atual dos calendários.</string>
+    <string name="conflict_archive_back">Voltar à lista</string>
+    <string name="conflict_archive_refresh">Atualizar histórico local</string>
+    <string name="conflict_archive_record">Registo %1$d</string>
+    <string name="conflict_archive_local_delete">Eliminação local guardada</string>
+    <string name="conflict_archive_local_edit">Alteração local guardada</string>
+    <string name="conflict_archive_base">Versão de base guardada</string>
+    <string name="conflict_archive_delete_help">A ação local foi uma eliminação. Estes campos foram guardados com a ação e não são uma pré-visualização de restauro.</string>
+    <string name="conflict_archive_observations">Observações registadas</string>
+    <string name="conflict_archive_observations_help">São dados históricos, não o estado atual do servidor. As datas de recolha não são datas de edição.</string>
+    <string name="conflict_archive_loading">A ler o histórico local…</string>
+    <string name="conflict_archive_no_observations">Nenhuma observação nesta página.</string>
+    <string name="conflict_archive_empty">Nenhum conflito arquivado nesta página.</string>
+    <string name="conflict_archive_inactive">Histórico inacessível. Verifique a ligação à conta e a permissão de calendário.</string>
+    <string name="conflict_archive_missing">Este registo já não está disponível.</string>
+    <string name="conflict_archive_unknown_calendar">Este calendário já não é conhecido localmente.</string>
+    <string name="conflict_archive_unavailable">Não foi possível ler o histórico local.</string>
+    <string name="conflict_archive_next">Página seguinte</string>
+    <string name="conflict_archive_all_day">Dia inteiro: %1$s – %2$s</string>
+    <string name="conflict_archive_timed">%1$s – %2$s (%3$s)</string>
+    <string name="conflict_archive_untitled">Evento sem título</string>
+    <string name="conflict_archive_location">Local</string>
+    <string name="conflict_archive_description">Descrição</string>
+    <string name="conflict_archive_cached">Observação histórica em cache</string>
+    <string name="conflict_archive_received">Observação recebida pela aplicação</string>
+    <string name="conflict_archive_collected">Recolhida: %1$s</string>
+    <string name="conflict_archive_recorded_remote">Versão remota registada</string>
+    <string name="conflict_archive_remote_deleted">Foi registada uma eliminação remota explícita.</string>
+    <string name="conflict_archive_unverified">Observação não verificada: não é possível mostrar o conteúdo.</string>
+    <string name="conflict_archive_unsupported">Observação não suportada: não é possível mostrar o conteúdo.</string>
+    <string name="conflict_archive_unobserved">Nenhuma versão remota observada. Isto não significa que o evento tenha sido eliminado.</string>
+    <string name="conflict_archive_partial_comparison">São apresentados apenas o título, as datas do evento, a descrição e o local. Campos iguais não significam que as versões completas sejam idênticas.</string>
+    <string name="conflict_archive_hidden_properties">Outras propriedades são guardadas mas não apresentadas aqui, como cor, repetição, lembretes ou pessoas.</string>
+    <string name="conflict_archive_unknown_details">Os detalhes de lembretes, organizador e participantes são desconhecidos nesta versão.</string>
+    <string name="conflict_archive_event_date_unavailable">Não é possível apresentar as datas do evento.</string>
+    <string name="conflict_archive_collection_date_unavailable">Não é possível apresentar a data de recolha.</string>
+    <string name="conflict_archive_unreadable">Foi guardada uma observação ilegível da cache. Não é possível verificar nem apresentar o seu conteúdo.</string>
+</resources>

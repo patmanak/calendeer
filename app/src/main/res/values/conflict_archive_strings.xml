@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="conflict_archive_title">Conflict archive</string>
+    <string name="conflict_archive_open">View conflict archive</string>
+    <string name="conflict_archive_close">Close</string>
+    <string name="conflict_archive_notice">Local history only. This view sends no changes. Retained versions may differ from current calendar contents.</string>
+    <string name="conflict_archive_back">Back to list</string>
+    <string name="conflict_archive_refresh">Refresh local history</string>
+    <string name="conflict_archive_record">Record %1$d</string>
+    <string name="conflict_archive_local_delete">Retained local deletion</string>
+    <string name="conflict_archive_local_edit">Retained local edit</string>
+    <string name="conflict_archive_base">Retained baseline</string>
+    <string name="conflict_archive_delete_help">The local action was a deletion. These are the fields retained with that action, not an undo preview.</string>
+    <string name="conflict_archive_observations">Recorded observations</string>
+    <string name="conflict_archive_observations_help">This is historical evidence, not the current server state. Collection dates are not editing dates.</string>
+    <string name="conflict_archive_loading">Reading local history…</string>
+    <string name="conflict_archive_no_observations">No observation on this page.</string>
+    <string name="conflict_archive_empty">No archived conflict on this page.</string>
+    <string name="conflict_archive_inactive">History is not accessible. Check the connection to your account and calendar permission.</string>
+    <string name="conflict_archive_missing">This record is no longer available.</string>
+    <string name="conflict_archive_unknown_calendar">This calendar is no longer known locally.</string>
+    <string name="conflict_archive_unavailable">Local history could not be read.</string>
+    <string name="conflict_archive_next">Next page</string>
+    <string name="conflict_archive_all_day">All day: %1$s – %2$s</string>
+    <string name="conflict_archive_timed">%1$s – %2$s (%3$s)</string>
+    <string name="conflict_archive_untitled">Untitled event</string>
+    <string name="conflict_archive_location">Location</string>
+    <string name="conflict_archive_description">Description</string>
+    <string name="conflict_archive_cached">Historical cached observation</string>
+    <string name="conflict_archive_received">Observation received by the bridge</string>
+    <string name="conflict_archive_collected">Collected: %1$s</string>
+    <string name="conflict_archive_recorded_remote">Recorded remote version</string>
+    <string name="conflict_archive_remote_deleted">An explicit remote deletion was recorded.</string>
+    <string name="conflict_archive_unverified">Unverified observation: its content cannot be displayed.</string>
+    <string name="conflict_archive_unsupported">Unsupported observation: its content cannot be displayed.</string>
+    <string name="conflict_archive_unobserved">No remote version was observed. This does not mean the event was deleted.</string>
+    <string name="conflict_archive_partial_comparison">Only titles, event dates, descriptions and locations are displayed. Matching fields do not mean that the complete versions are identical.</string>
+    <string name="conflict_archive_hidden_properties">Other properties are retained but not shown here, such as color, recurrence, reminders or people.</string>
+    <string name="conflict_archive_unknown_details">Reminder, organizer and attendee details are unknown in this version.</string>
+    <string name="conflict_archive_event_date_unavailable">Event dates cannot be displayed.</string>
+    <string name="conflict_archive_collection_date_unavailable">Collection date cannot be displayed.</string>
+    <string name="conflict_archive_unreadable">An unreadable cached observation was retained. Its contents cannot be verified or displayed.</string>
+</resources>

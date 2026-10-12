@@ -281,6 +281,15 @@ class LocalEditStoreDeviceTest {
                 db.execSQL("CREATE TABLE calendars (scope TEXT PRIMARY KEY, account TEXT NOT NULL, calendar TEXT NOT NULL, generation INTEGER NOT NULL, title TEXT NOT NULL, color INTEGER, enabled INTEGER NOT NULL DEFAULT 0, checkpoint TEXT, status TEXT NOT NULL DEFAULT 'PAUSED', completed_at INTEGER, next_attempt INTEGER NOT NULL DEFAULT 0, available INTEGER NOT NULL DEFAULT 1)")
                 db.execSQL("CREATE TABLE records (scope TEXT NOT NULL,event TEXT NOT NULL,payload TEXT NOT NULL,pending INTEGER NOT NULL,PRIMARY KEY(scope,event))")
                 db.execSQL("CREATE TABLE deferred_events (scope TEXT NOT NULL,event TEXT NOT NULL,revision TEXT NOT NULL,adapter TEXT NOT NULL,version INTEGER NOT NULL,reason TEXT NOT NULL,payload TEXT NOT NULL,retry_pending INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(scope,event))")
+                // Independently constructed legacy schema, including its original staging tables.
+                db.execSQL("CREATE TABLE inbox (scope TEXT PRIMARY KEY, request_checkpoint TEXT NOT NULL, request_limit INTEGER NOT NULL, payload TEXT NOT NULL, coverage TEXT)")
+                db.execSQL("CREATE TABLE delta_state (scope TEXT PRIMARY KEY, cursor_adapter TEXT, cursor_version INTEGER, cursor_value TEXT, received_adapter TEXT, received_version INTEGER, received_after TEXT, received_payload TEXT, more INTEGER NOT NULL DEFAULT 0)")
+                db.execSQL("CREATE TABLE delta_jobs (scope TEXT NOT NULL, notice_id TEXT NOT NULL, event TEXT, notice TEXT NOT NULL, received TEXT, blocked INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(scope,notice_id))")
+                db.execSQL("CREATE TABLE delta_reconciliation (id INTEGER PRIMARY KEY, scope TEXT NOT NULL, adapter TEXT NOT NULL, version INTEGER NOT NULL, after_cursor TEXT NOT NULL, payload TEXT NOT NULL)")
+                db.execSQL("CREATE INDEX delta_reconciliation_scope ON delta_reconciliation(scope)")
+                db.execSQL("CREATE TABLE coverage_state (scope TEXT PRIMARY KEY, payload TEXT NOT NULL)")
+                db.execSQL("CREATE TABLE series_members (scope TEXT NOT NULL, event TEXT NOT NULL, uid TEXT NOT NULL, role TEXT NOT NULL CHECK(role IN ('master','exception')), PRIMARY KEY(scope,event))")
+                db.execSQL("CREATE INDEX series_members_uid ON series_members(scope,uid,role)")
                 db.execSQL("CREATE TABLE mapping_profiles(scope TEXT PRIMARY KEY,adapter TEXT NOT NULL,version INTEGER NOT NULL,rescan_pending INTEGER NOT NULL DEFAULT 1)")
                 db.execSQL("INSERT INTO calendars(scope,account,calendar,generation,title,enabled) VALUES(?,?,?,?,?,1)",
                     arrayOf(scopeKey,scope.account.value,scope.calendar.value,0,"Fixture"))
@@ -293,7 +302,7 @@ class LocalEditStoreDeviceTest {
                 db.version = 7
             }
             ImportStore(context, name).use { store ->
-                assertEquals(17, store.readableDatabase.version)
+                assertEquals(19, store.readableDatabase.version)
                 assertEquals("Legacy", store.projectedBaseline(scope, EventId("stable"))?.content?.title)
                 listOf("pending","deferred","deleted").forEach { assertNull(store.projectedBaseline(scope, EventId(it))) }
                 assertNull(store.localEdit(scope, EventId("stable")))
