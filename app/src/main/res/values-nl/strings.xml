@@ -22,7 +22,7 @@
     <string name="system_create_limits">Maak eenvoudige afspraken in je agenda-app, zonder herinneringen, gasten, herhaling of aangepaste kleuren. Wijzigingen blijven lokaal tenzij je titelsynchronisatie uitdrukkelijk inschakelt. Verwijderingen worden niet naar Proton verzonden.</string>
     <string name="system_create_mode">Aanmaken vanuit de systeemagenda toestaan</string>
     <string name="system_title_mode">Titelwijzigingen synchroniseren (experimenteel)</string>
-    <string name="system_title_limits">Alleen titels: uit Proton geïmporteerde afspraken met tijdstip, zonder herhaling, herinnering of gasten. Dagevenementen en via Android aangemaakte afspraken zijn uitgesloten. Wijzigingen van datums, beschrijvingen en locaties blijven in Android.</string>
+    <string name="system_title_limits">Alleen titels: uit Proton geïmporteerde afspraken met tijdstip of voor een hele dag, zonder herhaling, herinneringen, gasten of eigen kleuren. Via Android aangemaakte afspraken zijn uitgesloten. Wijzigingen van datums, beschrijvingen en locaties blijven in Android.</string>
     <string name="system_create_pending">%1$d afspraken wachten of moeten worden gecontroleerd. Een onzekere verzending wordt nooit automatisch herhaald.</string>
     <string name="system_create_error">De synchronisatie vereist aandacht. Je Android-gegevens blijven behouden.</string>
 </resources>

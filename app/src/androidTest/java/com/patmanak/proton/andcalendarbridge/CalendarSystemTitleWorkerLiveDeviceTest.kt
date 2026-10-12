@@ -27,8 +27,6 @@ import com.patmanak.proton.andcalendarbridge.protonauth.ProtonAuthentication
 import com.patmanak.proton.andcalendarbridge.sync.*
 import java.nio.ByteBuffer
 import java.security.MessageDigest
-import java.time.Instant
-import java.time.ZoneOffset
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.runBlocking
@@ -66,18 +64,20 @@ class CalendarSystemTitleWorkerLiveDeviceTest {
         val automaticSource = args.getString("automaticTitleSource") == "true"
         val namespace = TitleJourneyNamespace.create(automaticSource, args.getString("systemTitleJourney") == "true",
             args.getString("titleJourneyLabel"))
+        val timeProfile = TitleJourneyTimeProfile.create(args.getString("titleJourneyAllDay"), automaticSource,
+            args.getString("systemTitleJourney") == "true", namespace.label)
         val requestedCalendarName = args.getString("titleSourceCalendarName").orEmpty()
         assertTrue("Automatic source requires the dedicated QA calendar name", !automaticSource ||
             requestedCalendarName == "Calendeer QA Automatic Worker")
         val source = app.getSharedPreferences(namespace.workerSourcePreferences, Context.MODE_PRIVATE)
         assertTrue("Require the existing qualified service fixture", source.getString("token", null) == token &&
-            source.getString("account_hash", null) == accountHash && source.getInt("content_profile", -1) == 1 &&
+            source.getString("account_hash", null) == accountHash && timeProfile.matchesFrozen(source.getInt("content_profile", -1),
+                source.getString("start", null), source.getString("end", null)) &&
             source.getString("journey_label", null) == namespace.label)
         fun sourceValue(key: String) = checkNotNull(source.getString(key, null)) { "Missing enrolled source field" }
         val target = CalendarScope(AccountId(sourceValue("account")), CalendarId(sourceValue("calendar")), source.getLong("generation", -1))
         val event = EventId(sourceValue("event"))
-        val originalContent = EventContent(sourceValue("changed_title"),
-            EventTime.Timed(Instant.parse(sourceValue("start")), Instant.parse(sourceValue("end")), ZoneOffset.UTC),
+        val originalContent = EventContent(sourceValue("changed_title"), timeProfile.time,
             sourceValue("description"), sourceValue("location"), details = EventDetails())
         val editTitle = "Calendeer QA automatic title $token"
         val expectedContent = originalContent.copy(title = editTitle)
@@ -104,6 +104,13 @@ class CalendarSystemTitleWorkerLiveDeviceTest {
                     result.event.content == originalContent && completion.result == result && completion.receipt.matches(result))
             }
         }
+        val prefs = app.getSharedPreferences(namespace.workerPreferences, Context.MODE_PRIVATE)
+        if (prefs.contains("token")) assertTrue("A frozen worker cannot change its typed time profile",
+            prefs.getInt("content_profile", 1) == timeProfile.contentProfile &&
+                prefs.getLong("start", -1) == timeProfile.startMillis && prefs.getLong("end", -1) == timeProfile.endMillis &&
+                if (timeProfile.allDay) prefs.getString("start_date", null) == timeProfile.start &&
+                    prefs.getString("end_exclusive_date", null) == timeProfile.end
+                else !prefs.contains("start_date") && !prefs.contains("end_exclusive_date"))
         if (phase == "DIAG") {
             diagnostics(app, target, event, originalContent)
             titleDiagnostics(app, target, event, originalContent, expectedContent, token, accountHash, automaticSource, namespace)
@@ -112,7 +119,6 @@ class CalendarSystemTitleWorkerLiveDeviceTest {
         val projection = AndroidCalendarProjection(app)
         assertTrue("Calendar permissions are required", projection.hasPermissions())
         projection.admitOperation = ::accessible
-        val prefs = app.getSharedPreferences(namespace.workerPreferences, Context.MODE_PRIVATE)
         val manager = WorkManager.getInstance(app)
         fun networkWork() = manager.getWorkInfosForUniqueWork(NETWORK_WORK).get()
         var periodicRunningObserved = false
@@ -194,19 +200,20 @@ class CalendarSystemTitleWorkerLiveDeviceTest {
                 }
                 idleQueues()
                 val base = checkNotNull(original)
-                assertTrue("Require an unchanged ordinary timed known-empty base", baseline() == base &&
+                assertTrue("Require an unchanged ordinary known-empty typed base", baseline() == base &&
                     base.content == originalContent && noLocalOwner())
                 val owned = checkNotNull(projection.inspectOwnedEvent(target, event, base.revision)) { "Missing owned production event" }
-                val time = base.content.time as EventTime.Timed
+                val time = TitleJourneyTimeProfile.bounds(base.content.time)
                 val before = nativeValues(app, projection, target, event, owned.eventRow, owned.calendarRow)
                 assertTrue("The enrolled row must start clean and present", before[Events.DIRTY] == "0" &&
-                    before[Events.DELETED] == "0" && before[Events.TITLE] == originalContent.title && ordinary(before))
+                    before[Events.DELETED] == "0" && before[Events.TITLE] == originalContent.title && ordinary(before) &&
+                    nativeTimeMatches(base.content.time, before))
                 val previous = modes()
                 assertScopeQuiescent(app, projection, target)
                 if (resumeBeforeEditor) {
                     assertTrue("A pre-editor retry cannot replace the frozen native row or event", owned.eventRow == prefs.getLong("row", -1) &&
                         owned.calendarRow == prefs.getLong("native_calendar", -1) && base.revision.value == prefs.getString("base_revision", null) &&
-                        time.start.toEpochMilli() == prefs.getLong("start", -1) && time.end.toEpochMilli() == prefs.getLong("end", -1))
+                        time.first == prefs.getLong("start", -1) && time.second == prefs.getLong("end", -1))
                     status("system_title_pre_editor_resume")
                 } else assertTrue("Freeze fixture and original flags before enabling either mode", prefs.edit()
                     .putString("token", token).putString("account_hash", accountHash)
@@ -216,7 +223,10 @@ class CalendarSystemTitleWorkerLiveDeviceTest {
                     .putLong("generation", target.generation).putString("event", event.value)
                     .putString("base_revision", base.revision.value).putString("edit_title", editTitle)
                     .putLong("row", owned.eventRow).putLong("native_calendar", owned.calendarRow)
-                    .putLong("start", time.start.toEpochMilli()).putLong("end", time.end.toEpochMilli())
+                    .putInt("content_profile", timeProfile.contentProfile)
+                    .putString("start_date", if (timeProfile.allDay) timeProfile.start else null)
+                    .putString("end_exclusive_date", if (timeProfile.allDay) timeProfile.end else null)
+                    .putLong("start", time.first).putLong("end", time.second)
                     .putBoolean("previous_create", previous.first).putBoolean("previous_titles", previous.second).commit())
                 restore = true
                 val selected = selection()
@@ -232,7 +242,7 @@ class CalendarSystemTitleWorkerLiveDeviceTest {
                     baseline() == base && noLocalOwner())
                 val clean = nativeValues(app, projection, target, event, owned.eventRow, owned.calendarRow)
                 assertTrue("Keep the unchanged original row before opening the editor", clean[Events.DIRTY] == "0" &&
-                    clean[Events.TITLE] == originalContent.title && ordinary(clean))
+                    clean[Events.TITLE] == originalContent.title && ordinary(clean) && nativeTimeMatches(originalContent.time, clean))
                 val beforeIds = networkWork().map { it.id.toString() }.toSet()
                 val beforePeriodicIds = periodicWork().map { it.id.toString() }.toSet()
                 assertTrue("Freeze the pre-edit queue and request before opening the editor", prefs.edit()
@@ -243,9 +253,10 @@ class CalendarSystemTitleWorkerLiveDeviceTest {
                     data = ContentUris.withAppendedId(Events.CONTENT_URI, owned.eventRow)
                     setPackage(args.getString("editorPackage") ?: "foundation.e.calendar")
                     addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    putExtra(CalendarContract.EXTRA_EVENT_BEGIN_TIME, time.start.toEpochMilli())
-                    putExtra(CalendarContract.EXTRA_EVENT_END_TIME, time.end.toEpochMilli())
+                    putExtra(CalendarContract.EXTRA_EVENT_BEGIN_TIME, time.first)
+                    putExtra(CalendarContract.EXTRA_EVENT_END_TIME, time.second)
                 })
+                if (timeProfile.allDay) status("system_title_all_day_enrolled")
                 status("system_title_editor_launched")
                 // Keep this process and its production observer alive while the external runner
                 // uses the calendar's own Edit/Save UI. No request/run/recovery call follows.
@@ -304,7 +315,7 @@ class CalendarSystemTitleWorkerLiveDeviceTest {
                             journal.readPreparationReservation(target, event)?.matches(record) == true)
                     record.frozen() to result
                 }
-                val originalTime = originalContent.time as EventTime.Timed
+                val originalTime = TitleJourneyTimeProfile.bounds(originalContent.time)
                 val row = prefs.getLong("row", -1); val calendar = prefs.getLong("native_calendar", -1)
                 val uuid = Regex("[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}")
                 assertTrue("Bind the original production intent, baseline and native enrollment",
@@ -313,8 +324,8 @@ class CalendarSystemTitleWorkerLiveDeviceTest {
                         frozen.first.preparation.intent.content == expectedContent && frozen.first.preparation.intent.state == LocalEditState.PAUSED &&
                         frozen.first.preparation.intent.base.revision.value == prefs.getString("base_revision", null) &&
                         frozen.first.preparation.timestamp.nano == 0 && row > 0 && calendar > 0 &&
-                        prefs.getLong("start", -1) == originalTime.start.toEpochMilli() &&
-                        prefs.getLong("end", -1) == originalTime.end.toEpochMilli())
+                        prefs.getLong("start", -1) == originalTime.first &&
+                        prefs.getLong("end", -1) == originalTime.second)
                 ImportStore(app).use { reader ->
                     val owner = checkNotNull(reader.localEdit(target, event)) { "Missing retained local owner" }
                     assertTrue("Only the exact retained owner and frozen capsule may recover",
@@ -329,17 +340,13 @@ class CalendarSystemTitleWorkerLiveDeviceTest {
                 val native = nativeValues(app, projection, target, event, row, calendar)
                 val account = projection.accountFor(target.account)
                 assertTrue("Require only the enrolled dirty ordinary title edit, still bound to the original revision",
-                    native[Events.DIRTY] == "1" && native[Events.DELETED] == "0" && native[Events.ALL_DAY] == "0" && ordinary(native) &&
+                    native[Events.DIRTY] == "1" && native[Events.DELETED] == "0" && ordinary(native) &&
                         native[Events.SYNC_DATA1] == "calendar-bridge-projection-v1" &&
                         native[Events.SYNC_DATA2] == digest("revision-v1", frozen.first.preparation.intent.base.revision.value) &&
                         native[Events.TITLE] == expectedContent.title && native[Events.DESCRIPTION].orEmpty() == expectedContent.description &&
                         native[Events.EVENT_LOCATION].orEmpty() == expectedContent.location &&
-                        native[Events.DTSTART] == originalTime.start.toEpochMilli().toString() &&
-                        native[Events.DTEND] == originalTime.end.toEpochMilli().toString() &&
+                        nativeTimeMatches(originalContent.time, native) &&
                         native[Events.ORGANIZER] == account.name &&
-                        java.time.ZoneId.of(checkNotNull(native[Events.EVENT_TIMEZONE])).normalized() == originalTime.zone.normalized() &&
-                        (native[Events.EVENT_END_TIMEZONE] == null ||
-                            java.time.ZoneId.of(checkNotNull(native[Events.EVENT_END_TIMEZONE])).normalized() == originalTime.zone.normalized()) &&
                         listOf(Events.RRULE, Events.RDATE, Events.EXRULE, Events.EXDATE, Events.DURATION, Events.ORIGINAL_ID,
                             Events.ORIGINAL_SYNC_ID, Events.ORIGINAL_INSTANCE_TIME, Events.ORIGINAL_ALL_DAY, Events.EVENT_COLOR,
                             Events.EVENT_COLOR_KEY, Events.CUSTOM_APP_PACKAGE, Events.CUSTOM_APP_URI).all { native[it] == null })
@@ -595,6 +602,9 @@ class CalendarSystemTitleWorkerLiveDeviceTest {
                 output.putBoolean("diag_owner_title_only", intent.content != intent.base.content &&
                     intent.content == intent.base.content.copy(title = intent.content.title))
                 output.putBoolean("diag_owner_time_exact_base", intent.content.time == intent.base.content.time)
+                output.putBoolean("diag_owner_all_day", intent.content.time is EventTime.AllDay)
+                output.putBoolean("diag_owner_all_day_dates_exact_base", intent.content.time is EventTime.AllDay &&
+                    intent.content.time == intent.base.content.time)
                 output.putBoolean("diag_owner_description_exact_base", intent.content.description == intent.base.content.description)
                 output.putBoolean("diag_owner_location_exact_base", intent.content.location == intent.base.content.location)
                 output.putBoolean("diag_owner_details_exact_base", intent.content.details == intent.base.content.details)
@@ -644,7 +654,9 @@ class CalendarSystemTitleWorkerLiveDeviceTest {
             output.putBoolean("diag_native_description_match", values[Events.DESCRIPTION].orEmpty() == requested.description)
             output.putBoolean("diag_native_location_match", values[Events.EVENT_LOCATION].orEmpty() == requested.location)
             output.putBoolean("diag_native_times_unchanged", values[Events.DTSTART] == prefs.getLong("start", -1).toString() &&
-                values[Events.DTEND] == prefs.getLong("end", -1).toString() && values[Events.ALL_DAY] == "0")
+                values[Events.DTEND] == prefs.getLong("end", -1).toString() && nativeTimeMatches(original.time, values))
+            output.putBoolean("diag_native_all_day", values[Events.ALL_DAY] == "1")
+            output.putBoolean("diag_native_all_day_dates_exclusive", original.time is EventTime.AllDay && nativeTimeMatches(original.time, values))
             output.putBoolean("diag_native_origins_absent", ordinary(values))
             output.putBoolean("diag_native_reserved_8_9_10_absent", listOf(Events.SYNC_DATA8, Events.SYNC_DATA9, Events.SYNC_DATA10)
                 .all { values[it] == null })
@@ -673,11 +685,10 @@ class CalendarSystemTitleWorkerLiveDeviceTest {
                 output.putBoolean("diag_native_end_zone_present", endZone != null)
                 output.putBoolean("diag_native_end_zone_exact_start", endZone == zone)
                 output.putBoolean("diag_native_represented_fields_exact_owner", owner?.let { intent ->
-                    ownerTime != null && values[Events.TITLE].orEmpty() == intent.content.title &&
+                    values[Events.TITLE].orEmpty() == intent.content.title &&
                         values[Events.DESCRIPTION].orEmpty() == intent.content.description &&
-                        values[Events.EVENT_LOCATION].orEmpty() == intent.content.location && values[Events.ALL_DAY] == "0" &&
-                        values[Events.DTSTART] == ownerTime.start.toEpochMilli().toString() &&
-                        values[Events.DTEND] == ownerTime.end.toEpochMilli().toString() && zone == ownerTime.zone &&
+                        values[Events.EVENT_LOCATION].orEmpty() == intent.content.location && nativeTimeMatches(intent.content.time, values) &&
+                        (ownerTime == null || zone == ownerTime.zone) &&
                         values[Events.EVENT_COLOR] == intent.content.colorRgb?.or(0xFF000000.toInt())?.toString()
                 } == true)
                 true
@@ -767,10 +778,12 @@ class CalendarSystemTitleWorkerLiveDeviceTest {
         output.putBoolean("diag_color_match", actual != null && actual.colorRgb == expected.colorRgb)
         output.putBoolean("diag_recurrence_match", actual != null && actual.recurrence == expected.recurrence)
         val actualTime = actual?.time as? EventTime.Timed
-        val expectedTime = expected.time as EventTime.Timed
-        output.putBoolean("diag_time_instants_match", actualTime?.start == expectedTime.start && actualTime?.end == expectedTime.end)
-        output.putBoolean("diag_zone_exact", actualTime?.zone == expectedTime.zone)
-        output.putBoolean("diag_zone_normalized", actualTime?.zone?.normalized() == expectedTime.zone.normalized())
+        val expectedTime = expected.time as? EventTime.Timed
+        output.putBoolean("diag_expected_all_day", expected.time is EventTime.AllDay)
+        output.putBoolean("diag_all_day_dates_match", expected.time is EventTime.AllDay && actual?.time == expected.time)
+        output.putBoolean("diag_time_instants_match", expectedTime != null && actualTime?.start == expectedTime.start && actualTime?.end == expectedTime.end)
+        output.putBoolean("diag_zone_exact", expectedTime != null && actualTime?.zone == expectedTime.zone)
+        output.putBoolean("diag_zone_normalized", expectedTime != null && actualTime?.zone?.normalized() == expectedTime.zone.normalized())
         InstrumentationRegistry.getInstrumentation().sendStatus(0, output)
     }
 
@@ -951,11 +964,15 @@ class CalendarSystemTitleWorkerLiveDeviceTest {
         val owned = projection.inspectOwnedEvent(scope, event, proof.result.event.revision)
         assertTrue("Keep the same owned production row after acknowledgement", owned != null && owned.eventRow == row && owned.calendarRow == calendar)
         val native = nativeValues(app, projection, scope, event, row, calendar)
-        assertTrue("The unchanged timed event must be clean with its new title", native[Events.TITLE] == changed.title &&
-            native[Events.DIRTY] == "0" && native[Events.DELETED] == "0" && native[Events.ALL_DAY] == "0" && ordinary(native) &&
+        assertTrue("The unchanged typed event must be clean with its new title", native[Events.TITLE] == changed.title &&
+            native[Events.DIRTY] == "0" && native[Events.DELETED] == "0" && ordinary(native) && nativeTimeMatches(changed.time, native) &&
             native[Events.DTSTART] == prefs.getLong("start", -1).toString() && native[Events.DTEND] == prefs.getLong("end", -1).toString() &&
             native[Events.DESCRIPTION] == changed.description && native[Events.EVENT_LOCATION] == changed.location)
+        if (changed.time is EventTime.AllDay) status("system_title_all_day_dates_preserved")
     }
+
+    private fun nativeTimeMatches(time: EventTime, values: Map<String, String?>) = TitleJourneyTimeProfile.nativeMatches(time,
+        values[Events.ALL_DAY], values[Events.DTSTART], values[Events.DTEND], values[Events.EVENT_TIMEZONE], values[Events.EVENT_END_TIMEZONE])
 
     private fun nativeValues(app: Context, projection: AndroidCalendarProjection, scope: CalendarScope,
         event: EventId, row: Long, calendar: Long): Map<String, String?> {

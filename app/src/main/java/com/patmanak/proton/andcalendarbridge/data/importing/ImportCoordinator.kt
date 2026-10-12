@@ -1019,7 +1019,7 @@ class ImportCoordinator(
     }
 
     private fun systemTitleProfile(intent: LocalEditIntent): Boolean =
-        intent.state == LocalEditState.PAUSED && intent.base.content.time is EventTime.Timed &&
+        intent.state == LocalEditState.PAUSED &&
             intent.base.content.details == EventDetails() && intent.base.content.recurrence == null &&
             intent.base.content.colorRgb == null && intent.content != intent.base.content &&
             intent.content == intent.base.content.copy(title = intent.content.title)

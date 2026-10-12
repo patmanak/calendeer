@@ -22,7 +22,7 @@
     <string name="system_create_limits">Créez des événements simples depuis votre calendrier, sans rappel, invité, récurrence ni couleur personnalisée. Les modifications restent locales sauf si la synchronisation des titres est explicitement activée. Les suppressions ne sont pas envoyées à Proton.</string>
     <string name="system_create_mode">Autoriser la création depuis le calendrier système</string>
     <string name="system_title_mode">Synchroniser les modifications de titre (expérimental)</string>
-    <string name="system_title_limits">Titres uniquement : événements importés de Proton avec horaires, non récurrents et sans rappel ni invité. Les journées entières et les événements créés depuis Android sont exclus. Les modifications de dates, descriptions et lieux restent dans Android.</string>
+    <string name="system_title_limits">Titres uniquement : événements importés de Proton, avec horaires ou en journée entière, sans répétition, rappel, invité ni couleur personnalisée. Les événements créés depuis Android sont exclus. Les changements de dates, description et lieu restent dans Android.</string>
     <string name="system_create_pending">%1$d créations en attente ou à vérifier. Un envoi incertain ne sera jamais répété automatiquement.</string>
     <string name="system_create_error">La synchronisation système nécessite une vérification. Vos données Android sont conservées.</string>
 </resources>

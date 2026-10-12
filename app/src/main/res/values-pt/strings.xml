@@ -22,7 +22,7 @@
     <string name="system_create_limits">Crie eventos simples no calendário, sem lembretes, convidados, repetições ou cores personalizadas. As alterações permanecem locais, exceto se ativar explicitamente a sincronização dos títulos. As eliminações não são enviadas para o Proton.</string>
     <string name="system_create_mode">Permitir criação no calendário do sistema</string>
     <string name="system_title_mode">Sincronizar alterações de títulos (experimental)</string>
-    <string name="system_title_limits">Apenas títulos: eventos com horário importados do Proton, sem recorrência, lembretes ou convidados. Os eventos de dia inteiro e criados através do Android estão excluídos. As alterações de datas, descrições e locais permanecem no Android.</string>
+    <string name="system_title_limits">Apenas títulos: eventos importados do Proton, com horário ou de dia inteiro, sem repetição, lembretes, convidados ou cores personalizadas. Os eventos criados através do Android estão excluídos. As alterações de datas, descrições e locais permanecem no Android.</string>
     <string name="system_create_pending">%1$d criações pendentes ou por verificar. Um envio incerto nunca é repetido automaticamente.</string>
     <string name="system_create_error">A sincronização requer atenção. Os dados Android são preservados.</string>
 </resources>

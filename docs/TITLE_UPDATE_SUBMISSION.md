@@ -14,10 +14,26 @@ opt-in requires creation mode, selection, availability and calendar permissions.
 Disabling creation atomically clears title consent; enabling creation again does
 not restore it. The setting is scoped to account, calendar and generation.
 
-Production accepts ordinary imported timed events only: known-empty details, no
-color, no recurrence, and exactly a title change. All-day events, CREATE-handoff
-events, broader edits and deletion remain captured locally without upload. The
+Production accepts ordinary imported timed and all-day events: known-empty details,
+no color, no recurrence, and exactly a title change. All-day start and exclusive
+end dates must remain identical, with the existing strict native UTC representation.
+CREATE-handoff events, broader edits and deletion remain captured locally without upload. The
 interface explains this limit; all editing stays in the system calendar client.
+
+All-day qualification includes real Provider/SQLite controller tests for one-day
+and multi-day exclusive date intervals across a daylight-saving transition. A
+changed native end date denies dispatch while preserving the dirty edit; a
+distinct remote end date is archived as a conflict without sending the title.
+The guarded Proton service journey also qualifies a three-day DATE event:
+authenticated full-content readback retains the unchanged dates, and recovery in
+a fresh process acknowledges the same row without another submission while
+preserving a later local edit. A separate automatic /e/OS system-editor journey
+also qualifies ordinary all-day title delivery through the normal observer and
+workers, with full Proton proof and same-row acknowledgement. Fresh-process
+replay preserves the exact immutable history and exclusive dates, makes no new
+attempt and restores the calendar's original write options. Periodic work was
+sampled without observing a running periodic worker; neither periodic delivery
+nor Samsung editing is qualified by these journeys.
 
 `SystemTitleUpdateController` processes independent durable owner and attempt
 indexes in bounded pages. It first inspects unresolved attempts, then discovers
@@ -168,7 +184,7 @@ these are repeated observations, not an atomic native edit precondition. A chang
 the final observation can still race transport. Preparing work does not supply dispatch
 admission. Fresh GET followed by PUT remains an optimistic controlled-writer experiment,
 without an atomic server precondition. The opt-in production path composes this
-boundary for its narrower ordinary timed profile.
+boundary for its narrower ordinary timed and all-day profiles.
 
 ## Stable preparation identity
 
@@ -611,7 +627,7 @@ server precondition**. A concurrent Proton change between them may be overwritte
 Readback proves current observed contents, not authorship or immutable remote
 history. This adapter does not advertise general conflict-safe write capability.
 
-The separate title toggle connects a narrow ordinary imported timed-event profile
+The separate title toggle connects narrow ordinary imported timed and all-day profiles
 to the existing worker. The system observer retains broader edits/deletions
 locally. Wider service/native journeys still require their own qualification.
 The completion path permits successive locally qualified title cycles; this

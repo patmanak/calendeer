@@ -21,7 +21,6 @@ import com.patmanak.proton.andcalendarbridge.sync.catalog.CalendarSummary
 import java.nio.ByteBuffer
 import java.security.MessageDigest
 import java.time.Instant
-import java.time.ZoneOffset
 import java.time.temporal.ChronoUnit
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicInteger
@@ -109,6 +108,7 @@ class CalendarTitleGuardedJourneyLiveDeviceTest {
         assertTrue("Automatic source enrollment requires the explicit system journey and dedicated QA calendar",
             !automaticSource || (systemJourney && requestedCalendarName == "Calendeer QA Automatic Worker"))
         val namespace = TitleJourneyNamespace.create(automaticSource, systemJourney, args.getString("titleJourneyLabel"))
+        val timeProfile = TitleJourneyTimeProfile.create(args.getString("titleJourneyAllDay"), automaticSource, systemJourney, namespace.label)
         val token = args.getString("createFixtureToken").orEmpty()
         val hash = args.getString("createAccountHash").orEmpty()
         val phase = args.getString("titleGuardedPhase").orEmpty()
@@ -126,6 +126,8 @@ class CalendarTitleGuardedJourneyLiveDeviceTest {
         val source = if (prefs.contains("token")) {
             assertTrue("Never replace an enrolled fixture", prefs.getString("token", null) == token &&
                 prefs.getString("account_hash", null) == hash && prefs.getString("journey_label", null) == namespace.label)
+            assertTrue("Never change the enrolled time profile or its exclusive dates", timeProfile.matchesFrozen(
+                prefs.getInt("content_profile", -1), prefs.getString("start", null), prefs.getString("end", null)))
             CalendarScope(AccountId(checkNotNull(prefs.getString("account", null))),
                 CalendarId(checkNotNull(prefs.getString("calendar", null))), prefs.getLong("generation", -1))
         } else {
@@ -151,11 +153,11 @@ class CalendarTitleGuardedJourneyLiveDeviceTest {
                 .putLong("generation", source.generation).putLong("physical_generation", generation)
                 .putString("create_id", UUID.randomUUID().toString()).putString("intent_id", UUID.randomUUID().toString())
                 .putString("attempt_id", UUID.randomUUID().toString()).putString("later_id", UUID.randomUUID().toString())
-                .putInt("content_profile", 1)
+                .putInt("content_profile", timeProfile.contentProfile)
                 .putString("create_title", "Calendeer QA — guarded CREATE $token")
                 .putString("changed_title", "Calendeer QA — guarded UPDATE $token")
                 .putString("later_title", "Calendeer QA — later local guarded title $token")
-                .putString("start", "2026-10-12T14:00:00Z").putString("end", "2026-10-12T15:00:00Z")
+                .putString("start", timeProfile.start).putString("end", timeProfile.end)
                 .putString("description", "Synthetic guarded title journey; retained for inspection.")
                 .putString("location", "Calendeer QA")
                 .putString("timestamp", Instant.now().truncatedTo(ChronoUnit.SECONDS).toString()).commit())
@@ -167,9 +169,9 @@ class CalendarTitleGuardedJourneyLiveDeviceTest {
         val attempt = id("attempt_id")
         val timestamp = Instant.parse(prefs.getString("timestamp", null))
         fun frozen(key: String) = checkNotNull(prefs.getString(key, null))
-        assertTrue("Require the frozen known-empty UTC profile", prefs.getInt("content_profile", -1) == 1)
-        val content = EventContent(frozen("create_title"),
-            EventTime.Timed(Instant.parse(frozen("start")), Instant.parse(frozen("end")), ZoneOffset.UTC),
+        assertTrue("Require the exact frozen known-empty time profile", timeProfile.matchesFrozen(
+            prefs.getInt("content_profile", -1), frozen("start"), frozen("end")))
+        val content = EventContent(frozen("create_title"), timeProfile.time,
             frozen("description"), frozen("location"), details = EventDetails())
         val changed = content.copy(title = frozen("changed_title"))
         val laterTitle = frozen("later_title")
@@ -200,6 +202,8 @@ class CalendarTitleGuardedJourneyLiveDeviceTest {
                 val event = EventId(checkNotNull(prefs.getString("event", null)))
                 assertTrue("Retain the exact native event ownership", row[Events._SYNC_ID] == native.eventIdentityKey(physical, event) &&
                     row[Events.SYNC_DATA4] == native.eventIdentityKey(physical, event))
+                assertTrue("Retain the exact typed dates and native timezone", TitleJourneyTimeProfile.nativeMatches(content.time,
+                    row[Events.ALL_DAY], row[Events.DTSTART], row[Events.DTEND], row[Events.EVENT_TIMEZONE], row[Events.EVENT_END_TIMEZONE]))
             }
         }
         fun edit(from: Map<String, String?>, title: String) {
@@ -404,6 +408,7 @@ class CalendarTitleGuardedJourneyLiveDeviceTest {
                             }
                             assertTrue(prefs.edit().putBoolean("submit_completed", true).commit())
                             witness("guarded_title_submit_verified", "guarded_title_unknown_durable", "guarded_title_same_row_dirty")
+                            if (timeProfile.allDay) witness("guarded_title_all_day_dates_preserved")
                         } else {
                             val original = checkNotNull(journal.read(source, attempt))
                             val result = checkNotNull(journal.readVerified(source, attempt))
@@ -456,6 +461,7 @@ class CalendarTitleGuardedJourneyLiveDeviceTest {
                                 journal.readVerified(source, attempt) == result && values() == later && projection.writes.get() == writes)
                             witness("guarded_title_recover_new_process", "guarded_title_offline_completed",
                                 "guarded_title_metadata_only_ack", "guarded_title_later_dirty_preserved", "guarded_title_no_repeat_submission")
+                            if (timeProfile.allDay) witness("guarded_title_all_day_dates_preserved")
                             if (args.getString("titleGuardedDropMarkers") == "true") witness("guarded_title_lost_markers_recovered")
                         }
                     } finally {

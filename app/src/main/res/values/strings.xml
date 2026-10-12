@@ -23,7 +23,7 @@
     <string name="system_create_limits">Create simple events from your calendar app, without reminders, guests, recurrence or custom colors. Changes stay local unless title synchronization is explicitly enabled. Deletions are not sent to Proton.</string>
     <string name="system_create_mode">Allow system creation</string>
     <string name="system_title_mode">Synchronize title changes (experimental)</string>
-    <string name="system_title_limits">Titles only: non-recurring timed events imported from Proton, with no reminder or guest. All-day events and events created through Android are excluded. Date, description and location changes stay on Android.</string>
+    <string name="system_title_limits">Titles only: timed or all-day events imported from Proton, without repeats, reminders, guests or custom colors. Events created through Android are excluded. Date, description and location changes stay on Android.</string>
     <string name="system_create_pending">%1$d creations waiting or requiring attention. An uncertain send is never repeated automatically.</string>
     <string name="system_create_error">System synchronization needs attention. Your Android data is retained.</string>
 </resources>

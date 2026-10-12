@@ -25,8 +25,9 @@ disabling creation closes native editing without deleting events; pending work
 stays visible with the mode off. UNKNOWN submissions can only be inspected, never
 automatically sent again. A separate, default-off title option now connects guarded
 preparation, submission and inspection to the existing network worker. It covers
-only ordinary imported timed events with known-empty details, no color, no
-recurrence and a title-only change. All-day, transferred CREATE, multi-field edits
+only ordinary imported timed and all-day events with known-empty details, no color, no
+recurrence and a title-only change. All-day date intervals and their exclusive
+end remain unchanged. Transferred CREATE, multi-field edits
 and DELETE remain held locally without upload.
 The existing local and network workers now traverse the production title journal
 offline, completing only already durable verified results. One bounded page per
@@ -79,6 +80,15 @@ a new attempt, then restored the original calendar write options. Fixture-only
 namespaces allow independent retained journeys without resetting earlier evidence
 or production journals. Periodic work was sampled, but no running periodic worker
 was observed; this does not qualify autonomous periodic delivery or broader edits.
+Ordinary all-day title synchronization now has separate service and automatic
+system-editor qualification. A three-day event spanning a daylight-saving
+transition retains its exact start and exclusive end dates through authenticated
+Proton readback, same-row acknowledgement and fresh-process replay without a new
+attempt. The /e/OS editor journey uses the normal observer and workers; replay
+restores the calendar's original write options. Controlled Provider/SQLite tests
+also preserve a later native date edit and archive a competing remote date change
+without sending the title. This does not qualify date editing, recurring events,
+Samsung editing or atomic protection against simultaneous service changes.
 Known-empty, non-recurring incoming events now use the calendar's opaque local
 owner label to preserve native editing, without a remote organizer or attendee. Ordinary and CREATE-handoff
 capture accept that profile and preserve DIRTY edits. Existing settled rows gain

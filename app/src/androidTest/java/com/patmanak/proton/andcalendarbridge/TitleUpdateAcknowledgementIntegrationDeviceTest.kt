@@ -28,6 +28,7 @@ import java.security.MessageDigest
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
+import java.time.ZoneOffset
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.*
@@ -42,7 +43,8 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class TitleUpdateAcknowledgementIntegrationDeviceTest {
     private class Fixture(val context: Context, allDay: Boolean, val transferred: Boolean = false,
-        private val preparedOnly: Boolean = false, private val pendingProjection: String? = null) {
+        private val preparedOnly: Boolean = false, private val pendingProjection: String? = null,
+        allDayDays: Long = 2) {
         private val token = UUID.randomUUID().toString()
         val target = CalendarScope(AccountId("title-ack-integration-$token"), CalendarId("fixture"), 0)
         private val importName = "title-ack-integration-$token.db"
@@ -52,7 +54,7 @@ class TitleUpdateAcknowledgementIntegrationDeviceTest {
         private val format = AdapterFormat("synthetic-title-ack-integration", 1)
         val base = RemoteChange.Upsert(EventId("synthetic-event"), Revision("synthetic-original-revision"),
             EventContent("Synthetic imported original", if (allDay)
-                EventTime.AllDay(LocalDate.of(2030, 10, 26), LocalDate.of(2030, 10, 28)) else
+                EventTime.AllDay(LocalDate.of(2030, 10, 26), LocalDate.of(2030, 10, 26).plusDays(allDayDays)) else
                 EventTime.Timed(Instant.parse("2030-10-27T00:30:00Z"), Instant.parse("2030-10-27T02:30:00Z"), ZoneId.of("Europe/Paris")),
                 "Synthetic description\nPreserved second line", "Synthetic location", details = EventDetails()))
         val local = base.content.copy(title = "Synthetic submitted system title")
@@ -230,6 +232,12 @@ class TitleUpdateAcknowledgementIntegrationDeviceTest {
         suspend fun productionTitleControllerUsesCanonicalWorkAndCompletesTheRealNativeOwner() {
             toggleTitles(true); reserveProductionIdentity()
             val capsule = ControlledCapsulePort(); val port = ControlledTitlePort(); val before = values()
+            (base.content.time as? EventTime.AllDay)?.let { dates ->
+                assertEquals("1", before[Events.ALL_DAY])
+                assertEquals("UTC", before[Events.EVENT_TIMEZONE])
+                assertEquals(dates.start.atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli().toString(), before[Events.DTSTART])
+                assertEquals(dates.endExclusive.atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli().toString(), before[Events.DTEND])
+            }
             val changePrefs = "system-title-integration-changes-$token"
             val attemptPrefs = "system-title-integration-attempts-$token"
             var wakes = 0
@@ -303,6 +311,44 @@ class TitleUpdateAcknowledgementIntegrationDeviceTest {
             assertEquals(1, port.submissions); assertEquals(0, port.sends); assertEquals(0, port.forbiddenCalls)
             assertEquals(prepared, journal.read(target, prepared.id)); assertNull(journal.readVerified(target, prepared.id))
             assertEquals(before, values()); assertEquals(0, writes.get())
+        }
+
+        suspend fun productionAllDayDateChangeBeforeClaimPreservesLaterNativeEdit() {
+            toggleTitles(true); reserveProductionIdentity()
+            val capsule = ControlledCapsulePort(); val port = ControlledTitlePort()
+            assertEquals(LocalTitleAttemptPreparation.Prepared(prepared), prepareProduction(capsule, port))
+            val dates = base.content.time as EventTime.AllDay
+            val laterEnd = dates.endExclusive.plusDays(1).atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli().toString()
+            port.beforeClaim = {
+                assertEquals(1, context.contentResolver.update(uri, ContentValues().apply {
+                    put(Events.DTEND, laterEnd.toLong()); put(Events.DIRTY, 1)
+                }, "${Events._ID}=? AND ${Events.CALENDAR_ID}=?", arrayOf(row.toString(), calendar.toString())))
+            }
+            assertNull(coordinator.submitSystemTitle(prepared, journal, port) { it == target && titlesAllowed })
+            assertEquals(1, port.submissions); assertEquals(0, port.sends); assertEquals(0, writes.get())
+            assertEquals(prepared, journal.read(target, prepared.id)); assertNull(journal.readVerified(target, prepared.id))
+            assertEquals(laterEnd, values()[Events.DTEND]); assertEquals("1", values()[Events.DIRTY])
+            assertSingleOriginalRow(); allowSql()
+            assertEquals(intent, store.localEdit(target, base.eventId)); assertEquals(base, store.projectedBaseline(target, base.eventId))
+        }
+
+        suspend fun productionAllDayRemoteDateChangeBeforeClaimRemainsArchivedWithoutSend() {
+            toggleTitles(true); reserveProductionIdentity()
+            val capsule = ControlledCapsulePort(); val port = ControlledTitlePort()
+            assertEquals(LocalTitleAttemptPreparation.Prepared(prepared), prepareProduction(capsule, port))
+            val dates = base.content.time as EventTime.AllDay
+            val remote = base.copy(revision = Revision("synthetic-competing-all-day-revision"),
+                content = base.content.copy(time = dates.copy(endExclusive = dates.endExclusive.plusDays(1))))
+            val before = values()
+            port.beforeClaim = { allowSql(); store.transaction(target) { putRemote(remote) } }
+            assertNull(coordinator.submitSystemTitle(prepared, journal, port) { it == target && titlesAllowed })
+            assertEquals(1, port.submissions); assertEquals(0, port.sends); assertEquals(0, writes.get())
+            assertEquals(prepared, journal.read(target, prepared.id)); assertNull(journal.readVerified(target, prepared.id))
+            assertEquals(before, values()); assertSingleOriginalRow(); allowSql()
+            assertEquals(intent.copy(state = LocalEditState.CONFLICT), store.localEdit(target, base.eventId))
+            val ref = store.conflictArchives(ConflictArchiveQuery(target)).entries.single()
+            assertEquals(base, store.conflictArchive(ref)!!.base); assertEquals(local, store.conflictArchive(ref)!!.local)
+            assertEquals(remote, store.conflictObservations(ConflictObservationQuery(ref)).entries.last().change)
         }
 
         suspend fun productionUnknownCannotBePreparedOrSubmittedAgain() {
@@ -1318,11 +1364,11 @@ class TitleUpdateAcknowledgementIntegrationDeviceTest {
     }
 
     private fun fixture(allDay: Boolean, transferred: Boolean = false, preparedOnly: Boolean = false, pendingProjection: String? = null,
-        block: suspend Fixture.() -> Unit) = runBlocking {
+        allDayDays: Long = 2, block: suspend Fixture.() -> Unit) = runBlocking {
         assumeTrue(InstrumentationRegistry.getArguments().getString("providerFixture") == "true")
         val context = ApplicationProvider.getApplicationContext<Context>()
         assumeTrue(AndroidCalendarProjection(context).hasPermissions())
-        val fixture = Fixture(context, allDay, transferred, preparedOnly, pendingProjection)
+        val fixture = Fixture(context, allDay, transferred, preparedOnly, pendingProjection, allDayDays)
         try { fixture.seed(); fixture.block() } finally { fixture.close() }
     }
 
@@ -1361,35 +1407,59 @@ class TitleUpdateAcknowledgementIntegrationDeviceTest {
     @Test fun absentCachedObservationCannotQualifyConflictedSelfEcho() = fixture(allDay = false) {
         verifiedSelfEchoBeforeFreshAcknowledgement("absent")
     }
-    @Test fun productionTitleOptionDefaultsOffWithoutAnyAdapterCalls() = fixture(allDay = false, preparedOnly = true) {
-        productionTitleOptionOffNeverCallsPorts()
+    @Test fun productionTitleOptionDefaultsOffWithoutAnyAdapterCalls() {
+        for (allDay in listOf(false, true)) fixture(allDay = allDay, preparedOnly = true) {
+            productionTitleOptionOffNeverCallsPorts()
+        }
     }
     @Test fun optedInTimedTitleControllerRetainsCanonicalProofAndAcknowledgesSameProviderRow() = fixture(allDay = false, preparedOnly = true) {
         productionTitleControllerUsesCanonicalWorkAndCompletesTheRealNativeOwner()
     }
-    @Test fun productionTitleOptionRefusesAllDayProfileBeforeAnyAdapterCalls() = fixture(allDay = true, preparedOnly = true) {
-        productionUnsupportedProfileNeverCallsPorts()
+    @Test fun optedInAllDayTitleControllerPreservesExclusiveDatesAcrossDstAndAcknowledgesSameRow() = fixture(allDay = true, preparedOnly = true) {
+        productionTitleControllerUsesCanonicalWorkAndCompletesTheRealNativeOwner()
     }
-    @Test fun productionTitleOptionRefusesTransferredCreateBeforeAnyAdapterCalls() = fixture(allDay = false, transferred = true, preparedOnly = true) {
-        productionUnsupportedProfileNeverCallsPorts()
+    @Test fun optedInSingleDayTitleControllerKeepsItsExclusiveNextDayBoundary() = fixture(allDay = true, preparedOnly = true, allDayDays = 1) {
+        productionTitleControllerUsesCanonicalWorkAndCompletesTheRealNativeOwner()
+    }
+    @Test fun optedInAllDayLaterEndDateCannotBeOverwrittenOrSubmittedByTitleWork() = fixture(allDay = true, preparedOnly = true) {
+        productionAllDayDateChangeBeforeClaimPreservesLaterNativeEdit()
+    }
+    @Test fun optedInAllDayCompetingRemoteDatesAreArchivedWithoutTitleSend() = fixture(allDay = true, preparedOnly = true) {
+        productionAllDayRemoteDateChangeBeforeClaimRemainsArchivedWithoutSend()
+    }
+    @Test fun productionAllDayFirstCapsuleUsesGuardedPreparationOnly() = fixture(allDay = true, preparedOnly = true) {
+        productionFreshCapsuleUsesOnlyGuardedOverload(revoke = false)
+    }
+    @Test fun productionTitleOptionRefusesTransferredCreateBeforeAnyAdapterCalls() {
+        for (allDay in listOf(false, true)) fixture(allDay = allDay, transferred = true, preparedOnly = true) {
+            productionUnsupportedProfileNeverCallsPorts()
+        }
     }
     @Test fun productionTitleFirstCapsuleUsesGuardedPreparationOnly() = fixture(allDay = false, preparedOnly = true) {
         productionFreshCapsuleUsesOnlyGuardedOverload(revoke = false)
     }
-    @Test fun productionTitleRevokedAndRestoredDuringFirstCapsuleCannotRetainOrPrepareWire() = fixture(allDay = false, preparedOnly = true) {
-        productionFreshCapsuleUsesOnlyGuardedOverload(revoke = true)
+    @Test fun productionTitleRevokedAndRestoredDuringFirstCapsuleCannotRetainOrPrepareWire() {
+        for (allDay in listOf(false, true)) fixture(allDay = allDay, preparedOnly = true) {
+            productionFreshCapsuleUsesOnlyGuardedOverload(revoke = true)
+        }
     }
-    @Test fun productionTitleRevokedAndRestoredBeforeClaimCannotSend() = fixture(allDay = false, preparedOnly = true) {
-        productionRevocationBeforeClaimCannotSendAfterModeRestoration()
+    @Test fun productionTitleRevokedAndRestoredBeforeClaimCannotSend() {
+        for (allDay in listOf(false, true)) fixture(allDay = allDay, preparedOnly = true) {
+            productionRevocationBeforeClaimCannotSendAfterModeRestoration()
+        }
     }
-    @Test fun productionTitleUnknownRemainsInspectionOnlyWithoutAnotherPreparationOrSend() = fixture(allDay = false, preparedOnly = true) {
-        productionUnknownCannotBePreparedOrSubmittedAgain()
+    @Test fun productionTitleUnknownRemainsInspectionOnlyWithoutAnotherPreparationOrSend() {
+        for (allDay in listOf(false, true)) fixture(allDay = allDay, preparedOnly = true) {
+            productionUnknownCannotBePreparedOrSubmittedAgain()
+        }
     }
-    @Test fun productionTitleCancelledCapsuleReturningNullCannotReturnNormally() = fixture(allDay = false, preparedOnly = true) {
-        productionCancelledNullCapsuleCannotReturnNormally()
+    @Test fun productionTitleCancelledCapsuleReturningNullCannotReturnNormally() {
+        for (allDay in listOf(false, true)) fixture(allDay = allDay, preparedOnly = true) {
+            productionCancelledNullCapsuleCannotReturnNormally()
+        }
     }
     @Test fun productionTitleRunLeaseRejectsRestoredPolicyAndAuthenticationAfterPreparation() {
-        for (authentication in listOf(false, true)) fixture(allDay = false, preparedOnly = true) {
+        for (allDay in listOf(false, true)) for (authentication in listOf(false, true)) fixture(allDay = allDay, preparedOnly = true) {
             productionFrozenRunLeaseCannotSurviveRevocationBetweenPreparationAndSubmission(authentication)
         }
     }
