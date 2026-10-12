@@ -1259,7 +1259,7 @@ class TitleUpdateAcknowledgementIntegrationDeviceTest {
          * re-send the UNKNOWN request or silently reset an arbitrary conflict to PAUSED.
          */
         suspend fun verifiedSelfEchoBeforeFreshAcknowledgement(rejectedObservation: String? = null) {
-            check(!transferred && !preparedOnly && base.content.time is EventTime.Timed)
+            check(!preparedOnly)
             allowSql()
             assertEquals(intent, store.localEdit(target, base.eventId))
             assertEquals(preparation, store.localEditPreparation(target, base.eventId))
@@ -1291,21 +1291,64 @@ class TitleUpdateAcknowledgementIntegrationDeviceTest {
                 "absent" -> assertEquals(1, store.writableDatabase.delete("records",
                     "scope=(SELECT scope FROM calendars WHERE account=? AND calendar=? AND generation=?) AND event=?",
                     arrayOf(target.account.value, target.calendar.value, target.generation.toString(), base.eventId.value)))
+                "owner" -> assertEquals(1, store.writableDatabase.update("local_edits", ContentValues().apply {
+                    put("mutation", "synthetic-distinct-echo-owner")
+                }, null, null))
+                "capsule" -> assertEquals(1, store.writableDatabase.delete("local_edit_preparations", null, null))
+                "frame" -> assertEquals(1, store.writableDatabase.delete("captured_create_handoffs", null, null))
+                "waiting" -> assertEquals(1, store.writableDatabase.update("captured_create_handoffs", ContentValues().apply {
+                    put("waiting", 0)
+                }, null, null))
+                "release" -> assertEquals(1, store.writableDatabase.update("captured_create_handoffs", ContentValues().apply {
+                    put("state", "PENDING")
+                }, null, null))
+                "frame_nonce" -> assertEquals(1, store.writableDatabase.update("captured_create_handoffs", ContentValues().apply {
+                    put("nonce", "synthetic-altered-handoff-nonce")
+                }, null, null))
+                "origin" -> assertEquals(1, store.writableDatabase.delete("captured_create_bases", null, null))
+                "create_ack" -> assertEquals(1, store.writableDatabase.update("captured_create_acknowledgements", ContentValues().apply {
+                    put("state", "UNKNOWN")
+                }, null, null))
+                "create_fingerprint" -> assertEquals(1, store.writableDatabase.update("captured_create_acknowledgements", ContentValues().apply {
+                    put("fingerprint", "synthetic-altered-origin-fingerprint")
+                }, null, null))
+                "frame_base" -> store.writableDatabase.execSQL("UPDATE projection_bases SET payload=replace(payload,?,?)",
+                    arrayOf("synthetic-original-revision", "synthetic-distinct-frame-revision"))
+                "projection" -> store.writableDatabase.execSQL("INSERT INTO projection_receipts " +
+                    "(scope,event,nonce,payload,adapter,version,previous_base,protocol) " +
+                    "SELECT scope,event,'synthetic-competing-projection',payload,?,?,payload,1 FROM projection_bases",
+                    arrayOf(format.id, format.version))
                 else -> error("Unknown synthetic observation case")
             }
+            val expectedOwner = intent.copy(state = LocalEditState.CONFLICT).let {
+                if (rejectedObservation == "owner") it.copy(id = MutationId("synthetic-distinct-echo-owner")) else it
+            }
+            val expectedPreparation = if (rejectedObservation == "capsule") null else preparation
+            val archive = store.conflictArchives(ConflictArchiveQuery(target)).entries.single()
+            val archived = archiveSnapshot(archive)
             // The acknowledgement must survive reopening and qualify the conflict from durable
             // exact proof, capsule and cached observation, not from in-memory submission state.
             reopenOwner()
             allowSql()
             val conflicted = store.localEdit(target, base.eventId)
-            assertEquals(intent.copy(state = LocalEditState.CONFLICT), conflicted)
+            assertEquals(expectedOwner, conflicted)
             assertNull(receipt()); assertEquals(dirty, values()); assertEquals(0, writes.get())
             if (rejectedObservation != null) {
                 assertEquals(TitleUpdateAcknowledgementResult.UNRESOLVED, acknowledge())
                 assertEquals(TitleUpdateCompletionResult.UNRESOLVED, complete())
                 allowSql()
                 assertEquals(conflicted, store.localEdit(target, base.eventId))
-                assertEquals(preparation, store.localEditPreparation(target, base.eventId))
+                if (rejectedObservation == "owner") {
+                    try {
+                        store.localEditPreparation(target, base.eventId)
+                        fail("A capsule cannot be decoded for a different owner")
+                    } catch (_: IllegalStateException) { }
+                    store.readableDatabase.rawQuery("SELECT mutation,payload FROM local_edit_preparations", null).use {
+                        assertEquals(1, it.count); assertTrue(it.moveToFirst())
+                        assertEquals(intent.id.value, it.getString(0))
+                        assertEquals(preparation.protectedPayload, it.getString(1))
+                    }
+                } else assertEquals(expectedPreparation, store.localEditPreparation(target, base.eventId))
                 assertNull(receipt()); assertNull(journal.readCompletion(target, prepared.id))
                 assertEquals(dirty, values()); assertEquals(0, writes.get())
             } else {
@@ -1324,10 +1367,85 @@ class TitleUpdateAcknowledgementIntegrationDeviceTest {
                 assertEquals(completed, journal.readCompletion(target, prepared.id))
                 assertEquals(clean, values()); assertEquals(1, writes.get())
                 assertSqlRestored(durableUnknown)
+                assertOriginalCreateProvenance()
+                if (transferred) {
+                    mutateTitle("Synthetic later transferred title after exact echo recovery")
+                    val later = values()
+                    captureTransferred(MutationId("synthetic-later-echo-owner"))
+                    val next = store.localEdit(target, base.eventId)!!
+                    assertEquals(verified, next.base)
+                    assertEquals(TitleUpdateAcknowledgementResult.ACKNOWLEDGED, acknowledge())
+                    assertEquals(TitleUpdateCompletionResult.COMPLETED, complete())
+                    allowSql(); assertEquals(next, store.localEdit(target, base.eventId))
+                    assertEquals(later, values()); assertEquals(1, writes.get())
+                    assertEquals(completed, journal.readCompletion(target, prepared.id))
+                    assertOriginalCreateProvenance()
+                }
             }
             assertEquals(durableUnknown, journal.read(target, prepared.id))
             assertEquals(durableResult, journal.readVerified(target, prepared.id))
+            assertEquals(archived, archiveSnapshot(archive))
         }
+
+        suspend fun transferredSelfEchoSqlLossPreservesLaterNativeEdit() {
+            check(transferred && !preparedOnly)
+            journal.retainEvidence(unknown, "synthetic-retained-echo-response")
+            val durableUnknown = checkNotNull(journal.read(target, prepared.id))
+            allowSql(); store.transaction(target) { putRemote(result.event) }
+            val conflicted = intent.copy(state = LocalEditState.CONFLICT)
+            assertEquals(conflicted, store.localEdit(target, base.eventId))
+            val archive = store.conflictArchives(ConflictArchiveQuery(target)).entries.single()
+            val archived = archiveSnapshot(archive)
+            reopenOwner()
+            store.writableDatabase.execSQL("CREATE TRIGGER fixture_echo_restore_loss BEFORE DELETE ON local_edits " +
+                "BEGIN SELECT RAISE(ABORT,'synthetic echo restore loss'); END")
+            assertEquals(TitleUpdateAcknowledgementResult.UNRESOLVED, acknowledge())
+            val retained = receipt()!!
+            assertEquals(TitleUpdateAcknowledgementState.PENDING, retained.state)
+            assertEquals("0", values()[Events.DIRTY]); assertEquals(1, writes.get())
+            allowSql(); assertEquals(base, store.projectedBaseline(target, base.eventId))
+            assertEquals(frame, store.capturedHandoff(target, base.eventId)!!.frame)
+            assertTrue(store.capturedHandoff(target, base.eventId)!!.waiting)
+            assertEquals(conflicted, store.localEdit(target, base.eventId))
+            assertEquals(preparation, store.localEditPreparation(target, base.eventId))
+            mutateTitle("Synthetic later native edit during exact-echo restoration gap")
+            val later = values()
+            store.writableDatabase.execSQL("DROP TRIGGER fixture_echo_restore_loss")
+            reopenOwner()
+            assertEquals(TitleUpdateAcknowledgementResult.ACKNOWLEDGED, acknowledge())
+            assertEquals(later, values()); assertEquals(1, writes.get()); assertEquals(1, inspections.get())
+            assertSqlRestored(durableUnknown)
+            assertEquals(TitleUpdateCompletionResult.COMPLETED, complete())
+            val completed = journal.readCompletion(target, prepared.id)!!
+            captureTransferred(MutationId("synthetic-after-echo-restoration-gap"))
+            val next = store.localEdit(target, base.eventId)!!
+            assertEquals(verified, next.base)
+            assertEquals(TitleUpdateAcknowledgementResult.ACKNOWLEDGED, acknowledge())
+            assertEquals(TitleUpdateCompletionResult.COMPLETED, complete())
+            allowSql(); assertEquals(next, store.localEdit(target, base.eventId))
+            assertEquals(later, values()); assertEquals(1, writes.get()); assertEquals(1, inspections.get())
+            assertEquals(retained.receipt, receipt()!!.receipt)
+            assertEquals(completed, journal.readCompletion(target, prepared.id))
+            assertEquals(durableUnknown, journal.read(target, prepared.id))
+            assertEquals(result, journal.readVerified(target, prepared.id))
+            assertEquals(archived, archiveSnapshot(archive))
+            assertOriginalCreateProvenance(); assertSingleOriginalRow()
+        }
+
+        /** Exact stored fields, including opaque deferred evidence and collection timestamps.
+         * Presentation models deliberately have identity equality and redact their contents.
+         */
+        private fun archiveSnapshot(ref: ConflictArchiveRef): List<List<List<String?>>> =
+            listOf("SELECT * FROM conflict_archives WHERE id=? ORDER BY id",
+                "SELECT * FROM conflict_observations WHERE archive_id=? ORDER BY id").map { query ->
+                store.readableDatabase.rawQuery(query, arrayOf(ref.id.toString())).use { cursor ->
+                    buildList {
+                        while (cursor.moveToNext()) add(cursor.columnNames.indices.map {
+                            if (cursor.isNull(it)) null else cursor.getString(it)
+                        })
+                    }
+                }
+            }
 
         suspend fun assertSqlRestored(expectedUnknown: TitleUpdateAttemptRecord = unknown) {
             allowSql()
@@ -1377,6 +1495,31 @@ class TitleUpdateAcknowledgementIntegrationDeviceTest {
     }
     @Test fun exactVerifiedSelfEchoBeforeReceiptRecoversConflictedOwnerWithoutAnotherSend() = fixture(allDay = false) {
         verifiedSelfEchoBeforeFreshAcknowledgement()
+    }
+    @Test fun exactTransferredTimedSelfEchoRestoresSameRowAndPreservesOriginalCreateAndLaterOwner() = fixture(allDay = false, transferred = true) {
+        verifiedSelfEchoBeforeFreshAcknowledgement()
+    }
+    @Test fun exactTransferredAllDaySelfEchoRestoresSameRowAndPreservesExclusiveDatesAndLaterOwner() = fixture(allDay = true, transferred = true) {
+        verifiedSelfEchoBeforeFreshAcknowledgement()
+    }
+    @Test fun distinctOrUnverifiedTransferredObservationsCannotQualifyAnExactEcho() {
+        for (allDay in listOf(false, true)) for (reason in listOf("revision", "content", "tombstone", "deferred", "absent"))
+            fixture(allDay = allDay, transferred = true) { verifiedSelfEchoBeforeFreshAcknowledgement(reason) }
+    }
+    @Test fun alteredTransferredOriginFrameOrAcknowledgementNeverFallsBackToOrdinaryEchoRecovery() {
+        for (allDay in listOf(false, true))
+            for (reason in listOf("frame", "waiting", "release", "frame_nonce", "origin", "create_ack", "create_fingerprint", "frame_base", "projection"))
+                fixture(allDay = allDay, transferred = true) { verifiedSelfEchoBeforeFreshAcknowledgement(reason) }
+    }
+    @Test fun differentTransferredOwnerOrMissingCapsuleCannotConsumeExactEchoProof() {
+        for (allDay in listOf(false, true)) for (reason in listOf("owner", "capsule"))
+            fixture(allDay = allDay, transferred = true) { verifiedSelfEchoBeforeFreshAcknowledgement(reason) }
+    }
+    @Test fun transferredTimedSelfEchoSqlRollbackRecoversByInspectionAndPreservesLaterDirtyEdit() = fixture(allDay = false, transferred = true) {
+        transferredSelfEchoSqlLossPreservesLaterNativeEdit()
+    }
+    @Test fun transferredAllDaySelfEchoSqlRollbackPreservesExclusiveDatesDuringLaterDirtyEdit() = fixture(allDay = true, transferred = true) {
+        transferredSelfEchoSqlLossPreservesLaterNativeEdit()
     }
     @Test fun redundantOrdinaryProjectionSurvivesReservationAndRetiresOnlyAfterNativeTitleProof() =
         fixture(allDay = false, pendingProjection = "redundant") { pendingOrdinaryProjectionAcknowledgement() }

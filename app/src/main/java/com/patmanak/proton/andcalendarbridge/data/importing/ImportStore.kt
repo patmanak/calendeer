@@ -1814,15 +1814,16 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
     }
 
     /** A verified result can be imported before its first ACK receipt is reserved.
-     * Consume only that exact ordinary owner/result, never reopen conflict dispatch.
-     * Capsule equality is checked by the caller in the same transaction.
+     * Consume only that exact owner/result, never reopen conflict dispatch.
+     * Source (including the complete handoff frame) and capsule equality are
+     * checked by the caller in the same transaction.
      */
     private fun exactTitleResultEcho(db: SQLiteDatabase, receipt: TitleUpdateAcknowledgementReceipt,
         owner: LocalEditIntent?): Boolean {
         val intent = receipt.intent
         val scope = intent.scope
         val event = intent.base.eventId
-        if (receipt.handoff != null || owner?.state != LocalEditState.CONFLICT ||
+        if (owner?.state != LocalEditState.CONFLICT ||
             owner.copy(state = LocalEditState.PAUSED) != intent || !activeProjectionScope(db, scope) ||
             !titleAcknowledgementFormatMatches(db, scope, intent.format) || readBaseline(db, scope, event) != intent.base ||
             hasRawEventRow(db, "deferred_events", scope, event)) return false

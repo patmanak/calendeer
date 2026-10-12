@@ -689,7 +689,7 @@ class ImportCoordinator(
                 // The SQL receipt already qualified this owner before the native write.
                 // An echo or later observation may change only its conflict marker;
                 // identity and all snapshots must stay exact.
-                val echoedOwner = retained.receipt.handoff == null && owner?.state == LocalEditState.CONFLICT &&
+                val echoedOwner = owner?.state == LocalEditState.CONFLICT &&
                     owner.copy(state = LocalEditState.PAUSED) == intent
                 if ((owner != intent && !echoedOwner) ||
                     store.localEditPreparation(target, eventId) != result.record.preparation)

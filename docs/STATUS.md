@@ -40,13 +40,16 @@ The title option requires creation mode and current calendar access; disabling
 creation clears title consent. A frozen worker session/policy lease surrounds
 both network indexes and every preparation/send. New proof wakes offline recovery
 once; uncertain work never causes a resend or an immediate retry loop.
-Fresh ordinary title acknowledgement now recognizes an exact imported echo of its
+Fresh title acknowledgement now recognizes an exact imported echo of its
 own durable verified result. The SQL owner may differ only by its conflict marker;
 original baseline, capsule, source provenance and the complete cached result,
-including revision, must match. Deferred or distinct observations still block a
+including revision, must match. Transferred CREATE additionally requires its
+exact released, waiting handoff frame and original proven creation acknowledgement.
+Deferred or distinct observations still block a
 new receipt. This consumes proof without resetting conflict dispatch or sending
 again. Once a receipt exists, later observations remain retained for reconciliation.
-It is not general conflict resolution or atomic server protection.
+It is not general conflict resolution or atomic server protection, and does not
+activate production title submission for transferred CREATE events.
 Local [conflict archives](CONFLICT_ARCHIVE.md) now preserve the original base and
 first local capture with distinct verified, deleted, deferred or unreadable evidence
 in the same import transaction. Calendar options offer paginated offline

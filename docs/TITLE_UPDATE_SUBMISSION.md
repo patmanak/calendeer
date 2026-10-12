@@ -380,6 +380,17 @@ preparation fingerprint checks every original field, timestamp and protected
 payload without copying a second sealed blob into the receipt. The additive
 version-sixteen import migration preserves existing work.
 
+An exact imported echo of the already verified result may change the original
+owner's state to CONFLICT before its first receipt is reserved. Reservation may
+consume this proof only if the owner differs by that state alone, its original
+baseline and complete capsule still match, and the cache equals the full verified
+result including revision, with no deferred observation. For transferred CREATE,
+the same transaction also requires the complete released, waiting handoff frame,
+valid immutable origin and proven CREATE acknowledgement, and no competing
+projection receipt. A different owner, result or source stays unresolved. This
+does not reset the owner to PAUSED or authorize another service request. The
+production gate for new transferred title submissions remains closed.
+
 Only the fresh reservation may call the native write. One atomic Calendar Provider
 batch asserts the unique owned calendar and both event identities, complete
 submitted contents, old revision, `DIRTY=1`, `DELETED=0`, supported markers
