@@ -191,7 +191,7 @@ optional opaque evidence. Equality includes every preparation field rather than
 the identity of a preparation object. Known-empty details, no color/recurrence and
 a meaningful text change remain required. Evidence cannot accompany PREPARED.
 
-An isolated SQLite journal retains one unresolved event and request identity per
+A SQLite journal retains one unresolved event and request identity per
 account/calendar across generations. All operations require explicit scoped
 leases. Exact PREPARED retention is idempotent; claim compares the entire retained
 record and returns true only after committing UNKNOWN with synchronous=FULL.
@@ -208,11 +208,25 @@ CursorWindow allocation and reads the capsule in 64 KiB BLOB segments within one
 writer transaction. Corrupt or incompatible storage raises a sanitized error;
 it cannot masquerade as absent work. There is no implicit migration or purge.
 
-This journal is not composed into the application workers or sending graph. Its
-claim proves only a local state transition. Atomic arbitration with the existing
-title journal and current native/SQL ownership qualification are prerequisites
-before activation: two independent databases cannot grant concurrent sending for
-the same event. No completion or hold-release mechanism is supplied yet.
+The title helper now hosts an internal text journal in the same database. Title
+reservation, retention and claim (including historical overloads) qualify text
+owners by event or request ID across generations. Reservation adoption also checks
+the retained canonical request ID. Text retention and claim qualify the full title
+history, including bare reservations, reverse reservation/wire links and complete
+completion proofs. Only a valid title completion releases its event; its request ID
+cannot be reused by text on another event or generation. Account/calendar scopes
+remain independent. All these checks and writes share one SQLite writer transaction;
+SQL callbacks stay synchronous on its owning thread, with cancellation checks.
+Keeping existing evidence, results or completions is separate from acquiring a
+new owner. The additive title schema upgrade creates the text table without
+rewriting historical title cells.
+
+The standalone text database remains quarantined, with no implicit import into
+the shared journal. Neither text journal is composed into the application workers
+or sending graph. Its claim proves only a local state transition. Current native/SQL
+ownership qualification remains required before activation. Two independent
+databases cannot grant concurrent sending for the same event. No text completion
+or hold-release mechanism is supplied yet.
 
 ## Integration and evidence limits
 
@@ -251,7 +265,11 @@ Separate JVM tests exercise the full attempt identity and a literal binary fixtu
 including malformed lengths, tags, UTF-8 and budgets. Opt-in physical SQLite
 fixtures exercise helper reopening, concurrent ownership and claim, full-record
 substitution refusal, lease rollback/cancellation, immutable evidence, capsules
-larger than a CursorWindow cell and corrupt metadata/payloads. Opaque synthetic
+larger than a CursorWindow cell and corrupt metadata/payloads.
+Shared-database fixtures additionally exercise cross-family reservation/retention
+and claim, competing helpers, request IDs across events/generations, valid versus
+malformed completion release, canonical reservation adoption and additive migration
+with exact historical-cell snapshots and failed-upgrade rollback. Opaque synthetic
 strings qualify persistence only. Helper reopening is not a process-death or
 power-loss qualification, nor evidence of production recovery or remote sending.
 

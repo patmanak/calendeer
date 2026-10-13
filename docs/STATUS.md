@@ -61,13 +61,19 @@ full decoded content, allowing only CRLF/LF equivalence in the three text fields
 The pure request/profile helper is shared with the historical title path; its
 formats remain unchanged. Unknown fields, unknown details, color, recurrence and
 normalized no-ops cannot widen this request profile. This enables no broader
-upload. An isolated, uncomposed SQLite text journal now retains the complete
+upload. A SQLite text journal now retains the complete
 immutable intent and protected request with a single-use PREPARED-to-UNKNOWN
 transition, scoped commit leases and immutable opaque evidence. Bounded binary
 capsules and segmented BLOB reads preserve large records without a full
-CursorWindow cell. UNKNOWN cannot reset or rebind across generations. Atomic
-arbitration with existing title ownership is required before this journal can
-participate in sending. Durable guarded submission/acknowledgement, service round trips and
+CursorWindow cell. UNKNOWN cannot reset or rebind across generations. The existing
+title database now hosts an internal text journal, with atomic cross-family event
+and request-identity checks in the same writer transaction. Bare title reservations
+and uncertain attempts hold ownership across generations; only fully qualified
+title completions release an event for a distinct text request. The additive schema
+upgrade preserves historical title bytes. The standalone text database remains
+quarantined, with no automatic import. No text journal is connected to workers or
+sending. Current native/SQL ownership qualification, durable guarded
+submission/acknowledgement, service round trips and
 system-editor qualification remain required. See
 [shared text preparation](SHARED_TEXT_PREPARATION.md).
 
