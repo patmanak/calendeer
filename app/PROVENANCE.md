@@ -42,6 +42,14 @@ to this `app` module. SHA-256 values below identify the exact inspected source b
 
 ## New application material
 
+`TextUpdateAttemptStore` and `TextUpdateAttemptStorageCodec` are original project
+integration for quarantined text-attempt persistence. They reuse the existing
+project's SQLite transaction/lease invariants with a separate schema and a bounded
+binary capsule; no upstream code, dependency or cryptographic primitive is added.
+Segmented BLOB reads avoid placing large payload cells in a CursorWindow. These
+helpers are not composed into production sending and provide no inter-journal
+dispatch arbitration. Protected adapter bytes remain opaque.
+
 The configuration layout, teal appearance, simple vector calendar symbol,
 launcher resources, Calendar-specific text and translations are new material.
 No Contako artwork, visual identity, contact code, source translation catalogs,

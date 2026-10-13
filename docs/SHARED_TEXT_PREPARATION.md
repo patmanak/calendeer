@@ -183,6 +183,37 @@ not evidence of a description/location server round trip. These internal records
 have no submission state, transport authority or journal integration. Supplied
 readback does not prove fresh access, an atomic server snapshot or durable success.
 
+## Quarantined durable attempt history
+
+A portable immutable text attempt now retains the complete raw intent, preparation,
+request format and protected bytes, with PREPARED or OUTCOME_UNKNOWN state and
+optional opaque evidence. Equality includes every preparation field rather than
+the identity of a preparation object. Known-empty details, no color/recurrence and
+a meaningful text change remain required. Evidence cannot accompany PREPARED.
+
+An isolated SQLite journal retains one unresolved event and request identity per
+account/calendar across generations. All operations require explicit scoped
+leases. Exact PREPARED retention is idempotent; claim compares the entire retained
+record and returns true only after committing UNKNOWN with synchronous=FULL.
+Revocation before commit rolls back. Cancellation after commit cannot undo that
+history. UNKNOWN cannot be reset, replaced or automatically retried. The first
+opaque evidence is immutable and grants no verified success or acknowledgement.
+
+The project-owned binary capsule preserves raw CRLF, temporal precision, timezone,
+exclusive all-day end and opaque adapter formats. It has explicit schema/tags,
+strict UTF-8, bounded fields, a 16 MiB aggregate limit and mandatory end of input.
+The backup-excluded database stores protected payloads alongside local intention
+metadata; binary framing itself is not encryption. SQL bounds metadata before
+CursorWindow allocation and reads the capsule in 64 KiB BLOB segments within one
+writer transaction. Corrupt or incompatible storage raises a sanitized error;
+it cannot masquerade as absent work. There is no implicit migration or purge.
+
+This journal is not composed into the application workers or sending graph. Its
+claim proves only a local state transition. Atomic arbitration with the existing
+title journal and current native/SQL ownership qualification are prerequisites
+before activation: two independent databases cannot grant concurrent sending for
+the same event. No completion or hold-release mechanism is supplied yet.
+
 ## Integration and evidence limits
 
 The plaintext patcher itself has no keys, network reads, persistence, dispatch
@@ -215,6 +246,14 @@ rejected before opening protected history, and cancellation before serialization
 It does not qualify a durable journal or process-death recovery. These checks do
 not establish a description or location round trip with the Proton service or a
 system calendar client.
+
+Separate JVM tests exercise the full attempt identity and a literal binary fixture,
+including malformed lengths, tags, UTF-8 and budgets. Opt-in physical SQLite
+fixtures exercise helper reopening, concurrent ownership and claim, full-record
+substitution refusal, lease rollback/cancellation, immutable evidence, capsules
+larger than a CursorWindow cell and corrupt metadata/payloads. Opaque synthetic
+strings qualify persistence only. Helper reopening is not a process-death or
+power-loss qualification, nor evidence of production recovery or remote sending.
 
 The next integration needs guarded durable submission
 and acknowledgement, followed by physical system-editor
