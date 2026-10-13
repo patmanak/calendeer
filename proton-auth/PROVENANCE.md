@@ -2,7 +2,8 @@
 
 ## Offline shared-title preservation experiment
 
-`ProtonSharedTitlePatcher.kt` is an original, internal plaintext experiment using
+`ProtonSharedTitlePatcher.kt` is the compatibility entry point for an original,
+internal plaintext experiment now implemented in `ProtonSharedTextPatcher.kt`, using
 the existing Biweekly 0.6.8 dependency, also used by the inspected Proton Android
 Calendar source. It does not copy the Android split/edit use case. The
 [conditional-write audit](../docs/research/CONDITIONAL_WRITES.md) explains why that
@@ -24,10 +25,25 @@ No original line is refolded. A failing Unicode boundary test established the
 default-width limitation before the configuration and byte check were added.
 
 Input/output remain ephemeral `ProtonEventTextParts` with redacted diagnostics.
-There is no authentication, envelope/signature/key-packet handling, timestamp
-update, persistence, transport, production caller or mutation capability. This is
+The raw `patch` operation has no timestamp update. The common primitive has no
+authentication, envelope/signature/key-packet handling, persistence or transport;
+the production title path uses it through the compatibility entry point. This is
 not a complete UPDATE serializer or arbitrary JSON round-trip. Existing Biweekly
 license notices apply; no dependency or copied-upstream code was added.
+
+The shared text extension extracts the same scanner, identity/budget checks and
+restricted explicit metadata policy into the common primitive. It reuses
+Biweekly's `VEvent.setSummary`, `setDescription` and `setLocation`, already used
+by the local CREATE serializer, to write only changed properties. No new upstream
+code, dependency or cryptography is added. Optional DESCRIPTION/LOCATION absence
+is distinct from an explicitly empty property; selected fields refuse parameters,
+duplicates and clear-part ambiguity. Unchanged selected spans and all unselected
+data remain raw, apart from the three explicit metadata replacements in `patchAt`.
+Additions use a deterministic order at the event end.
+The old title API delegates without changing protected formats or production
+eligibility. Description/location preparation remains plaintext-only, without
+signature renewal, request assembly or service qualification. See the
+[shared text boundary](../docs/SHARED_TEXT_PREPARATION.md) for its scope and limits.
 
 `ProtonEventDecryptor.openSharedTitle` extends this experiment with the existing
 Core key-bootstrap and binary/text signature verification paths described below.
