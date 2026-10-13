@@ -69,6 +69,16 @@ No new Proton component, copied upstream code or cryptographic primitive is adde
 This local binding remains independent of authenticated adapter reads and durable
 submission; it cannot grant wider sending consent.
 
+`ProtonLocalTextPreparationAdapter` is original project orchestration reusing the
+existing read-only calendar metadata, bootstrap and exact-event remotes, guarded
+Core user/address refresh, local address DAO and `ProtonCreateContextPolicy`.
+Its crypto callback invokes the already shared full-base text preparation above,
+with the refreshed local addresses frozen for that operation. The separate
+authentication capability shares the established session graph and logout mutex.
+No endpoint, dependency, imported source, key setup or cryptographic primitive is
+added. It checks current observations without claiming an atomic server snapshot,
+durable submission or broader upload consent.
+
 `ProtonEventDecryptor.openSharedTitle` extends this experiment with the existing
 Core key-bootstrap and binary/text signature verification paths described below.
 The bootstrap helper is shared with page decoding; page recovery and budget

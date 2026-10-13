@@ -154,6 +154,58 @@ internal object ProtonLocalTextCryptoProbe {
                 reopened.encryptedSharedPart == prepared.encryptedSharedPart)
             check(reopened.originalRow !== reopened.originalRow)
 
+            stage = "LOCAL_TEXT_AUTHENTICATED_COMPOSITION"
+            // Exact runtime crypto callback with synthetic fresh reads; no real account or service.
+            val reads = mutableListOf<String>()
+            var allowed = true
+            var seals = 0
+            val nativeProtector = protector()
+            val countedProtector = object : EventPayloadProtector {
+                override fun seal(plain: String): String { seals++; return nativeProtector.seal(plain) }
+                override fun open(protected: String): String = nativeProtector.open(protected)
+            }
+            val authenticated = ProtonLocalTextPreparationAdapter(
+                { session }, { error("No legacy refresh") },
+                CreateCalendarMetadataRemote { observed, calendar ->
+                    check(observed == session && calendar == scope.calendar.value)
+                    reads += "metadata"; metadata
+                }, object : EventImportRemote {
+                    override suspend fun page(session: CatalogSession, calendar: String, window: EventWindow): EncryptedEventPage =
+                        error("No pagination")
+                    override suspend fun bootstrap(session: CatalogSession, calendar: String): JsonObject {
+                        reads += "bootstrap"; return bootstrap
+                    }
+                }, LocalTitleEventRemote { observed, target, event ->
+                    check(observed == session && target == scope && event == source.eventId)
+                    reads += "event"; candidate
+                }, LocalEventAddresses { user ->
+                    check(user == session.userId); reads += "local-addresses"; listOf(address)
+                }, localTextCryptoPreparation(crypto, countedProtector),
+                guardedRefresh = localTitleContextRefresh(
+                    { reads += "user" }, { reads += "addresses" }))
+            val authenticatedRecord = checkNotNull(authenticated.prepareLocalText(originalIntent, timestamp) {
+                check(it == scope); allowed
+            })
+            check(authenticatedRecord.intent == originalIntent)
+            check(reads == listOf("user", "addresses", "metadata", "bootstrap", "event", "local-addresses"))
+            check(seals == 1)
+            verify(authenticatedRecord, candidate, originalClear, secret, originalIntent.content)
+            // A full-base mismatch with a valid opaque revision must be rejected by the real decoder.
+            stage = "LOCAL_TEXT_AUTHENTICATED_BASE_REFUSAL"
+            var baseRefused = false
+            try {
+                authenticated.prepareLocalText(originalIntent.copy(base = source.copy(
+                    content = source.content.copy(description = "Foreign original description"))), timestamp) { allowed }
+            } catch (failure: LocalEditPreparationException) {
+                baseRefused = failure.reason == LocalEditPreparationFailure.UNSUPPORTED && failure.cause == null
+            }
+            check(baseRefused && seals == 1)
+            stage = "LOCAL_TEXT_AUTHENTICATED_REVOKED"
+            allowed = false
+            reads.clear()
+            check(authenticated.prepareLocalText(originalIntent, timestamp) { allowed } == null)
+            check(reads.isEmpty() && seals == 1)
+
             stage = "LOCAL_TEXT_OPTIONAL_PRESENCE"
             for (presentEmpty in listOf(false, true)) {
                 val plain = if (presentEmpty) secret.replace("END:VEVENT\r\n", "LOCATION:\r\nEND:VEVENT\r\n") else secret

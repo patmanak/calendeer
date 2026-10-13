@@ -120,6 +120,34 @@ projection formats, duplicate keys, unknown fields and other preparation formats
 are refused.
 These checks do not prove encrypted text semantics or renew current access.
 
+## Authenticated fresh preparation
+
+`CalendarLocalTextPreparationPort` is a separate project-owned capability for
+the full paused text intent. `ProtonAuthentication.localTextPreparations` exposes
+it through the existing shared authenticated runtime. Its local format is the
+distinct local text format above; the title port, consent and formats retain
+their restrictions. Unsupported guarded implementations return null without
+falling back to an unrestricted operation.
+
+The facade freezes and validates the intent before dispatcher switching or
+waiting for the shared authentication mutex. The adapter refreshes the Core user
+and addresses with separate checkpoints, then reads current calendar metadata,
+bootstrap and the exact original event. Each response is copied before later
+suspensions. It checks the exact local session, account/calendar/event identities,
+UID, original revision including settings, and current member/signing-key policy
+before invoking the existing full-base decoder and protected crypto preparation.
+These successive reads do not constitute an atomic server snapshot.
+
+The guarded path checks the caller's original scoped admission around each
+controlled read and preparation stage. Once denied, that operation cannot reopen.
+The facade also validates the complete returned intent, time and format and
+expires its callback on every exit. Cancellation takes precedence even when a
+dependency cancels then returns normally or throws an ordinary error. Network,
+storage, permission and unsupported failures expose only closed categories.
+Logout uses the same mutex: cleanup waits for an in-flight operation, rather than
+immediately interrupting it. Preparation grants no sending authority or durable
+retention; the caller still owns mode, generation and local intent lifetime.
+
 ## Integration and evidence limits
 
 The plaintext patcher itself has no keys, network reads, persistence, dispatch
@@ -139,12 +167,15 @@ local-observation binding, unchanged absent/empty properties, removal, newline-o
 no-ops and mutable input isolation. A separate synthetic local-intent native probe
 checks full-base refusal before sealing, timed/all-day date preservation and those
 optional-field cases. Native recovery uses new instances in the same process;
-it does not qualify a durable journal or process-death recovery. These checks do
+the probe also exercises the exact runtime crypto callback through the fresh
+adapter with synthetic read responses, rejects a full-base mismatch before
+sealing, and refuses revoked admission before reads.
+It does not qualify a durable journal or process-death recovery. These checks do
 not establish a description or location round trip with the Proton service or a
 system calendar client.
 
-The next integration needs an authenticated preparation adapter and request/readback,
-guarded durable submission and acknowledgement, followed by physical system-editor
+The next integration needs broader request/readback, guarded durable submission
+and acknowledgement, followed by physical system-editor
 qualification. Historical title records must not be
 reinterpreted as permission for broader edits. The existing concurrent GET/PUT
 race remains; plaintext patching supplies no server-side write precondition.

@@ -48,10 +48,15 @@ mutation identity, complete base/replacement and observation format. Preparation
 compares the full decoded original before crypto and derives nullable selected
 properties from that verified plaintext. Unchanged absent/empty fields retain
 their representation; a changed optional field cleared in Android becomes removal.
-The original title type and formats remain restricted. This enables no broader
-upload: authenticated preparation/request/readback, durable submission/acknowledgement
-and system-editor
-qualification remain required. See [shared text preparation](SHARED_TEXT_PREPARATION.md).
+The original title type and formats remain restricted. A separate text preparation
+port now shares the authenticated session graph and logout mutex. It freezes the
+intent before suspension, refreshes user/address context and reads current
+metadata/bootstrap/original event, checking session, revision, rights and caller
+admission around controlled stages. The exact runtime crypto callback verifies
+the full base before sealing. Revoked guarded access cannot reopen or fall back;
+returned intent/time/format must match. This enables no broader upload:
+request/readback, durable submission/acknowledgement and system-editor qualification
+remain required. See [shared text preparation](SHARED_TEXT_PREPARATION.md).
 
 After title acknowledgement, the original CREATE follow-up can close from the
 exact current clean frame, with repeated native, origin and access checks and no

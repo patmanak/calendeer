@@ -3,6 +3,7 @@ package com.patmanak.proton.andcalendarbridge.protonauth
 
 import android.content.Context
 import android.webkit.WebView
+import java.util.concurrent.atomic.AtomicBoolean
 import com.patmanak.proton.andcalendarbridge.sync.*
 import com.patmanak.proton.andcalendarbridge.auth.AuthenticationFlowPort
 import com.patmanak.proton.andcalendarbridge.auth.AuthenticationSecret
@@ -31,6 +32,7 @@ object ProtonAuthentication {
     fun createPreparations(context: Context): CalendarCreatePreparationPort = shared(context)
     fun createSubmissions(context: Context): CalendarCreateSubmissionPort = shared(context)
     fun localEditPreparations(context: Context): CalendarLocalEditPreparationPort = shared(context)
+    fun localTextPreparations(context: Context): CalendarLocalTextPreparationPort = shared(context)
     fun titleUpdates(context: Context): CalendarTitleUpdateSubmissionPort = shared(context)
     internal suspend fun matchesIdentityHash(context: Context, account: AccountId, expectedHash: String): Boolean =
         shared(context).matchesIdentityHash(account, expectedHash)
@@ -62,11 +64,12 @@ internal class SerializedAuthenticationPort(
     private val createGraph: () -> ProtonAuthenticationGraph,
     private val cancelVerification: () -> Unit,
     private val dispatcher: CoroutineDispatcher = Dispatchers.IO,
-) : AuthenticationFlowPort, CalendarCatalogPort, CalendarDeltaRemote, RollingCalendarRemote, ContentMappingRemote, CalendarCreatePreparationPort, CalendarCreateSubmissionPort, CalendarLocalEditPreparationPort, CalendarTitleUpdateSubmissionPort {
+) : AuthenticationFlowPort, CalendarCatalogPort, CalendarDeltaRemote, RollingCalendarRemote, ContentMappingRemote, CalendarCreatePreparationPort, CalendarCreateSubmissionPort, CalendarLocalEditPreparationPort, CalendarLocalTextPreparationPort, CalendarTitleUpdateSubmissionPort {
     override val contentMapping = EVENT_CONTENT_MAPPING
     override val localCreateFormat = LOCAL_CREATE_PREPARATION_FORMAT
     override val knownEmptySubmissionFormat = KNOWN_EMPTY_SUBMISSION_FORMAT
     override val localTitleFormat = LOCAL_TITLE_PREPARATION_FORMAT
+    override val localTextFormat = LOCAL_TEXT_PREPARATION_FORMAT
     override val titleUpdateFormat = TITLE_UPDATE_SUBMISSION_FORMAT
     constructor(context: Context, verification: HumanVerificationHost) : this(
         { ProtonAuthenticationRuntime.build(context, verification.delegate.hooks) },
@@ -81,6 +84,91 @@ internal class SerializedAuthenticationPort(
 
     override suspend fun currentAccount(): AccountId? = withContext(dispatcher) {
         lock.withLock { if (authenticated) graph?.events?.currentAccount() else null }
+    }
+
+    override suspend fun prepareLocalText(intent: LocalEditIntent, timestamp: java.time.Instant): LocalTextEditPreparation {
+        val caller = currentCoroutineContext()
+        caller.ensureActive()
+        return try {
+            // Freeze before dispatcher switching or waiting for the shared logout mutex.
+            val frozen = freezeLocalTextRequest(intent, timestamp)
+            val expectedFormat = localTextFormat
+            withContext(dispatcher) {
+                val operation = currentCoroutineContext()
+                try {
+                    lock.withLock {
+                        operation.ensureActive()
+                        if (!authenticated) localEditUnavailable(LocalEditPreparationFailure.AUTHENTICATION)
+                        val runtime = graph?.localTexts ?: localEditUnavailable(LocalEditPreparationFailure.UNSUPPORTED)
+                        if (runtime.localTextFormat != expectedFormat)
+                            localEditUnavailable(LocalEditPreparationFailure.UNSUPPORTED)
+                        val result = runtime.prepareLocalText(frozen, timestamp)
+                        operation.ensureActive()
+                        if (!authenticated || runtime.localTextFormat != expectedFormat || result.intent != frozen ||
+                            result.timestamp != timestamp || result.format != expectedFormat)
+                            localEditUnavailable(LocalEditPreparationFailure.CONTEXT)
+                        LocalTextEditPreparation(frozen, timestamp, expectedFormat, result.protectedPayload)
+                    }
+                } catch (cancelled: CancellationException) { throw cancelled }
+                  catch (failure: Exception) { operation.ensureActive(); throw failure }
+            }
+        } catch (cancelled: CancellationException) { throw cancelled }
+          catch (failure: Exception) { caller.ensureActive(); throw failure }
+    }
+
+    override suspend fun prepareLocalText(intent: LocalEditIntent, timestamp: java.time.Instant,
+        admit: (CalendarScope) -> Boolean): LocalTextEditPreparation? {
+        val caller = currentCoroutineContext()
+        caller.ensureActive()
+        val closed = AtomicBoolean(false)
+        return try {
+            val frozen = freezeLocalTextRequest(intent, timestamp)
+            val expectedFormat = localTextFormat
+            val lease = { scope: CalendarScope ->
+                if (scope != frozen.scope || closed.get()) false else {
+                    val allowed = localTextFormat == expectedFormat && admit(scope)
+                    if (!allowed) closed.set(true)
+                    allowed && !closed.get()
+                }
+            }
+            suspend fun active(): Boolean {
+                currentCoroutineContext().ensureActive()
+                val allowed = lease(frozen.scope)
+                currentCoroutineContext().ensureActive()
+                return allowed
+            }
+            if (!active()) return null
+            withContext(dispatcher) {
+                val operation = currentCoroutineContext()
+                try {
+                    if (!active()) return@withContext null
+                    lock.withLock {
+                        operation.ensureActive()
+                        if (!authenticated || !active()) return@withLock null
+                        val runtime = graph?.localTexts ?: return@withLock null
+                        if (runtime.localTextFormat != expectedFormat) return@withLock null
+                        val runtimeLease = { scope: CalendarScope ->
+                            if (scope != frozen.scope || closed.get()) false else {
+                                operation.ensureActive()
+                                val allowed = authenticated && runtime.localTextFormat == expectedFormat && lease(scope)
+                                if (!allowed) closed.set(true)
+                                operation.ensureActive()
+                                allowed && !closed.get()
+                            }
+                        }
+                        // Guarded entry never falls back to the unrestricted preparation overload.
+                        val result = runtime.prepareLocalText(frozen, timestamp, runtimeLease)
+                        operation.ensureActive()
+                        if (!active() || !authenticated || runtime.localTextFormat != expectedFormat) return@withLock null
+                        result?.takeIf { it.intent == frozen && it.timestamp == timestamp && it.format == expectedFormat }
+                            ?.let { LocalTextEditPreparation(frozen, timestamp, expectedFormat, it.protectedPayload) }
+                    }
+                } catch (cancelled: CancellationException) { throw cancelled }
+                  catch (failure: Exception) { operation.ensureActive(); throw failure }
+            }
+        } catch (cancelled: CancellationException) { throw cancelled }
+          catch (failure: Exception) { caller.ensureActive(); throw failure }
+          finally { closed.set(true) }
     }
 
     override suspend fun prepareCreate(draft: CalendarCreateDraft): PreparedCalendarCreate = withContext(dispatcher) {
