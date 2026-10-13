@@ -128,9 +128,14 @@ edit through the production workers. Fresh-process replay retains the original
 CREATE and title evidence, complete result and native row without another attempt.
 The incoming projection receipt may advance only for an identical verified echo;
 this is conservation of data and history, not immutability of import metadata.
-Transferred all-day journeys remain unqualified: the live journey has not passed
-the native-content check following its initial CREATE. Later read-only checks
-match the expected values but cannot establish what differed at the failure.
+A separate fresh transferred all-day CREATE-to-title journey also qualifies
+production-worker completion and fresh-process replay across three calendar dates
+spanning a daylight-saving transition. It retains complete historical CREATE and
+title evidence, the same native row and exact UTC date bounds with an exclusive
+end, without another attempt. The fixture permits an omitted end timezone only
+for the complete verified owner-placeholder profile; other journey validators
+remain unchanged. The observed pre-editor frame may differ from the immutable
+historical title acknowledgement only by a receipt for an exact original-base echo.
 Broader event profiles remain unqualified.
 An internal offline binding now retains an already prepared title wire only for
 the exact current SQL owner, preparation capsule and complete native dirty edit.

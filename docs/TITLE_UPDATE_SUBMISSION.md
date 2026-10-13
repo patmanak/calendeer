@@ -844,6 +844,18 @@ not automatic production-worker triggering or a Samsung editor journey.
   CREATE check. It compares implicit and explicit Provider projections against
   the frozen original content, emitting boolean witnesses without qualifying the
   failed CREATE, changing write options or admitting a title edit.
+  Native-content assertions emit boolean diagnostics from their own cursor
+  snapshot. A transferred all-day row may omit its end timezone only with a
+  clean witness for that exact frame and the complete native owner-placeholder
+  profile, including the scoped organizer and every flag from that same cursor.
+  UTC date bounds, exclusive end, identity and provenance still require exact
+  matches. Canonical and other journey profiles retain their strict validation.
+  The pre-editor frame is an observation, not a production reservation. Its
+  relationship to the actual historical title acknowledgement allows only an
+  incoming receipt for an identical echo of the full original base, with exact
+  origin, scope, format and representations. The pre-editor snapshot stays
+  unchanged; the actual acknowledgement stays fully immutable and remains the
+  reference for SQL acknowledgement, title evidence and fresh-process replay.
   `RECOVER` requires an already completed title proof and
   exact original enrollment, allowing normal workers to close only its retained
   CREATE follow-up; no editor or new submission is admitted. Its preflight may

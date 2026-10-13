@@ -191,6 +191,8 @@ class CalendarSystemHandoffTitleWorkerLiveDeviceTest {
                     output.putBoolean("handoff_diag_settled_${stage}_base_result", frame.base == result)
                     output.putBoolean("handoff_diag_settled_${stage}_ack_frame_frozen",
                         snapshot.title.completion.receipt.handoff == frozenTitleFrame(prefs, snapshot.create))
+                    output.putBoolean("handoff_diag_settled_${stage}_ack_frame_preeditor_qualified",
+                        TransferredTitleFrame.matchesPreEditorFrame(frozenTitleFrame(prefs, snapshot.create), snapshot.title.completion.receipt.handoff))
                     output.putBoolean("handoff_diag_settled_${stage}_projection_ack", last == snapshot.title.completion.receipt.projection)
                     output.putBoolean("handoff_diag_settled_${stage}_projection_exact_echo", last != null &&
                         last.scope == target && last.format == frame.format && last.protocol == 1 &&
@@ -697,6 +699,12 @@ class CalendarSystemHandoffTitleWorkerLiveDeviceTest {
                     output.putBoolean("handoff_diag_title_completion", completion != null)
                     output.putBoolean("handoff_diag_title_result_requested", result?.event?.content?.title == prefs.getString("changed_title", null))
                     output.putBoolean("handoff_diag_title_owner_matches_preparation", record != null && record.preparation.intent == owner)
+                    if (record != null && result != null && completion != null) read("title_evidence_comparison") {
+                        val original = readCreateProof(app, scope, row, normalizeQueueStatusForRecovery = true)
+                        val frozen = frozenTitleFrame(prefs, original)
+                        val expected = original.initial.base.content.copy(title = checkNotNull(prefs.getString("changed_title", null)))
+                        titleEvidenceDiagnostics("handoff_diag_title_evidence_", record, result, completion, original.initial, frozen, expected)
+                    }
                     ImportStore(app).use { imports ->
                         val ack = imports.titleUpdateAcknowledgement(scope, event, id)
                         output.putBoolean("handoff_diag_title_ack_present", ack != null)
@@ -918,12 +926,13 @@ class CalendarSystemHandoffTitleWorkerLiveDeviceTest {
             intent.base == frozenFrame.base && intent.content == expected && intent.state == LocalEditState.PAUSED &&
             proof.record.preparation.timestamp.nano == 0)
         val receipt = proof.completion.receipt
+        titleEvidenceDiagnostics("handoff_title_evidence_", proof.record, proof.result, proof.completion, create.initial, frozenFrame, expected)
         assertTrue("Require complete durable title evidence bound to this handoff", proof.record.state == TitleUpdateAttemptState.OUTCOME_UNKNOWN &&
             proof.record.protectedEvidence != null && proof.result.record == proof.record.copy(protectedEvidence = null) &&
             proof.result.event.eventId == create.initial.eventId && proof.result.event.content == expected &&
             proof.result.event.revision != create.initial.base.revision && proof.completion.result == proof.result &&
-            receipt.handoff == frozenFrame && receipt.matches(proof.result))
-        val advanced = CapturedCreateHandoffFrame(frozenFrame.receipt, proof.result.event, receipt.projection)
+            TransferredTitleFrame.matchesPreEditorFrame(frozenFrame, receipt.handoff) && receipt.matches(proof.result))
+        val advanced = CapturedCreateHandoffFrame(checkNotNull(receipt.handoff).receipt, proof.result.event, receipt.projection)
         val currentFrame = create.current.frame
         val echoProjection = currentFrame.lastProjection?.let {
             it.scope == scope && it.format == advanced.format && it.protocol == 1 &&
@@ -948,19 +957,133 @@ class CalendarSystemHandoffTitleWorkerLiveDeviceTest {
         status("handoff_title_typed_time_preserved")
     }
 
+    /** Predicate evidence only; neither adopts another frame nor changes the strict assertion. */
+    private fun titleEvidenceDiagnostics(prefix: String, record: TitleUpdateAttemptRecord, result: TitleUpdateVerifiedResult,
+        completion: TitleUpdateCompletion, original: CapturedCreateHandoffFrame, frozen: CapturedCreateHandoffFrame,
+        expected: EventContent) {
+        val receipt = completion.receipt
+        val historical = receipt.handoff
+        val last = historical?.lastProjection
+        val output = Bundle()
+        output.putBoolean(prefix + "unknown", record.state == TitleUpdateAttemptState.OUTCOME_UNKNOWN)
+        output.putBoolean(prefix + "response_present", record.protectedEvidence != null)
+        output.putBoolean(prefix + "record_exact", result.record == record.copy(protectedEvidence = null))
+        output.putBoolean(prefix + "event_identity_exact", result.event.eventId == original.eventId)
+        output.putBoolean(prefix + "content_exact", result.event.content == expected)
+        output.putBoolean(prefix + "revision_changed", result.event.revision != original.base.revision)
+        output.putBoolean(prefix + "completion_result_exact", completion.result == result)
+        output.putBoolean(prefix + "handoff_frozen_exact", historical == frozen)
+        output.putBoolean(prefix + "handoff_preeditor_qualified", TransferredTitleFrame.matchesPreEditorFrame(frozen, historical))
+        output.putBoolean(prefix + "receipt_matches_result", receipt.matches(result))
+        output.putBoolean(prefix + "handoff_present", historical != null)
+        output.putBoolean(prefix + "handoff_origin_exact", historical?.receipt == frozen.receipt)
+        output.putBoolean(prefix + "handoff_base_exact", historical?.base == frozen.base)
+        output.putBoolean(prefix + "handoff_base_identity_exact", historical?.base?.eventId == frozen.base.eventId)
+        output.putBoolean(prefix + "handoff_base_revision_exact", historical?.base?.revision == frozen.base.revision)
+        output.putBoolean(prefix + "handoff_base_content_exact", historical?.base?.content == frozen.base.content)
+        output.putBoolean(prefix + "handoff_scope_exact", historical?.scope == frozen.scope)
+        output.putBoolean(prefix + "handoff_format_exact", historical?.format == frozen.format)
+        output.putBoolean(prefix + "handoff_last_projection_exact", historical != null && last == frozen.lastProjection)
+        output.putBoolean(prefix + "handoff_last_projection_present", last != null)
+        output.putBoolean(prefix + "frozen_last_projection_present", frozen.lastProjection != null)
+        output.putBoolean(prefix + "last_projection_scope_exact", last?.scope == frozen.scope)
+        output.putBoolean(prefix + "last_projection_format_exact", last?.format == frozen.format)
+        output.putBoolean(prefix + "last_projection_protocol_exact", last?.protocol == 1)
+        output.putBoolean(prefix + "last_projection_nonce_valid", last?.nonce?.matches(Regex("[a-f0-9]{8}(-[a-f0-9]{4}){3}-[a-f0-9]{12}")) == true)
+        output.putBoolean(prefix + "last_projection_change_exact", last?.change == frozen.base)
+        output.putBoolean(prefix + "last_projection_previous_exact", last?.previousBase == frozen.base)
+        output.putBoolean(prefix + "last_projection_representations_absent", last != null && last.representation == null && last.previousRepresentation == null)
+        output.putBoolean(prefix + "historical_frame_is_exact_base_echo", historical != null &&
+            historical.receipt == frozen.receipt && historical.base == frozen.base && historical.scope == frozen.scope &&
+            historical.format == frozen.format && last != null && last.scope == frozen.scope && last.format == frozen.format &&
+            last.protocol == 1 && last.nonce.matches(Regex("[a-f0-9]{8}(-[a-f0-9]{4}){3}-[a-f0-9]{12}")) &&
+            last.change == frozen.base && last.previousBase == frozen.base && last.representation == null && last.previousRepresentation == null)
+        InstrumentationRegistry.getInstrumentation().sendStatus(0, output)
+    }
+
     private suspend fun verifyNative(app: Context, projection: AndroidCalendarProjection, scope: CalendarScope,
         calendar: Long, row: Long, frame: CapturedCreateHandoffFrame, expected: EventContent) {
         val clean = projection.inspectCapturedHandoffBase(frame)
         val witness = projection.inspectOwnedEvent(scope, frame.eventId, frame.base.revision)
         assertTrue("Keep the qualified transferred original on the same native row", clean?.frame == frame && witness != null &&
             witness.eventRow == row && witness.calendarRow == calendar)
-        val values = nativeValues(app, calendar, row)
+        val output = Bundle()
+        val calendarOwner = projection.accountFor(scope.account).name
+        val cleanFrameVerified = clean?.frame == frame
+        // This is the same query and map construction as nativeValues. Both diagnostics
+        // and the qualified transferred-row assertion below consume this one cursor snapshot.
+        val values = app.contentResolver.query(Events.CONTENT_URI, null,
+            "${Events.CALENDAR_ID}=? AND ${Events._ID}=?", arrayOf(calendar.toString(), row.toString()), null)!!.use { cursor ->
+            assertTrue("One retained native row required", cursor.count == 1 && cursor.moveToFirst())
+            val fields = listOf(Events._SYNC_ID, Events.SYNC_DATA4, Events.DIRTY, Events.DELETED, Events.TITLE,
+                Events.DESCRIPTION, Events.EVENT_LOCATION, Events.ALL_DAY, Events.DTSTART, Events.DTEND,
+                Events.EVENT_TIMEZONE, Events.EVENT_END_TIMEZONE, Events.SYNC_DATA5, Events.SYNC_DATA6, Events.SYNC_DATA7,
+                Events.SYNC_DATA8, Events.SYNC_DATA9, Events.SYNC_DATA10, Events.ORGANIZER, Events.HAS_ATTENDEE_DATA,
+                Events.IS_ORGANIZER, Events.GUESTS_CAN_INVITE_OTHERS, Events.GUESTS_CAN_SEE_GUESTS,
+                Events.GUESTS_CAN_MODIFY, Events.HAS_ALARM, Events.SELF_ATTENDEE_STATUS, Events.ACCESS_LEVEL)
+            val numeric = setOf(Events.DIRTY, Events.DELETED, Events.ALL_DAY, Events.DTSTART, Events.DTEND,
+                Events.HAS_ATTENDEE_DATA, Events.IS_ORGANIZER, Events.GUESTS_CAN_INVITE_OTHERS, Events.GUESTS_CAN_SEE_GUESTS,
+                Events.GUESTS_CAN_MODIFY, Events.HAS_ALARM, Events.SELF_ATTENDEE_STATUS, Events.ACCESS_LEVEL)
+            val empty = setOf(Events.SYNC_DATA8, Events.SYNC_DATA9, Events.SYNC_DATA10)
+            val snapshot = cursor.columnNames.indices.associate { cursor.getColumnName(it) to if (cursor.isNull(it)) null else cursor.getString(it) }
+            val qualifiedNullEnd = expected.time is EventTime.AllDay && snapshot[Events.EVENT_END_TIMEZONE] == null &&
+                TransferredTitleNativeTime.nativeMatches(expected.time, snapshot, calendarOwner, cleanFrameVerified)
+            output.putBoolean("handoff_native_column_names_unique", cursor.columnNames.toSet().size == cursor.columnCount)
+            for (field in fields) {
+                val indices = cursor.columnNames.indices.filter { cursor.getColumnName(it) == field }
+                val type = indices.singleOrNull()?.let(cursor::getType)
+                output.putBoolean("handoff_native_${field}_present", indices.isNotEmpty())
+                output.putBoolean("handoff_native_${field}_unique", indices.size == 1)
+                output.putBoolean("handoff_native_${field}_type_expected", when {
+                    field in empty -> type == android.database.Cursor.FIELD_TYPE_NULL
+                    field in numeric -> type == android.database.Cursor.FIELD_TYPE_INTEGER
+                    field == Events.EVENT_END_TIMEZONE && expected.time is EventTime.Timed ->
+                        type == android.database.Cursor.FIELD_TYPE_STRING || type == android.database.Cursor.FIELD_TYPE_NULL
+                    field == Events.EVENT_END_TIMEZONE && qualifiedNullEnd -> type == android.database.Cursor.FIELD_TYPE_NULL
+                    else -> type == android.database.Cursor.FIELD_TYPE_STRING
+                })
+            }
+            snapshot
+        }
         val identity = projection.eventIdentityKey(scope, frame.eventId)
+        val qualifiedPlaceholder = TransferredTitleNativeTime.qualifiedPlaceholder(values, calendarOwner, cleanFrameVerified)
+        val typedTimeMatches = TransferredTitleNativeTime.nativeMatches(expected.time, values, calendarOwner, cleanFrameVerified)
+        output.putBoolean("handoff_native_qualified_placeholder", qualifiedPlaceholder)
+        output.putBoolean("handoff_native_clean_frame", clean?.frame == frame)
+        output.putBoolean("handoff_native_owned_same_row", witness != null && witness.eventRow == row && witness.calendarRow == calendar)
+        output.putBoolean("handoff_native_sync_identity", values[Events._SYNC_ID] == identity)
+        output.putBoolean("handoff_native_remote_identity", values[Events.SYNC_DATA4] == identity)
+        output.putBoolean("handoff_native_dirty_zero", values[Events.DIRTY] == "0")
+        output.putBoolean("handoff_native_deleted_zero", values[Events.DELETED] == "0")
+        output.putBoolean("handoff_native_title_exact", values[Events.TITLE] == expected.title)
+        output.putBoolean("handoff_native_description_exact", values[Events.DESCRIPTION] == expected.description)
+        output.putBoolean("handoff_native_location_exact", values[Events.EVENT_LOCATION] == expected.location)
+        output.putBoolean("handoff_native_typed_time_exact", typedTimeMatches)
+        val bounds = TitleJourneyTimeProfile.bounds(expected.time)
+        output.putBoolean("handoff_native_time_start_exact", values[Events.DTSTART] == bounds.first.toString())
+        output.putBoolean("handoff_native_time_end_exact", values[Events.DTEND] == bounds.second.toString())
+        output.putBoolean("handoff_native_all_day_exact", values[Events.ALL_DAY] == if (expected.time is EventTime.AllDay) "1" else "0")
+        output.putBoolean("handoff_native_end_zone_null", values[Events.EVENT_END_TIMEZONE] == null)
+        for (field in listOf(Events.EVENT_TIMEZONE, Events.EVENT_END_TIMEZONE)) {
+            val zone = values[field]
+            val matches = when (val time = expected.time) {
+                is EventTime.AllDay -> zone == "UTC" ||
+                    (field == Events.EVENT_END_TIMEZONE && zone == null && qualifiedPlaceholder && typedTimeMatches)
+                is EventTime.Timed -> if (zone == null) field == Events.EVENT_END_TIMEZONE else try {
+                    java.time.ZoneId.of(zone).normalized() == time.zone.normalized()
+                } catch (_: java.time.DateTimeException) { false }
+            }
+            output.putBoolean("handoff_native_${field}_matches", matches)
+        }
+        for (field in listOf(Events.SYNC_DATA5, Events.SYNC_DATA6, Events.SYNC_DATA7))
+            output.putBoolean("handoff_native_${field}_nonempty", !values[field].isNullOrEmpty())
+        for (field in listOf(Events.SYNC_DATA8, Events.SYNC_DATA9, Events.SYNC_DATA10))
+            output.putBoolean("handoff_native_${field}_empty", values[field] == null)
+        InstrumentationRegistry.getInstrumentation().sendStatus(0, output)
         assertTrue("Keep the exact remote identity and clean typed content", values[Events._SYNC_ID] == identity && values[Events.SYNC_DATA4] == identity &&
             values[Events.DIRTY] == "0" && values[Events.DELETED] == "0" && values[Events.TITLE] == expected.title &&
             values[Events.DESCRIPTION] == expected.description && values[Events.EVENT_LOCATION] == expected.location &&
-            TitleJourneyTimeProfile.nativeMatches(expected.time, values[Events.ALL_DAY], values[Events.DTSTART], values[Events.DTEND],
-                values[Events.EVENT_TIMEZONE], values[Events.EVENT_END_TIMEZONE]) &&
+            typedTimeMatches &&
             listOf(Events.SYNC_DATA5, Events.SYNC_DATA6, Events.SYNC_DATA7).all { !values[it].isNullOrEmpty() } &&
             listOf(Events.SYNC_DATA8, Events.SYNC_DATA9, Events.SYNC_DATA10).all { values[it] == null })
         app.contentResolver.query(Events.CONTENT_URI, arrayOf(Events._ID),
