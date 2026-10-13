@@ -148,6 +148,41 @@ Logout uses the same mutex: cleanup waits for an in-flight operation, rather tha
 immediately interrupting it. Preparation grants no sending authority or durable
 retention; the caller still owns mode, generation and local intent lifetime.
 
+## Protected UPDATE request and supplied readback
+
+An internal text request codec seals a distinct versioned envelope binding the
+request identity, complete local preparation, its protected-payload hash, exact
+context and literal same-calendar UPDATE body. Reopening reconstructs that body
+from the retained fragments and refuses substitutions, unknown keys, duplicate
+JSON keys, malformed UTF-8 and oversized values. Inputs and returned structures
+are snapshotted. Protection failures remain sanitized and cancellation takes
+precedence around protection callbacks.
+
+Request construction shares a pure closed profile with the existing title path;
+its compatibility wrappers and historical formats remain unchanged. This profile
+requires known-empty details, no color, no recurrence, no personal/invitation
+payload and exactly two shared parts. Unknown GET fields cannot be silently
+dropped. A normalized newline-only preparation remains recoverable history but
+cannot become an UPDATE request. This narrower profile does not make every
+supported offline preparation sendable.
+
+The separate readback verifier consumes supplied observations without fetching
+them. It checks cancellation before serialization and bounds each JSON snapshot
+to 4 MiB of strict UTF-8 before parsing or opening protected history.
+It requires the retained account/context/bootstrap, exact signed parts and
+untouched metadata, then invokes native verification with the known-empty policy.
+The decoded event identity, computed new revision and entire content must match.
+Only CRLF-to-LF equivalence in title, description and location is accepted; dates,
+zone, precision and other fields remain exact. It returns the actual decoded
+content while retaining the raw local intent. Future acknowledgement must handle
+that distinction explicitly.
+
+The shared clock comparison allows the narrowly measured title transformations
+of ModifyTime and LastEditTime. Applying it to broader text is conservative reuse,
+not evidence of a description/location server round trip. These internal records
+have no submission state, transport authority or journal integration. Supplied
+readback does not prove fresh access, an atomic server snapshot or durable success.
+
 ## Integration and evidence limits
 
 The plaintext patcher itself has no keys, network reads, persistence, dispatch
@@ -170,11 +205,18 @@ optional-field cases. Native recovery uses new instances in the same process;
 the probe also exercises the exact runtime crypto callback through the fresh
 adapter with synthetic read responses, rejects a full-base mismatch before
 sealing, and refuses revoked admission before reads.
+Its explicitly closed-profile extension builds protected requests and verifies
+supplied timed/all-day readbacks through the real Core decoder, including combined
+text edits, multiline notes, optional removal and normalized no-op refusal.
+An invalid signature is also retained in both the expected fragments and supplied
+row, so rejection requires native verification rather than a structural mismatch.
+JVM readback tests additionally require malformed or oversized observations to be
+rejected before opening protected history, and cancellation before serialization.
 It does not qualify a durable journal or process-death recovery. These checks do
 not establish a description or location round trip with the Proton service or a
 system calendar client.
 
-The next integration needs broader request/readback, guarded durable submission
+The next integration needs guarded durable submission
 and acknowledgement, followed by physical system-editor
 qualification. Historical title records must not be
 reinterpreted as permission for broader edits. The existing concurrent GET/PUT

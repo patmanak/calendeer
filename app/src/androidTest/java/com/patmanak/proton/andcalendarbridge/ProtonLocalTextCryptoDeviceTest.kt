@@ -8,8 +8,8 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 import org.junit.runner.RunWith
 
-/** Synthetic native full-intent crypto and fresh adapter composition.
- * Uses the production crypto callback; no real account, service, journal or Provider access.
+/** Synthetic native full-intent crypto, protected UPDATE requests and supplied readback.
+ * Uses production crypto callbacks; no real account, service, journal or Provider access.
  */
 @RunWith(AndroidJUnit4::class)
 class ProtonLocalTextCryptoDeviceTest {

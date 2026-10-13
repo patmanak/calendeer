@@ -254,6 +254,84 @@ internal object ProtonLocalTextCryptoProbe {
             check(noOp.intent == noOpIntent && noOp.intent.content.description != noOp.intent.base.content.description)
             verify(noOp, candidate, originalClear, secret, noOpIntent.content, changed = false)
 
+            stage = "LOCAL_TEXT_UPDATE_REQUEST"
+            // Explicitly qualify a closed wire profile, separate from the opaque preservation fixture above.
+            fun closed(input: JsonObject, allDay: Boolean): JsonObject = JsonObject(
+                (input - "OpaqueMetadata") + mapOf(
+                    "SharedEvents" to JsonArray(input.array("SharedEvents").map {
+                        JsonObject((it as JsonObject) - "UnknownPartMetadata")
+                    }),
+                    "Permissions" to JsonPrimitive(3), "IsOrganizer" to JsonPrimitive(1),
+                    "IsPersonalSingleEdit" to JsonPrimitive(false), "CreateTime" to JsonPrimitive(1),
+                    "ModifyTime" to JsonPrimitive(1), "LastEditTime" to JsonPrimitive(1),
+                    "FullDay" to JsonPrimitive(if (allDay) 1 else 0),
+                    "StartTime" to JsonPrimitive(Instant.parse(if (allDay) "2026-10-24T00:00:00Z" else "2026-10-03T10:00:00Z").epochSecond),
+                    "EndTime" to JsonPrimitive(Instant.parse(if (allDay) "2026-10-27T00:00:00Z" else "2026-10-03T11:00:00Z").epochSecond),
+                    "StartTimezone" to JsonPrimitive("UTC"), "EndTimezone" to JsonPrimitive("UTC"),
+                    "Attendees" to JsonArray(emptyList()), "Exdates" to JsonArray(emptyList()),
+                    "NotificationOccurrences" to JsonArray(emptyList())))
+            val requestContext = ProtonSimpleEventUpdate.context(
+                ProtonCreateContextPolicy.select(scope, metadata, bootstrap, listOf(address)), metadata, bootstrap)
+            val requestCodec = ProtonTextUpdateRequestCodec(protector())
+            val readback = ProtonTextUpdateReadbackVerifier(requestCodec, decoder::decodeCreated)
+            val requestCases = listOf(
+                closed(candidate, false) to "DESCRIPTION",
+                closed(allDayRow, true) to "COMBINED",
+                closed(candidate, false) to "REMOVAL")
+            for ((input, kind) in requestCases) {
+                stage = "LOCAL_TEXT_UPDATE_$kind"
+                ProtonSimpleEventUpdate.qualify(input)
+                val observed = base(input)
+                val target = when (kind) {
+                    "DESCRIPTION" -> observed.content.copy(description = "Notes\r\nligne; été 🦌")
+                    "COMBINED" -> observed.content.copy(title = "All-day deer", description = "Three days\r\nnotes", location = "Salle 🦌")
+                    else -> observed.content.copy(description = "")
+                }
+                val edit = intent(observed, target, "synthetic-request-$kind")
+                val preparation = localTextCryptoPreparation(crypto, protector()).prepare(
+                    session, edit, uid, timestamp, metadata, bootstrap, input, listOf(address))
+                val saved = requestCodec.seal(MutationId("synthetic-wire-$kind"), preparation, requestContext)
+                val opened = ProtonTextUpdateRequestCodec(protector()).open(saved)
+                val fragments = opened.fragments
+                check(fragments.originalRow == input && fragments.changed)
+                check(opened.request.keys == setOf("MemberID", "IsImport", "Events"))
+                val event = (opened.request.array("Events").single() as JsonObject).obj("Event")
+                check(event.number("Permissions") == 1L)
+                check(event.array("SharedEventContent").all { (it as JsonObject).keys == setOf("Type", "Data", "Signature") })
+                val returned = JsonObject(input + mapOf("ModifyTime" to JsonPrimitive(2), "LastEditTime" to JsonPrimitive(2),
+                    "SharedEvents" to JsonArray(listOf(fragments.clearSharedPart, fragments.encryptedSharedPart))))
+                val actual = checkNotNull(readback.verify(session, saved, requestContext, bootstrap, returned))
+                fun canonical(value: String) = value.replace("\r\n", "\n")
+                check(actual.content == target.copy(title = canonical(target.title), description = canonical(target.description),
+                    location = canonical(target.location)))
+                check(actual.revision == returned.revision(bootstrap) && saved.preparation.intent == edit)
+                check(readback.verify(session, saved, requestContext, bootstrap,
+                    JsonObject(returned + ("StartTime" to JsonPrimitive(0)))) == null)
+                // Even exact retained fragments cannot qualify an invalid native signature.
+                val plain = Json.parseToJsonElement(protector().open(preparation.protectedPayload)).jsonObject
+                val badPart = JsonObject(fragments.encryptedSharedPart + ("Signature" to JsonPrimitive("synthetic-invalid-signature")))
+                val badPlain = JsonObject(plain + ("encryptedSharedPart" to badPart))
+                val badPreparation = LocalTextEditPreparation(edit, timestamp, preparation.format, protector().seal(badPlain.toString()))
+                val badRecord = requestCodec.seal(MutationId("synthetic-invalid-$kind"), badPreparation, requestContext)
+                val invalid = JsonObject(returned + ("SharedEvents" to JsonArray(listOf(fragments.clearSharedPart, badPart))))
+                check(readback.verify(session, badRecord, requestContext, bootstrap, invalid) == null)
+            }
+            stage = "LOCAL_TEXT_UPDATE_NO_OP"
+            val noOpRow = closed(candidate, false)
+            val noOpBase = base(noOpRow)
+            val retainedDescription = noOpBase.content.description
+            val alternateDescription = if (retainedDescription.contains("\r\n")) retainedDescription.replace("\r\n", "\n")
+                else retainedDescription.replace("\n", "\r\n")
+            val noOpEdit = intent(noOpBase, noOpBase.content.copy(description = alternateDescription))
+            val noOpPreparation = prepare(noOpEdit, noOpRow)
+            check(!open(noOpPreparation).changed)
+            var noOpRefused = false
+            try { requestCodec.seal(MutationId("synthetic-no-op-request"), noOpPreparation, requestContext) }
+            catch (failure: ProtonTextUpdateRequestException) {
+                noOpRefused = failure.reason == ProtonTextUpdateRequestFailure.UNSUPPORTED
+            }
+            check(noOpRefused)
+
             stage = "LOCAL_TEXT_FULL_BASE_REFUSALS"
             fun changedBase(next: EventContent) = intent(source.copy(content = next),
                 next.copy(title = originalIntent.content.title, description = originalIntent.content.description,

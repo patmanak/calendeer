@@ -79,6 +79,15 @@ No endpoint, dependency, imported source, key setup or cryptographic primitive i
 added. It checks current observations without claiming an atomic server snapshot,
 durable submission or broader upload consent.
 
+`ProtonSimpleEventUpdate` extracts the existing title UPDATE profile and literal
+body builder attributed below. Title wrappers retain their historical contracts.
+`ProtonTextUpdateRequestCodec` and `ProtonTextUpdateReadbackVerifier` are original
+project integration: a disjoint protected full-text envelope and supplied-observation
+verification through the existing native decoder. No new endpoint, dependency or
+cryptographic primitive is introduced. The retained title clock rules are a
+conservative hypothesis for broader text until a real service round trip qualifies
+them. These helpers neither send requests nor grant broader consent.
+
 `ProtonEventDecryptor.openSharedTitle` extends this experiment with the existing
 Core key-bootstrap and binary/text signature verification paths described below.
 The bootstrap helper is shared with page decoding; page recovery and budget

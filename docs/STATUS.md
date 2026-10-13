@@ -54,9 +54,16 @@ intent before suspension, refreshes user/address context and reads current
 metadata/bootstrap/original event, checking session, revision, rights and caller
 admission around controlled stages. The exact runtime crypto callback verifies
 the full base before sealing. Revoked guarded access cannot reopen or fall back;
-returned intent/time/format must match. This enables no broader upload:
-request/readback, durable submission/acknowledgement and system-editor qualification
-remain required. See [shared text preparation](SHARED_TEXT_PREPARATION.md).
+returned intent/time/format must match. An internal protected text UPDATE record
+now binds the complete preparation and exact closed request shape. A separate
+supplied-readback verifier compares signed parts, context, computed revision and
+full decoded content, allowing only CRLF/LF equivalence in the three text fields.
+The pure request/profile helper is shared with the historical title path; its
+formats remain unchanged. Unknown fields, unknown details, color, recurrence and
+normalized no-ops cannot widen this request profile. This enables no broader
+upload: durable guarded submission/acknowledgement, service round trips and
+system-editor qualification remain required. See
+[shared text preparation](SHARED_TEXT_PREPARATION.md).
 
 After title acknowledgement, the original CREATE follow-up can close from the
 exact current clean frame, with repeated native, origin and access checks and no
