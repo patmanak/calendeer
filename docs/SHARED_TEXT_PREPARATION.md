@@ -61,22 +61,53 @@ its previous API, exception type, sanitized message and no-op behavior. Existing
 protected preparation formats, journals, submission profiles and worker consent
 are unchanged. The extension introduces no cryptographic primitive or dependency.
 
+## Protected fragments
+
+`ProtonEventDecryptor.prepareSharedTextAt` now verifies the original shared
+signatures and caller-supplied scope, event ID, revision, UID and original title
+before preparing selected text. It reuses the existing Proton Core key bootstrap,
+signing and encryption paths. Changed clear text is signed again; changed secret
+text is signed and encrypted with the original shared session key. The original
+SharedKeyPacket and all other part metadata remain unchanged. A no-op retains
+the original ciphertext and signatures. Personal and attendee partitions must
+be explicitly empty; no address key packet is admitted. These local checks do
+not prove current server access or complete upload eligibility.
+
+Input maps and JSON values are copied before local key access. Output containers
+return independent snapshots. Cancellation stops preparation before subsequent
+crypto or sealing work, including ordinary storage errors after cancellation.
+Diagnostic representations omit event content.
+
+`prepareAndSealTextAt` protects the complete original row and separate replacement
+fragments with the existing payload protector. The distinct
+`proton-calendar-offline-text-preparation` version 1 format binds the selected
+properties, expected and replacement values (including absence versus empty),
+explicit timestamp and all caller identifiers. Opening with a fresh codec checks
+the exact format, binding, closed JSON structure, budgets and allowed fragment
+differences. Duplicate keys and historical title formats are refused. Reopening
+is structural: it does not reverify signatures, certify a fresh observation or
+authorize dispatch. No bootstrap or private key material is stored in the record.
+
 ## Integration and evidence limits
 
-Inputs and outputs are ephemeral adapter-owned plaintext with redacted diagnostic
-representations. Changed shared parts need replacement signatures and encryption
-before they can form a request. This primitive has no keys, authenticated network
-reads, persistence, dispatch permission or Android provider access.
+The plaintext patcher itself has no keys, network reads, persistence, dispatch
+permission or Android provider access. Protected fragment preparation adds no
+database transaction, automatic recovery or worker integration.
 
 Focused JVM tests cover optional-property insertion/removal, absence versus empty,
 combined edits, untouched spans, Unicode escaping/folding, invalid bindings,
 budgets, metadata preservation and sanitized refusals. Existing title tests check
-the compatibility entry point. These checks do not establish a description or
-location round trip with the Proton service or a system calendar client.
+the compatibility entry point. Codec tests cover exact bindings, structural
+refusals, protection failures and snapshot isolation. A synthetic physical-device
+probe checks original binary/text signatures, replacement decryption and signatures,
+original key-packet reuse, untouched fields, no-op ciphertext and reopening with
+new protector/codec instances. Its cancellation cases inspect errors inside the
+cancelled child coroutine. These checks do not establish a description or location
+round trip with the Proton service or a system calendar client.
 
-The next integration needs a distinct protected text preparation format, complete
-authenticated readback, guarded durable submission and acknowledgement, followed
-by physical system-editor qualification. Historical title records must not be
+The next integration needs complete immutable local-intent binding, authenticated
+request/readback, guarded durable submission and acknowledgement, followed by
+physical system-editor qualification. Historical title records must not be
 reinterpreted as permission for broader edits. The existing concurrent GET/PUT
 race remains; plaintext patching supplies no server-side write precondition.
 

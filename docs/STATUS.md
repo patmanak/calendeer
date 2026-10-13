@@ -37,10 +37,15 @@ The Proton boundary now shares its lossless title patcher with an internal
 DESCRIPTION/LOCATION preparation primitive. It distinguishes absent from empty
 properties, validates selected bindings and rewrites only changed spans, retaining
 opaque fields and unchanged text exactly. The title compatibility API and explicit
-metadata policy are preserved. Focused JVM tests exercise the common primitive
-and existing title paths. This enables no broader upload: protected text preparation,
-authenticated request/readback integration and physical qualification remain
-required. See [shared text preparation](SHARED_TEXT_PREPARATION.md).
+metadata policy are preserved. Offline preparation now verifies original shared
+signatures, renews signatures and reuses the original session key for changed
+encrypted text through Proton Core. A distinct protected versioned record binds
+the selected fields, values, timestamp and original observation; reopening checks
+historical structure without granting sending authority. JVM tests and a synthetic
+physical crypto probe exercise this boundary and existing title paths. This
+enables no broader upload: complete local-intent binding, authenticated
+request/readback, durable submission/acknowledgement and system-editor
+qualification remain required. See [shared text preparation](SHARED_TEXT_PREPARATION.md).
 
 After title acknowledgement, the original CREATE follow-up can close from the
 exact current clean frame, with repeated native, origin and access checks and no

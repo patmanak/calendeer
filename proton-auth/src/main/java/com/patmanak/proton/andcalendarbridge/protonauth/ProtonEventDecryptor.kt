@@ -8,6 +8,8 @@ import java.nio.charset.CodingErrorAction
 import java.util.Base64
 import java.time.Instant
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonPrimitive
@@ -95,6 +97,40 @@ internal class ProtonEventDecryptor(private val crypto: CryptoContext, private v
         return ProtonTitlePreparationCodec(protector).seal(binding, prepared)
     }
 
+    /** Offline selected shared texts only, with mandatory timestamp policy and no dispatch authority.
+     * Authentication of the original SUMMARY remains mandatory even when it is not selected.
+     */
+    suspend fun prepareSharedTextAt(session: CatalogSession, binding: ProtonTextPreparationBinding,
+        metadata: JsonObject, bootstrap: JsonObject, row: JsonObject): ProtonTimestampedSharedText {
+        currentCoroutineContext().ensureActive()
+        val changes = binding.changes
+        val titleChange = changes[ProtonSharedTextProperty.SUMMARY]
+        if (titleChange != null && (titleChange.expected == null ||
+            titleChange.expected.replace("\r\n", "\n") != binding.expectedTitle.replace("\r\n", "\n"))) unsupportedEvents()
+        return prepareSharedTextFragments(session, binding.scope, binding.eventId, binding.revision,
+            binding.uid, binding.expectedTitle, metadata, bootstrap, row, requireEmptyPersonal = true) { basis ->
+            ProtonSharedTextPatcher.patchAt(basis.originalPlaintext, changes, binding.uid, binding.timestamp)
+        }
+    }
+
+    /** Distinct protected history only; sealing grants no access, journal or sending capability. */
+    suspend fun prepareAndSealTextAt(session: CatalogSession, binding: ProtonTextPreparationBinding,
+        metadata: JsonObject, bootstrap: JsonObject, row: JsonObject,
+        protector: EventPayloadProtector): ProtonProtectedTextPreparation {
+        try {
+            val prepared = prepareSharedTextAt(session, binding, metadata, bootstrap, row)
+            currentCoroutineContext().ensureActive()
+            val record = ProtonTextPreparationCodec(protector).seal(binding, prepared)
+            currentCoroutineContext().ensureActive()
+            return record
+        } catch (cancelled: CancellationException) { throw cancelled }
+          catch (failure: Exception) {
+            // A synchronous protector can revoke this job and then throw an ordinary storage error.
+            currentCoroutineContext().ensureActive()
+            throw failure
+        }
+    }
+
     /** Bind the protected title profile to a project-owned immutable local intent.
      * Only title changes are admitted here, against the complete supported imported base.
      * Observed metadata equality does not prove current rights, opaque content or remote writes.
@@ -116,13 +152,30 @@ internal class ProtonEventDecryptor(private val crypto: CryptoContext, private v
         expectedRevision: Revision, expectedUid: String, expectedTitle: String, newTitle: String,
         metadata: JsonObject, bootstrap: JsonObject, row: JsonObject, timestamp: Instant?,
         expectedBase: RemoteChange.Upsert? = null): ProtonTimestampedSharedTitle {
+        val prepared = prepareSharedTextFragments(session, scope, expectedEventId, expectedRevision,
+            expectedUid, expectedTitle, metadata, bootstrap, row, timestamp != null, expectedBase) { basis ->
+            if (timestamp == null) basis.patchTitle(newTitle).patchedPlaintext
+            else ProtonSharedTitlePatcher.patchAt(basis.originalPlaintext, expectedTitle, newTitle, expectedUid, timestamp)
+        }
+        return ProtonTimestampedSharedTitle(prepared.originalRow, prepared.clearSharedPart,
+            prepared.encryptedSharedPart, prepared.changed)
+    }
+
+    private suspend fun prepareSharedTextFragments(session: CatalogSession, scope: CalendarScope, expectedEventId: EventId,
+        expectedRevision: Revision, expectedUid: String, expectedTitle: String,
+        metadata: JsonObject, bootstrap: JsonObject, row: JsonObject, requireEmptyPersonal: Boolean,
+        expectedBase: RemoteChange.Upsert? = null,
+        patch: (ProtonSharedTitleBasis) -> ProtonEventTextParts): ProtonTimestampedSharedText {
         try {
+            val context = currentCoroutineContext()
+            context.ensureActive()
             val frozenMetadata = snapshot(metadata)
             return withSharedTitle(session, scope, expectedEventId, expectedRevision, expectedUid, expectedTitle,
                 bootstrap, row) { basis, keys, addresses, frozenBootstrap ->
+                context.ensureActive()
                 val original = basis.originalRow
                 // Personal partitions can contain their own DTSTAMP; never silently retain stale dates.
-                if (timestamp != null && (original.array("CalendarEvents").isNotEmpty() ||
+                if (requireEmptyPersonal && (original.array("CalendarEvents").isNotEmpty() ||
                     original.array("AttendeesEvents").isNotEmpty())) unsupportedEvents()
                 // Decode the same frozen observation with the already unlocked keys and addresses.
                 // Compare before patching/signing/sealing; never normalize away an intent mismatch.
@@ -138,20 +191,23 @@ internal class ProtonEventDecryptor(private val crypto: CryptoContext, private v
                 val secretPart = parts.single { it.number("Type") == 3L }
                 // Preserve the legacy encrypted-author check, including its no-op contract.
                 if (!selected.address.email.equals(secretPart.string("Author"), ignoreCase = true)) unsupportedEvents()
-                val patched = if (timestamp == null) basis.patchTitle(newTitle).patchedPlaintext
-                    else ProtonSharedTitlePatcher.patchAt(basis.originalPlaintext, expectedTitle, newTitle, expectedUid, timestamp)
+                context.ensureActive()
+                val patched = patch(basis)
+                context.ensureActive()
                 val clearChanged = patched.clearShared != basis.originalPlaintext.clearShared
                 val secretChanged = patched.encryptedShared != basis.originalPlaintext.encryptedShared
                 if (!clearChanged && !secretChanged)
-                    return@withSharedTitle ProtonTimestampedSharedTitle(original, clearPart, secretPart, changed = false)
+                    return@withSharedTitle ProtonTimestampedSharedText(original, clearPart, secretPart, changed = false)
                 // A trusted original author need not be the selected writer if its part is unchanged.
                 if (clearChanged && !selected.address.email.equals(clearPart.string("Author"), ignoreCase = true)) unsupportedEvents()
                 GateCProtectedStorageGuard.requireAvailable(crypto.keyStoreCrypto)
                 if (selected.signingKey.unlockOrNull(crypto)?.use { true } != true) missingLocalKeys()
+                context.ensureActive()
                 val replacementClear = if (!clearChanged) clearPart else JsonObject(clearPart + mapOf(
                     "Data" to JsonPrimitive(patched.clearShared),
                     "Signature" to JsonPrimitive(selected.signingKey.signText(crypto, patched.clearShared))))
                 val replacementSecret = if (!secretChanged) secretPart else {
+                    context.ensureActive()
                     val sessionKey = keys.decryptSessionKeyOrNull(Base64.getDecoder().decode(original.string("SharedKeyPacket")))
                         ?: missingLocalKeys()
                     val encrypted = sessionKey.use { key ->
@@ -162,11 +218,18 @@ internal class ProtonEventDecryptor(private val crypto: CryptoContext, private v
                     JsonObject(secretPart + mapOf("Data" to JsonPrimitive(encrypted),
                         "Signature" to JsonPrimitive(selected.signingKey.signText(crypto, patched.encryptedShared))))
                 }
-                ProtonTimestampedSharedTitle(original, replacementClear, replacementSecret, changed = true)
+                context.ensureActive()
+                ProtonTimestampedSharedText(original, replacementClear, replacementSecret, changed = true)
             }
         } catch (cancelled: CancellationException) { throw cancelled }
-          catch (failure: RemoteImportException) { throw failure }
-          catch (_: Exception) { unsupportedEvents() }
+          catch (failure: RemoteImportException) {
+            // Key callbacks can cancel and fail before returning to the normal activity check.
+            currentCoroutineContext().ensureActive()
+            throw failure
+        } catch (_: Exception) {
+            currentCoroutineContext().ensureActive()
+            unsupportedEvents()
+        }
     }
 
     private suspend fun <T> withSharedTitle(session: CatalogSession, scope: CalendarScope, expectedEventId: EventId,
@@ -216,6 +279,7 @@ internal class ProtonEventDecryptor(private val crypto: CryptoContext, private v
     private suspend fun <T> withCalendarKeys(user: UserId, calendar: String, bootstrap: JsonObject,
         action: (KeyHolderContext, List<UserAddress>) -> T): T {
         val addresses = localAddresses.get(user)
+        currentCoroutineContext().ensureActive()
         if (addresses.isEmpty() || addresses.none { address -> address.keys.any { it.privateKey.isActive } }) missingLocalKeys()
         return try {
         val passphrase = bootstrap.obj("Passphrase")

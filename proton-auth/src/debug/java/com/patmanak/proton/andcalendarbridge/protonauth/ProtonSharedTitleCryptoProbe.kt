@@ -7,6 +7,10 @@ import java.time.ZoneOffset
 import java.util.Base64
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.*
 import me.proton.core.crypto.android.context.AndroidCryptoContext
@@ -32,6 +36,8 @@ object ProtonSharedTitleCryptoProbe {
     suspend fun runTimestampedText(): String = run(textSignatures = true, timestamped = true)
     suspend fun runProtectedBinary(): String = run(textSignatures = false, timestamped = true, protectPreparation = true)
     suspend fun runProtectedText(): String = run(textSignatures = true, timestamped = true, protectPreparation = true)
+    suspend fun runProtectedSharedTextBinary(): String = run(textSignatures = false, timestamped = true, sharedText = true)
+    suspend fun runProtectedSharedTextText(): String = run(textSignatures = true, timestamped = true, sharedText = true)
     suspend fun runQualifiedBinary(): String = run(textSignatures = false, timestamped = true, protectPreparation = true, qualifyLocalBase = true)
     suspend fun runQualifiedText(): String = run(textSignatures = true, timestamped = true, protectPreparation = true, qualifyLocalBase = true)
     suspend fun runAuthenticatedBinary(): String = run(textSignatures = false, timestamped = true, protectPreparation = true, authenticateLocal = true)
@@ -43,7 +49,8 @@ object ProtonSharedTitleCryptoProbe {
     private suspend fun run(textSignatures: Boolean, reencrypted: Boolean = false,
         timestamped: Boolean = false, protectPreparation: Boolean = false,
         journal: (suspend (LocalEditPreparation) -> LocalEditPreparation)? = null,
-        qualifyLocalBase: Boolean = false, authenticateLocal: Boolean = false): String = withContext(Dispatchers.IO) {
+        qualifyLocalBase: Boolean = false, authenticateLocal: Boolean = false,
+        sharedText: Boolean = false): String = withContext(Dispatchers.IO) {
         var stage = "GENERATE"
         try {
             val crypto = AndroidCryptoContext()
@@ -130,6 +137,9 @@ object ProtonSharedTitleCryptoProbe {
                     putJsonObject("OpaqueMetadata") { put("Value", "untouched"); put("Null", JsonNull) }
                 } }
                 val decoder = ProtonEventDecryptor(crypto) { check(it == user); listOf(address) }
+                if (sharedText) return@withContext runProtectedSharedText(crypto, calendarSecret, calendarArmored,
+                    addressKey, address, scope, session, bootstrap, row, clear, secret, alteredSignature,
+                    decoder, textSignatures)
                 suspend fun open(candidate: JsonObject = row, context: JsonObject = bootstrap,
                     candidateScope: CalendarScope = scope, expectedId: EventId = eventId,
                     expectedRevision: Revision = candidate.revision(context), expectedUid: String = uid,
@@ -390,6 +400,299 @@ object ProtonSharedTitleCryptoProbe {
             } finally { addressSecret.fill(0); calendarSecret.fill(0) }
         } catch (cancelled: CancellationException) { throw cancelled }
           catch (_: Exception) { "RESULT=FAILURE STAGE=$stage" }
+    }
+
+    /** Separate synthetic branch: historical title scenarios above retain their original assertions. */
+    private suspend fun runProtectedSharedText(crypto: AndroidCryptoContext, calendarSecret: ByteArray,
+        calendarArmored: String, addressKey: PrivateKey, address: UserAddress, scope: CalendarScope,
+        session: CatalogSession, bootstrap: JsonObject, row: JsonObject, clear: String, secret: String,
+        alteredSignature: String, decoder: ProtonEventDecryptor, textSignatures: Boolean): String {
+        var stage = "TEXT_START"
+        try {
+            val description = ProtonSharedTextProperty.DESCRIPTION
+            val location = ProtonSharedTextProperty.LOCATION
+            val uid = row.string("UID")
+            val title = "Original title"
+            val time = Instant.parse("2026-10-03T09:30:00Z")
+            val metadata = buildJsonObject { put("ID", scope.calendar.value); put("Type", 0) }
+            val note = "Notes; forêt, \\ " + "é🦌界".repeat(12) + "\nLigne suivante"
+            val place = "Salle; été, \\ 🦌\nÉtage 2"
+            val changes = linkedMapOf(
+                description to ProtonSharedTextChange("Opaque\ntext", note),
+                location to ProtonSharedTextChange(null, place))
+            fun binding(candidate: JsonObject = row, context: JsonObject = bootstrap,
+                selected: Map<ProtonSharedTextProperty, ProtonSharedTextChange> = changes,
+                candidateScope: CalendarScope = scope, eventId: EventId = EventId(row.string("ID")),
+                revision: Revision = candidate.revision(context), expectedUid: String = uid,
+                expectedTitle: String = title, timestamp: Instant = time) =
+                ProtonTextPreparationBinding(candidateScope, eventId, revision, expectedUid,
+                    expectedTitle, selected, timestamp)
+            suspend fun prepare(candidate: JsonObject = row, context: JsonObject = bootstrap,
+                candidateMetadata: JsonObject = metadata, expected: ProtonTextPreparationBinding = binding(candidate, context),
+                engine: ProtonEventDecryptor = decoder) =
+                engine.prepareSharedTextAt(session, expected, candidateMetadata, context, candidate)
+            val originalParts = row.array("SharedEvents").map { it as JsonObject }
+            val originalClear = originalParts.single { it.number("Type") == 2L }
+            val originalSecret = originalParts.single { it.number("Type") == 3L }
+            val calendarKey = PrivateKey(calendarArmored, true,
+                passphrase = PlainByteArray(calendarSecret).encrypt(crypto.keyStoreCrypto))
+            fun decrypt(part: JsonObject): String =
+                KeyHolderContext(crypto, PrivateKeyRing(crypto, listOf(calendarKey)), PublicKeyRing(emptyList())).use { keys ->
+                    val retainedKey = keys.decryptSessionKeyOrNull(Base64.getDecoder().decode(row.string("SharedKeyPacket")))
+                        ?: error("Synthetic packet unavailable")
+                    val bytes = retainedKey.use { key ->
+                        keys.decryptDataOrNull(Base64.getDecoder().decode(part.string("Data")), key)
+                            ?: error("Synthetic ciphertext unavailable")
+                    }
+                    try { String(bytes, Charsets.UTF_8) } finally { bytes.fill(0) }
+                }
+            fun originalSignature(text: String): String = if (textSignatures) addressKey.signText(crypto, text)
+                else addressKey.signData(crypto, text.toByteArray(Charsets.UTF_8))
+            fun signedRow(plain: String): JsonObject {
+                val encrypted = KeyHolderContext(crypto, PrivateKeyRing(crypto, listOf(calendarKey)),
+                    PublicKeyRing(emptyList())).use { keys ->
+                    val retainedKey = keys.decryptSessionKeyOrNull(Base64.getDecoder().decode(row.string("SharedKeyPacket")))
+                        ?: error("Synthetic packet unavailable")
+                    retainedKey.use { key ->
+                        val bytes = plain.toByteArray(Charsets.UTF_8)
+                        try { Base64.getEncoder().encodeToString(crypto.pgpCrypto.encryptData(bytes, key)) }
+                        finally { bytes.fill(0) }
+                    }
+                }
+                return changedPart(changedPart(row, 1, "Data", JsonPrimitive(encrypted)), 1,
+                    "Signature", JsonPrimitive(originalSignature(plain)))
+            }
+            val publicKey = addressKey.publicKey(crypto)
+            fun verifyOriginal(plain: String, part: JsonObject) {
+                check(if (textSignatures) publicKey.verifyText(crypto, plain, part.string("Signature"))
+                    else publicKey.verifyData(crypto, plain.toByteArray(Charsets.UTF_8), part.string("Signature")))
+            }
+            fun verifyPrepared(candidate: JsonObject, result: ProtonTimestampedSharedText, expectedSecret: String? = null): String {
+                val before = candidate.array("SharedEvents").map { it as JsonObject }
+                check(result.changed && result.originalRow == candidate)
+                check(result.originalRow.string("SharedKeyPacket") == row.string("SharedKeyPacket"))
+                for ((oldPart, nextPart) in listOf(before[0] to result.clearSharedPart, before[1] to result.encryptedSharedPart))
+                    check(oldPart.filterKeys { it != "Data" && it != "Signature" } ==
+                        nextPart.filterKeys { it != "Data" && it != "Signature" })
+                val expectedClear = clear.replace("DTSTAMP:20261003T090000Z", "DTSTAMP:20261003T093000Z")
+                    .replace("LAST-MODIFIED:20261003T090000Z", "LAST-MODIFIED:20261003T093000Z")
+                check(result.clearSharedPart.string("Data") == expectedClear)
+                val plain = decrypt(result.encryptedSharedPart)
+                if (expectedSecret != null) check(plain == expectedSecret)
+                check(publicKey.verifyText(crypto, expectedClear, result.clearSharedPart.string("Signature")))
+                check(publicKey.verifyText(crypto, plain, result.encryptedSharedPart.string("Signature")))
+                // Core may canonicalize equivalent signatures: validity, not signature inequality, is the contract.
+                check(result.originalRow !== result.originalRow && result.clearSharedPart !== result.clearSharedPart &&
+                    result.encryptedSharedPart !== result.encryptedSharedPart)
+                check(!result.toString().contains(uid) && !result.toString().contains(note))
+                return plain
+            }
+            fun reopen(record: ProtonProtectedTextPreparation, expected: ProtonTextPreparationBinding) =
+                ProtonTextPreparationCodec(ProtonEventPayloadProtector(AndroidCryptoContext().keyStoreCrypto)).open(record, expected)
+            fun rejected(action: () -> Unit) {
+                var rejected = false
+                try { action() }
+                catch (failure: ProtonTextPreparationException) {
+                    rejected = failure.reason == ProtonTextPreparationFailure.UNSUPPORTED && failure.cause == null
+                }
+                check(rejected)
+            }
+
+            stage = "TEXT_ORIGINAL_SIGNATURES"
+            verifyOriginal(clear, originalClear)
+            verifyOriginal(secret, originalSecret)
+            check(decrypt(originalSecret) == secret)
+            stage = "TEXT_SELECTED_AND_RAW"
+            val expected = binding()
+            val prepared = prepare(expected = expected)
+            val plain = verifyPrepared(row, prepared)
+            val event = biweekly.Biweekly.parse(plain).first().events.single()
+            check(event.summary.value == title && event.description.value.replace("\r\n", "\n") == note &&
+                event.location.value.replace("\r\n", "\n") == place)
+            // The fixture's selected properties are root-only; nested SUMMARY and duplicate opaque spans remain raw.
+            val selectedBlocks = Regex("(?m)^(?:DESCRIPTION|LOCATION):[^\\r\\n]*(?:\\r\\n[ \\t][^\\r\\n]*)*\\r\\n")
+            check(plain.replace(selectedBlocks, "") == secret.replace(selectedBlocks, "")
+                .replace("DTSTAMP:20261003T090000Z", "DTSTAMP:20261003T093000Z"))
+            check(prepared.originalRow == row && prepared.originalRow.array("SharedEvents") == row.array("SharedEvents"))
+
+            stage = "TEXT_PROTECTED_REOPEN"
+            val record = decoder.prepareAndSealTextAt(session, expected, metadata, bootstrap, row,
+                ProtonEventPayloadProtector(crypto.keyStoreCrypto))
+            check(record.format == TEXT_PREPARATION_FORMAT && record.scope == scope &&
+                record.eventId == expected.eventId && record.revision == expected.revision)
+            check(!record.protectedPayload.contains(uid) && !record.protectedPayload.contains(note))
+            check(!record.toString().contains(uid) && !expected.toString().contains(note))
+            verifyPrepared(row, reopen(record, expected), plain)
+            val separatelySealed = ProtonTextPreparationCodec(ProtonEventPayloadProtector(crypto.keyStoreCrypto))
+                .seal(expected, prepared)
+            val recovered = reopen(separatelySealed, expected)
+            check(recovered.originalRow == prepared.originalRow && recovered.clearSharedPart == prepared.clearSharedPart &&
+                recovered.encryptedSharedPart == prepared.encryptedSharedPart && recovered.changed == prepared.changed)
+            stage = "TEXT_EXACT_BINDING"
+            for (wrong in listOf(
+                binding(expectedUid = "different@calendeer.invalid"), binding(expectedTitle = "Different title"),
+                binding(eventId = EventId("different-event")), binding(revision = Revision("different-revision")),
+                binding(candidateScope = scope.copy(generation = scope.generation + 1)),
+                binding(timestamp = time.plusSeconds(1)),
+                binding(selected = changes + (location to ProtonSharedTextChange("", place))),
+                binding(selected = changes + (location to ProtonSharedTextChange(null, ""))),
+                binding(selected = changes + (location to ProtonSharedTextChange(null, null))),
+                binding(selected = changes - location),
+                binding(selected = changes + (ProtonSharedTextProperty.SUMMARY to ProtonSharedTextChange(title, title))))) {
+                rejected { reopen(record, wrong) }
+            }
+            for (wrongFormat in listOf(TITLE_PREPARATION_FORMAT, TEXT_PREPARATION_FORMAT.copy(version = 2)))
+                rejected { reopen(ProtonProtectedTextPreparation(record.scope, record.eventId, record.revision,
+                    wrongFormat, record.protectedPayload), expected) }
+
+            stage = "TEXT_NO_OP"
+            val noOpBinding = binding(selected = linkedMapOf(
+                description to ProtonSharedTextChange("Opaque\ntext", "Opaque\r\ntext"),
+                location to ProtonSharedTextChange(null, null)))
+            val noOp = prepare(expected = noOpBinding)
+            check(!noOp.changed && noOp.originalRow == row && noOp.clearSharedPart == originalClear &&
+                noOp.encryptedSharedPart == originalSecret)
+            val noOpRecord = decoder.prepareAndSealTextAt(session, noOpBinding, metadata, bootstrap, row,
+                ProtonEventPayloadProtector(crypto.keyStoreCrypto))
+            val noOpReopened = reopen(noOpRecord, noOpBinding)
+            check(!noOpReopened.changed && noOpReopened.clearSharedPart == originalClear &&
+                noOpReopened.encryptedSharedPart == originalSecret && noOpReopened.originalRow == row)
+
+            stage = "TEXT_REMOVAL"
+            for ((field, oldValue, oldLine) in listOf(
+                Triple(description, "Opaque\ntext", "DESCRIPTION:Opaque\\ntext\r\n"),
+                Triple(location, "", "LOCATION:\r\n"))) {
+                val input = if (field == location) secret.replace("END:VEVENT\r\n", "LOCATION:\r\nEND:VEVENT\r\n") else secret
+                val candidate = signedRow(input)
+                verifyOriginal(input, candidate.array("SharedEvents")[1] as JsonObject)
+                val removal = binding(candidate = candidate, selected = mapOf(field to ProtonSharedTextChange(oldValue, null)))
+                val removed = prepare(candidate = candidate, expected = removal)
+                val expectedPlain = input.replace(oldLine, "")
+                    .replace("DTSTAMP:20261003T090000Z", "DTSTAMP:20261003T093000Z")
+                verifyPrepared(candidate, removed, expectedPlain)
+                val saved = ProtonTextPreparationCodec(ProtonEventPayloadProtector(crypto.keyStoreCrypto)).seal(removal, removed)
+                verifyPrepared(candidate, reopen(saved, removal), expectedPlain)
+            }
+
+            stage = "TEXT_SELECTED_REFUSALS"
+            for (selected in listOf(
+                changes + (description to ProtonSharedTextChange("Stale", note)),
+                changes + (location to ProtonSharedTextChange("", place)),
+                mapOf(description to ProtonSharedTextChange("Stale", "Stale"))))
+                refused { prepare(expected = binding(selected = selected)) }
+            for (input in listOf(
+                secret.replace("DESCRIPTION:", "DESCRIPTION;LANGUAGE=fr:"),
+                secret.replace("DESCRIPTION:Opaque\\ntext\r\n", "DESCRIPTION:Opaque\\ntext\r\nDESCRIPTION:Opaque\\ntext\r\n"))) {
+                val candidate = signedRow(input)
+                refused { prepare(candidate = candidate) }
+            }
+            stage = "TEXT_PROFILE_SIGNATURE_CONTEXT"
+            for (name in listOf("CalendarEvents", "AttendeesEvents"))
+                refused { prepare(candidate = JsonObject(row + (name to JsonArray(listOf(buildJsonObject { put("Type", 99) }))))) }
+            refused { prepare(candidate = JsonObject(row + ("AddressKeyPacket" to JsonPrimitive("unsupported-packet")))) }
+            for (index in 0..1) {
+                refused { prepare(candidate = changedPart(row, index, "Signature", JsonPrimitive(alteredSignature))) }
+                refused { prepare(candidate = changedPart(row, index, "Author", JsonPrimitive("foreign@example.invalid"))) }
+                refused { prepare(candidate = changedPart(row, index, "Author", null)) }
+            }
+            refused { prepare(candidateMetadata = JsonObject(metadata + ("Type" to JsonPrimitive(1)))) }
+            refused { prepare(expected = binding(candidateScope = scope.copy(account = AccountId("different-account")))) }
+            refused { prepare(expected = binding(candidateScope = scope.copy(calendar = CalendarId("different-calendar")))) }
+            val member = bootstrap.array("Members").single() as JsonObject
+            refused { prepare(context = JsonObject(bootstrap + ("Members" to JsonArray(listOf(
+                JsonObject(member + ("Permissions" to JsonPrimitive(0)))))))) }
+            refused { prepare(engine = ProtonEventDecryptor(crypto) { listOf(address.copy(enabled = false)) }) }
+
+            stage = "TEXT_FROZEN_INPUTS"
+            val mutableChanges = changes.toMutableMap()
+            val frozenBinding = binding(selected = mutableChanges)
+            val getterChanges = frozenBinding.changes
+            val mutableRow = row.toMutableMap()
+            val mutableMetadata = metadata.toMutableMap()
+            val mutableSettings = bootstrap.obj("CalendarSettings").toMutableMap()
+            var reads = 0
+            val mutating = ProtonEventDecryptor(crypto) {
+                check(it == session.userId); reads++
+                kotlinx.coroutines.yield()
+                mutableChanges.clear()
+                if (getterChanges is MutableMap) {
+                    try { getterChanges.clear() } catch (_: UnsupportedOperationException) { /* Immutable view is also safe. */ }
+                }
+                mutableRow["ModifyTime"] = JsonPrimitive(99)
+                mutableMetadata["Type"] = JsonPrimitive(1)
+                mutableSettings["CalendarID"] = JsonPrimitive("changed-after-suspension")
+                listOf(address)
+            }
+            val frozenRecord = mutating.prepareAndSealTextAt(session, frozenBinding, JsonObject(mutableMetadata),
+                JsonObject(bootstrap + ("CalendarSettings" to JsonObject(mutableSettings))), JsonObject(mutableRow),
+                ProtonEventPayloadProtector(crypto.keyStoreCrypto))
+            check(reads == 1 && mutableChanges.isEmpty() && frozenBinding.changes == changes)
+            verifyPrepared(row, reopen(frozenRecord, expected), plain)
+
+            stage = "TEXT_CANCELLATION"
+            val cancelled = CancellationException("Synthetic text cancellation")
+            var propagated = false
+            try {
+                ProtonEventDecryptor(crypto) { throw cancelled }.prepareAndSealTextAt(session, expected, metadata,
+                    bootstrap, row, ProtonEventPayloadProtector(crypto.keyStoreCrypto))
+            } catch (actual: CancellationException) { propagated = actual === cancelled }
+            check(propagated)
+            stage = "TEXT_CANCELLED_CLASSIFICATION"
+            val failedCancellationCases = mutableListOf<String>()
+            for (kind in listOf("CALLBACK_RETURN", "CALLBACK_FAILURE", "STORAGE_FAILURE")) {
+                val validCancellation = supervisorScope {
+                    var normalReturns = 0
+                    var cancellations = 0
+                    var ordinaryFailures = 0
+                    var addressCallbacks = 0
+                    var seals = 0
+                    val child = async {
+                        // seal is synchronous, so capture this child's context before passing its callback.
+                        val childContext = currentCoroutineContext()
+                        val cancellingDecoder = ProtonEventDecryptor(crypto) {
+                            addressCallbacks++
+                            if (kind != "STORAGE_FAILURE") {
+                                currentCoroutineContext().cancel(CancellationException("Synthetic text callback cancellation"))
+                                if (kind == "CALLBACK_FAILURE") throw java.io.IOException("Synthetic address read failure")
+                            }
+                            listOf(address)
+                        }
+                        val delegate = ProtonEventPayloadProtector(crypto.keyStoreCrypto)
+                        val cancellingProtector = object : EventPayloadProtector {
+                            override fun seal(plain: String): String {
+                                seals++
+                                if (kind == "STORAGE_FAILURE") {
+                                    childContext.cancel(CancellationException("Synthetic text storage cancellation"))
+                                    throw java.io.IOException("Synthetic storage failure")
+                                }
+                                return delegate.seal(plain)
+                            }
+                            override fun open(protected: String) = delegate.open(protected)
+                        }
+                        // Classify inside the child: await also throws when cancellation was wrongly
+                        // converted to an ordinary exception, or a preparation was returned normally.
+                        try {
+                            cancellingDecoder.prepareAndSealTextAt(session, expected, metadata, bootstrap, row,
+                                cancellingProtector)
+                            normalReturns++
+                        } catch (_: CancellationException) { cancellations++ }
+                          catch (_: Exception) { ordinaryFailures++ }
+                    }
+                    var awaitCancelled = false
+                    try { child.await() }
+                    catch (_: CancellationException) { awaitCancelled = true }
+                    awaitCancelled && addressCallbacks == 1 && cancellations == 1 && ordinaryFailures == 0 &&
+                        normalReturns == 0 && seals == (if (kind == "STORAGE_FAILURE") 1 else 0)
+                }
+                if (!validCancellation) failedCancellationCases += kind
+            }
+            // Execute every case before reporting bounded labels; no plaintext or exception details escape.
+            if (failedCancellationCases.isNotEmpty())
+                stage = "TEXT_CANCELLED_" + failedCancellationCases.joinToString("_")
+            check(failedCancellationCases.isEmpty())
+            return "RESULT=SUCCESS"
+        } catch (cancelled: CancellationException) { throw cancelled }
+          catch (_: Exception) { return "RESULT=FAILURE STAGE=$stage" }
     }
 
     private suspend fun runTimestamped(crypto: AndroidCryptoContext, addressSecret: ByteArray,

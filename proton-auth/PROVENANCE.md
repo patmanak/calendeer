@@ -41,9 +41,23 @@ duplicates and clear-part ambiguity. Unchanged selected spans and all unselected
 data remain raw, apart from the three explicit metadata replacements in `patchAt`.
 Additions use a deterministic order at the event end.
 The old title API delegates without changing protected formats or production
-eligibility. Description/location preparation remains plaintext-only, without
-signature renewal, request assembly or service qualification. See the
+eligibility. The plaintext primitive itself has no signature renewal, request
+assembly or service qualification. See the
 [shared text boundary](../docs/SHARED_TEXT_PREPARATION.md) for its scope and limits.
+
+The protected shared-text continuation extracts the existing title fragment
+preparation into a common helper in `ProtonEventDecryptor`. It uses the same pinned
+Core original-signature verification, calendar session-key decryption, text
+signing and data encryption described below. Only changed plaintext parts are
+signed/encrypted; the original SharedKeyPacket and opaque metadata are retained.
+The timestamped text path requires empty personal/attendee partitions. Legacy
+title profiles and formats remain separate, including their immutable local-base
+check. No new library, upstream code copy or cryptographic primitive is added.
+`ProtonTextPreparationCodec` is original project integration using the existing
+payload protector and duplicate-key preflight. Its distinct versioned kind binds
+the selected fields and complete original row; it never interprets historical
+title records as broader consent. Structural reopening is not fresh cryptographic
+verification, current authorization or a service-qualified UPDATE serializer.
 
 `ProtonEventDecryptor.openSharedTitle` extends this experiment with the existing
 Core key-bootstrap and binary/text signature verification paths described below.
