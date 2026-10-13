@@ -572,16 +572,38 @@ class ImportCoordinator(
                     }
                     if (!available()) return progress(inactive = true)
                     val historical = journal.readVerified(target, reference.id)
+                    var inspectionSourceFrozen = false
+                    var inspectionRole: CapturedCreateHandoffRecord? = null
                     suspend fun networkAvailable(): Boolean {
                         if (!available()) return false
                         if (networkAdmission == null) return true
                         if (!systemTitlesEnabled(target) || !networkAdmission(target) ||
                             !systemTitleProfile(record.preparation.intent)) return false
                         val role = store.capturedHandoff(target, reference.eventId)
+                        if (!available()) return false
                         val hold = capturedRawHold(target)
                         currentCoroutineContext().ensureActive()
-                        return role == null && !hold.scopeBlocked && !hold.holds(reference.eventId) &&
-                            active() && systemTitlesEnabled(target) && networkAdmission(target)
+                        if (!available() || hold.scopeBlocked || (inspectionSourceFrozen && role != inspectionRole)) return false
+                        if (role == null) {
+                            if (hold.holds(reference.eventId)) return false
+                        } else {
+                            // Historical inspection must survive a later native edit. Sending and
+                            // acknowledgement separately require their exact current owner/frame.
+                            if (role.state != CapturedCreateHandoffState.RELEASED ||
+                                role.frame.format != record.preparation.intent.format ||
+                                !handoffSource(role.frame, active)) return false
+                            if (!available()) return false
+                        }
+                        val currentRole = store.capturedHandoff(target, reference.eventId)
+                        if (!available() || currentRole != role) return false
+                        val currentHold = capturedRawHold(target)
+                        currentCoroutineContext().ensureActive()
+                        if (!available() || currentHold.scopeBlocked ||
+                            (role == null && currentHold.holds(reference.eventId)) ||
+                            !systemTitlesEnabled(target) || !networkAdmission(target)) return false
+                        inspectionRole = role
+                        inspectionSourceFrozen = true
+                        return true
                     }
                     val result = historical ?: if (recovery != null && networkAvailable()) recovery.recover(
                         target, reference.id, allowNetwork, admit = { it == target && active() &&
@@ -1024,23 +1046,42 @@ class ImportCoordinator(
             intent.base.content.colorRgb == null && intent.content != intent.base.content &&
             intent.content == intent.base.content.copy(title = intent.content.title)
 
-    /** Current ordinary source only, never a fallback for transferred CREATE history. */
+    /** Current source, with complete provenance required for a transferred CREATE. */
     private suspend fun systemTitleSource(intent: LocalEditIntent, active: () -> Boolean): Boolean {
         currentCoroutineContext().ensureActive()
         if (!active() || !systemTitleProfile(intent)) return false
         val target = intent.scope
         val event = intent.base.eventId
         if (store.localEdit(target, event) != intent || !active()) return false
-        if (store.capturedHandoff(target, event) != null || !active()) return false
+        val role = store.capturedHandoff(target, event)
+        if (!active()) return false
         val hold = capturedRawHold(target)
-        if (!active() || hold.scopeBlocked || hold.holds(event)) return false
-        val observed = projection.captureOwnedSimpleEdit(target, intent.base)
+        if (!active() || hold.scopeBlocked || (role == null && hold.holds(event))) return false
+        val content = if (role == null) projection.captureOwnedSimpleEdit(target, intent.base)?.content else {
+            if (!currentSystemTitleHandoff(role, intent, active)) return false
+            val observed = projection.captureCapturedHandoffCurrent(role.frame) as? CapturedHandoffCurrentObservation.Supported
+            observed?.snapshot?.takeIf { it.frame == role.frame && !it.deleted }?.content
+        }
         currentCoroutineContext().ensureActive()
-        if (!active() || observed?.content != intent.content) return false
-        if (store.capturedHandoff(target, event) != null || !active()) return false
+        if (!active() || content != intent.content) return false
+        if (store.capturedHandoff(target, event) != role || !active()) return false
+        if (role != null && !currentSystemTitleHandoff(role, intent, active)) return false
         val after = capturedRawHold(target)
         currentCoroutineContext().ensureActive()
-        return active() && !after.scopeBlocked && !after.holds(event) && store.localEdit(target, event) == intent && active()
+        return active() && !after.scopeBlocked && (role != null || !after.holds(event)) &&
+            store.capturedHandoff(target, event) == role && store.localEdit(target, event) == intent && active()
+    }
+
+    private suspend fun currentSystemTitleHandoff(role: CapturedCreateHandoffRecord, intent: LocalEditIntent,
+        active: () -> Boolean): Boolean {
+        if (!active() || role.state != CapturedCreateHandoffState.RELEASED || !role.waiting ||
+            role.frame.base != intent.base || role.frame.format != intent.format) return false
+        val pending = store.capturedHandoffProjection(role.frame)
+        currentCoroutineContext().ensureActive()
+        if (!active() || pending != null) return false
+        val qualified = handoffSource(role.frame, active)
+        currentCoroutineContext().ensureActive()
+        return qualified && active()
     }
 
     /** Production-only opt-in preparation. Capsule and wire keep the original epoch and timestamp. */
@@ -1157,7 +1198,7 @@ class ImportCoordinator(
             if (hold.scopeBlocked) return LocalTitleAttemptRetentionResult.UNRESOLVED
             val role = store.capturedHandoff(target, event)
             if (!available()) return LocalTitleAttemptRetentionResult.INACTIVE
-            if (systemTitle && (!systemTitleProfile(intent) || role != null))
+            if (systemTitle && !systemTitleProfile(intent))
                 return LocalTitleAttemptRetentionResult.UNSUPPORTED
             val content = if (role == null) {
                 if (hold.holds(event)) return LocalTitleAttemptRetentionResult.UNRESOLVED
@@ -1166,6 +1207,9 @@ class ImportCoordinator(
                 if (role.state != CapturedCreateHandoffState.RELEASED || !role.waiting ||
                     role.frame.base != intent.base || role.frame.format != intent.format)
                     return LocalTitleAttemptRetentionResult.UNRESOLVED
+                val pending = store.capturedHandoffProjection(role.frame)
+                if (!available()) return LocalTitleAttemptRetentionResult.INACTIVE
+                if (pending != null) return LocalTitleAttemptRetentionResult.UNRESOLVED
                 val qualified = handoffSource(role.frame, active)
                 if (!available()) return LocalTitleAttemptRetentionResult.INACTIVE
                 if (!qualified) return LocalTitleAttemptRetentionResult.UNRESOLVED
@@ -1182,11 +1226,17 @@ class ImportCoordinator(
                 val qualified = handoffSource(role.frame, active)
                 if (!available()) return LocalTitleAttemptRetentionResult.INACTIVE
                 if (!qualified) return LocalTitleAttemptRetentionResult.UNRESOLVED
-            } else {
-                val currentHold = capturedRawHold(target)
+                val pending = store.capturedHandoffProjection(role.frame)
                 if (!available()) return LocalTitleAttemptRetentionResult.INACTIVE
-                if (currentHold.holds(event)) return LocalTitleAttemptRetentionResult.UNRESOLVED
+                if (pending != null) return LocalTitleAttemptRetentionResult.UNRESOLVED
             }
+            val currentHold = capturedRawHold(target)
+            if (!available()) return LocalTitleAttemptRetentionResult.INACTIVE
+            if (currentHold.scopeBlocked || (role == null && currentHold.holds(event)))
+                return LocalTitleAttemptRetentionResult.UNRESOLVED
+            val finalRole = store.capturedHandoff(target, event)
+            if (!available()) return LocalTitleAttemptRetentionResult.INACTIVE
+            if (finalRole != role) return LocalTitleAttemptRetentionResult.UNRESOLVED
             return sqlQualification(available)
         }
     }
@@ -2301,6 +2351,62 @@ class ImportCoordinator(
             if (role.state != CapturedCreateHandoffState.RELEASED || !handoffSource(role.frame, active) ||
                 !recoverHandoffProjection(role.frame, expected, active)) return@withLock CapturedCreateReconciliationResult.UNRESOLVED
             role = store.capturedHandoff(target, binding.eventId) ?: return@withLock CapturedCreateReconciliationResult.UNRESOLVED
+            // A title acknowledgement or incoming projection can leave this CREATE
+            // follow-up queued after its native row is already clean. Qualify the
+            // current frame; inspecting the original CREATE revision cannot close it.
+            val clean = projection.inspectCapturedHandoffBase(role.frame)
+            currentCoroutineContext().ensureActive()
+            if (!available()) return@withLock CapturedCreateReconciliationResult.INACTIVE
+            if (clean != null) {
+                if (clean.frame != role.frame) return@withLock CapturedCreateReconciliationResult.UNRESOLVED
+                val qualified = handoffSource(role.frame, active)
+                currentCoroutineContext().ensureActive()
+                if (!available()) return@withLock CapturedCreateReconciliationResult.INACTIVE
+                val sameRole = store.capturedHandoff(target, binding.eventId) == role
+                currentCoroutineContext().ensureActive()
+                if (!available()) return@withLock CapturedCreateReconciliationResult.INACTIVE
+                if (!qualified || !sameRole) return@withLock CapturedCreateReconciliationResult.UNRESOLVED
+                val resumed = store.resumeCapturedHandoff(clean)
+                currentCoroutineContext().ensureActive()
+                if (!available()) return@withLock CapturedCreateReconciliationResult.INACTIVE
+                if (!resumed)
+                    return@withLock CapturedCreateReconciliationResult.UNRESOLVED
+                val after = projection.inspectCapturedHandoffBase(role.frame)
+                currentCoroutineContext().ensureActive()
+                if (!available()) return@withLock CapturedCreateReconciliationResult.INACTIVE
+                val sourceCurrent = handoffSource(role.frame, active)
+                currentCoroutineContext().ensureActive()
+                if (!available()) return@withLock CapturedCreateReconciliationResult.INACTIVE
+                val current = store.capturedHandoff(target, binding.eventId)
+                currentCoroutineContext().ensureActive()
+                if (!available()) return@withLock CapturedCreateReconciliationResult.INACTIVE
+                if (after?.frame != role.frame || !sourceCurrent ||
+                    current == null || current.frame != role.frame || current.state != CapturedCreateHandoffState.RELEASED || current.waiting) {
+                    if (active() && current?.frame == role.frame) store.waitCapturedHandoff(role.frame)
+                    currentCoroutineContext().ensureActive()
+                    if (!available()) return@withLock CapturedCreateReconciliationResult.INACTIVE
+                    return@withLock CapturedCreateReconciliationResult.UNRESOLVED
+                }
+                if (role.waiting) {
+                    val pending = store.capturedHandoffPending(current.frame)
+                    currentCoroutineContext().ensureActive()
+                    if (!available()) return@withLock CapturedCreateReconciliationResult.INACTIVE
+                    if (pending == ProjectionIntent(target, current.frame.base)) {
+                        val sourceStillCurrent = handoffSource(current.frame, active)
+                        currentCoroutineContext().ensureActive()
+                        if (!available()) return@withLock CapturedCreateReconciliationResult.INACTIVE
+                        val settledRole = store.capturedHandoff(target, binding.eventId)
+                        currentCoroutineContext().ensureActive()
+                        if (!available()) return@withLock CapturedCreateReconciliationResult.INACTIVE
+                        if (!sourceStillCurrent || settledRole != current)
+                            return@withLock CapturedCreateReconciliationResult.UNRESOLVED
+                        // Import precedes this metadata-only release in the worker.
+                        // Append a local pass: KEEP could lose this wake while it runs.
+                        scheduler.continueWork(network = false)
+                    }
+                }
+                return@withLock CapturedCreateReconciliationResult.UNCHANGED
+            }
             val observed = projection.captureCapturedHandoffCurrent(role.frame)
             if (!available()) return@withLock CapturedCreateReconciliationResult.INACTIVE
             if (!handoffSource(role.frame, active) || store.capturedHandoff(target, binding.eventId) != role)

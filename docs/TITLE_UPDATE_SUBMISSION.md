@@ -14,11 +14,41 @@ opt-in requires creation mode, selection, availability and calendar permissions.
 Disabling creation atomically clears title consent; enabling creation again does
 not restore it. The setting is scoped to account, calendar and generation.
 
-Production accepts ordinary imported timed and all-day events: known-empty details,
+Production accepts ordinary imported and fully handed-off Android-created timed
+and all-day events: known-empty details,
 no color, no recurrence, and exactly a title change. All-day start and exclusive
 end dates must remain identical, with the existing strict native UTC representation.
-CREATE-handoff events, broader edits and deletion remain captured locally without upload. The
+Broader edits and deletion remain captured locally without upload. The
 interface explains this limit; all editing stays in the system calendar client.
+
+A transferred CREATE must retain its complete original submission, binding,
+attachment and proven acknowledgement. Preparation and claim require the exact
+released, waiting handoff frame bound to the current base and format, matching
+nondeleted native contents and no pending projection receipt. Source, scope holds,
+owner, capsule and access are rechecked after suspended reads. Missing or malformed
+provenance cannot fall back to ordinary capture; an unrelated uncertain CREATE
+still blocks the whole calendar.
+
+UNKNOWN inspection uses separate historical qualification. It freezes the source
+role and checks its complete immutable origin throughout recovery, without
+requiring the old waiting marker, current owner or native-content equality. A
+later title/date edit or deletion can therefore retain the previous verified proof
+without forcing acknowledgement. A changed source or revoked lease closes the
+inspection. Already durable results retain their offline recovery path with title
+consent off; this never authorizes another preparation or submission.
+
+The original CREATE follow-up can settle after title acknowledgement from a
+clean native witness of the full current handoff frame. It rechecks access,
+immutable origin and the exact SQL role, refuses any local owner or pending
+projection receipt, then verifies the native frame again before reporting unchanged.
+This closes only follow-up metadata; it neither writes native event fields nor
+inspects the original CREATE revision again. A later edit or deletion stays held.
+When this waiting-to-settled transition leaves the complete current base pending
+as an incoming echo, it requests one appended offline continuation after checking
+the immutable source, access and settled role again. Import precedes CREATE
+reconciliation in the worker, so this pass lets the now-released echo drain without
+relying on a native event notification. An already settled replay, absent echo,
+distinct revision or changed source requests no continuation or network work.
 
 All-day qualification includes real Provider/SQLite controller tests for one-day
 and multi-day exclusive date intervals across a daylight-saving transition. A
@@ -184,7 +214,7 @@ these are repeated observations, not an atomic native edit precondition. A chang
 the final observation can still race transport. Preparing work does not supply dispatch
 admission. Fresh GET followed by PUT remains an optimistic controlled-writer experiment,
 without an atomic server precondition. The opt-in production path composes this
-boundary for its narrower ordinary timed and all-day profiles.
+boundary for its narrower timed and all-day profiles, including qualified CREATE handoffs.
 
 ## Stable preparation identity
 
@@ -389,7 +419,7 @@ the same transaction also requires the complete released, waiting handoff frame,
 valid immutable origin and proven CREATE acknowledgement, and no competing
 projection receipt. A different owner, result or source stays unresolved. This
 does not reset the owner to PAUSED or authorize another service request. The
-production gate for new transferred title submissions remains closed.
+separate production source qualification still controls every new submission.
 
 Only the fresh reservation may call the native write. One atomic Calendar Provider
 batch asserts the unique owned calendar and both event identities, complete
@@ -638,7 +668,7 @@ server precondition**. A concurrent Proton change between them may be overwritte
 Readback proves current observed contents, not authorship or immutable remote
 history. This adapter does not advertise general conflict-safe write capability.
 
-The separate title toggle connects narrow ordinary imported timed and all-day profiles
+The separate title toggle connects narrow imported and qualified CREATE-handoff timed and all-day profiles
 to the existing worker. The system observer retains broader edits/deletions
 locally. Wider service/native journeys still require their own qualification.
 The completion path permits successive locally qualified title cycles; this
@@ -799,6 +829,36 @@ not automatic production-worker triggering or a Samsung editor journey.
 - `CalendarTitleUpdateShapeLiveDeviceTest` explicitly prepares a retained
   synthetic CREATE fixture without sending UPDATE. Diagnostics contain schema
   names/types only, and the preparation is stored separately from production work.
+- `CalendarSystemHandoffTitleWorkerLiveDeviceTest` requires
+  `calendarSystemHandoffTitleWorker=true`, an authorized account, an immutable
+  fixture token and a separate journey namespace. `RUN` opens the external editor
+  for CREATE and then a title-only edit of that same row. Normal workers perform
+  preparation, submission, inspection and acknowledgement. The fixture retains
+  immutable CREATE evidence separately from the full current handoff frame frozen
+  immediately before title editing. `CONTINUE` can resume only an already verified
+  CREATE with no previous title-editor admission or title work; it cannot create
+  another event. `DIAG` reads the retained evidence without changing write options
+  or scheduling work. `DIAG_SETTLED` compares in-memory SQL and decoded snapshots
+  before and after normal worker convergence, emitting only equality witnesses.
+  `DIAG_CREATE` reads only the original enrolled row after a failed pre-title
+  CREATE check. It compares implicit and explicit Provider projections against
+  the frozen original content, emitting boolean witnesses without qualifying the
+  failed CREATE, changing write options or admitting a title edit.
+  `RECOVER` requires an already completed title proof and
+  exact original enrollment, allowing normal workers to close only its retained
+  CREATE follow-up; no editor or new submission is admitted. Its preflight may
+  retain one pending incoming echo only when its complete event, revision, baseline
+  and format equal the durable result. Final qualification requires that pending
+  projection to drain. The original title acknowledgement stays immutable;
+  a subsequent projection may reference only the identical result as both its
+  change and previous base. New qualifications freeze the complete settled SQL
+  snapshot and its checksum together without replacing an existing enrollment.
+  `REPLAY` requires a fresh process, unchanged historical evidence and baseline,
+  and no additional attempt. Only the last incoming projection receipt may advance,
+  and only to a fully qualified echo of the identical verified result; the native
+  row must still match. It then restores the original calendar write options. Timed
+  and all-day profiles use independent retained journeys. These gates never
+  authorize replacing unresolved evidence or replaying an uncertain submission.
 - `CalendarTitleUpdateSubmissionLiveDeviceTest` requires explicit opt-in and an
   authorized fixture/account identity. It retains the exact attempt before one
   controlled title submission. `titleUpdateInspectOnly=true` permits restart

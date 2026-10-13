@@ -25,10 +25,20 @@ disabling creation closes native editing without deleting events; pending work
 stays visible with the mode off. UNKNOWN submissions can only be inspected, never
 automatically sent again. A separate, default-off title option now connects guarded
 preparation, submission and inspection to the existing network worker. It covers
-only ordinary imported timed and all-day events with known-empty details, no color, no
+ordinary imported and fully handed-off Android-created timed and all-day events
+with known-empty details, no color, no
 recurrence and a title-only change. All-day date intervals and their exclusive
-end remain unchanged. Transferred CREATE, multi-field edits
+end remain unchanged. Transferred CREATE requires its exact released waiting frame,
+complete immutable origin and matching native contents, with no pending projection receipt.
+Missing provenance cannot fall back to ordinary capture. Multi-field edits
 and DELETE remain held locally without upload.
+After title acknowledgement, the original CREATE follow-up can close from the
+exact current clean frame, with repeated native, origin and access checks and no
+local owner or pending projection receipt. Its immutable creation evidence stays intact;
+this requires no native field write or another inspection of the old CREATE revision.
+If that transition leaves the exact verified incoming echo pending, it appends
+one offline worker pass after rechecking the source and settled role. A replay,
+distinct remote revision or changed source does not append another pass.
 The existing local and network workers now traverse the production title journal
 offline, completing only already durable verified results. One bounded page per
 active editable calendar uses a durable scope/protocol-bound cursor. Recovery
@@ -48,8 +58,8 @@ exact released, waiting handoff frame and original proven creation acknowledgeme
 Deferred or distinct observations still block a
 new receipt. This consumes proof without resetting conflict dispatch or sending
 again. Once a receipt exists, later observations remain retained for reconciliation.
-It is not general conflict resolution or atomic server protection, and does not
-activate production title submission for transferred CREATE events.
+Exact-echo recognition consumes existing proof; it does not authorize another
+request, resolve distinct conflicts or establish atomic server protection.
 Local [conflict archives](CONFLICT_ARCHIVE.md) now preserve the original base and
 first local capture with distinct verified, deleted, deferred or unreadable evidence
 in the same import transaction. Calendar options offer paginated offline
@@ -112,8 +122,16 @@ receipt history supports successive title cycles and old replay without consumin
 the next intent. The original UNKNOWN attempt remains non-resendable; unresolved
 work and corrupt history block new admission across generations. A gated ordinary
 timed-event journey now qualifies real native capture, Proton preparation and guarded
-submission through durable proof and restarted offline recovery. Transferred CREATE
-submission journeys and broader event profiles remain unqualified.
+submission through durable proof and restarted offline recovery. A separate fresh
+system-editor journey also qualifies a timed Android CREATE followed by a title-only
+edit through the production workers. Fresh-process replay retains the original
+CREATE and title evidence, complete result and native row without another attempt.
+The incoming projection receipt may advance only for an identical verified echo;
+this is conservation of data and history, not immutability of import metadata.
+Transferred all-day journeys remain unqualified: the live journey has not passed
+the native-content check following its initial CREATE. Later read-only checks
+match the expected values but cannot establish what differed at the failure.
+Broader event profiles remain unqualified.
 An internal offline binding now retains an already prepared title wire only for
 the exact current SQL owner, preparation capsule and complete native dirty edit.
 Transferred CREATE events require their original provenance and released waiting

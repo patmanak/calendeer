@@ -74,7 +74,23 @@ class TitleUpdateAcknowledgementIntegrationDeviceTest {
         var beforeFreshAcknowledgement: (suspend () -> Unit)? = null
         var rejectFreshAcknowledgement = false
         var afterFreshAcknowledgement: (suspend () -> Unit)? = null
+        var afterHandoffSourceRead: (suspend () -> Unit)? = null
+        var afterCleanHandoffRead: (suspend () -> Unit)? = null
         private val projection = object : CalendarProjection by native {
+            override suspend fun inspectCapturedHandoffBase(frame: CapturedCreateHandoffFrame): CapturedHandoffCleanWitness? {
+                val observation = native.inspectCapturedHandoffBase(frame)
+                val hook = afterCleanHandoffRead
+                afterCleanHandoffRead = null
+                hook?.invoke()
+                return observation
+            }
+            override suspend fun captureCapturedHandoffCurrent(frame: CapturedCreateHandoffFrame): CapturedHandoffCurrentObservation {
+                val observation = native.captureCapturedHandoffCurrent(frame)
+                val hook = afterHandoffSourceRead
+                afterHandoffSourceRead = null
+                hook?.invoke()
+                return observation
+            }
             override suspend fun acknowledgeTitleUpdate(receipt: TitleUpdateAcknowledgementReceipt): AppliedTitleUpdateAcknowledgement? {
                 writes.incrementAndGet()
                 beforeFreshAcknowledgement?.invoke()
@@ -101,11 +117,15 @@ class TitleUpdateAcknowledgementIntegrationDeviceTest {
         private var originalSubmission: LocalCreateSubmission? = null
         private var jobs = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         private val schedules = AtomicInteger()
+        private val localContinuations = AtomicInteger()
+        private val networkContinuations = AtomicInteger()
         private val scheduler = object : ImportScheduler {
             override fun cancel() = Unit
             override fun requestLocal() = Unit
             override fun requestNetwork() { schedules.incrementAndGet() }
-            override fun continueWork(network: Boolean) = Unit
+            override fun continueWork(network: Boolean) {
+                if (network) networkContinuations.incrementAndGet() else localContinuations.incrementAndGet()
+            }
         }
         private val remote = object : ReadOnlyCalendarRemote {
             override val format = this@Fixture.format
@@ -255,6 +275,7 @@ class TitleUpdateAcknowledgementIntegrationDeviceTest {
                 assertEquals(preparation.timestamp, journal.read(target, prepared.id)!!.preparation.timestamp)
                 assertEquals(result, journal.readCompletion(target, prepared.id)!!.result)
                 assertSqlRestored(admitted)
+                assertOriginalCreateProvenance()
                 val after = values()
                 assertEquals(before - setOf(Events.DIRTY, Events.SYNC_DATA2, Events.SYNC_DATA3),
                     after - setOf(Events.DIRTY, Events.SYNC_DATA2, Events.SYNC_DATA3))
@@ -263,19 +284,243 @@ class TitleUpdateAcknowledgementIntegrationDeviceTest {
                 assertEquals(1, wakes); port.assertOneExchange(); assertEquals(after, values())
                 reopenOwner(); assertSqlRestored(admitted)
                 assertEquals(result, journal.readCompletion(target, prepared.id)!!.result)
+                assertOriginalCreateProvenance()
             } finally { context.deleteSharedPreferences(changePrefs); context.deleteSharedPreferences(attemptPrefs) }
         }
 
-        suspend fun productionUnsupportedProfileNeverCallsPorts() {
+        suspend fun completedTransferredTitleClosesCreateFollowupWithoutNativeWrite(pendingEcho: Boolean = false, distinctRevision: Boolean = false) {
+            check(transferred)
+            productionTitleControllerUsesCanonicalWorkAndCompletesTheRealNativeOwner()
+            allowSql()
+            val settled = requireNotNull(store.capturedHandoff(target, base.eventId)).frame
+            assertEquals(verified, settled.base)
+            if (pendingEcho) {
+                assertEquals(1, store.writableDatabase.update("records", ContentValues().apply { put("pending", 1) },
+                    null, null))
+                assertEquals(ProjectionIntent(target, verified), store.capturedHandoffPending(settled))
+            }
+            if (distinctRevision) {
+                val distinct = verified.copy(revision = Revision("synthetic-newer-distinct-remote-revision"))
+                val pending = ProjectionIntent(target, distinct)
+                store.transaction(target) {
+                    putRemote(distinct)
+                    putProjection(pending)
+                }
+                assertEquals(pending, store.capturedHandoffPending(settled))
+            }
+            assertTrue(store.waitCapturedHandoff(settled))
+            val localBefore = localContinuations.get()
+            val networkBefore = networkContinuations.get()
+            val nativeBefore = values()
+            val titleBefore = journal.read(target, prepared.id)
+            val completionBefore = journal.readCompletion(target, prepared.id)
+            val source = CapturedCreateDispatchIdentity.of(requireNotNull(originalSubmission))
+            assertEquals(CapturedCreateReconciliationResult.UNCHANGED,
+                coordinator.reconcileHandoffLocalCreate(target, source.localId, source.captureId, source.attempt.id))
+            allowSql()
+            assertEquals(CapturedCreateHandoffRecord(settled, CapturedCreateHandoffState.RELEASED),
+                store.capturedHandoff(target, base.eventId))
+            assertEquals(nativeBefore, values())
+            assertEquals(titleBefore, journal.read(target, prepared.id))
+            assertEquals(completionBefore, journal.readCompletion(target, prepared.id))
+            assertEquals(localBefore + if (pendingEcho) 1 else 0, localContinuations.get())
+            assertEquals(networkBefore, networkContinuations.get())
+            assertEquals(1, writes.get())
+            assertOriginalCreateProvenance()
+            assertEquals(CapturedCreateReconciliationResult.UNCHANGED,
+                coordinator.reconcileHandoffLocalCreate(target, source.localId, source.captureId, source.attempt.id))
+            assertEquals(nativeBefore, values())
+            assertEquals(localBefore + if (pendingEcho) 1 else 0, localContinuations.get())
+            assertEquals(networkBefore, networkContinuations.get())
+        }
+
+        suspend fun changedSettledHandoffCannotCloseCreateFollowup(case: String) {
+            check(transferred)
+            productionTitleControllerUsesCanonicalWorkAndCompletesTheRealNativeOwner()
+            allowSql()
+            val settled = requireNotNull(store.capturedHandoff(target, base.eventId)).frame
+            assertTrue(store.waitCapturedHandoff(settled))
+            val source = CapturedCreateDispatchIdentity.of(requireNotNull(originalSubmission))
+            val completionBefore = journal.readCompletion(target, prepared.id)
+            val localBefore = localContinuations.get()
+            val networkBefore = networkContinuations.get()
+            var expectedNative = values()
+            when (case) {
+                "owner" -> assertNotNull(store.retainCapturedHandoffLocalChange(
+                    CapturedHandoffCurrent(settled, settled.base.content.copy(title = "Synthetic newer retained title"), false),
+                    MutationId(UUID.randomUUID().toString())))
+                "projection" -> damageTransferredSource("projection")
+                "late_title", "late_delete", "origin", "revoked", "cancelled_read" -> afterCleanHandoffRead = {
+                    when (case) {
+                        "late_title" -> mutateTitle("Synthetic later native title")
+                        "late_delete" -> context.contentResolver.update(uri, ContentValues().apply {
+                            put(Events.DIRTY, 1); put(Events.DELETED, 1)
+                        }, "${Events._ID}=?", arrayOf(row.toString()))
+                        "origin" -> damageTransferredSource("attachment")
+                        "revoked" -> toggleTitles(false)
+                        "cancelled_read" -> currentCoroutineContext().cancel()
+                    }
+                    expectedNative = values()
+                }
+                else -> error("Unknown settled handoff fixture")
+            }
+            if (case == "cancelled_read") {
+                val boundary = Job()
+                var propagated = false
+                try {
+                    withContext(boundary) {
+                        coordinator.reconcileHandoffLocalCreate(target, source.localId, source.captureId, source.attempt.id)
+                    }
+                } catch (_: CancellationException) { propagated = true }
+                finally { boundary.cancel() }
+                assertTrue("A captured clean witness cannot absorb cancellation", propagated)
+            } else assertNotEquals(CapturedCreateReconciliationResult.UNCHANGED,
+                coordinator.reconcileHandoffLocalCreate(target, source.localId, source.captureId, source.attempt.id))
+            allowSql()
+            assertEquals(CapturedCreateHandoffRecord(settled, CapturedCreateHandoffState.RELEASED, waiting = true),
+                store.capturedHandoff(target, base.eventId))
+            assertEquals(expectedNative, values())
+            assertEquals(completionBefore, journal.readCompletion(target, prepared.id))
+            assertEquals(localBefore, localContinuations.get())
+            assertEquals(networkBefore, networkContinuations.get())
+            assertEquals(1, writes.get())
+        }
+
+        private fun damageTransferredSource(case: String) {
+            check(transferred)
+            when (case) {
+                "frame" -> assertEquals(1, store.writableDatabase.delete("captured_create_handoffs", null, null))
+                "origin" -> assertEquals(1, store.writableDatabase.delete("captured_create_bases", null, null))
+                "attachment" -> assertEquals(1, createAttempts.writableDatabase.delete("captured_create_attachments", null, null))
+                "binding" -> assertEquals(1, createAttempts.writableDatabase.update("captured_create_bindings", ContentValues().apply {
+                    put("verified_revision", "synthetic-distinct-original-binding")
+                }, null, null))
+                "submission" -> assertEquals(1, captures.writableDatabase.delete("local_create_submissions", null, null))
+                "submission_payload" -> assertEquals(1, captures.writableDatabase.update("local_create_submissions", ContentValues().apply {
+                    put("payload", "synthetic-distinct-original-wire")
+                }, null, null))
+                "waiting" -> assertEquals(1, store.writableDatabase.update("captured_create_handoffs", ContentValues().apply {
+                    put("waiting", 0)
+                }, null, null))
+                "release" -> assertEquals(1, store.writableDatabase.update("captured_create_handoffs", ContentValues().apply {
+                    put("state", "PENDING")
+                }, null, null))
+                "nonce" -> assertEquals(1, store.writableDatabase.update("captured_create_handoffs", ContentValues().apply {
+                    put("nonce", "synthetic-distinct-current-frame")
+                }, null, null))
+                "projection" -> store.writableDatabase.execSQL("INSERT INTO projection_receipts " +
+                    "(scope,event,nonce,payload,adapter,version,previous_base,protocol) " +
+                    "SELECT scope,event,?,payload,?,?,payload,1 FROM projection_bases",
+                    arrayOf<Any>(UUID.randomUUID().toString(), format.id, format.version))
+                "scope_hold" -> {
+                    createAttempts.writableDatabase.execSQL("INSERT INTO create_attempts " +
+                        "(account,calendar,generation,mutation,adapter,version,payload,state,evidence) " +
+                        "SELECT account,calendar,generation,'synthetic-other-unknown',adapter,version,payload,state,evidence FROM create_attempts")
+                    createAttempts.writableDatabase.execSQL("INSERT INTO captured_create_links " +
+                        "(account,calendar,generation,mutation,adapter,version,payload_fingerprint,local_id,capture_id," +
+                        "capture_adapter,capture_version,timestamp,content_fingerprint,fingerprint_version) " +
+                        "SELECT account,calendar,generation,'synthetic-other-unknown',adapter,version,payload_fingerprint," +
+                        "'synthetic-other-local','synthetic-other-capture',capture_adapter,capture_version,timestamp," +
+                        "content_fingerprint,fingerprint_version FROM captured_create_links")
+                }
+                else -> error("Unknown synthetic source case")
+            }
+        }
+
+        suspend fun productionInvalidTransferredSourceNeverCallsPorts(case: String) {
             toggleTitles(true)
             val capsule = ControlledCapsulePort(); val port = ControlledTitlePort(); val before = values()
-            assertEquals(LocalTitleAttemptPreparation.Unsupported, prepareProduction(capsule, port))
+            damageTransferredSource(case)
+            assertFalse(prepareProduction(capsule, port) is LocalTitleAttemptPreparation.Prepared)
             assertNull(coordinator.submitSystemTitle(prepared, journal, port) { it == target && titlesAllowed })
             assertEquals(0, capsule.guardedCalls); assertEquals(0, capsule.forbiddenCalls)
             assertEquals(0, port.preparations); assertEquals(0, port.submissions); assertEquals(0, port.forbiddenCalls)
             assertNull(journal.read(target, prepared.id)); assertEquals(before, values())
             allowSql(); assertEquals(preparation, store.localEditPreparation(target, base.eventId))
-            if (transferred) assertOriginalCreateProvenance()
+            assertEquals(intent, store.localEdit(target, base.eventId)); assertSingleOriginalRow()
+            assertEquals(0, writes.get()); assertEquals(0, inspections.get())
+            if (case == "projection") assertNotNull(store.capturedHandoffProjection(frame!!))
+        }
+
+        suspend fun productionTransferredSourceChangingBeforeClaimCannotSend(case: String) {
+            toggleTitles(true); reserveProductionIdentity()
+            val capsule = ControlledCapsulePort(); val port = ControlledTitlePort(); val before = values()
+            assertEquals(LocalTitleAttemptPreparation.Prepared(prepared), prepareProduction(capsule, port))
+            port.beforeClaim = { damageTransferredSource(case) }
+            assertNull(coordinator.submitSystemTitle(prepared, journal, port) { it == target && titlesAllowed })
+            assertEquals(1, port.submissions); assertEquals(0, port.sends); assertEquals(0, port.forbiddenCalls)
+            assertEquals(prepared, journal.read(target, prepared.id)); assertNull(journal.readVerified(target, prepared.id))
+            assertEquals(before, values()); assertEquals(0, writes.get()); assertSingleOriginalRow()
+            allowSql(); assertEquals(intent, store.localEdit(target, base.eventId))
+            if (case == "projection") assertNotNull(store.capturedHandoffProjection(frame!!))
+        }
+
+        suspend fun productionTransferredScopeHoldAppearingAfterNativeReadCannotPrepare() {
+            toggleTitles(true)
+            val capsule = ControlledCapsulePort(); val port = ControlledTitlePort(); val before = values()
+            afterHandoffSourceRead = { damageTransferredSource("scope_hold") }
+            assertFalse(prepareProduction(capsule, port) is LocalTitleAttemptPreparation.Prepared)
+            assertEquals(0, port.preparations); assertEquals(0, capsule.guardedCalls)
+            assertTrue(createAttempts.capturedProjectionHold(target, format).scopeBlocked)
+            assertEquals(before, values()); assertEquals(0, writes.get()); assertOriginalCreateProvenance()
+        }
+
+        suspend fun productionHistoricalInspectionPreservesLaterNativeChange(case: String) {
+            check(transferred && !preparedOnly)
+            toggleTitles(true)
+            journal.writableDatabase.execSQL("UPDATE title_update_attempts SET result=NULL")
+            assertNull(journal.readVerified(target, prepared.id))
+            when (case) {
+                "later_title", "revoke", "attachment", "inspection_attachment", "inspection_role", "projection" ->
+                    mutateTitle("Synthetic later title while earlier outcome is unknown")
+                "later_date" -> assertEquals(1, context.contentResolver.update(uri, ContentValues().apply {
+                    put(Events.DTEND, values()[Events.DTEND]!!.toLong() + 86_400_000L); put(Events.DIRTY, 1)
+                }, "${Events._ID}=? AND ${Events.CALENDAR_ID}=?", arrayOf(row.toString(), calendar.toString())))
+                "deleted" -> assertEquals(1, context.contentResolver.update(uri, ContentValues().apply {
+                    put(Events.DELETED, 1); put(Events.DIRTY, 1)
+                }, "${Events._ID}=? AND ${Events.CALENDAR_ID}=?", arrayOf(row.toString(), calendar.toString())))
+                else -> error("Unknown synthetic historical case")
+            }
+            if (case == "attachment") damageTransferredSource("attachment")
+            if (case == "projection") damageTransferredSource("projection")
+            // A historical read must not require the old mutable waiting marker.
+            if (case == "later_title") damageTransferredSource("waiting")
+            val later = values(); var serviceInspections = 0; var wakes = 0
+            val lease = coordinator.systemTitleRunAdmission(target)
+            val port = object : CalendarTitleUpdateSubmissionPort {
+                override val titleUpdateFormat = prepared.format
+                override suspend fun prepareSubmission(id: MutationId, preparation: LocalEditPreparation): TitleUpdateAttemptRecord =
+                    error("Historical inspection cannot prepare")
+                override suspend fun submit(record: TitleUpdateAttemptRecord, journal: TitleUpdateAttemptJournal): TitleUpdateSubmissionObservation =
+                    error("Historical inspection cannot send")
+                override suspend fun inspect(record: TitleUpdateAttemptRecord): TitleUpdateSubmissionObservation =
+                    error("Historical inspection must remain guarded")
+                override suspend fun inspect(record: TitleUpdateAttemptRecord, admit: (CalendarScope) -> Boolean): TitleUpdateSubmissionObservation {
+                    assertEquals(unknown, record); assertTrue(admit(target))
+                    assertFalse(admit(target.copy(generation = 1))); serviceInspections++
+                    if (case == "revoke") { toggleTitles(false); toggleTitles(true) }
+                    if (case == "inspection_attachment") damageTransferredSource("attachment")
+                    if (case == "inspection_role") damageTransferredSource("waiting")
+                    return TitleUpdateSubmissionObservation.Verified(TitleUpdateAttemptIdentity.of(record), verified)
+                }
+            }
+            val progress = coordinator.inspectSystemTitles(TitleUpdateWorkQuery(target), journal, port, lease) { wakes++ }
+            if (case in listOf("attachment", "revoke", "inspection_attachment", "inspection_role")) {
+                assertNull(journal.readVerified(target, prepared.id)); assertEquals(0, wakes)
+                assertEquals(if (case == "attachment") 0 else 1, serviceInspections)
+            } else {
+                assertEquals(TitleUpdateRecoveryProgress(held = 1), progress)
+                assertEquals(1, serviceInspections); assertEquals(1, wakes)
+                assertEquals(result, journal.readVerified(target, prepared.id))
+                assertEquals(TitleUpdateRecoveryProgress(held = 1), coordinator.inspectSystemTitles(
+                    TitleUpdateWorkQuery(target), journal, port, lease) { wakes++ })
+                assertEquals(1, serviceInspections); assertEquals(1, wakes)
+                assertOriginalCreateProvenance()
+            }
+            assertEquals(unknown, journal.read(target, prepared.id)); assertNull(journal.readCompletion(target, prepared.id))
+            assertEquals(later, values()); assertEquals(0, writes.get()); assertEquals(0, inspections.get())
+            allowSql(); assertEquals(intent, store.localEdit(target, base.eventId))
+            assertEquals(base, store.projectedBaseline(target, base.eventId)); assertNull(receipt())
         }
 
         suspend fun productionFreshCapsuleUsesOnlyGuardedOverload(revoke: Boolean) {
@@ -1551,7 +1796,7 @@ class TitleUpdateAcknowledgementIntegrationDeviceTest {
         verifiedSelfEchoBeforeFreshAcknowledgement("absent")
     }
     @Test fun productionTitleOptionDefaultsOffWithoutAnyAdapterCalls() {
-        for (allDay in listOf(false, true)) fixture(allDay = allDay, preparedOnly = true) {
+        for (allDay in listOf(false, true)) for (transferred in listOf(false, true)) fixture(allDay = allDay, transferred = transferred, preparedOnly = true) {
             productionTitleOptionOffNeverCallsPorts()
         }
     }
@@ -1564,6 +1809,70 @@ class TitleUpdateAcknowledgementIntegrationDeviceTest {
     @Test fun optedInSingleDayTitleControllerKeepsItsExclusiveNextDayBoundary() = fixture(allDay = true, preparedOnly = true, allDayDays = 1) {
         productionTitleControllerUsesCanonicalWorkAndCompletesTheRealNativeOwner()
     }
+    @Test fun optedInTransferredTimedTitleControllerCompletesSameRowWithImmutableCreateOrigin() = fixture(allDay = false, transferred = true, preparedOnly = true) {
+        productionTitleControllerUsesCanonicalWorkAndCompletesTheRealNativeOwner()
+    }
+    @Test fun optedInTransferredAllDayTitleControllerPreservesExclusiveDatesAndCreateOrigin() = fixture(allDay = true, transferred = true, preparedOnly = true) {
+        productionTitleControllerUsesCanonicalWorkAndCompletesTheRealNativeOwner()
+    }
+    @Test fun completedTransferredTimedTitleClosesOriginalCreateFollowupWithoutNativeWrite() = fixture(allDay = false, transferred = true, preparedOnly = true) {
+        completedTransferredTitleClosesCreateFollowupWithoutNativeWrite()
+    }
+    @Test fun completedTransferredAllDayTitleClosesOriginalCreateFollowupWithoutNativeWrite() = fixture(allDay = true, transferred = true, preparedOnly = true) {
+        completedTransferredTitleClosesCreateFollowupWithoutNativeWrite()
+    }
+    @Test fun completedTransferredTimedTitleSchedulesOneOfflineEchoContinuation() = fixture(allDay = false, transferred = true, preparedOnly = true) {
+        completedTransferredTitleClosesCreateFollowupWithoutNativeWrite(pendingEcho = true)
+    }
+    @Test fun completedTransferredAllDayTitleSchedulesOneOfflineEchoContinuation() = fixture(allDay = true, transferred = true, preparedOnly = true) {
+        completedTransferredTitleClosesCreateFollowupWithoutNativeWrite(pendingEcho = true)
+    }
+    @Test fun completedTransferredTitleDoesNotScheduleForDistinctRemoteRevision() = fixture(allDay = false, transferred = true, preparedOnly = true) {
+        completedTransferredTitleClosesCreateFollowupWithoutNativeWrite(distinctRevision = true)
+    }
+    @Test fun settledTransferredTimedOwnerKeepsCreateFollowupWaiting() = fixture(allDay = false, transferred = true, preparedOnly = true) {
+        changedSettledHandoffCannotCloseCreateFollowup("owner")
+    }
+    @Test fun settledTransferredTimedProjectionKeepsCreateFollowupWaiting() = fixture(allDay = false, transferred = true, preparedOnly = true) {
+        changedSettledHandoffCannotCloseCreateFollowup("projection")
+    }
+    @Test fun settledTransferredTimedLaterTitleKeepsCreateFollowupWaiting() = fixture(allDay = false, transferred = true, preparedOnly = true) {
+        changedSettledHandoffCannotCloseCreateFollowup("late_title")
+    }
+    @Test fun settledTransferredTimedLaterDeletionKeepsCreateFollowupWaiting() = fixture(allDay = false, transferred = true, preparedOnly = true) {
+        changedSettledHandoffCannotCloseCreateFollowup("late_delete")
+    }
+    @Test fun settledTransferredTimedLostOriginKeepsCreateFollowupWaiting() = fixture(allDay = false, transferred = true, preparedOnly = true) {
+        changedSettledHandoffCannotCloseCreateFollowup("origin")
+    }
+    @Test fun settledTransferredTimedRevocationKeepsCreateFollowupWaiting() = fixture(allDay = false, transferred = true, preparedOnly = true) {
+        changedSettledHandoffCannotCloseCreateFollowup("revoked")
+    }
+    @Test fun settledTransferredTimedCancellationKeepsCreateFollowupWaiting() = fixture(allDay = false, transferred = true, preparedOnly = true) {
+        changedSettledHandoffCannotCloseCreateFollowup("cancelled_read")
+    }
+    @Test fun settledTransferredAllDayOwnerKeepsCreateFollowupWaiting() = fixture(allDay = true, transferred = true, preparedOnly = true) {
+        changedSettledHandoffCannotCloseCreateFollowup("owner")
+    }
+    @Test fun settledTransferredAllDayProjectionKeepsCreateFollowupWaiting() = fixture(allDay = true, transferred = true, preparedOnly = true) {
+        changedSettledHandoffCannotCloseCreateFollowup("projection")
+    }
+    @Test fun settledTransferredAllDayLaterTitleKeepsCreateFollowupWaiting() = fixture(allDay = true, transferred = true, preparedOnly = true) {
+        changedSettledHandoffCannotCloseCreateFollowup("late_title")
+    }
+    @Test fun settledTransferredAllDayLaterDeletionKeepsCreateFollowupWaiting() = fixture(allDay = true, transferred = true, preparedOnly = true) {
+        changedSettledHandoffCannotCloseCreateFollowup("late_delete")
+    }
+    @Test fun settledTransferredAllDayLostOriginKeepsCreateFollowupWaiting() = fixture(allDay = true, transferred = true, preparedOnly = true) {
+        changedSettledHandoffCannotCloseCreateFollowup("origin")
+    }
+    @Test fun settledTransferredAllDayRevocationKeepsCreateFollowupWaiting() = fixture(allDay = true, transferred = true, preparedOnly = true) {
+        changedSettledHandoffCannotCloseCreateFollowup("revoked")
+    }
+    @Test fun settledTransferredAllDayCancellationKeepsCreateFollowupWaiting() = fixture(allDay = true, transferred = true, preparedOnly = true) {
+        changedSettledHandoffCannotCloseCreateFollowup("cancelled_read")
+    }
+
     @Test fun optedInAllDayLaterEndDateCannotBeOverwrittenOrSubmittedByTitleWork() = fixture(allDay = true, preparedOnly = true) {
         productionAllDayDateChangeBeforeClaimPreservesLaterNativeEdit()
     }
@@ -1573,36 +1882,70 @@ class TitleUpdateAcknowledgementIntegrationDeviceTest {
     @Test fun productionAllDayFirstCapsuleUsesGuardedPreparationOnly() = fixture(allDay = true, preparedOnly = true) {
         productionFreshCapsuleUsesOnlyGuardedOverload(revoke = false)
     }
-    @Test fun productionTitleOptionRefusesTransferredCreateBeforeAnyAdapterCalls() {
+    @Test fun productionInvalidTransferredCreateCannotFallBackToOrdinaryTitleWork() {
+        for (allDay in listOf(false, true)) for (case in listOf("frame", "origin", "attachment", "binding", "submission",
+            "submission_payload", "waiting", "release", "nonce", "projection")) {
+            fixture(allDay = allDay, transferred = true, preparedOnly = true) {
+                productionInvalidTransferredSourceNeverCallsPorts(case)
+            }
+        }
+    }
+    @Test fun productionTransferredSourceChangesBeforeClaimCannotSendOrConsumeProjection() {
+        for (allDay in listOf(false, true)) for (case in listOf("attachment", "submission_payload", "waiting", "nonce", "projection", "scope_hold")) {
+            fixture(allDay = allDay, transferred = true, preparedOnly = true) {
+                productionTransferredSourceChangingBeforeClaimCannotSend(case)
+            }
+        }
+    }
+    @Test fun productionTransferredUnknownInspectionKeepsProofAndLaterNativeEdits() {
+        for (allDay in listOf(false, true)) for (case in listOf("later_title", "later_date", "deleted", "attachment", "revoke",
+            "inspection_attachment", "inspection_role", "projection")) {
+            fixture(allDay = allDay, transferred = true) {
+                productionHistoricalInspectionPreservesLaterNativeChange(case)
+            }
+        }
+    }
+    @Test fun productionTransferredScopeHoldAfterNativeReadCannotBeIgnored() {
         for (allDay in listOf(false, true)) fixture(allDay = allDay, transferred = true, preparedOnly = true) {
-            productionUnsupportedProfileNeverCallsPorts()
+            productionTransferredScopeHoldAppearingAfterNativeReadCannotPrepare()
+        }
+    }
+    @Test fun productionTransferredAllDayLaterNativeDatesAreHeldWithoutSend() = fixture(allDay = true, transferred = true, preparedOnly = true) {
+        productionAllDayDateChangeBeforeClaimPreservesLaterNativeEdit()
+    }
+    @Test fun productionTransferredAllDayRemoteDateConflictRemainsArchivedWithoutSend() = fixture(allDay = true, transferred = true, preparedOnly = true) {
+        productionAllDayRemoteDateChangeBeforeClaimRemainsArchivedWithoutSend()
+    }
+    @Test fun productionTransferredFreshCapsuleUsesGuardedPreparationOnly() {
+        for (allDay in listOf(false, true)) fixture(allDay = allDay, transferred = true, preparedOnly = true) {
+            productionFreshCapsuleUsesOnlyGuardedOverload(revoke = false)
         }
     }
     @Test fun productionTitleFirstCapsuleUsesGuardedPreparationOnly() = fixture(allDay = false, preparedOnly = true) {
         productionFreshCapsuleUsesOnlyGuardedOverload(revoke = false)
     }
     @Test fun productionTitleRevokedAndRestoredDuringFirstCapsuleCannotRetainOrPrepareWire() {
-        for (allDay in listOf(false, true)) fixture(allDay = allDay, preparedOnly = true) {
+        for (allDay in listOf(false, true)) for (transferred in listOf(false, true)) fixture(allDay = allDay, transferred = transferred, preparedOnly = true) {
             productionFreshCapsuleUsesOnlyGuardedOverload(revoke = true)
         }
     }
     @Test fun productionTitleRevokedAndRestoredBeforeClaimCannotSend() {
-        for (allDay in listOf(false, true)) fixture(allDay = allDay, preparedOnly = true) {
+        for (allDay in listOf(false, true)) for (transferred in listOf(false, true)) fixture(allDay = allDay, transferred = transferred, preparedOnly = true) {
             productionRevocationBeforeClaimCannotSendAfterModeRestoration()
         }
     }
     @Test fun productionTitleUnknownRemainsInspectionOnlyWithoutAnotherPreparationOrSend() {
-        for (allDay in listOf(false, true)) fixture(allDay = allDay, preparedOnly = true) {
+        for (allDay in listOf(false, true)) for (transferred in listOf(false, true)) fixture(allDay = allDay, transferred = transferred, preparedOnly = true) {
             productionUnknownCannotBePreparedOrSubmittedAgain()
         }
     }
     @Test fun productionTitleCancelledCapsuleReturningNullCannotReturnNormally() {
-        for (allDay in listOf(false, true)) fixture(allDay = allDay, preparedOnly = true) {
+        for (allDay in listOf(false, true)) for (transferred in listOf(false, true)) fixture(allDay = allDay, transferred = transferred, preparedOnly = true) {
             productionCancelledNullCapsuleCannotReturnNormally()
         }
     }
     @Test fun productionTitleRunLeaseRejectsRestoredPolicyAndAuthenticationAfterPreparation() {
-        for (allDay in listOf(false, true)) for (authentication in listOf(false, true)) fixture(allDay = allDay, preparedOnly = true) {
+        for (allDay in listOf(false, true)) for (transferred in listOf(false, true)) for (authentication in listOf(false, true)) fixture(allDay = allDay, transferred = transferred, preparedOnly = true) {
             productionFrozenRunLeaseCannotSurviveRevocationBetweenPreparationAndSubmission(authentication)
         }
     }

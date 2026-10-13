@@ -22,7 +22,7 @@
     <string name="system_create_limits">Erstellen Sie einfache Termine in Ihrer Kalender-App, ohne Erinnerungen, Gäste, Wiederholungen oder eigene Farben. Änderungen bleiben lokal, sofern die Titelsynchronisierung nicht ausdrücklich aktiviert ist. Löschungen werden nicht an Proton gesendet.</string>
     <string name="system_create_mode">Erstellung im Systemkalender erlauben</string>
     <string name="system_title_mode">Titeländerungen synchronisieren (experimentell)</string>
-    <string name="system_title_limits">Nur Titel: aus Proton importierte Termine mit Uhrzeit oder ganztägig, ohne Wiederholung, Erinnerungen, Gäste oder eigene Farbe. Über Android erstellte Termine sind ausgeschlossen. Änderungen an Datum, Beschreibung und Ort bleiben in Android.</string>
+    <string name="system_title_limits">Nur Titel: Termine mit Uhrzeit oder ganztägig, ohne Wiederholung, Erinnerungen, Gäste oder eigene Farbe. Dies gilt für aus Proton importierte und in Android erstellte Termine nach ihrer ersten erfolgreichen Synchronisierung. Änderungen an Datum, Beschreibung und Ort bleiben in Android.</string>
     <string name="system_create_pending">%1$d Erstellungen warten oder müssen geprüft werden. Ein ungewisser Versand wird nie automatisch wiederholt.</string>
     <string name="system_create_error">Die Synchronisierung benötigt eine Prüfung. Ihre Android-Daten bleiben erhalten.</string>
 </resources>
