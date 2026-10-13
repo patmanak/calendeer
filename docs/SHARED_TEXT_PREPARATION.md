@@ -88,6 +88,38 @@ differences. Duplicate keys and historical title formats are refused. Reopening
 is structural: it does not reverify signatures, certify a fresh observation or
 authorize dispatch. No bootstrap or private key material is stored in the record.
 
+## Complete local edit binding
+
+`LocalTextEditPreparation` is a separate domain-owned historical record. Its
+constructor retains a frozen copy of the paused local intent: mutation identity,
+scope, observation format, complete original projection, complete replacement and
+explicit timestamp. Only title, description and location may differ. Dates, zone,
+precision, original color and null versus empty details remain exact. Recurrence
+and nonempty details are refused. All six original/replacement texts have strict
+UTF-8, control-character and 65,536-byte checks. Empty detail lists are detached
+from mutable inputs. The existing title preparation type is not broadened.
+
+`prepareAndSealLocalTextEdit` requires the current event observation format and
+decodes the same frozen original row with the already unlocked keys. The complete
+decoded base must match the local intent before patching, signing or encryption.
+The bounded patcher observation reuses its existing framing and selected-property
+checks to distinguish an absent optional property from an explicit empty value.
+Selection comes only from raw differences in the local intent; an unchanged empty
+field keeps its original presence and bytes. For a changed optional field, a new
+empty domain string means removal. Observed text comparisons normalize CRLF to LF;
+the retained local intent is never normalized. A newline-only difference can
+therefore retain a complete intent while producing unchanged crypto fragments.
+
+The distinct `proton-calendar-offline-local-text-preparation` version 1 format
+seals that full intent together with the original row, fragments and nullable
+property bindings. `openLocal` compares the complete expected intent before
+reading the UID from protected history, then checks exact typed bindings,
+selection and fragment structure. It needs no external UID. Payload swaps between
+otherwise identical records with different mutation identities, altered dates or
+projection formats, duplicate keys, unknown fields and other preparation formats
+are refused.
+These checks do not prove encrypted text semantics or renew current access.
+
 ## Integration and evidence limits
 
 The plaintext patcher itself has no keys, network reads, persistence, dispatch
@@ -102,12 +134,18 @@ refusals, protection failures and snapshot isolation. A synthetic physical-devic
 probe checks original binary/text signatures, replacement decryption and signatures,
 original key-packet reuse, untouched fields, no-op ciphertext and reopening with
 new protector/codec instances. Its cancellation cases inspect errors inside the
-cancelled child coroutine. These checks do not establish a description or location
-round trip with the Proton service or a system calendar client.
+cancelled child coroutine. Domain and local codec tests additionally cover complete
+local-observation binding, unchanged absent/empty properties, removal, newline-only
+no-ops and mutable input isolation. A separate synthetic local-intent native probe
+checks full-base refusal before sealing, timed/all-day date preservation and those
+optional-field cases. Native recovery uses new instances in the same process;
+it does not qualify a durable journal or process-death recovery. These checks do
+not establish a description or location round trip with the Proton service or a
+system calendar client.
 
-The next integration needs complete immutable local-intent binding, authenticated
-request/readback, guarded durable submission and acknowledgement, followed by
-physical system-editor qualification. Historical title records must not be
+The next integration needs an authenticated preparation adapter and request/readback,
+guarded durable submission and acknowledgement, followed by physical system-editor
+qualification. Historical title records must not be
 reinterpreted as permission for broader edits. The existing concurrent GET/PUT
 race remains; plaintext patching supplies no server-side write precondition.
 

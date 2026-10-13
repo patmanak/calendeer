@@ -42,9 +42,15 @@ signatures, renews signatures and reuses the original session key for changed
 encrypted text through Proton Core. A distinct protected versioned record binds
 the selected fields, values, timestamp and original observation; reopening checks
 historical structure without granting sending authority. JVM tests and a synthetic
-physical crypto probe exercise this boundary and existing title paths. This
-enables no broader upload: complete local-intent binding, authenticated
-request/readback, durable submission/acknowledgement and system-editor
+physical crypto probe exercise this boundary and existing title paths.
+The separate local text record now freezes the full Android edit and seals its
+mutation identity, complete base/replacement and observation format. Preparation
+compares the full decoded original before crypto and derives nullable selected
+properties from that verified plaintext. Unchanged absent/empty fields retain
+their representation; a changed optional field cleared in Android becomes removal.
+The original title type and formats remain restricted. This enables no broader
+upload: authenticated preparation/request/readback, durable submission/acknowledgement
+and system-editor
 qualification remain required. See [shared text preparation](SHARED_TEXT_PREPARATION.md).
 
 After title acknowledgement, the original CREATE follow-up can close from the

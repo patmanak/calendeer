@@ -148,6 +148,57 @@ internal class ProtonEventDecryptor(private val crypto: CryptoContext, private v
         return ProtonTitlePreparationCodec(protector).sealLocal(frozen, uid, timestamp, prepared)
     }
 
+    /** Offline text preparation bound to the full imported base and frozen local intent.
+     * Optional property absence is observed from authenticated plaintext, never inferred from
+     * an empty domain string. This distinct local format grants no persistence or upload authority.
+     */
+    suspend fun prepareAndSealLocalTextEdit(session: CatalogSession, intent: LocalEditIntent,
+        uid: String, timestamp: Instant, metadata: JsonObject, bootstrap: JsonObject, row: JsonObject,
+        protector: EventPayloadProtector): LocalTextEditPreparation {
+        val context = currentCoroutineContext()
+        context.ensureActive()
+        val frozen = try { LocalTextEditPreparation.freezeIntent(intent) }
+            catch (_: IllegalArgumentException) { context.ensureActive(); unsupportedEvents() }
+            catch (_: java.nio.charset.CharacterCodingException) { context.ensureActive(); unsupportedEvents() }
+        if (frozen.format != EVENT_FORMAT) unsupportedEvents()
+        val base = frozen.base.content
+        val replacement = frozen.content
+        fun contentValue(content: EventContent, field: ProtonSharedTextProperty): String = when (field) {
+            ProtonSharedTextProperty.SUMMARY -> content.title
+            ProtonSharedTextProperty.DESCRIPTION -> content.description
+            ProtonSharedTextProperty.LOCATION -> content.location
+        }
+        // Select raw differences; normalization is only for comparing decoded signed values.
+        val selected = ProtonSharedTextProperty.entries.filterTo(linkedSetOf()) {
+            contentValue(base, it) != contentValue(replacement, it)
+        }
+        var binding: ProtonTextPreparationBinding? = null
+        val prepared = prepareSharedTextFragments(session, frozen.scope, frozen.base.eventId, frozen.base.revision,
+            uid, base.title, metadata, bootstrap, row, requireEmptyPersonal = true, expectedBase = frozen.base) { basis ->
+            context.ensureActive()
+            val observed = ProtonSharedTextPatcher.observe(basis.originalPlaintext, selected, uid)
+            val changes = selected.associateWith { field ->
+                val expected = observed.getValue(field)
+                val old = contentValue(base, field).replace("\r\n", "\n")
+                if (expected?.replace("\r\n", "\n").orEmpty() != old ||
+                    (field == ProtonSharedTextProperty.SUMMARY && expected == null)) unsupportedEvents()
+                val next = contentValue(replacement, field)
+                ProtonSharedTextChange(expected,
+                    if (field != ProtonSharedTextProperty.SUMMARY && next.isEmpty()) null else next)
+            }
+            binding = ProtonTextPreparationBinding(frozen.scope, frozen.base.eventId, frozen.base.revision,
+                uid, base.title, changes, timestamp)
+            ProtonSharedTextPatcher.patchAt(basis.originalPlaintext, changes, uid, timestamp)
+        }
+        context.ensureActive()
+        val record = try {
+            ProtonTextPreparationCodec(protector).sealLocal(frozen, binding ?: unsupportedEvents(), prepared)
+        } catch (cancelled: CancellationException) { throw cancelled }
+          catch (failure: Exception) { context.ensureActive(); throw failure }
+        context.ensureActive()
+        return record
+    }
+
     private suspend fun prepareSharedTitleFragments(session: CatalogSession, scope: CalendarScope, expectedEventId: EventId,
         expectedRevision: Revision, expectedUid: String, expectedTitle: String, newTitle: String,
         metadata: JsonObject, bootstrap: JsonObject, row: JsonObject, timestamp: Instant?,

@@ -29,6 +29,22 @@ internal class ProtonTextPatchException : IllegalStateException("Shared text pat
  * Framing, identity and selected text checks do not certify other properties as safe to upload.
  */
 internal object ProtonSharedTextPatcher {
+    /** Bounded signed-plaintext observation, preserving explicit absence versus an empty property. */
+    fun observe(original: ProtonEventTextParts, selected: Set<ProtonSharedTextProperty>,
+        expectedUid: String): Map<ProtonSharedTextProperty, String?> {
+        try {
+            val fields = selected.toSet()
+            require(fields.isNotEmpty())
+            budget(original.clearShared, original.encryptedShared)
+            val clear = inspect(original.clearShared, hasTitle = false, fields)
+            val secret = inspect(original.encryptedShared, hasTitle = true, fields)
+            require(clear.uid == secret.uid && clear.stamp == secret.stamp && clear.uid == expectedUid)
+            return fields.associateWith { field -> secret.values[field]?.let(::text) }
+        } catch (_: Exception) {
+            throw ProtonTextPatchException()
+        }
+    }
+
     /**
      * Explicit local metadata policy for a restricted plaintext layout, not a general Proton edit.
      * Retain CREATED and SEQUENCE; set both DTSTAMP values and clear LAST-MODIFIED.

@@ -59,6 +59,16 @@ the selected fields and complete original row; it never interprets historical
 title records as broader consent. Structural reopening is not fresh cryptographic
 verification, current authorization or a service-qualified UPDATE serializer.
 
+The local shared-text extension reuses the same full `decodeRows` comparison
+already used by local title preparation before signing or encryption. The
+patcher's observation operation reuses its bounded scanner and Biweekly inspection
+to retain selected optional-property presence. The complete project-owned local
+intent is frozen and bound by a separate local text kind/version in the text codec;
+the existing title domain type, codec and journal formats are not expanded.
+No new Proton component, copied upstream code or cryptographic primitive is added.
+This local binding remains independent of authenticated adapter reads and durable
+submission; it cannot grant wider sending consent.
+
 `ProtonEventDecryptor.openSharedTitle` extends this experiment with the existing
 Core key-bootstrap and binary/text signature verification paths described below.
 The bootstrap helper is shared with page decoding; page recovery and budget
