@@ -46,6 +46,10 @@ import com.patmanak.proton.andcalendarbridge.sync.CapturedHandoffProjection
 import com.patmanak.proton.andcalendarbridge.sync.AppliedCapturedHandoffProjection
 import com.patmanak.proton.andcalendarbridge.sync.TitleUpdateAcknowledgementReceipt
 import com.patmanak.proton.andcalendarbridge.sync.AppliedTitleUpdateAcknowledgement
+import com.patmanak.proton.andcalendarbridge.sync.TextUpdateAcknowledgementReceipt
+import com.patmanak.proton.andcalendarbridge.sync.AppliedTextUpdateAcknowledgement
+import com.patmanak.proton.andcalendarbridge.sync.LocalEditIntent
+import com.patmanak.proton.andcalendarbridge.sync.TextUpdateContentPolicy
 import com.patmanak.proton.andcalendarbridge.sync.RecurrencePoint
 import com.patmanak.proton.andcalendarbridge.sync.RemoteChange
 import com.patmanak.proton.andcalendarbridge.sync.EventContent
@@ -68,6 +72,8 @@ import java.time.temporal.ChronoUnit
 import java.time.format.DateTimeFormatter
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -90,60 +96,133 @@ data class EnsuredCalendar(val id: Long, val created: Boolean)
  * order opaque revisions and never infers deletion from an absent event in a server page.
  */
 class AndroidCalendarProjection(context: Context) : CalendarProjection {
+    override val textUpdateAcknowledgementProtocol: Int? = 1
+    override suspend fun acknowledgeTextUpdate(receipt: TextUpdateAcknowledgementReceipt): AppliedTextUpdateAcknowledgement? {
+        val caller = currentCoroutineContext()
+        caller.ensureActive()
+        val frozen = receipt.snapshot()
+        val recipe = NativeEditAcknowledgement.text(frozen) { caller.ensureActive() }
+        return textAcknowledgementOperation(recipe) {
+            if (acknowledgeNativeEdit(recipe)) AppliedTextUpdateAcknowledgement(frozen) else null
+        }
+    }
+    override suspend fun inspectTextUpdateAcknowledgement(receipt: TextUpdateAcknowledgementReceipt): AppliedTextUpdateAcknowledgement? {
+        val caller = currentCoroutineContext()
+        caller.ensureActive()
+        val frozen = receipt.snapshot()
+        val recipe = NativeEditAcknowledgement.text(frozen) { caller.ensureActive() }
+        return textAcknowledgementOperation(recipe) {
+            if (inspectNativeEditAcknowledgement(recipe)) AppliedTextUpdateAcknowledgement(frozen) else null
+        }
+    }
     override val titleUpdateAcknowledgementProtocol: Int? = 1
     override suspend fun acknowledgeTitleUpdate(receipt: TitleUpdateAcknowledgementReceipt): AppliedTitleUpdateAcknowledgement? {
         val frozen = receipt.snapshot()
         return operation {
-            frozen.handoff?.let { frame ->
-                val original = frame.receipt.acknowledgement
-                return@operation if (captureCapturedCurrent(original.baseline, expectedAck = original, handoff = frame,
-                        titleAcknowledgement = frozen) is CapturedCreateCurrentObservation.Supported)
-                    AppliedTitleUpdateAcknowledgement(frozen) else null
-            }
-            if (captureSimpleSnapshot(frozen.intent.scope, frozen.intent.base, deleted = false, acknowledgement = frozen) != null)
-                AppliedTitleUpdateAcknowledgement(frozen) else null
+            if (acknowledgeNativeEdit(NativeEditAcknowledgement.title(frozen))) AppliedTitleUpdateAcknowledgement(frozen) else null
         }
     }
     override suspend fun inspectTitleUpdateAcknowledgement(receipt: TitleUpdateAcknowledgementReceipt): AppliedTitleUpdateAcknowledgement? {
         val frozen = receipt.snapshot()
         return operation {
-            frozen.handoff?.let { frame ->
-                return@operation if (inspectCapturedHistory(frame.receipt.acknowledgement, frozen.projection))
-                    AppliedTitleUpdateAcknowledgement(frozen) else null
-            }
-            val scope = frozen.intent.scope
-            val account = accountFor(scope.account)
-            val calendar = calendarRow(scope, account) ?: return@operation null
-            val remoteId = digest("event-v1", calendarSyncId(scope), frozen.intent.base.eventId.value)
-            val uri = syncUri(Events.CONTENT_URI, account)
-            val identity = Selection("${Events.CALENDAR_ID}=? AND (${Events.SYNC_DATA4}=? OR " +
-                "(${Events.SYNC_DATA4} IS NULL AND ${Events._SYNC_ID}=?))", arrayOf(calendar.toString(), remoteId, remoteId))
-            val row = ownedRow(uri, identity, Events.SYNC_DATA1) ?: return@operation null
-            // Historical proof excludes current flags/content/children; all ownership metadata
-            // remains exact and is asserted atomically, including reserved and CREATE markers.
-            val metadata = resolver.query(uri, arrayOf(Events._ID, Events.CALENDAR_ID) + ATTACHMENT_SYNC_COLUMNS,
-                identity.sql, identity.args, null)?.use {
-                if (it.count != 1 || !it.moveToFirst()) return@operation null
-                ContentValues().apply { DatabaseUtils.cursorRowToContentValues(it, this) }
-            } ?: fail(CalendarProjectionFailure.PROVIDER_UNAVAILABLE)
-            if (metadata.getAsLong(Events._ID) != row || metadata.getAsLong(Events.CALENDAR_ID) != calendar ||
-                metadata.getAsString(Events._SYNC_ID) != remoteId || metadata.getAsString(Events.SYNC_DATA4) != remoteId ||
-                metadata.getAsString(Events.SYNC_DATA1) != OWNER_MARKER ||
-                metadata.getAsString(Events.SYNC_DATA2) != digest("revision-v1", frozen.projection.change.revision.value) ||
-                metadata.getAsString(Events.SYNC_DATA3) != receiptMarker(frozen.projection) ||
-                ORDINARY_RESERVED_COLUMNS.any { metadata[it] != null }) return@operation null
-            val syncIdentity = Selection("${Events.CALENDAR_ID}=? AND ${Events._SYNC_ID}=?", arrayOf(calendar.toString(), remoteId))
-            if (ownedRow(uri, syncIdentity, Events.SYNC_DATA1) != row) return@operation null
-            requirePermissions()
-            capturedBatch(arrayListOf(
-                assertion(syncUri(Calendars.CONTENT_URI, account), calendarSelection(scope, account), calendar),
-                ContentProviderOperation.newAssertQuery(uri).withSelection(identity.sql, identity.args)
-                    .withValues(metadata).withExpectedCount(1).build(),
-                assertion(uri, syncIdentity, row),
-            ), intArrayOf(1, 1, 1))
-            requirePermissions()
-            AppliedTitleUpdateAcknowledgement(frozen)
+            if (inspectNativeEditAcknowledgement(NativeEditAcknowledgement.title(frozen))) AppliedTitleUpdateAcknowledgement(frozen) else null
         }
+    }
+
+    /** Private recipes are constructed only from their separately validated public receipt types.
+     * The title factory always remains metadata-only; only the text factory permits CRLF writes.
+     */
+    private class NativeEditAcknowledgement private constructor(val intent: LocalEditIntent,
+        val projection: ProjectionReceipt, val handoff: CapturedCreateHandoffFrame?,
+        private val canonicalText: Boolean, val checkActive: () -> Unit) {
+        init {
+            require(if (canonicalText) TextUpdateContentPolicy.sameSubmittedContent(intent.content, projection.change.content)
+                else intent.content == projection.change.content)
+        }
+        fun values(marker: String): ContentValues = ContentValues().apply {
+            put(Events.DIRTY, 0)
+            put(Events.SYNC_DATA2, digest("revision-v1", projection.change.revision.value))
+            put(Events.SYNC_DATA3, marker)
+            if (canonicalText) {
+                val raw = intent.content
+                val actual = projection.change.content
+                if (raw.title != actual.title) put(Events.TITLE, actual.title)
+                if (raw.description != actual.description) put(Events.DESCRIPTION, actual.description)
+                if (raw.location != actual.location) put(Events.EVENT_LOCATION, actual.location)
+            }
+        }
+        companion object {
+            fun title(receipt: TitleUpdateAcknowledgementReceipt) =
+                NativeEditAcknowledgement(receipt.intent, receipt.projection, receipt.handoff, false) {}
+            fun text(receipt: TextUpdateAcknowledgementReceipt, checkActive: () -> Unit) =
+                NativeEditAcknowledgement(receipt.intent, receipt.projection, receipt.handoff, true, checkActive)
+        }
+    }
+
+    private fun requireEditPermissions(receipt: NativeEditAcknowledgement?) {
+        receipt?.checkActive?.invoke()
+        requirePermissions()
+        receipt?.checkActive?.invoke()
+    }
+
+    private suspend fun <T> textAcknowledgementOperation(receipt: NativeEditAcknowledgement, block: () -> T): T = try {
+        operation {
+            requireEditPermissions(receipt)
+            val result = block()
+            requireEditPermissions(receipt)
+            result
+        }
+    } catch (failure: Exception) {
+        // A callback may cancel its caller and then throw an ordinary provider/lease failure.
+        receipt.checkActive()
+        throw failure
+    }
+
+    private fun acknowledgeNativeEdit(receipt: NativeEditAcknowledgement): Boolean {
+        receipt.handoff?.let { frame ->
+            val original = frame.receipt.acknowledgement
+            return captureCapturedCurrent(original.baseline, expectedAck = original, handoff = frame,
+                editAcknowledgement = receipt) is CapturedCreateCurrentObservation.Supported
+        }
+        return captureSimpleSnapshot(receipt.intent.scope, receipt.intent.base, deleted = false, acknowledgement = receipt) != null
+    }
+
+    private fun inspectNativeEditAcknowledgement(receipt: NativeEditAcknowledgement): Boolean {
+        receipt.handoff?.let { frame ->
+            return inspectCapturedHistory(frame.receipt.acknowledgement, receipt.projection, receipt.checkActive)
+        }
+        val scope = receipt.intent.scope
+        val account = accountFor(scope.account)
+        val calendar = calendarRow(scope, account) ?: return false
+        val remoteId = digest("event-v1", calendarSyncId(scope), receipt.intent.base.eventId.value)
+        val uri = syncUri(Events.CONTENT_URI, account)
+        val identity = Selection("${Events.CALENDAR_ID}=? AND (${Events.SYNC_DATA4}=? OR " +
+            "(${Events.SYNC_DATA4} IS NULL AND ${Events._SYNC_ID}=?))", arrayOf(calendar.toString(), remoteId, remoteId))
+        val row = ownedRow(uri, identity, Events.SYNC_DATA1) ?: return false
+        // Historical proof excludes current flags/content/children; all ownership metadata
+        // remains exact and is asserted atomically, including reserved and CREATE markers.
+        val metadata = resolver.query(uri, arrayOf(Events._ID, Events.CALENDAR_ID) + ATTACHMENT_SYNC_COLUMNS,
+            identity.sql, identity.args, null)?.use {
+            if (it.count != 1 || !it.moveToFirst()) return false
+            ContentValues().apply { DatabaseUtils.cursorRowToContentValues(it, this) }
+        } ?: fail(CalendarProjectionFailure.PROVIDER_UNAVAILABLE)
+        if (metadata.getAsLong(Events._ID) != row || metadata.getAsLong(Events.CALENDAR_ID) != calendar ||
+            metadata.getAsString(Events._SYNC_ID) != remoteId || metadata.getAsString(Events.SYNC_DATA4) != remoteId ||
+            metadata.getAsString(Events.SYNC_DATA1) != OWNER_MARKER ||
+            metadata.getAsString(Events.SYNC_DATA2) != digest("revision-v1", receipt.projection.change.revision.value) ||
+            metadata.getAsString(Events.SYNC_DATA3) != receiptMarker(receipt.projection) ||
+            ORDINARY_RESERVED_COLUMNS.any { metadata[it] != null }) return false
+        val syncIdentity = Selection("${Events.CALENDAR_ID}=? AND ${Events._SYNC_ID}=?", arrayOf(calendar.toString(), remoteId))
+        if (ownedRow(uri, syncIdentity, Events.SYNC_DATA1) != row) return false
+        requireEditPermissions(receipt)
+        capturedBatch(arrayListOf(
+            assertion(syncUri(Calendars.CONTENT_URI, account), calendarSelection(scope, account), calendar),
+            ContentProviderOperation.newAssertQuery(uri).withSelection(identity.sql, identity.args)
+                .withValues(metadata).withExpectedCount(1).build(),
+            assertion(uri, syncIdentity, row),
+        ), intArrayOf(1, 1, 1))
+        requireEditPermissions(receipt)
+        return true
     }
     @Volatile override var admitOperation: () -> Boolean = { true }
     private val context = context.applicationContext
@@ -485,7 +564,7 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
     }
 
     private fun captureSimpleSnapshot(scope: CalendarScope, base: RemoteChange.Upsert, deleted: Boolean,
-        acknowledgement: TitleUpdateAcknowledgementReceipt? = null): OwnedLocalEditSnapshot? {
+        acknowledgement: NativeEditAcknowledgement? = null): OwnedLocalEditSnapshot? {
         if (base.content.recurrence != null ||
             (base.content.details != null && base.content.details != EventDetails())) return null
         val account = accountFor(scope.account)
@@ -538,8 +617,8 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
             base.content.colorRgb, details = base.content.details)
         if (!deleted && content == base.content) return null
         if (acknowledgement != null && content != acknowledgement.intent.content) return null
-        // Ordinary capture stays assertion-only. ACK additionally compares the exact submitted
-        // content and changes only three metadata columns in the same atomic Provider batch.
+        // Capture stays assertion-only. ACK asserts the complete raw edit; its typed recipe
+        // adds metadata and, for text receipts only, verified CRLF/LF differences.
         val checks = arrayListOf(assertion(syncUri(Calendars.CONTENT_URI, account), calendarSelection(scope, account), calendar),
             assertion(uri, identity, row),
             ContentProviderOperation.newAssertQuery(uri).withSelection(identity.sql, identity.args)
@@ -563,15 +642,13 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
         }
         if (acknowledgement != null) {
             checks += ContentProviderOperation.newUpdate(uri).withSelection(identity.sql, identity.args)
-                .withValue(Events.DIRTY, 0)
-                .withValue(Events.SYNC_DATA2, digest("revision-v1", acknowledgement.projection.change.revision.value))
-                .withValue(Events.SYNC_DATA3, receiptMarker(acknowledgement.projection))
+                .withValues(acknowledgement.values(receiptMarker(acknowledgement.projection)))
                 .withExpectedCount(1).build()
             expected += 1
         }
-        requirePermissions()
+        requireEditPermissions(acknowledgement)
         capturedBatch(checks, expected.toIntArray())
-        requirePermissions()
+        requireEditPermissions(acknowledgement)
         return OwnedLocalEditSnapshot(calendar, row, content)
     }
 
@@ -781,10 +858,10 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
         clean: Boolean = false,
         handoff: CapturedCreateHandoffFrame? = null,
         handoffProjection: CapturedHandoffProjection? = null,
-        titleAcknowledgement: TitleUpdateAcknowledgementReceipt? = null): CapturedCreateCurrentObservation {
-        if (titleAcknowledgement != null) {
+        editAcknowledgement: NativeEditAcknowledgement? = null): CapturedCreateCurrentObservation {
+        if (editAcknowledgement != null) {
             require(!clean && writeAck == null && handoffProjection == null && handoff != null &&
-                titleAcknowledgement.handoff == handoff && expectedAck == handoff.receipt.acknowledgement)
+                editAcknowledgement.handoff == handoff && expectedAck == handoff.receipt.acknowledgement)
         }
         val ackMarker = (expectedAck ?: writeAck)?.let(::capturedAcknowledgementMarker)
         val receipt = baseline.receipt
@@ -846,7 +923,7 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
         } catch (_: IllegalArgumentException) { return CapturedCreateCurrentObservation.Unsupported }
         val unchanged = if (handoff == null) snapshot.unchanged else !snapshot.deleted && snapshot.content == handoff.base.content
         if ((writeAck != null || clean) && !unchanged) return CapturedCreateCurrentObservation.Unresolved
-        if (titleAcknowledgement != null && (snapshot.deleted || snapshot.content != titleAcknowledgement.intent.content))
+        if (editAcknowledgement != null && (snapshot.deleted || snapshot.content != editAcknowledgement.intent.content))
             return CapturedCreateCurrentObservation.Unresolved
         val checks = arrayListOf(assertion(syncUri(Calendars.CONTENT_URI, account), calendarSelection(scope, account), calendar),
             ContentProviderOperation.newAssertQuery(uri).withSelection(local.sql, local.args)
@@ -864,10 +941,9 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
         if (writeAck != null) checks += ContentProviderOperation.newUpdate(uri)
             .withSelection(local.sql, local.args).withValue(Events.DIRTY, 0)
             .withValue(Events.SYNC_DATA7, ackMarker).withExpectedCount(1).build()
-        if (titleAcknowledgement != null) checks += ContentProviderOperation.newUpdate(uri)
-            .withSelection(local.sql, local.args).withValue(Events.DIRTY, 0)
-            .withValue(Events.SYNC_DATA2, digest("revision-v1", titleAcknowledgement.projection.change.revision.value))
-            .withValue(Events.SYNC_DATA3, receiptMarker(titleAcknowledgement.projection)).withExpectedCount(1).build()
+        if (editAcknowledgement != null) checks += ContentProviderOperation.newUpdate(uri)
+            .withSelection(local.sql, local.args)
+            .withValues(editAcknowledgement.values(receiptMarker(editAcknowledgement.projection))).withExpectedCount(1).build()
         if (handoffProjection != null) checks += ContentProviderOperation.newUpdate(uri)
             .withSelection(local.sql, local.args).withValues(eventValues(handoffProjection.receipt.change, account).apply {
                 put(Events.SYNC_DATA2, digest("revision-v1", handoffProjection.receipt.change.revision.value))
@@ -875,10 +951,10 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
             }).withExpectedCount(1).build()
         // ACK and incoming handoff writes admit from current assertions, never a prior snapshot.
         // Every identity, content/flag value and child absence is qualified in this one batch.
-        requirePermissions()
-        capturedBatch(checks, if (writeAck != null || handoffProjection != null || titleAcknowledgement != null)
+        requireEditPermissions(editAcknowledgement)
+        capturedBatch(checks, if (writeAck != null || handoffProjection != null || editAcknowledgement != null)
             intArrayOf(1, 1, 1, 0, 0, 0, 1) else intArrayOf(1, 1, 1, 0, 0, 0))
-        requirePermissions()
+        requireEditPermissions(editAcknowledgement)
         return CapturedCreateCurrentObservation.Supported(snapshot)
     }
 
@@ -886,7 +962,8 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
         if (inspectCapturedHistory(receipt)) AppliedCapturedCreateAcknowledgement(receipt) else null
     }
 
-    private fun inspectCapturedHistory(receipt: CapturedCreateAcknowledgementReceipt, projectionReceipt: ProjectionReceipt? = null): Boolean {
+    private fun inspectCapturedHistory(receipt: CapturedCreateAcknowledgementReceipt, projectionReceipt: ProjectionReceipt? = null,
+        checkActive: () -> Unit = {}): Boolean {
         val baseline = receipt.baseline
         val expected = capturedAttachmentValues(baseline.receipt)
         expected.put(Events.SYNC_DATA7, capturedAcknowledgementMarker(receipt))
@@ -914,7 +991,9 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
         if (!remoteMatches) return false
         // Historical proof ignores later user data, children and dirty/deleted flags.
         val metadata = ContentValues(values).apply { remove(Events.DIRTY); remove(Events.DELETED) }
+        checkActive()
         requirePermissions()
+        checkActive()
         capturedBatch(arrayListOf(
             assertion(syncUri(Calendars.CONTENT_URI, account), calendarSelection(scope, account), calendar),
             ContentProviderOperation.newAssertQuery(uri).withSelection(local.sql, local.args)
@@ -922,7 +1001,9 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
             ContentProviderOperation.newAssertQuery(uri).withSelection(remote.sql, remote.args)
                 .withValue(Events._ID, values.getAsLong(Events._ID)).withExpectedCount(1).build(),
         ), intArrayOf(1, 1, 1))
+        checkActive()
         requirePermissions()
+        checkActive()
         return true
     }
 

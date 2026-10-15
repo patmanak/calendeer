@@ -279,4 +279,89 @@ class SystemTitleRecoveryControllerTest {
         reopened.run(target, fresh = false) { true }
         assertNull(queries.last().cursor)
     }
+
+    @Test fun originalEpochRevokedAndReenabledDuringCursorReadCannotEnterGuardedRecovery() = runBlocking {
+        val cursors = Cursors(); var epoch = 7; var enabled = true; var calls = 0
+        val originalEpoch = epoch
+        val entered = CompletableDeferred<Unit>(); val release = CompletableDeferred<Unit>()
+        cursors.duringRead = { entered.complete(Unit); release.await() }
+        val controller = SystemTitleRecoveryController(cursors,
+            recover = { error("Legacy recovery must not handle this guarded invocation") },
+            guardedRecover = { _, _ -> calls++; TitleUpdateOfflineRecoveryProgress(completed = 1) })
+        withTimeout(5_000) {
+            val task = async { controller.run(target) { enabled && epoch == originalEpoch } }
+            entered.await()
+            try { enabled = false; epoch++; enabled = true } finally { release.complete(Unit) }
+            assertEquals(SystemTitleRecoveryProgress(), task.await())
+        }
+        assertEquals(0, calls); assertNull(cursors.saved[target]); assertFalse(cursors.exhausted(target))
+    }
+
+    @Test fun guardedRecoveryKeepsOriginalEpochThroughSuspensionBeforeNativeAcknowledgement() = runBlocking {
+        val cursors = Cursors(); var epoch = 10; val originalEpoch = epoch
+        val entered = CompletableDeferred<Unit>(); val release = CompletableDeferred<Unit>()
+        var retained: (() -> Boolean)? = null; var acknowledgements = 0
+        val controller = SystemTitleRecoveryController(cursors,
+            recover = { error("Guarded recovery is required") },
+            guardedRecover = { query, active ->
+                assertEquals(target, query.scope); retained = active; assertTrue(active())
+                entered.complete(Unit); release.await()
+                // A newly captured lease would accept epoch 11; the original must still refuse.
+                if (active()) acknowledgements++
+                TitleUpdateOfflineRecoveryProgress(inactive = !active())
+            })
+        withTimeout(5_000) {
+            val task = async { controller.run(target) { epoch == originalEpoch } }
+            entered.await()
+            try { epoch++ } finally { release.complete(Unit) }
+            assertEquals(SystemTitleRecoveryProgress(), task.await())
+        }
+        assertEquals(0, acknowledgements); assertFalse(retained!!())
+        assertFalse(cursors.exhausted(target))
+    }
+
+    @Test fun guardedAdmissionIsStickyAndExpiresBeforeTheNextInvocation() = runBlocking {
+        val cursors = Cursors(); var allowed = true; var invocation = 0
+        val leases = mutableListOf<() -> Boolean>()
+        val controller = SystemTitleRecoveryController(cursors,
+            recover = { error("Guarded recovery is required") },
+            guardedRecover = { _, active ->
+                leases += active; invocation++
+                assertTrue(active())
+                if (invocation == 1) {
+                    allowed = false; assertFalse(active())
+                    allowed = true; assertFalse(active())
+                } else assertFalse(leases.first()())
+                TitleUpdateOfflineRecoveryProgress()
+            })
+        controller.run(target) { allowed }
+        assertFalse(leases.single()())
+        controller.run(target) { allowed }
+        assertEquals(2, invocation); assertTrue(leases.all { !it() })
+    }
+
+    @Test fun guardedCallbackExpiresOnOrdinaryFailureAndCancellation() = runBlocking {
+        for (cancel in listOf(false, true)) supervisorScope {
+            val cursors = Cursors(); var retained: (() -> Boolean)? = null
+            var returned = 0; var cancellations = 0; var ordinary = 0
+            val controller = SystemTitleRecoveryController(cursors,
+                recover = { error("Guarded recovery is required") },
+                guardedRecover = { _, active ->
+                    retained = active; assertTrue(active())
+                    if (cancel) currentCoroutineContext().cancel()
+                    throw java.io.IOException("Synthetic recovery interruption")
+                })
+            val task = async {
+                try {
+                    val progress = controller.run(target) { true }
+                    assertTrue(progress.failed); returned++
+                } catch (_: CancellationException) { cancellations++ }
+                  catch (_: Exception) { ordinary++ }
+            }
+            try { task.await() } catch (_: CancellationException) { }
+            assertEquals(if (cancel) 0 else 1, returned)
+            assertEquals(if (cancel) 1 else 0, cancellations); assertEquals(0, ordinary)
+            assertFalse(retained!!())
+        }
+    }
 }

@@ -60,6 +60,51 @@ Keep run-specific outputs, device/account identities, questions and reviewer
 handoffs in ignored local files. Update public acceptance and limitations when
 behavior changes, not for each command run.
 
+## Guarded description/location delivery
+
+Run the portable policy, guarded adapter and host orchestration tests with
+`:sync:test :proton-auth:testDebugUnitTest :app:testDebugUnitTest`. The text suites
+cover full raw identity, first capsule/wire retention, uncertain outcomes,
+revocation, cancellation and offline proof recovery. Host JSON tests use a
+test-only implementation and do not qualify Android storage semantics.
+
+On an authorized physical test device, select these isolated instrumented suites
+with `providerFixture=true`: `TextUpdateProofStoreDeviceTest`,
+`TextUpdateWorkPageDeviceTest`, `TextUpdateAcknowledgementProviderDeviceTest`,
+`TextLocalPreparationStoreDeviceTest`, `TextUpdateAcknowledgementStoreDeviceTest`
+and `SystemTextOwnerGatewayDeviceTest`. They cover additive migration and rollback,
+complete history validation, bounded BLOB reads, cross-family ownership, atomic
+raw-to-readback acknowledgement, explicit CREATE provenance and interrupted
+restoration. The gateway uses a synthetic transport; it makes no service or crypto
+compatibility claim. Its barrier-controlled concurrency cases check the
+import-before-auth lock order and revocation while waiting.
+
+`TextModesStoreDeviceTest` and `SystemTextModeUiDeviceTest` separately check
+default-off scope-bound consent, independent title/text options, permission and
+selection gating, logout and the closed feature gate. Keep the existing title
+Provider/CREATE-handoff suites as regression coverage. Require the expected test
+count with no failures, errors or skipped cases; a skipped opt-in suite is not a
+qualification. Isolated Provider rows, accounts, preferences and databases are
+removed by their fixtures. These suites do not prove process death, power loss,
+an OEM editor, background scheduling or a Proton server round trip.
+
+`CalendarTextGuardedJourneyLiveDeviceTest` is a separate explicitly authorized
+service fixture. It requires `calendarTextGuardedJourney=true`, a frozen
+`textFixtureToken`, an enrolled `textAccountHash` and `textGuardedPhase=submit`
+followed by `recover` in a distinct process. It uses the uniquely selected dedicated
+QA calendar, real authenticated ports and an isolated native generation. Recovery
+has sentinels that forbid fixture-path preparation, submission and inspection;
+it does not claim the entire application has no network traffic. A repeated
+recovery checks immutable history and the later local owner. Never renew the token
+to retry an uncertain request. The timed combined multiline service journey is
+qualified separately from automatic scheduling and an OEM editor.
+
+The text production gate stays closed until those complete journeys qualify.
+Retain visible synthetic service events when performing authorized live tests;
+do not infer service success from opaque fixture strings or a local completion.
+The known GET/PUT concurrency window remains, as documented in
+[shared text preparation](SHARED_TEXT_PREPARATION.md).
+
 ## Retained change metadata pagination
 
 `RetainedLocalChangePageTest` covers page/limit/cursor contracts, duplicate refusal,

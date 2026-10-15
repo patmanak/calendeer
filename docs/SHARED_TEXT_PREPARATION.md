@@ -222,11 +222,50 @@ new owner. The additive title schema upgrade creates the text table without
 rewriting historical title cells.
 
 The standalone text database remains quarantined, with no implicit import into
-the shared journal. Neither text journal is composed into the application workers
-or sending graph. Its claim proves only a local state transition. Current native/SQL
-ownership qualification remains required before activation. Two independent
-databases cannot grant concurrent sending for the same event. No text completion
-or hold-release mechanism is supplied yet.
+the shared journal. The shared journal now retains a first immutable verified
+result and a separately qualified completion. Completion releases the event only;
+the historical request identity remains reserved. Every completed row is checked
+against its full result and RESTORED acknowledgement before another owner is
+admitted. Corrupt historical completion cannot be treated as released ownership.
+Two independent databases cannot grant concurrent sending for the same event.
+
+## Guarded delivery and local acknowledgement
+
+A separate authenticated text submission port reuses the existing UPDATE transport
+permit and Proton signing/encryption boundary. Its source qualification surrounds
+the PREPARED-to-UNKNOWN claim and the exchange. UNKNOWN is inspection-only. A
+distinct, scoped evidence lease can retain a factual reply after editing consent
+is revoked; it expires with the invocation and cannot survive logout. This grants
+no native acknowledgement or another send.
+
+The first complete local capsule determines the deterministic request identity.
+The coordinator rereads any retained wire before preparing a new one, and never
+replaces randomized ciphertext with a later preparation. The text discovery profile
+requires a meaningful description or location change; a simultaneous title change
+is allowed. Title-only changes keep their own consent and historical formats.
+
+Import storage retains the raw local intent and a receipt before native writes.
+Android acknowledgement compares the complete original row, child rows and
+identity in one batch, then clears DIRTY and advances revision/nonce markers.
+Only text fields that differ by CRLF/LF are canonicalized to the actual verified
+readback. Dates, timezone, colors and other fields are unchanged. A retained pending
+receipt only inspects these markers; it never repeats the native write. SQL then
+restores the actual remote baseline while preserving newer edits and deferred
+data. Completion is committed separately, so an interruption between databases
+keeps the event held until local recovery finishes.
+
+Bounded offline proof recovery precedes discovery. Text owner, inspection and
+recovery cursors use distinct preference namespaces. The worker captures its
+policy lease before suspension; the traversal passes that original admission
+through to acknowledgement. The import lock is acquired before the authenticated
+submission lock, and its source callback performs local reads without reacquiring
+either lock. This preserves the order used by incoming synchronization.
+
+The production text activation gate remains closed pending automatic-worker and
+system-editor qualification. The text option is hidden without both
+recovery and submission controllers. Its per-calendar consent is separate and
+off by default; disabling creation clears it. Existing durable proof can recover
+with text sending disabled, subject to current account, calendar and native access.
 
 ## Integration and evidence limits
 
@@ -273,9 +312,16 @@ with exact historical-cell snapshots and failed-upgrade rollback. Opaque synthet
 strings qualify persistence only. Helper reopening is not a process-death or
 power-loss qualification, nor evidence of production recovery or remote sending.
 
-The next integration needs guarded durable submission
-and acknowledgement, followed by physical system-editor
-qualification. Historical title records must not be
+An explicitly composed ordinary timed service journey qualifies a combined
+multiline title/description/location UPDATE through the real authenticated ports.
+It verifies actual canonical LF content, retains raw CRLF intent after mode
+revocation, and acknowledges the same Android row offline in a distinct process.
+Historical replay preserves a later local owner and the complete original proof.
+This does not qualify the automatic worker, an OEM editor, transferred CREATE
+delivery against the service or an all-day service UPDATE.
+
+The remaining qualification includes automatic-worker and physical system-editor
+journeys. Historical title records must not be
 reinterpreted as permission for broader edits. The existing concurrent GET/PUT
 race remains; plaintext patching supplies no server-side write precondition.
 

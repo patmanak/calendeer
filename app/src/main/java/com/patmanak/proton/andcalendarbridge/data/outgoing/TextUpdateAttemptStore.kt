@@ -14,7 +14,7 @@ import kotlinx.coroutines.withContext
  * The shared title helper owns cross-family arbitration; no automatic import is supported.
  */
 class TextUpdateAttemptStore(context: Context, name: String = "calendar-text-update-attempt-v1.db") :
-    SQLiteOpenHelper(context, name, null, 1), TextUpdateAttemptJournal {
+    SQLiteOpenHelper(context, name, null, 2), TextUpdateAttemptJournal {
     private val lock = Mutex()
     private val journal = SqlTextUpdateAttemptJournal(object : TextAttemptDatabase {
         override suspend fun <T> withDatabase(beforeOpen: () -> Unit, action: (SQLiteDatabase) -> T): T =
@@ -23,7 +23,8 @@ class TextUpdateAttemptStore(context: Context, name: String = "calendar-text-upd
     override fun onConfigure(db: SQLiteDatabase) { db.execSQL("PRAGMA synchronous=FULL") }
     override fun onCreate(db: SQLiteDatabase) = TextUpdateAttemptSql.createTable(db)
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        throw IllegalStateException("Explicit text journal migration required")
+        check(oldVersion == 1 && newVersion == 2) { "Explicit text journal migration required" }
+        TextUpdateAttemptSql.migrateProofs(db)
     }
     override suspend fun remember(record: TextUpdateAttemptRecord, admit: (CalendarScope) -> Boolean) = journal.remember(record, admit)
     override suspend fun read(scope: CalendarScope, id: MutationId, admit: (CalendarScope) -> Boolean) = journal.read(scope, id, admit)

@@ -25,4 +25,9 @@
     <string name="system_title_limits">Nur Titel: Termine mit Uhrzeit oder ganztägig, ohne Wiederholung, Erinnerungen, Gäste oder eigene Farbe. Dies gilt für aus Proton importierte und in Android erstellte Termine nach ihrer ersten erfolgreichen Synchronisierung. Änderungen an Datum, Beschreibung und Ort bleiben in Android.</string>
     <string name="system_create_pending">%1$d Erstellungen warten oder müssen geprüft werden. Ein ungewisser Versand wird nie automatisch wiederholt.</string>
     <string name="system_create_error">Die Synchronisierung benötigt eine Prüfung. Ihre Android-Daten bleiben erhalten.</string>
+    <string name="system_text_mode">Änderungen an Beschreibung und Ort synchronisieren (experimentell)</string>
+    <string name="system_text_limits">Einfache Termine mit Uhrzeit oder ganztägig, ohne Wiederholung, Erinnerung, Gäste oder eigene Farben. Für Proton-Termine und in Android erstellte Termine nach ihrer ersten erfolgreichen Synchronisierung. Ein gleichzeitig mit Beschreibung oder Ort geänderter Titel wird eingeschlossen. Datumsänderungen und Löschungen bleiben in Android.</string>
+    <string name="system_text_overview">Standardmäßig nur Lesen. Erstellung, reine Titeländerungen und Änderungen an Beschreibung oder Ort benötigen jeweils ihre eigene Option. Andere Änderungen und Löschungen bleiben in Android; ausstehende Vorgänge werden aufbewahrt.</string>
+    <string name="system_title_limits_with_text">Für reine Titeländerungen einfacher Termine. Beschreibung und Ort nutzen die separate Textoption. Datumsänderungen und Löschungen bleiben in Android.</string>
+    <string name="calendar_dashboard_text_mode">Textänderungen aktiviert</string>
 </resources>

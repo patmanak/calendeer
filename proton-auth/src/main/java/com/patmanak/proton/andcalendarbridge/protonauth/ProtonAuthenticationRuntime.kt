@@ -2,6 +2,8 @@
 // Adapted from Contako; see proton-auth/PROVENANCE.md.
 package com.patmanak.proton.andcalendarbridge.protonauth
 
+import com.patmanak.proton.andcalendarbridge.sync.CalendarTextUpdateSubmissionPort
+
 import android.content.Context
 import com.patmanak.proton.andcalendarbridge.auth.AuthenticationFlowPort
 import com.patmanak.proton.andcalendarbridge.sync.CalendarTitleUpdateSubmissionPort
@@ -86,6 +88,7 @@ internal data class ProtonAuthenticationGraph(
     val localEdits: CalendarLocalEditPreparationPort = CalendarLocalEditPreparationPort { _, _ -> localEditUnavailable(LocalEditPreparationFailure.UNSUPPORTED) },
     val titleUpdates: CalendarTitleUpdateSubmissionPort? = null,
     val localTexts: CalendarLocalTextPreparationPort = CalendarLocalTextPreparationPort { _, _ -> localEditUnavailable(LocalEditPreparationFailure.UNSUPPORTED) },
+    val textUpdates: CalendarTextUpdateSubmissionPort? = null,
     val catalog: CalendarCatalogPort,
 )
 
@@ -238,6 +241,8 @@ internal object ProtonAuthenticationRuntime {
             localEdits = titlePreparations,
             localTexts = textPreparations,
             titleUpdates = ProtonTitleUpdateSubmissionAdapter(titlePreparations, eventProtector, readSession, titleContext,
+                ProtonTitleUpdateSubmissionRemote(network.apiProvider), eventRemote, eventDecoder::decodeCreated),
+            textUpdates = ProtonTextUpdateSubmissionAdapter(textPreparations, eventProtector, readSession, titleContext,
                 ProtonTitleUpdateSubmissionRemote(network.apiProvider), eventRemote, eventDecoder::decodeCreated),
             submissions = ProtonCreateSubmissionAdapter(ProtonCreatePreparationAdapter(readSession, contextRefresher,
                 ProtonCreateCalendarMetadataRemote(network.apiProvider), eventRemote, localAddresses,

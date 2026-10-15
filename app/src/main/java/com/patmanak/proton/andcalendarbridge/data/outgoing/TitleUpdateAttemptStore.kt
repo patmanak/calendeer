@@ -26,10 +26,10 @@ import org.json.JSONObject
  * Payload/evidence are opaque protected strings; this store grants no HTTP or Provider capability.
  */
 class TitleUpdateAttemptStore(context: Context, name: String = "calendar-title-update-attempt-v1.db") :
-    SQLiteOpenHelper(context, name, null, 5), TitleUpdateRecoveryJournal, TitleUpdatePreparationJournal {
+    SQLiteOpenHelper(context, name, null, 6), TitleUpdateRecoveryJournal, TitleUpdatePreparationJournal {
     private val lock = Mutex()
     /** Same connection/transaction as title ownership; still not composed into broader sending. */
-    internal val textJournal: TextUpdateAttemptJournal = SqlTextUpdateAttemptJournal(object : TextAttemptDatabase {
+    internal val textJournal: TextUpdateRecoveryJournal = SqlTextUpdateAttemptJournal(object : TextAttemptDatabase {
         override suspend fun <T> withDatabase(beforeOpen: () -> Unit, action: (SQLiteDatabase) -> T): T =
             withContext(Dispatchers.IO) { lock.withLock { beforeOpen(); action(writableDatabase) } }
     }, ::canTextOwn)
@@ -104,11 +104,11 @@ class TitleUpdateAttemptStore(context: Context, name: String = "calendar-title-u
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        check(oldVersion in 1..4 && newVersion == 5) { "Explicit title update journal migration required" }
+        check(oldVersion in 1..5 && newVersion == 6) { "Explicit title update journal migration required" }
         if (oldVersion >= 3) {
             // Existing attempts, protected bytes, results and completions stay untouched.
             if (oldVersion == 3) createReservationTable(db)
-            TextUpdateAttemptSql.createTable(db)
+            if (oldVersion == 5) TextUpdateAttemptSql.migrateProofs(db) else TextUpdateAttemptSql.createTable(db)
             return
         }
         // SQLiteOpenHelper owns the migration transaction. Copy opaque bytes without interpreting

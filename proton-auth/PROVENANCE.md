@@ -869,3 +869,16 @@ capability advertisement or native acknowledgement. A fresh GET followed by PUT
 is **not server compare-and-swap**: a concurrent edit between those requests can
 still be overwritten. Readback proves current observed contents, not authorship,
 immutable remote history, or general conflict-safe bidirectional synchronization.
+
+## Separate guarded text submission
+
+`ProtonTextUpdateSubmissionAdapter` is original project integration adapted from
+the guarded title adapter. It reuses the UPDATE permit, remote transport,
+authenticated graph and existing protected text preparation/readback boundary.
+It adds no new endpoint, copied upstream source or cryptographic primitive.
+The separate text port requires full preparation and wire binding, scoped source
+qualification, a durable UNKNOWN claim and an independent evidence lease. It
+cannot fall back to unguarded submission. Its actual decoded readback is retained
+separately from the raw local intent, allowing CRLF/LF equivalence only in text.
+The production text gate remains closed until complete device/service qualification.
+The GET/PUT concurrency limit described above remains unchanged.

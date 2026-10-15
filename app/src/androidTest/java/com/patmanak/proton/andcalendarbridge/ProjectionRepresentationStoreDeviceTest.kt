@@ -130,6 +130,10 @@ class ProjectionRepresentationStoreDeviceTest {
         val receiptPayload = store.readableDatabase.rawQuery("SELECT payload FROM projection_receipts", null).use { it.moveToFirst(); it.getString(0) }
         store.close()
         SQLiteDatabase.openDatabase(context.getDatabasePath(name).path, null, SQLiteDatabase.OPEN_READWRITE).use { db ->
+            // Remove empty later tables to reconstruct the historical fixture.
+            db.execSQL("DROP TABLE local_text_edit_preparations")
+            db.execSQL("DROP TABLE text_update_acknowledgements")
+            db.execSQL("DROP TABLE text_update_acknowledgement_history")
             db.execSQL("DROP TRIGGER conflict_archive_scope_delete")
             db.execSQL("DROP TABLE conflict_observations")
             db.execSQL("DROP TABLE conflict_archives")
@@ -145,7 +149,7 @@ class ProjectionRepresentationStoreDeviceTest {
             db.version = 14
         }
         ImportStore(context, name).use { reopened ->
-            assertEquals(19, reopened.readableDatabase.version); assertEquals(receipt, reopened.projectionReceipt(scope, next.eventId))
+            assertEquals(20, reopened.readableDatabase.version); assertEquals(receipt, reopened.projectionReceipt(scope, next.eventId))
             assertEquals(basePayload, reopened.readableDatabase.rawQuery("SELECT payload FROM projection_bases", null).use { it.moveToFirst(); it.getString(0) })
             assertEquals(receiptPayload, reopened.readableDatabase.rawQuery("SELECT payload FROM projection_receipts", null).use { it.moveToFirst(); it.getString(0) })
             assertTrue(reopened.restoreProjection(AppliedProjectionWitness(receipt)))

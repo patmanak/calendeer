@@ -34,6 +34,7 @@ object ProtonAuthentication {
     fun localEditPreparations(context: Context): CalendarLocalEditPreparationPort = shared(context)
     fun localTextPreparations(context: Context): CalendarLocalTextPreparationPort = shared(context)
     fun titleUpdates(context: Context): CalendarTitleUpdateSubmissionPort = shared(context)
+    fun textUpdates(context: Context): CalendarTextUpdateSubmissionPort = shared(context)
     internal suspend fun matchesIdentityHash(context: Context, account: AccountId, expectedHash: String): Boolean =
         shared(context).matchesIdentityHash(account, expectedHash)
 
@@ -64,13 +65,14 @@ internal class SerializedAuthenticationPort(
     private val createGraph: () -> ProtonAuthenticationGraph,
     private val cancelVerification: () -> Unit,
     private val dispatcher: CoroutineDispatcher = Dispatchers.IO,
-) : AuthenticationFlowPort, CalendarCatalogPort, CalendarDeltaRemote, RollingCalendarRemote, ContentMappingRemote, CalendarCreatePreparationPort, CalendarCreateSubmissionPort, CalendarLocalEditPreparationPort, CalendarLocalTextPreparationPort, CalendarTitleUpdateSubmissionPort {
+) : AuthenticationFlowPort, CalendarCatalogPort, CalendarDeltaRemote, RollingCalendarRemote, ContentMappingRemote, CalendarCreatePreparationPort, CalendarCreateSubmissionPort, CalendarLocalEditPreparationPort, CalendarLocalTextPreparationPort, CalendarTitleUpdateSubmissionPort, CalendarTextUpdateSubmissionPort {
     override val contentMapping = EVENT_CONTENT_MAPPING
     override val localCreateFormat = LOCAL_CREATE_PREPARATION_FORMAT
     override val knownEmptySubmissionFormat = KNOWN_EMPTY_SUBMISSION_FORMAT
     override val localTitleFormat = LOCAL_TITLE_PREPARATION_FORMAT
     override val localTextFormat = LOCAL_TEXT_PREPARATION_FORMAT
     override val titleUpdateFormat = TITLE_UPDATE_SUBMISSION_FORMAT
+    override val textUpdateFormat = TEXT_UPDATE_REQUEST_FORMAT
     constructor(context: Context, verification: HumanVerificationHost) : this(
         { ProtonAuthenticationRuntime.build(context, verification.delegate.hooks) },
         verification::cancel,
@@ -84,6 +86,123 @@ internal class SerializedAuthenticationPort(
 
     override suspend fun currentAccount(): AccountId? = withContext(dispatcher) {
         lock.withLock { if (authenticated) graph?.events?.currentAccount() else null }
+    }
+
+    override suspend fun prepareSubmission(id: MutationId, preparation: LocalTextEditPreparation,
+        admit: (CalendarScope) -> Boolean): TextUpdateAttemptRecord? {
+        currentCoroutineContext().ensureActive()
+        val frozen = LocalTextEditPreparation(freezeLocalTextRequest(preparation.intent, preparation.timestamp),
+            preparation.timestamp, preparation.format, preparation.protectedPayload)
+        if (frozen.format != LOCAL_TEXT_PREPARATION_FORMAT) return null
+        return textOperation(frozen.intent.scope, admit, { false }, null, preparation = true) { runtime, lease, _ ->
+            val result = runtime.prepareSubmission(id, frozen, lease::allows)
+            currentCoroutineContext().ensureActive()
+            result?.takeIf { it.id == id && it.format == textUpdateFormat && it.state == TextUpdateAttemptState.PREPARED &&
+                it.protectedEvidence == null && it.preparation.intent == frozen.intent && it.preparation.timestamp == frozen.timestamp &&
+                it.preparation.format == frozen.format && it.preparation.protectedPayload == frozen.protectedPayload }?.frozen()
+        }
+    }
+
+    override suspend fun submit(record: TextUpdateAttemptRecord, journal: TextUpdateAttemptJournal,
+        admit: (CalendarScope) -> Boolean, qualifySource: suspend (CalendarScope) -> Boolean,
+        admitEvidence: (CalendarScope) -> Boolean): TextUpdateSubmissionObservation {
+        currentCoroutineContext().ensureActive()
+        val frozen = record.frozen()
+        if (frozen.format != textUpdateFormat || frozen.state != TextUpdateAttemptState.PREPARED || frozen.protectedEvidence != null)
+            return TextUpdateSubmissionObservation.Unknown
+        return textOperation(frozen.scope, admit, admitEvidence, TextUpdateSubmissionObservation.Unknown as TextUpdateSubmissionObservation) {
+                runtime, lease, evidence ->
+            val source: suspend (CalendarScope) -> Boolean = { requested ->
+                if (!lease.allows(requested)) false else {
+                    val qualified = try { qualifySource(requested) }
+                    catch (failure: Exception) { lease.close(); currentCoroutineContext().ensureActive(); throw failure }
+                    if (!qualified) lease.close()
+                    currentCoroutineContext().ensureActive()
+                    qualified && lease.allows(requested)
+                }
+            }
+            val observed = runtime.submit(frozen, journal, lease::allows, source, evidence::allows)
+            currentCoroutineContext().ensureActive()
+            if (observed is TextUpdateSubmissionObservation.Verified &&
+                observed.record.copy(state = TextUpdateAttemptState.PREPARED, protectedEvidence = null) == frozen)
+                TextUpdateSubmissionObservation.Verified(observed.record, observed.event)
+            else TextUpdateSubmissionObservation.Unknown
+        }
+    }
+
+    override suspend fun inspect(record: TextUpdateAttemptRecord, journal: TextUpdateAttemptJournal,
+        admit: (CalendarScope) -> Boolean): TextUpdateSubmissionObservation {
+        currentCoroutineContext().ensureActive()
+        val frozen = record.frozen()
+        if (frozen.format != textUpdateFormat || frozen.state != TextUpdateAttemptState.OUTCOME_UNKNOWN)
+            return TextUpdateSubmissionObservation.Unknown
+        return textOperation(frozen.scope, admit, { false }, TextUpdateSubmissionObservation.Unknown as TextUpdateSubmissionObservation) {
+                runtime, lease, _ ->
+            val observed = runtime.inspect(frozen, journal, lease::allows)
+            currentCoroutineContext().ensureActive()
+            if (observed is TextUpdateSubmissionObservation.Verified && observed.record == frozen)
+                TextUpdateSubmissionObservation.Verified(observed.record, observed.event)
+            else TextUpdateSubmissionObservation.Unknown
+        }
+    }
+
+    /** Shared logout serialization, but separate expiring edit and response-retention permissions. */
+    private suspend fun <T> textOperation(scope: CalendarScope, admit: (CalendarScope) -> Boolean,
+        admitEvidence: (CalendarScope) -> Boolean, denied: T, preparation: Boolean = false,
+        action: suspend (CalendarTextUpdateSubmissionPort, TextLease, TextLease) -> T): T {
+        val caller = currentCoroutineContext()
+        caller.ensureActive()
+        val lease = TextLease(scope, admit, caller)
+        val evidence = TextLease(scope, admitEvidence, caller)
+        try {
+            if (!lease.allows(scope)) return denied
+            return withContext(dispatcher) {
+                val operation = currentCoroutineContext()
+                lease.bind(operation); evidence.bind(operation)
+                try {
+                    lock.withLock {
+                        operation.ensureActive()
+                        if (!lease.allows(scope) || !authenticated) return@withLock denied
+                        val runtime = graph?.textUpdates ?: return@withLock denied
+                        if (runtime.textUpdateFormat != textUpdateFormat) return@withLock denied
+                        lease.qualify { authenticated && runtime.textUpdateFormat == textUpdateFormat }
+                        evidence.qualify { authenticated && runtime.textUpdateFormat == textUpdateFormat }
+                        val result = action(runtime, lease, evidence)
+                        operation.ensureActive()
+                        if (!lease.allows(scope) || !authenticated || runtime.textUpdateFormat != textUpdateFormat) denied else result
+                    }
+                } catch (failure: Exception) {
+                    // A cancelled dispatcher child can throw an ordinary error while the
+                    // caller is still active. Check that child before leaving its context.
+                    operation.ensureActive()
+                    throw failure
+                }
+            }
+        } catch (cancelled: CancellationException) { throw cancelled }
+          catch (failure: Exception) {
+              caller.ensureActive()
+              if (preparation && failure is LocalEditPreparationException) throw failure
+              return denied
+          } finally { lease.close(); evidence.close() }
+    }
+
+    private class TextLease(private val scope: CalendarScope, private val admit: (CalendarScope) -> Boolean,
+        private val caller: kotlin.coroutines.CoroutineContext) {
+        private val closed = java.util.concurrent.atomic.AtomicBoolean()
+        private val operation = java.util.concurrent.atomic.AtomicReference(caller)
+        private var qualification: () -> Boolean = { true }
+        fun bind(context: kotlin.coroutines.CoroutineContext) { operation.set(context) }
+        fun qualify(check: () -> Boolean) { qualification = check }
+        fun allows(requested: CalendarScope): Boolean {
+            if (closed.get() || requested != scope) return false
+            caller.ensureActive(); operation.get().ensureActive()
+            val allowed = try { qualification() && admit(requested) }
+            catch (failure: Exception) { closed.set(true); caller.ensureActive(); operation.get().ensureActive(); throw failure }
+            if (!allowed) closed.set(true)
+            caller.ensureActive(); operation.get().ensureActive()
+            return allowed && !closed.get()
+        }
+        fun close() { closed.set(true) }
     }
 
     override suspend fun prepareLocalText(intent: LocalEditIntent, timestamp: java.time.Instant): LocalTextEditPreparation {

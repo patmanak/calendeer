@@ -25,10 +25,19 @@ import com.patmanak.proton.andcalendarbridge.sync.CapturedHandoffProjection
 import com.patmanak.proton.andcalendarbridge.sync.AppliedCapturedHandoffProjection
 import com.patmanak.proton.andcalendarbridge.sync.TitleUpdateAcknowledgementReceipt
 import com.patmanak.proton.andcalendarbridge.sync.AppliedTitleUpdateAcknowledgement
+import com.patmanak.proton.andcalendarbridge.sync.TextUpdateAcknowledgementReceipt
+import com.patmanak.proton.andcalendarbridge.sync.AppliedTextUpdateAcknowledgement
 import com.patmanak.proton.andcalendarbridge.sync.catalog.CalendarSummary
 
 /** Android-layer boundary. A failed apply leaves its durable intent unacknowledged for replay. */
 interface CalendarProjection {
+    val textUpdateAcknowledgementProtocol: Int? get() = null
+    /** Assert the full raw native edit before same-row acknowledgement. Only verified CRLF/LF
+     * text differences and acknowledgement metadata may change; CREATE requires explicit origin.
+     */
+    suspend fun acknowledgeTextUpdate(receipt: TextUpdateAcknowledgementReceipt): AppliedTextUpdateAcknowledgement? = null
+    /** Historical metadata proof only; never consume subsequent native edits or children. */
+    suspend fun inspectTextUpdateAcknowledgement(receipt: TextUpdateAcknowledgementReceipt): AppliedTextUpdateAcknowledgement? = null
     val titleUpdateAcknowledgementProtocol: Int? get() = null
     /** Atomic metadata-only ACK of one exact dirty edit, with explicit CREATE handoff when present.
      * Preserve creation provenance; never rewrite content, insert or infer handoff from row markers.

@@ -7,6 +7,9 @@ import com.patmanak.proton.andcalendarbridge.data.calendar.CalendarProjectionFai
 import com.patmanak.proton.andcalendarbridge.data.outgoing.CreateAttemptStore
 import com.patmanak.proton.andcalendarbridge.data.outgoing.CreatePauseReason
 import com.patmanak.proton.andcalendarbridge.data.outgoing.LocalCreateStore
+import com.patmanak.proton.andcalendarbridge.data.outgoing.SystemTextLocalOwner
+import com.patmanak.proton.andcalendarbridge.data.outgoing.SystemTextEditProfile
+import com.patmanak.proton.andcalendarbridge.data.outgoing.TextLocalOwnerSnapshot
 import com.patmanak.proton.andcalendarbridge.sync.*
 import com.patmanak.proton.andcalendarbridge.sync.catalog.CalendarCatalogState
 import com.patmanak.proton.andcalendarbridge.sync.catalog.CalendarCatalogStatus
@@ -17,6 +20,7 @@ import com.patmanak.proton.andcalendarbridge.sync.catalog.CalendarSummary
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicReference
 import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.sync.Mutex
@@ -86,6 +90,7 @@ class ImportCoordinator(
     private val localCreates: LocalCreateStore? = null,
     private val systemCreatesEnabled: (CalendarScope) -> Boolean = { false },
     private val systemTitlesEnabled: (CalendarScope) -> Boolean = { false },
+    private val systemTextsEnabled: (CalendarScope) -> Boolean = { false },
 ) {
     private val mutex = Mutex()
     private val serial = AccountSerialExecutor()
@@ -148,6 +153,364 @@ class ImportCoordinator(
             createPolicyRevision.get() == policy && hasCalendarPermissions() &&
             systemCreatesEnabled(target) && systemTitlesEnabled(target) &&
             state.value.selections.any { it.scope == target && it.enabled && it.available } }
+    }
+
+    /** Capture the original worker epoch; the authenticated facade is never called by this lease. */
+    fun systemTextRunAdmission(target: CalendarScope): (CalendarScope) -> Boolean = textRunAdmission(target, true)
+
+    /** Historical proof recovery needs CREATE access, but never borrows text sending consent. */
+    fun systemTextProofAdmission(target: CalendarScope): (CalendarScope) -> Boolean = textRunAdmission(target, false)
+
+    /** Factual response retention survives editing-policy loss, never logout or account replacement.
+     * The caller additionally bounds this lease to its exact invocation and UNKNOWN record.
+     */
+    fun systemTextEvidenceAdmission(target: CalendarScope): (CalendarScope) -> Boolean {
+        val expected = generation
+        val account = createAccount.get()
+        val initiallyAuthenticated = authenticated
+        val closed = AtomicBoolean(false)
+        return { requested ->
+            val allowed = !closed.get() && requested == target && initiallyAuthenticated && authenticated &&
+                account == target.account && generation == expected && createAccount.get() == account
+            if (!allowed) closed.set(true)
+            allowed && !closed.get()
+        }
+    }
+
+    private fun textRunAdmission(target: CalendarScope, consent: Boolean): (CalendarScope) -> Boolean {
+        val expected = generation
+        val policy = createPolicyRevision.get()
+        val account = createAccount.get()
+        val initiallyAuthenticated = authenticated
+        val closed = AtomicBoolean(false)
+        return { requested ->
+            val allowed = !closed.get() && requested == target && initiallyAuthenticated && authenticated &&
+                generation == expected && createPolicyRevision.get() == policy &&
+                account == target.account && createAccount.get() == account &&
+                hasCalendarPermissions() && systemCreatesEnabled(target) && (!consent || systemTextsEnabled(target)) &&
+                state.value.selections.any { it.scope == target && it.enabled && it.available } &&
+                generation == expected && createPolicyRevision.get() == policy
+            if (!allowed) closed.set(true)
+            allowed && !closed.get()
+        }
+    }
+
+    /** Local-only gateway: callbacks can run while the Proton session mutex is already held. */
+    internal val localTextOwners: SystemTextLocalOwner = object : SystemTextLocalOwner {
+        override suspend fun observe(scope: CalendarScope, event: EventId, owner: MutationId,
+            admit: (CalendarScope) -> Boolean): TextLocalOwnerSnapshot? =
+            withTextOwner(scope, admit, consent = true, denied = null) { access ->
+                val intent = access.read { store.localEdit(scope, event) } ?: return@withTextOwner null
+                if (intent.id != owner || !SystemTextEditProfile.accepts(intent)) return@withTextOwner null
+                val frozen = LocalTextEditPreparation.freezeIntent(intent)
+                val preparation = access.read { store.localTextEditPreparation(scope, event) }
+                if (!textSource(frozen, preparation, access)) return@withTextOwner null
+                TextLocalOwnerSnapshot(frozen, preparation)
+            }
+
+        override suspend fun retain(preparation: LocalTextEditPreparation,
+            admit: (CalendarScope) -> Boolean): LocalTextEditPreparation? {
+            currentCoroutineContext().ensureActive()
+            val frozen = freezeTextPreparation(preparation)
+            return withTextOwner(frozen.intent.scope, admit, consent = true, denied = null) { access ->
+                val retained = access.read { store.localTextEditPreparation(frozen.intent.scope, frozen.intent.base.eventId) }
+                if (retained != null && !sameTextPreparation(retained, frozen)) return@withTextOwner null
+                if (!textSource(frozen.intent, retained, access)) return@withTextOwner null
+                val outcome = access.read { store.retainCurrentLocalTextPreparation(frozen) }
+                if (outcome !in listOf(LocalTextPreparationAdmission.STORED, LocalTextPreparationAdmission.HISTORICAL))
+                    return@withTextOwner null
+                val durable = access.read { store.localTextEditPreparation(frozen.intent.scope, frozen.intent.base.eventId) }
+                if (!sameTextPreparation(durable, frozen) || !textSource(frozen.intent, frozen, access))
+                    return@withTextOwner null
+                freezeTextPreparation(requireNotNull(durable))
+            }
+        }
+
+        override suspend fun qualify(preparation: LocalTextEditPreparation, admit: (CalendarScope) -> Boolean): Boolean {
+            currentCoroutineContext().ensureActive()
+            val frozen = freezeTextPreparation(preparation)
+            return withTextOwner(frozen.intent.scope, admit, consent = true, denied = false) { access ->
+                textSource(frozen.intent, frozen, access)
+            }
+        }
+
+        override suspend fun submit(record: TextUpdateAttemptRecord, journal: TextUpdateRecoveryJournal,
+            port: CalendarTextUpdateSubmissionPort, admit: (CalendarScope) -> Boolean,
+            admitEvidence: (CalendarScope) -> Boolean): TextUpdateSubmissionObservation {
+            val operation = currentCoroutineContext()
+            operation.ensureActive()
+            val frozen = record.frozen()
+            val target = frozen.scope
+            val accountEvidence = systemTextEvidenceAdmission(target)
+            val open = AtomicBoolean(true)
+            val sourceClosed = AtomicBoolean(false)
+            val evidenceClosed = AtomicBoolean(false)
+            val evidence: (CalendarScope) -> Boolean = { requested ->
+                operation.ensureActive()
+                val allowed = open.get() && !evidenceClosed.get() && requested == target &&
+                    accountEvidence(requested) && admitEvidence(requested)
+                operation.ensureActive()
+                if (!allowed) evidenceClosed.set(true)
+                allowed && !evidenceClosed.get() && open.get()
+            }
+            try {
+                if (frozen.state != TextUpdateAttemptState.PREPARED || frozen.protectedEvidence != null ||
+                    port.textUpdateFormat != frozen.format ||
+                    frozen.id != TextUpdateAttemptIdentity.requestId(frozen.preparation, frozen.format))
+                    return TextUpdateSubmissionObservation.Unknown
+                return withTextOwner(target, admit, consent = true, denied = TextUpdateSubmissionObservation.Unknown,
+                    finalAccessRequired = false) { access ->
+                    val sending: (CalendarScope) -> Boolean = { requested ->
+                        operation.ensureActive()
+                        val allowed = open.get() && !sourceClosed.get() && requested == target && access.active() &&
+                            port.textUpdateFormat == frozen.format
+                        operation.ensureActive()
+                        if (!allowed) sourceClosed.set(true)
+                        allowed && !sourceClosed.get() && open.get()
+                    }
+                    suspend fun source(requested: CalendarScope): Boolean {
+                        operation.ensureActive()
+                        return try {
+                            val valid = sending(requested) && textSource(frozen.preparation.intent, frozen.preparation, access) &&
+                                sending(requested)
+                            if (!valid) sourceClosed.set(true)
+                            valid
+                        } catch (cancelled: CancellationException) { throw cancelled }
+                          catch (_: Exception) { operation.ensureActive(); sourceClosed.set(true); false }
+                    }
+                    if (!sending(target) || access.read { journal.read(target, frozen.id, sending) } != frozen ||
+                        !source(target)) return@withTextOwner TextUpdateSubmissionObservation.Unknown
+                    // Lock order is import then authenticated adapter. The callback never retakes the import lock.
+                    val observation = port.submit(frozen, journal, sending, ::source, evidence)
+                    operation.ensureActive()
+                    if (observation !is TextUpdateSubmissionObservation.Verified || !evidence(target) ||
+                        observation.record.copy(state = TextUpdateAttemptState.PREPARED, protectedEvidence = null) != frozen ||
+                        observation.record.protectedEvidence == null) return@withTextOwner TextUpdateSubmissionObservation.Unknown
+                    // Response facts survive editing-policy revocation. No ACK authority is derived here.
+                    val durable = journal.read(target, frozen.id, evidence)
+                    operation.ensureActive()
+                    if (!evidence(target) || durable == null || durable != observation.record)
+                        return@withTextOwner TextUpdateSubmissionObservation.Unknown
+                    TextUpdateSubmissionObservation.Verified(durable, observation.event)
+                }
+            } finally {
+                open.set(false); sourceClosed.set(true); evidenceClosed.set(true)
+            }
+        }
+
+        override suspend fun acknowledge(result: TextUpdateVerifiedResult, journal: TextUpdateRecoveryJournal,
+            admit: (CalendarScope) -> Boolean): Boolean {
+            currentCoroutineContext().ensureActive()
+            val frozen = result.snapshot()
+            return withTextOwner(frozen.record.scope, admit, consent = false, denied = false) { access ->
+                acknowledgeText(frozen, journal, access)
+            }
+        }
+
+        override suspend fun complete(result: TextUpdateVerifiedResult, journal: TextUpdateRecoveryJournal,
+            admit: (CalendarScope) -> Boolean): Boolean {
+            currentCoroutineContext().ensureActive()
+            val frozen = result.snapshot()
+            return withTextOwner(frozen.record.scope, admit, consent = false, denied = false) { access ->
+                completeText(frozen, journal, access)
+            }
+        }
+    }
+
+    private class TextOwnerDenied : IllegalStateException("Text owner access is inactive")
+
+    private inner class TextOwnerAccess(val target: CalendarScope, private val expected: Long,
+        private val policy: Long, private val consent: Boolean, private val admission: (CalendarScope) -> Boolean,
+        private val operation: kotlin.coroutines.CoroutineContext) {
+        private val closed = AtomicBoolean(false)
+        fun close() { closed.set(true) }
+        fun active(): Boolean {
+            operation.ensureActive()
+            if (closed.get()) return false
+            val allowed = authenticated && generation == expected && createPolicyRevision.get() == policy &&
+                createAccount.get() == target.account && hasCalendarPermissions() && systemCreatesEnabled(target) &&
+                (!consent || systemTextsEnabled(target)) &&
+                state.value.selections.any { it.scope == target && it.enabled && it.available } && admission(target)
+            operation.ensureActive()
+            if (!allowed || generation != expected || createPolicyRevision.get() != policy ||
+                createAccount.get() != target.account) closed.set(true)
+            return !closed.get()
+        }
+        val admit: (CalendarScope) -> Boolean = { requested -> requested == target && active() }
+        suspend fun requireAvailable() {
+            operation.ensureActive()
+            if (!active()) throw TextOwnerDenied()
+            val selected = store.selections(target.account).singleOrNull { it.scope == target }
+            operation.ensureActive()
+            if (!active() || selected == null || !selected.enabled || !selected.available) {
+                close(); throw TextOwnerDenied()
+            }
+        }
+        suspend fun <T> read(action: suspend () -> T): T {
+            requireAvailable()
+            val value = action()
+            operation.ensureActive()
+            requireAvailable()
+            return value
+        }
+    }
+
+    private suspend fun <T> withTextOwner(target: CalendarScope, admit: (CalendarScope) -> Boolean,
+        consent: Boolean, denied: T, finalAccessRequired: Boolean = true, action: suspend (TextOwnerAccess) -> T): T {
+        currentCoroutineContext().ensureActive()
+        val expected = generation
+        val policy = createPolicyRevision.get()
+        return mutex.withLock {
+            val access = TextOwnerAccess(target, expected, policy, consent, admit, currentCoroutineContext())
+            try {
+                access.requireAvailable()
+                store.admitTransaction = access.admit
+                projection.admitOperation = access::active
+                val result = action(access)
+                currentCoroutineContext().ensureActive()
+                if (finalAccessRequired) access.requireAvailable()
+                result
+            } catch (cancelled: CancellationException) { throw cancelled }
+              catch (_: TextOwnerDenied) { currentCoroutineContext().ensureActive(); denied }
+              catch (_: Exception) { currentCoroutineContext().ensureActive(); denied }
+              finally {
+                  access.close()
+                  store.admitTransaction = { false }
+                  projection.admitOperation = { false }
+              }
+        }
+    }
+
+    private fun freezeTextPreparation(value: LocalTextEditPreparation) =
+        LocalTextEditPreparation(value.intent, value.timestamp, value.format, value.protectedPayload)
+
+    private fun sameTextPreparation(left: LocalTextEditPreparation?, right: LocalTextEditPreparation?): Boolean =
+        if (left == null || right == null) left == null && right == null else
+            left.intent == right.intent && left.timestamp == right.timestamp && left.format == right.format &&
+                left.protectedPayload == right.protectedPayload
+
+    /** Exact SQL and native source, including complete immutable origin for a handed-off CREATE. */
+    private suspend fun textSource(intent: LocalEditIntent, preparation: LocalTextEditPreparation?,
+        access: TextOwnerAccess): Boolean {
+        val target = access.target
+        val event = intent.base.eventId
+        if (intent.scope != target || !SystemTextEditProfile.accepts(intent) || intent.format != remote.format) return false
+        suspend fun sql(): Boolean {
+            if (remote.format != intent.format) return false
+            if (access.read { store.localEdit(target, event) } != intent) return false
+            val eligibility = access.read { store.assessLocalTextPreparation(intent) }
+            if (eligibility != if (preparation == null) LocalTextPreparationAdmission.ELIGIBLE
+                else LocalTextPreparationAdmission.HISTORICAL) return false
+            return sameTextPreparation(access.read { store.localTextEditPreparation(target, event) }, preparation) &&
+                remote.format == intent.format
+        }
+        if (!sql()) return false
+        val role = access.read { store.capturedHandoff(target, event) }
+        val hold = access.read { capturedRawHold(target) }
+        if (hold.scopeBlocked || (role == null && hold.holds(event))) return false
+        val content = if (role == null) access.read { projection.captureOwnedSimpleEdit(target, intent.base) }?.content else {
+            if (!access.read { currentSystemTitleHandoff(role, intent, access::active) }) return false
+            val observed = access.read { projection.captureCapturedHandoffCurrent(role.frame) }
+                as? CapturedHandoffCurrentObservation.Supported
+            observed?.snapshot?.takeIf { it.frame == role.frame && !it.deleted }?.content
+        }
+        if (content != intent.content || access.read { store.capturedHandoff(target, event) } != role) return false
+        if (role != null && !access.read { currentSystemTitleHandoff(role, intent, access::active) }) return false
+        val after = access.read { capturedRawHold(target) }
+        if (after.scopeBlocked || (role == null && after.holds(event)) ||
+            access.read { store.capturedHandoff(target, event) } != role) return false
+        return sql()
+    }
+
+    private suspend fun currentTextResult(result: TextUpdateVerifiedResult, journal: TextUpdateRecoveryJournal,
+        access: TextOwnerAccess): Boolean {
+        val record = result.record
+        if (record.scope != access.target || record.state != TextUpdateAttemptState.OUTCOME_UNKNOWN ||
+            record.preparation.intent.format != remote.format ||
+            access.read { store.transaction(access.target) { checkpoint?.format } } != record.preparation.intent.format)
+            return false
+        val durable = access.read { journal.read(access.target, record.id, access.admit) } ?: return false
+        return durable.copy(protectedEvidence = null) == record &&
+            access.read { journal.readVerified(access.target, record.id, access.admit) } == result &&
+            access.read { store.transaction(access.target) { checkpoint?.format } } == record.preparation.intent.format &&
+            remote.format == record.preparation.intent.format
+    }
+
+    private suspend fun acknowledgeText(result: TextUpdateVerifiedResult, journal: TextUpdateRecoveryJournal,
+        access: TextOwnerAccess): Boolean {
+        if (projection.textUpdateAcknowledgementProtocol != 1 || !currentTextResult(result, journal, access)) return false
+        val target = access.target
+        val attempt = result.record.id
+        val intent = result.record.preparation.intent
+        val event = result.event.eventId
+        val existing = access.read { store.textUpdateAcknowledgement(target, event, attempt) }
+        if (existing != null && !existing.receipt.matches(result)) return false
+        if (existing?.state == TextUpdateAcknowledgementState.RESTORED)
+            return currentTextResult(result, journal, access)
+        val reservation = if (existing != null) TextUpdateAcknowledgementReservation(existing, false) else {
+            val role = access.read { store.capturedHandoff(target, event) }
+            val hold = access.read { capturedRawHold(target) }
+            if (hold.scopeBlocked || (role == null && hold.holds(event))) return false
+            val content = if (role == null) access.read { projection.captureOwnedSimpleEdit(target, intent.base) }?.content else {
+                if (!access.read { currentSystemTitleHandoff(role, intent, access::active) }) return false
+                val observed = access.read { projection.captureCapturedHandoffCurrent(role.frame) }
+                    as? CapturedHandoffCurrentObservation.Supported
+                observed?.snapshot?.takeIf { it.frame == role.frame && !it.deleted }?.content
+            }
+            if (content != intent.content || access.read { store.capturedHandoff(target, event) } != role ||
+                !currentTextResult(result, journal, access)) return false
+            access.read { store.prepareTextUpdateAcknowledgement(result, role?.frame) } ?: return false
+        }
+        val retained = reservation.record
+        if (!retained.receipt.matches(result) ||
+            access.read { store.textUpdateAcknowledgement(target, event, attempt) } != retained ||
+            !currentTextResult(result, journal, access)) return false
+        if (reservation.fresh) {
+            val owner = access.read { store.localEdit(target, event) }
+            val echoedOwner = owner?.state == LocalEditState.CONFLICT && owner.copy(state = LocalEditState.PAUSED) == intent
+            if ((owner != intent && !echoedOwner) || !sameTextPreparation(
+                    access.read { store.localTextEditPreparation(target, event) }, result.record.preparation)) return false
+            val frame = retained.receipt.handoff
+            val role = access.read { store.capturedHandoff(target, event) }
+            if (frame == null) {
+                val hold = access.read { capturedRawHold(target) }
+                if (role != null || hold.scopeBlocked || hold.holds(event)) return false
+            } else if (role == null || role != CapturedCreateHandoffRecord(frame, CapturedCreateHandoffState.RELEASED, waiting = true) ||
+                !access.read { currentSystemTitleHandoff(role, intent, access::active) }) return false
+        }
+        val historicalFrame = retained.receipt.handoff
+        if (historicalFrame != null && !access.read { handoffSource(historicalFrame, access::active) }) return false
+        // A retained pending receipt only inspects. An interrupted batch is never replayed.
+        val witness = access.read {
+            if (reservation.fresh) projection.acknowledgeTextUpdate(retained.receipt)
+            else projection.inspectTextUpdateAcknowledgement(retained.receipt)
+        } ?: return false
+        if (witness.receipt.snapshot() != retained.receipt || !currentTextResult(result, journal, access) ||
+            access.read { store.textUpdateAcknowledgement(target, event, attempt) } != retained) return false
+        if (historicalFrame != null && !access.read { handoffSource(historicalFrame, access::active) }) return false
+        if (!access.read { store.restoreTextUpdateAcknowledgement(witness) }) return false
+        return access.read { store.textUpdateAcknowledgement(target, event, attempt) } ==
+            TextUpdateAcknowledgementRecord(retained.receipt, TextUpdateAcknowledgementState.RESTORED) &&
+            currentTextResult(result, journal, access)
+    }
+
+    private suspend fun completeText(result: TextUpdateVerifiedResult, journal: TextUpdateRecoveryJournal,
+        access: TextOwnerAccess): Boolean {
+        if (journal.completionProtocol != 1 || !currentTextResult(result, journal, access)) return false
+        val target = access.target
+        val event = result.event.eventId
+        val attempt = result.record.id
+        val acknowledgement = access.read { store.textUpdateAcknowledgement(target, event, attempt) } ?: return false
+        if (acknowledgement.state != TextUpdateAcknowledgementState.RESTORED || !acknowledgement.receipt.matches(result)) return false
+        val completion = TextUpdateCompletion.of(result, acknowledgement)
+        val retained = access.read { journal.readCompletion(target, attempt, access.admit) }
+        if (retained != null && retained != completion) return false
+        if (!currentTextResult(result, journal, access) ||
+            access.read { store.textUpdateAcknowledgement(target, event, attempt) } != acknowledgement) return false
+        if (retained == null && !access.read { journal.retainCompletion(completion, access.admit) }) return false
+        return access.read { journal.readCompletion(target, attempt, access.admit) } == completion &&
+            access.read { store.textUpdateAcknowledgement(target, event, attempt) } == acknowledgement &&
+            currentTextResult(result, journal, access)
     }
 
     suspend fun configureSystemCalendar(target: CalendarScope): Boolean = mutex.withLock {

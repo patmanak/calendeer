@@ -126,6 +126,15 @@ class SystemCreateWorkStore(context: Context, name: String = "system-creates.db"
     /** Opt-in is scoped to the complete account/calendar/generation and defaults to disabled. */
     fun modeEnabled(scope: CalendarScope): Boolean = modes.getBoolean(modeKey(scope), false)
 
+    @Synchronized fun textsEnabled(scope: CalendarScope): Boolean =
+        modeEnabled(scope) && modes.getBoolean("texts-${modeKey(scope)}", false)
+
+    @Synchronized fun setTextsMode(scope: CalendarScope, enabled: Boolean) {
+        check(modes.edit().putBoolean("texts-${modeKey(scope)}", enabled && modeEnabled(scope)).commit()) {
+            "System text mode was not persisted"
+        }
+    }
+
     @Synchronized fun titlesEnabled(scope: CalendarScope): Boolean =
         modeEnabled(scope) && modes.getBoolean("titles-${modeKey(scope)}", false)
 
@@ -137,7 +146,7 @@ class SystemCreateWorkStore(context: Context, name: String = "system-creates.db"
 
     @Synchronized fun setMode(scope: CalendarScope, enabled: Boolean) {
         val update = modes.edit().putBoolean(modeKey(scope), enabled)
-        if (!enabled) update.remove("titles-${modeKey(scope)}")
+        if (!enabled) update.remove("titles-${modeKey(scope)}").remove("texts-${modeKey(scope)}")
         check(update.commit()) { "System create mode was not persisted" }
     }
 

@@ -36,12 +36,14 @@ data class SystemCreateUiState(
     val pending: Map<CalendarScope, Int> = emptyMap(),
     val busy: Boolean = false,
     val failed: Boolean = false,
+    val textsEnabled: Set<CalendarScope> = emptySet(),
+    val textSupportAvailable: Boolean = false,
 ) {
     override fun toString() = "SystemCreateUiState(REDACTED, busy=$busy, failed=$failed)"
 }
 
 /**
- * Explicit opt-in system CREATE and narrow title trigger. Other edits/deletes stay retained.
+ * Separate opt-in CREATE, title and text triggers. Unsupported edits/deletes stay retained.
  * All Provider admission stays inside ImportCoordinator's mutex; this owner never borrows or
  * modifies the mutable admission guards of its shared projection/capture dependencies.
  */
@@ -57,9 +59,12 @@ class SystemCreateController(
     private val scheduler: ImportScheduler = WorkManagerImportScheduler(context),
     private val titleRecovery: SystemTitleRecoveryController? = null,
     private val titleUpdates: SystemTitleUpdateController? = null,
+    private val textRecovery: SystemTitleRecoveryController? = null,
+    private val textUpdates: SystemTitleUpdateController? = null,
 ) {
     private val context = context.applicationContext
-    private val mutableState = MutableStateFlow(SystemCreateUiState())
+    private val textSupportAvailable = textRecovery != null && textUpdates != null
+    private val mutableState = MutableStateFlow(SystemCreateUiState(textSupportAvailable = textSupportAvailable))
     val state: StateFlow<SystemCreateUiState> = mutableState.asStateFlow()
     private val mutex = Mutex()
     private val started = AtomicBoolean()
@@ -91,8 +96,7 @@ class SystemCreateController(
                         val revoked = previous?.active().orEmpty() - signal.active()
                         previous = signal
                         for (target in revoked) {
-                            titleRecovery?.reset(target)
-                            titleUpdates?.reset(target)
+                            resetEditingTraversal(target)
                         }
                         updateObserver()
                         imports.reconcileSystemCalendarAccess()
@@ -115,10 +119,28 @@ class SystemCreateController(
         imports.systemCreatePolicyChanged(target, enabled)
         scope.launch {
             try {
-                titleRecovery?.reset(target)
-                titleUpdates?.reset(target)
+                resetEditingTraversal(target)
                 updateObserver()
                 imports.configureSystemCalendar(target)
+                publish()
+                request()
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { mutableState.update { it.copy(failed = true) } }
+        }
+    }
+
+    fun setTextsEnabled(selection: ImportStore.Selection, enabled: Boolean) {
+        val target = selection.scope
+        val current = imports.state.value
+        if (enabled && (!textSupportAvailable || !current.authenticated || !current.hasPermission || !work.modeEnabled(target) ||
+            current.selections.none { it.scope == target && it.enabled && it.available })) return
+        work.setTextsMode(target, enabled)
+        epochs.computeIfAbsent(target) { AtomicLong() }.incrementAndGet()
+        // Invalidate coordinator/adapter leases synchronously, before any cursor reset suspends.
+        imports.systemCreatePolicyChanged(target, work.modeEnabled(target))
+        scope.launch {
+            try {
+                resetEditingTraversal(target)
                 publish()
                 request()
             } catch (cancelled: CancellationException) { throw cancelled }
@@ -143,13 +165,19 @@ class SystemCreateController(
         imports.systemCreatePolicyChanged(target, work.modeEnabled(target))
         scope.launch {
             try {
-                titleUpdates?.reset(target)
-                titleRecovery?.reset(target)
+                resetEditingTraversal(target)
                 publish()
                 request()
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (_: Exception) { mutableState.update { it.copy(failed = true) } }
         }
+    }
+
+    private suspend fun resetEditingTraversal(target: CalendarScope) {
+        titleRecovery?.reset(target)
+        titleUpdates?.reset(target)
+        textRecovery?.reset(target)
+        textUpdates?.reset(target)
     }
 
     /** One bounded page per selected scope; unknown outcomes never cause immediate retry loops. */
@@ -161,12 +189,23 @@ class SystemCreateController(
             for (target in activeScopes()) {
                 val epoch = epochs.computeIfAbsent(target) { AtomicLong() }.get()
                 val titleAdmission = imports.systemTitleRunAdmission(target)
+                // Capture both policy leases before the first suspension. Re-enabling cannot
+                // lend fresh authority to a run already paused in title/CREATE work.
+                val textAdmission = if (textSupportAvailable) imports.systemTextRunAdmission(target) else null
+                val textProofAdmission = if (textSupportAvailable) imports.systemTextProofAdmission(target) else null
                 if (!active(target, epoch)) continue
                 // A failed native scan/CREATE must not block already durable title proof.
                 // This is the same captured epoch; no new authority is acquired after a pause.
                 val recovered = titleRecovery?.run(target, fresh) { active(target, epoch) }
                 if (recovered?.failed == true) mutableState.update { it.copy(failed = true) }
                 more = more || recovered?.more == true
+                if (!active(target, epoch)) continue
+                // Existing local text proof remains recoverable with text sending disabled.
+                val recoveredText = if (textSupportAvailable) textRecovery?.run(target, fresh) {
+                    active(target, epoch) && textProofAdmission?.invoke(target) == true
+                } else null
+                if (recoveredText?.failed == true) mutableState.update { it.copy(failed = true) }
+                more = more || recoveredText?.more == true
                 if (!active(target, epoch)) continue
                 if (!imports.configureSystemCalendar(target)) { retry = true; continue }
                 val discovered = imports.discoverSystemChanges(target, cursor(target, "scan"), PAGE_SIZE)
@@ -226,6 +265,12 @@ class SystemCreateController(
                 }
                 if (titles?.failed == true) mutableState.update { it.copy(failed = true) }
                 more = more || titles?.more == true
+                if (!active(target, epoch)) continue
+                val texts = if (textSupportAvailable) textUpdates?.run(target, network, fresh) {
+                    active(target, epoch) && work.textsEnabled(target) && textAdmission?.invoke(target) == true
+                } else null
+                if (texts?.failed == true) mutableState.update { it.copy(failed = true) }
+                more = more || texts?.more == true
             }
             publish()
             when { retry -> ImportRunResult.RETRY; more -> ImportRunResult.CONTINUE; else -> ImportRunResult.COMPLETE }
@@ -353,7 +398,9 @@ class SystemCreateController(
         val enabled = selections.map { it.scope }.filter { work.modeEnabled(it) }.toSet()
         val pending = selections.associate { it.scope to work.count(it.scope) }
         val titles = selections.map { it.scope }.filter { work.titlesEnabled(it) }.toSet()
-        mutableState.update { it.copy(enabled = enabled, titlesEnabled = titles, pending = pending) }
+        val texts = selections.map { it.scope }.filter { work.textsEnabled(it) }.toSet()
+        mutableState.update { it.copy(enabled = enabled, titlesEnabled = titles, textsEnabled = texts,
+            textSupportAvailable = textSupportAvailable, pending = pending) }
     }
 
     @Synchronized private fun updateObserver() {

@@ -10,6 +10,7 @@ import android.database.sqlite.SQLiteOpenHelper
 import android.database.sqlite.SQLiteException
 import com.patmanak.proton.andcalendarbridge.sync.*
 import com.patmanak.proton.andcalendarbridge.data.serialization.TitleUpdateAcknowledgementCodec
+import com.patmanak.proton.andcalendarbridge.data.serialization.TextUpdateAcknowledgementCodec
 import com.patmanak.proton.andcalendarbridge.sync.catalog.CalendarSummary
 import java.time.Instant
 import java.time.LocalDate
@@ -31,9 +32,10 @@ import org.json.JSONException
 
 /** App-private, backup-excluded durable import queue. Every page and checkpoint commits together. */
 enum class LocalTitlePreparationAdmission { ELIGIBLE, STORED, HISTORICAL, INACTIVE, UNQUALIFIED, CONFLICT }
+enum class LocalTextPreparationAdmission { ELIGIBLE, STORED, HISTORICAL, INACTIVE, UNQUALIFIED, CONFLICT }
 
 class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
-    SQLiteOpenHelper(context, name, null, 19), SyncStore {
+    SQLiteOpenHelper(context, name, null, 20), SyncStore {
     private val lock = Mutex()
     /** Check the run lease both before its transaction and before durable commit. */
     @Volatile var admitTransaction: (CalendarScope) -> Boolean = { true }
@@ -58,10 +60,14 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
         createProjectionRepresentations(db)
         createTitleUpdateAcknowledgements(db)
         createTitleUpdateAcknowledgementHistory(db)
+        createTextPreparationAndAcknowledgements(db)
         createConflictArchives(db)
     }
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        check(oldVersion in 1..18 && newVersion == 19) { "Explicit import schema migration required" }
+        check(oldVersion in 1..19 && newVersion == 20) { "Explicit import schema migration required" }
+        // Add these before every legacy branch, including the schema-18 observation rebuild.
+        createTextPreparationAndAcknowledgements(db)
+        if (oldVersion == 19) return
         if (oldVersion == 18) {
             migrateConflictObservationsFrom18(db)
             return
@@ -357,6 +363,35 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
         checkStagingCapacity(db)
     }
 
+    private fun createTextPreparationAndAcknowledgements(db: SQLiteDatabase) {
+        createLocalTextEditPreparations(db)
+        createTextUpdateAcknowledgements(db)
+        createTextUpdateAcknowledgementHistory(db)
+    }
+    private fun createTextUpdateAcknowledgements(db: SQLiteDatabase) {
+        db.execSQL("""CREATE TABLE text_update_acknowledgements (
+            scope TEXT NOT NULL, event TEXT NOT NULL, nonce TEXT NOT NULL UNIQUE,
+            receipt TEXT NOT NULL, state TEXT NOT NULL CHECK(state IN ('PENDING','RESTORED')),
+            PRIMARY KEY(scope,event)
+        )""".trimIndent())
+    }
+    private fun createTextUpdateAcknowledgementHistory(db: SQLiteDatabase) {
+        db.execSQL("""CREATE TABLE text_update_acknowledgement_history (
+            scope TEXT NOT NULL, event TEXT NOT NULL, attempt TEXT NOT NULL,
+            nonce TEXT NOT NULL UNIQUE, receipt TEXT NOT NULL,
+            PRIMARY KEY(scope,event,attempt), UNIQUE(scope,attempt)
+        )""".trimIndent())
+    }
+    private fun createLocalTextEditPreparations(db: SQLiteDatabase) {
+        db.execSQL("""CREATE TABLE local_text_edit_preparations (
+            scope TEXT NOT NULL, mutation TEXT NOT NULL, event TEXT NOT NULL,
+            adapter TEXT NOT NULL, version INTEGER NOT NULL CHECK(version > 0),
+            base TEXT NOT NULL, local TEXT NOT NULL, state TEXT NOT NULL CHECK(state = 'PAUSED'),
+            timestamp TEXT NOT NULL, prep_adapter TEXT NOT NULL,
+            prep_version INTEGER NOT NULL CHECK(prep_version > 0), payload TEXT NOT NULL,
+            PRIMARY KEY(scope,mutation), UNIQUE(scope,event)
+        )""".trimIndent())
+    }
     private fun createTitleUpdateAcknowledgements(db: SQLiteDatabase) {
         db.execSQL("""CREATE TABLE title_update_acknowledgements (
             scope TEXT NOT NULL, event TEXT NOT NULL, nonce TEXT NOT NULL UNIQUE,
@@ -1510,7 +1545,8 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
             val exact = db.rawQuery("SELECT 1 FROM local_edits WHERE scope=? AND event=? AND mutation=? AND kind='DELETE'",
                 arrayOf(key(scope), eventId.value, mutationId.value)).use { it.moveToFirst() }
             if (!exact) return@stagingMutation null
-            check(!hasRawEventRow(db, "local_edit_preparations", scope, eventId)) { "Deletion has incompatible preparation" }
+            check(!hasRawEventRow(db, "local_edit_preparations", scope, eventId) &&
+                !hasRawEventRow(db, "local_text_edit_preparations", scope, eventId)) { "Deletion has incompatible preparation" }
             val owner = readInspectionDeleteOwner(db, scope, eventId) ?: return@stagingMutation null
             check(owner.id == mutationId)
             val imported = stagedQuery(db, "SELECT payload FROM records WHERE scope=? AND event=?",
@@ -1539,6 +1575,487 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
         catch (failure: SQLiteException) { throw failure }
         catch (_: Exception) { throw IllegalStateException("Invalid local deletion owner") }
 
+    /** SQL observation only; does not inspect Android or refresh remote access. */
+    suspend fun assessLocalTextPreparation(intent: LocalEditIntent): LocalTextPreparationAdmission {
+        currentCoroutineContext().ensureActive()
+        val frozen = supportedLocalTextIntent(intent) ?: return LocalTextPreparationAdmission.UNQUALIFIED
+        return textStagingMutation(frozen.scope) { db -> localTextPreparationAdmission(db, frozen) }
+    }
+
+    /** First admission rechecks the owner, checkpoint, baseline and remote in the insertion transaction. */
+    suspend fun retainCurrentLocalTextPreparation(value: LocalTextEditPreparation): LocalTextPreparationAdmission {
+        currentCoroutineContext().ensureActive()
+        val frozen = LocalTextEditPreparation(value.intent, value.timestamp, value.format, value.protectedPayload)
+        val base = encodeChange(frozen.intent.base).also(::requirePreparationSnapshotBudget)
+        val local = encodeChange(frozen.intent.base.copy(content = frozen.intent.content)).also(::requirePreparationSnapshotBudget)
+        return textStagingMutation(frozen.intent.scope) { db ->
+            val admission = localTextPreparationAdmission(db, frozen.intent)
+            if (admission == LocalTextPreparationAdmission.HISTORICAL) {
+                val retained = readLocalTextEditPreparation(db, frozen.intent.scope, frozen.intent.base.eventId)
+                return@textStagingMutation if (retained != null && sameTextPreparation(retained, frozen)) admission
+                    else LocalTextPreparationAdmission.UNQUALIFIED
+            }
+            if (admission != LocalTextPreparationAdmission.ELIGIBLE) return@textStagingMutation admission
+            insertLocalTextPreparation(db, frozen, base, local)
+            LocalTextPreparationAdmission.STORED
+        }
+    }
+    /** Monotone exact-owner transition after a remote conflict; original snapshots/evidence stay intact. */
+    suspend fun conflictLocalTextPreparation(intent: LocalEditIntent): LocalTextPreparationAdmission {
+        currentCoroutineContext().ensureActive()
+        val frozen = supportedLocalTextIntent(intent) ?: return LocalTextPreparationAdmission.UNQUALIFIED
+        return textStagingMutation(frozen.scope) { db ->
+            val intent = frozen
+            val admission = localTextPreparationAdmission(db, intent)
+            if (admission !in listOf(LocalTextPreparationAdmission.ELIGIBLE, LocalTextPreparationAdmission.HISTORICAL))
+                return@textStagingMutation admission
+            check(db.update("local_edits", ContentValues().apply { put("state", LocalEditState.CONFLICT.name) },
+                "scope=? AND event=? AND mutation=? AND kind='UPDATE'",
+                arrayOf(key(intent.scope), intent.base.eventId.value, intent.id.value)) == 1)
+            ensureConflictArchive(db, intent.scope, intent.base.eventId)
+            LocalTextPreparationAdmission.CONFLICT
+        }
+    }
+    private fun localTextPreparationAdmission(db: SQLiteDatabase, intent: LocalEditIntent): LocalTextPreparationAdmission {
+        if (supportedLocalTextIntent(intent) == null) return LocalTextPreparationAdmission.UNQUALIFIED
+        val target = intent.scope
+        if (!activeProjectionScope(db, target)) return LocalTextPreparationAdmission.INACTIVE
+        if (hasRawEventRow(db, "local_edit_preparations", target, intent.base.eventId))
+            return LocalTextPreparationAdmission.UNQUALIFIED
+        val format = db.rawQuery("SELECT checkpoint FROM calendars WHERE scope=?", arrayOf(key(target))).use {
+            if (!it.moveToFirst() || it.isNull(0)) null else decodeCheckpoint(target, it.getString(0)).format
+        }
+        if (format != intent.format) return LocalTextPreparationAdmission.UNQUALIFIED
+        val owner = readTextPreparationOwner(db, target, intent.base.eventId) ?: return LocalTextPreparationAdmission.UNQUALIFIED
+        if (owner != intent) return if (owner.state == LocalEditState.CONFLICT && owner.copy(state = LocalEditState.PAUSED) == intent)
+            LocalTextPreparationAdmission.CONFLICT else LocalTextPreparationAdmission.UNQUALIFIED
+        if (owner.state == LocalEditState.CONFLICT) return LocalTextPreparationAdmission.CONFLICT
+        if (readBaseline(db, target, intent.base.eventId) != intent.base) return LocalTextPreparationAdmission.UNQUALIFIED
+        val remote = stagedQuery(db, "SELECT payload FROM records WHERE scope=? AND event=?",
+            arrayOf(key(target), intent.base.eventId.value)).use { if (it.moveToFirst()) decodeChange(it.getString(0)) else null }
+        if (remote != intent.base || hasRawEventRow(db, "deferred_events", target, intent.base.eventId))
+            return LocalTextPreparationAdmission.CONFLICT
+        // A cache hit is historical evidence, never a fresh crypto/access qualification.
+        if (readLocalTextEditPreparation(db, target, intent.base.eventId) != null) return LocalTextPreparationAdmission.HISTORICAL
+        return LocalTextPreparationAdmission.ELIGIBLE
+    }
+    private fun insertLocalTextPreparation(db: SQLiteDatabase, value: LocalTextEditPreparation, base: String, local: String) {
+        val intent = value.intent
+        db.insertOrThrow("local_text_edit_preparations", null, ContentValues().apply {
+            put("scope", key(intent.scope)); put("mutation", intent.id.value); put("event", intent.base.eventId.value)
+            put("adapter", intent.format.id); put("version", intent.format.version)
+            put("base", base); put("local", local); put("state", intent.state.name)
+            put("timestamp", value.timestamp.toString()); put("prep_adapter", value.format.id)
+            put("prep_version", value.format.version); put("payload", value.protectedPayload)
+        })
+        checkStagingCapacity(db)
+    }
+    private fun sameTextPreparation(a: LocalTextEditPreparation, b: LocalTextEditPreparation) =
+        a.intent == b.intent && a.timestamp == b.timestamp && a.format == b.format && a.protectedPayload == b.protectedPayload
+
+    private fun supportedLocalTextIntent(intent: LocalEditIntent): LocalEditIntent? = try {
+        LocalTextEditPreparation.freezeIntent(intent).takeIf {
+            it.base.content.details == EventDetails() && it.base.content.colorRgb == null &&
+                !TextUpdateContentPolicy.sameSubmittedContent(it.base.content, it.content)
+        }
+    } catch (_: IllegalArgumentException) { null }
+
+    /** Reserve the immutable text receipt before the one fresh native text/metadata acknowledgement.
+     * The coordinator owns verified-result admission; this transaction qualifies only its SQL source.
+     */
+    suspend fun prepareTextUpdateAcknowledgement(result: TextUpdateVerifiedResult,
+        handoff: CapturedCreateHandoffFrame? = null): TextUpdateAcknowledgementReservation? {
+        currentCoroutineContext().ensureActive()
+        val frozen = result.snapshot()
+        val proposed = TextUpdateAcknowledgementReceipt.of(frozen, UUID.randomUUID().toString(), handoff)
+        val encoded = encodeTextUpdateAcknowledgement(proposed)
+        return textStagingMutation(proposed.intent.scope) { db ->
+            val scope = proposed.intent.scope
+            val event = proposed.intent.base.eventId
+            val historical = readTextUpdateAcknowledgementHistory(db, scope, event, proposed.attempt.id)
+            val existing = if (historical == null) readTextUpdateAcknowledgement(db, scope, event) else null
+            val exact = if (historical != null) readTextUpdateAcknowledgement(db, scope, event, proposed.attempt.id)
+                else existing?.takeIf { it.receipt.attempt.id == proposed.attempt.id }
+            if (exact != null) {
+                check(exact.receipt.matches(frozen) && exact.receipt.handoff == proposed.handoff) {
+                    "Text acknowledgement receipt is immutable"
+                }
+                return@textStagingMutation TextUpdateAcknowledgementReservation(exact, fresh = false)
+            }
+            check(existing == null || existing.state == TextUpdateAcknowledgementState.RESTORED) {
+                "Pending text acknowledgement receipt is immutable"
+            }
+            requireUnusedTextAcknowledgementIdentity(db, proposed)
+            if (!textAcknowledgementSource(db, proposed) ||
+                !directTextAcknowledgementBase(db, scope, event))
+                return@textStagingMutation null
+            val owner = textAcknowledgementOwner(db, scope, event)
+            val historicalAdmission = owner == proposed.intent &&
+                localTextPreparationAdmission(db, proposed.intent) == LocalTextPreparationAdmission.HISTORICAL
+            if (!historicalAdmission && !exactTextResultEcho(db, proposed, owner))
+                return@textStagingMutation null
+            val preparation = readLocalTextEditPreparation(db, scope, event) ?: return@textStagingMutation null
+            if (!sameTextPreparation(preparation, frozen.record.preparation) || !proposed.attempt.matchesPreparation(preparation))
+                return@textStagingMutation null
+            if (existing != null) {
+                archiveTextUpdateAcknowledgement(db, existing)
+                check(db.delete("text_update_acknowledgements", "scope=? AND event=? AND nonce=? AND receipt=? AND state='RESTORED'",
+                    arrayOf(key(scope), event.value, existing.receipt.projection.nonce,
+                        encodeTextUpdateAcknowledgement(existing.receipt))) == 1) { "Text acknowledgement slot changed" }
+            }
+            check(!db.rawQuery("SELECT 1 FROM text_update_acknowledgement_history WHERE nonce=?",
+                arrayOf(proposed.projection.nonce)).use { it.moveToFirst() }) { "Text acknowledgement nonce is already retained" }
+            db.insertOrThrow("text_update_acknowledgements", null, ContentValues().apply {
+                put("scope", key(scope)); put("event", event.value); put("nonce", proposed.projection.nonce)
+                put("receipt", encoded); put("state", TextUpdateAcknowledgementState.PENDING.name)
+            })
+            checkStagingCapacity(db)
+            TextUpdateAcknowledgementReservation(TextUpdateAcknowledgementRecord(proposed,
+                TextUpdateAcknowledgementState.PENDING), fresh = true)
+        }
+    }
+
+    /** Historical leased inspection, including inactive scopes; never permission for a native write. */
+    suspend fun textUpdateAcknowledgement(scope: CalendarScope, event: EventId,
+        attempt: MutationId? = null): TextUpdateAcknowledgementRecord? =
+        textStagingMutation(scope) { db -> readTextUpdateAcknowledgement(db, scope, event, attempt) }
+
+    /** Close only the exact historically acknowledged owner. New remote/deferred work survives.
+     * A RESTORED replay is read-only and cannot consume a subsequent intent or preparation.
+     */
+    suspend fun restoreTextUpdateAcknowledgement(witness: AppliedTextUpdateAcknowledgement): Boolean {
+        currentCoroutineContext().ensureActive()
+        val receipt = witness.receipt.snapshot()
+        val intent = receipt.intent
+        val scope = intent.scope
+        val event = intent.base.eventId
+        return textStagingMutation(scope) { db ->
+            val retained = readTextUpdateAcknowledgement(db, scope, event, receipt.attempt.id) ?: return@textStagingMutation false
+            if (retained.receipt != receipt) return@textStagingMutation false
+            if (retained.state == TextUpdateAcknowledgementState.RESTORED) return@textStagingMutation true
+            if (!activeProjectionScope(db, scope) || !textAcknowledgementFormatMatches(db, scope, intent.format) ||
+                !textAcknowledgementSource(db, receipt) || !directTextAcknowledgementBase(db, scope, event))
+                return@textStagingMutation false
+            val owner = textAcknowledgementOwner(db, scope, event) ?: return@textStagingMutation false
+            if (owner.copy(state = LocalEditState.PAUSED) != intent) return@textStagingMutation false
+            val preparation = readLocalTextEditPreparation(db, scope, event) ?: return@textStagingMutation false
+            if (preparation.intent != intent || !receipt.attempt.matchesPreparation(preparation)) return@textStagingMutation false
+            if (readBaseline(db, scope, event) != intent.base) return@textStagingMutation false
+            // The native ACK is now proven. Retire only a still-redundant ordinary
+            // plan, atomically with baseline/owner restoration; never claim its apply succeeded.
+            if (receipt.handoff == null) retireRedundantTextProjection(db, receipt)
+            val oldBase = encodeChange(intent.base)
+            val newBase = encodeChange(receipt.projection.change)
+            val local = encodeChange(intent.base.copy(content = intent.content))
+            check(db.update("projection_bases", ContentValues().apply { put("payload", newBase) },
+                "scope=? AND event=? AND payload=? AND representation IS NULL", arrayOf(key(scope), event.value, oldBase)) == 1)
+            receipt.handoff?.let { frame ->
+                check(db.update("captured_create_handoffs", ContentValues().apply {
+                    put("last_projection", encodeHandoffProjection(receipt.projection)); put("waiting", 0)
+                }, "scope=? AND event=? AND nonce=? AND protocol=? AND ack_nonce=? AND ack_fingerprint=? " +
+                    "AND fingerprint=? AND state='RELEASED' AND waiting=1 AND last_projection IS ?",
+                    arrayOf(key(scope), event.value, frame.receipt.nonce, frame.receipt.protocol.toString(),
+                        frame.receipt.acknowledgement.nonce, frame.receipt.acknowledgement.fingerprint(), frame.receipt.fingerprint(),
+                        frame.lastProjection?.let(::encodeHandoffProjection))) == 1) {
+                    "Transferred text acknowledgement source changed"
+                }
+            }
+            check(db.delete("local_text_edit_preparations", "scope=? AND event=? AND mutation=? AND adapter=? AND version=? " +
+                "AND base=? AND local=? AND state=? AND timestamp=? AND prep_adapter=? AND prep_version=? AND payload=?",
+                arrayOf(key(scope), event.value, intent.id.value, intent.format.id, intent.format.version.toString(), oldBase,
+                    local, LocalEditState.PAUSED.name, preparation.timestamp.toString(), preparation.format.id,
+                    preparation.format.version.toString(), preparation.protectedPayload)) == 1)
+            check(db.delete("local_edits", "scope=? AND event=? AND mutation=? AND adapter=? AND version=? " +
+                "AND base=? AND local=? AND state=? AND kind='UPDATE'",
+                arrayOf(key(scope), event.value, intent.id.value, intent.format.id, intent.format.version.toString(),
+                    oldBase, local, owner.state.name)) == 1)
+            // Advance only an exact old cache; a concurrent/newer update, deletion or absence survives.
+            db.update("records", ContentValues().apply { put("payload", newBase); put("pending", 0) },
+                "scope=? AND event=? AND payload=?", arrayOf(key(scope), event.value, oldBase))
+            db.update("records", ContentValues().apply { put("pending", 0) },
+                "scope=? AND event=? AND payload=? AND pending=1", arrayOf(key(scope), event.value, newBase))
+            requeueDistinctTextObservation(db, receipt, newBase)
+            check(db.update("text_update_acknowledgements", ContentValues().apply {
+                put("state", TextUpdateAcknowledgementState.RESTORED.name)
+            }, "scope=? AND event=? AND nonce=? AND receipt=? AND state=?",
+                arrayOf(key(scope), event.value, receipt.projection.nonce, encodeTextUpdateAcknowledgement(receipt),
+                    TextUpdateAcknowledgementState.PENDING.name)) == 1)
+            archiveTextUpdateAcknowledgement(db, TextUpdateAcknowledgementRecord(receipt,
+                TextUpdateAcknowledgementState.RESTORED))
+            true
+        }
+    }
+
+    /** The exact owner has been consumed in this transaction. Re-arm only its distinct cached
+     * observation, preserving deferred evidence and the normal recurrence/handoff boundaries.
+     * This is queue state, never permission to overwrite a later dirty Provider row.
+     */
+    private fun requeueDistinctTextObservation(db: SQLiteDatabase, receipt: TextUpdateAcknowledgementReceipt,
+        acknowledgedPayload: String) {
+        val scope = receipt.intent.scope
+        val event = receipt.intent.base.eventId
+        val condition = "scope=? AND event=? AND payload<>? AND pending=0 AND NOT EXISTS " +
+            "(SELECT 1 FROM deferred_events d WHERE d.scope=records.scope AND d.event=records.event) " +
+            "AND NOT EXISTS (SELECT 1 FROM local_edits l WHERE l.scope=records.scope AND l.event=records.event)"
+        val args = arrayOf(key(scope), event.value, acknowledgedPayload)
+        val change = stagedQuery(db, "SELECT payload FROM records WHERE $condition", args).use { row ->
+            if (row.moveToFirst()) decodeChange(row.getString(0)) else null
+        } ?: return
+        check(change.eventId == event) { "Invalid retained text observation" }
+        if (receipt.handoff != null && !supportsCapturedHandoff(change)) return
+        val recurrence = (change as? RemoteChange.Upsert)?.content?.recurrence
+        if (recurrence != null && !recurrence.isMaster && masterStates(db, scope)[recurrence.uid] == MasterState.INACTIVE) return
+        check(db.update("records", ContentValues().apply { put("pending", 1) }, condition, args) == 1) {
+            "Retained text observation changed"
+        }
+    }
+
+    private fun ordinaryTextAcknowledgement(db: SQLiteDatabase, receipt: TextUpdateAcknowledgementReceipt): Boolean {
+        val scope = receipt.intent.scope
+        val event = receipt.intent.base.eventId
+        if (listOf("captured_create_bases", "captured_create_acknowledgements", "captured_create_handoffs")
+            .any { hasRawEventRow(db, it, scope, event) }) return false
+        val pending = readProjectionReceipt(db, scope, event) ?: return true
+        return redundantTextProjection(pending, receipt)
+    }
+
+    /** A dirty edit can interrupt a tracked no-change projection after preparation.
+     * This plan carries no content beyond the text intent's original baseline.
+     * Keep it through reservation: only a proven native text ACK supersedes it.
+     */
+    private fun redundantTextProjection(pending: ProjectionReceipt, receipt: TextUpdateAcknowledgementReceipt): Boolean =
+        receipt.handoff == null && pending.scope == receipt.intent.scope && pending.protocol == 1 &&
+            pending.format == receipt.intent.format && pending.change == receipt.intent.base &&
+            pending.previousBase == receipt.intent.base && pending.representation == null && pending.previousRepresentation == null
+
+    private fun retireRedundantTextProjection(db: SQLiteDatabase, receipt: TextUpdateAcknowledgementReceipt) {
+        val pending = readProjectionReceipt(db, receipt.intent.scope, receipt.intent.base.eventId) ?: return
+        check(redundantTextProjection(pending, receipt)) { "Text projection obligation changed" }
+        check(db.delete("projection_receipts", "scope=? AND event=? AND nonce=? AND payload=? AND adapter=? AND version=? " +
+            "AND previous_base=? AND protocol=? AND representation IS NULL AND previous_representation IS NULL",
+            arrayOf(key(pending.scope), pending.change.eventId.value, pending.nonce, encodeChange(pending.change),
+                pending.format.id, pending.format.version.toString(), encodeChange(checkNotNull(pending.previousBase)),
+                pending.protocol.toString())) == 1) { "Text projection obligation changed" }
+    }
+
+    private fun textAcknowledgementSource(db: SQLiteDatabase, receipt: TextUpdateAcknowledgementReceipt): Boolean {
+        val scope = receipt.intent.scope
+        val event = receipt.intent.base.eventId
+        if (hasRawEventRow(db, "local_edit_preparations", scope, event)) return false
+        val frame = receipt.handoff ?: return ordinaryTextAcknowledgement(db, receipt)
+        if (!activeProjectionScope(db, scope) || !textAcknowledgementFormatMatches(db, scope, receipt.intent.format) ||
+            hasRawEventRow(db, "projection_receipts", scope, event)) return false
+        // This reader validates the full immutable origin/PROVEN acknowledgement and current base.
+        // The ordinary handoff clean guard cannot be reused while this exact local intent is held.
+        val current = readCapturedHandoff(db, scope, event) ?: return false
+        return current.state == CapturedCreateHandoffState.RELEASED && current.waiting && current.frame == frame
+    }
+
+    private fun textAcknowledgementOwner(db: SQLiteDatabase, scope: CalendarScope, event: EventId): LocalEditIntent? {
+        val update = db.rawQuery("SELECT 1 FROM local_edits WHERE scope=? AND event=? AND kind='UPDATE'",
+            arrayOf(key(scope), event.value)).use { it.moveToFirst() }
+        return if (update) readTextPreparationOwner(db, scope, event) else null
+    }
+
+    /** A verified result can be imported before its first ACK receipt is reserved.
+     * Consume only that exact owner/result, never reopen conflict dispatch.
+     * Source (including the complete handoff frame) and capsule equality are
+     * checked by the caller in the same transaction.
+     */
+    private fun exactTextResultEcho(db: SQLiteDatabase, receipt: TextUpdateAcknowledgementReceipt,
+        owner: LocalEditIntent?): Boolean {
+        val intent = receipt.intent
+        val scope = intent.scope
+        val event = intent.base.eventId
+        if (owner?.state != LocalEditState.CONFLICT ||
+            owner.copy(state = LocalEditState.PAUSED) != intent || !activeProjectionScope(db, scope) ||
+            !textAcknowledgementFormatMatches(db, scope, intent.format) || readBaseline(db, scope, event) != intent.base ||
+            hasRawEventRow(db, "deferred_events", scope, event)) return false
+        val observed = stagedQuery(db, "SELECT payload FROM records WHERE scope=? AND event=?",
+            arrayOf(key(scope), event.value)).use { if (it.moveToFirst()) decodeChange(it.getString(0)) else null }
+        return observed == receipt.projection.change
+    }
+
+    private fun directTextAcknowledgementBase(db: SQLiteDatabase, scope: CalendarScope, event: EventId): Boolean =
+        db.rawQuery("SELECT 1 FROM projection_bases WHERE scope=? AND event=? AND representation IS NULL",
+            arrayOf(key(scope), event.value)).use { it.moveToFirst() }
+
+    private fun textAcknowledgementFormatMatches(db: SQLiteDatabase, scope: CalendarScope, format: AdapterFormat): Boolean =
+        db.rawQuery("SELECT checkpoint FROM calendars WHERE scope=?", arrayOf(key(scope))).use {
+            it.moveToFirst() && !it.isNull(0) && decodeCheckpoint(scope, it.getString(0)).format == format
+        }
+
+    private fun readTextUpdateAcknowledgement(db: SQLiteDatabase, scope: CalendarScope, event: EventId,
+        attempt: MutationId? = null): TextUpdateAcknowledgementRecord? {
+        if (attempt == null) return readCurrentTextUpdateAcknowledgement(db, scope, event)
+        val historical = readTextUpdateAcknowledgementHistory(db, scope, event, attempt)
+        if (historical != null) {
+            // A later slot is unrelated to historical recovery. Only qualify it if it claims
+            // the archived identity/nonce; never decode its mutable handoff or projection frame.
+            val sameIdentity = stagedQuery(db, "SELECT ${archiveText("nonce", 128)},${archiveText("receipt")} FROM text_update_acknowledgements WHERE scope=? AND event=?",
+                arrayOf(key(scope), event.value)).use { row ->
+                if (!row.moveToFirst()) false else archiveString(row, 0) == historical.receipt.projection.nonce || try {
+                    requirePreparationSnapshotBudget(archiveString(row, 1))
+                    JSONObject(archiveString(row, 1)).getJSONObject("attempt").get("id") == attempt.value
+                } catch (failure: CancellationException) { throw failure }
+                catch (failure: SQLiteException) { throw failure }
+                catch (_: Exception) { false }
+            }
+            if (sameIdentity) check(readCurrentTextUpdateAcknowledgement(db, scope, event) == historical) {
+                "Text acknowledgement history diverged"
+            }
+            return historical
+        }
+        return readCurrentTextUpdateAcknowledgement(db, scope, event)?.takeIf { it.receipt.attempt.id == attempt }
+    }
+
+    private fun readCurrentTextUpdateAcknowledgement(db: SQLiteDatabase, scope: CalendarScope, event: EventId): TextUpdateAcknowledgementRecord? =
+        stagedQuery(db, "SELECT ${archiveText("nonce", 128)},${archiveText("receipt")},${archiveText("state", 16)} FROM text_update_acknowledgements WHERE scope=? AND event=?",
+            arrayOf(key(scope), event.value)).use { row ->
+            if (!row.moveToFirst()) null else try {
+                val receipt = decodeTextUpdateAcknowledgement(archiveString(row, 1))
+                require(receipt.intent.scope == scope && receipt.intent.base.eventId == event && receipt.projection.nonce == archiveString(row, 0))
+                TextUpdateAcknowledgementRecord(receipt, TextUpdateAcknowledgementState.valueOf(archiveString(row, 2)))
+            } catch (failure: CancellationException) { throw failure }
+            catch (failure: SQLiteException) { throw failure }
+            catch (_: Exception) { throw IllegalStateException("Invalid retained text acknowledgement") }
+        }
+
+    private fun readTextUpdateAcknowledgementHistory(db: SQLiteDatabase, scope: CalendarScope, event: EventId,
+        attempt: MutationId): TextUpdateAcknowledgementRecord? =
+        stagedQuery(db, "SELECT ${archiveText("attempt", 4096)},${archiveText("nonce", 128)},${archiveText("receipt")} FROM text_update_acknowledgement_history WHERE scope=? AND event=? AND attempt=?",
+            arrayOf(key(scope), event.value, attempt.value)).use { row ->
+            if (!row.moveToFirst()) null else decodeTextUpdateAcknowledgementHistory(scope, event,
+                archiveString(row, 0), archiveString(row, 1), archiveString(row, 2))
+        }
+
+    private fun decodeTextUpdateAcknowledgementHistory(scope: CalendarScope, event: EventId,
+        attempt: String, nonce: String, payload: String): TextUpdateAcknowledgementRecord = try {
+        val receipt = decodeTextUpdateAcknowledgement(payload)
+        require(receipt.intent.scope == scope && receipt.intent.base.eventId == event &&
+            receipt.attempt.id.value == attempt && receipt.projection.nonce == nonce)
+        TextUpdateAcknowledgementRecord(receipt, TextUpdateAcknowledgementState.RESTORED)
+    } catch (failure: CancellationException) { throw failure }
+    catch (failure: SQLiteException) { throw failure }
+    catch (_: Exception) { throw IllegalStateException("Invalid text acknowledgement history") }
+
+    private fun archiveTextUpdateAcknowledgement(db: SQLiteDatabase, record: TextUpdateAcknowledgementRecord) {
+        check(record.state == TextUpdateAcknowledgementState.RESTORED)
+        val receipt = record.receipt
+        val scope = receipt.intent.scope
+        val event = receipt.intent.base.eventId
+        val existing = readTextUpdateAcknowledgementHistory(db, scope, event, receipt.attempt.id)
+        if (existing != null) {
+            check(existing == record) { "Text acknowledgement history is immutable" }
+            return
+        }
+        db.insertOrThrow("text_update_acknowledgement_history", null, ContentValues().apply {
+            put("scope", key(scope)); put("event", event.value); put("attempt", receipt.attempt.id.value)
+            put("nonce", receipt.projection.nonce); put("receipt", encodeTextUpdateAcknowledgement(receipt))
+        })
+        checkStagingCapacity(db)
+    }
+
+    /** An immutable attempt or local intent cannot be rebound to a new cycle/event in this scope. */
+    private fun requireUnusedTextAcknowledgementIdentity(db: SQLiteDatabase, proposed: TextUpdateAcknowledgementReceipt) {
+        val scope = proposed.intent.scope
+        fun unused(retained: TextUpdateAcknowledgementReceipt) {
+            check(retained.attempt.id != proposed.attempt.id && retained.intent.id != proposed.intent.id) {
+                "Text acknowledgement identity is already retained"
+            }
+        }
+        stagedQuery(db, "SELECT ${archiveText("event", 4096)} FROM text_update_acknowledgements WHERE scope=?", arrayOf(key(scope))).use { rows ->
+            while (rows.moveToNext()) unused(checkNotNull(readCurrentTextUpdateAcknowledgement(db, scope, EventId(archiveString(rows, 0)))).receipt)
+        }
+        stagedQuery(db, "SELECT ${archiveText("event", 4096)},${archiveText("attempt", 4096)},${archiveText("nonce", 128)},${archiveText("receipt")} FROM text_update_acknowledgement_history WHERE scope=?", arrayOf(key(scope))).use { rows ->
+            while (rows.moveToNext()) unused(decodeTextUpdateAcknowledgementHistory(scope, EventId(archiveString(rows, 0)),
+                archiveString(rows, 1), archiveString(rows, 2), archiveString(rows, 3)).receipt)
+        }
+    }
+
+    private fun encodeTextUpdateAcknowledgement(value: TextUpdateAcknowledgementReceipt): String =
+        TextUpdateAcknowledgementCodec.encode(value)
+
+    private fun decodeTextUpdateAcknowledgement(payload: String): TextUpdateAcknowledgementReceipt =
+        TextUpdateAcknowledgementCodec.decode(payload)
+
+    /** Historical inspection only. Retained capsules never grant current submission authority. */
+    suspend fun localTextEditPreparation(scope: CalendarScope, eventId: EventId): LocalTextEditPreparation? =
+        textStagingMutation(scope) { db -> readLocalTextEditPreparation(db, scope, eventId) }
+
+    private fun readLocalTextEditPreparation(db: SQLiteDatabase, scope: CalendarScope, eventId: EventId): LocalTextEditPreparation? =
+        try {
+            stagedQuery(db, "SELECT ${archiveText("mutation", 4096)},${archiveText("adapter", 4096)},version," +
+                "${archiveText("base")},${archiveText("local")},${archiveText("state", 16)},${archiveText("timestamp", 40)}," +
+                "${archiveText("prep_adapter", 4096)},prep_version,${archiveText("payload")} FROM local_text_edit_preparations WHERE scope=? AND event=?",
+                arrayOf(key(scope), eventId.value)).use { row ->
+                if (!row.moveToFirst()) null else {
+                    val baseJson = archiveString(row, 3).also(::requirePreparationSnapshotBudget)
+                    val localJson = archiveString(row, 4).also(::requirePreparationSnapshotBudget)
+                    val base = decodeChange(baseJson) as RemoteChange.Upsert
+                    val local = decodeChange(localJson) as RemoteChange.Upsert
+                    require(base.eventId == eventId && local.eventId == eventId && local.revision == base.revision)
+                    val frozen = LocalEditIntent(MutationId(archiveString(row, 0)), scope,
+                        AdapterFormat(archiveString(row, 1), preparationVersion(row, 2)), base, local.content,
+                        LocalEditState.valueOf(archiveString(row, 5)))
+                    val timestamp = Instant.parse(archiveString(row, 6))
+                    require(timestamp.toString() == archiveString(row, 6)) { "Noncanonical local preparation time" }
+                    val preparation = LocalTextEditPreparation(frozen, timestamp,
+                        AdapterFormat(archiveString(row, 7), preparationVersion(row, 8)), archiveString(row, 9))
+                    require(supportedLocalTextIntent(preparation.intent) != null)
+                    val owner = readTextPreparationOwner(db, scope, eventId)
+                    require(owner?.copy(state = LocalEditState.PAUSED) == frozen) { "Local preparation owner mismatch" }
+                    preparation
+                }
+            }
+        } catch (failure: CancellationException) { throw failure }
+        catch (failure: SQLiteException) { throw failure }
+        catch (_: Exception) { throw IllegalStateException("Invalid retained text preparation") }
+    private fun readTextPreparationOwner(db: SQLiteDatabase, scope: CalendarScope, eventId: EventId): LocalEditIntent? =
+        try {
+            stagedQuery(db, "SELECT ${archiveText("mutation", 4096)},${archiveText("adapter", 4096)},version," +
+                "${archiveText("base")},${archiveText("local")},${archiveText("state", 16)},${archiveText("kind", 16)} FROM local_edits WHERE scope=? AND event=?",
+                arrayOf(key(scope), eventId.value)).use { row ->
+                if (!row.moveToFirst()) null else {
+                    require(archiveString(row, 6) == "UPDATE")
+                    val baseJson = archiveString(row, 3).also(::requirePreparationSnapshotBudget)
+                    val localJson = archiveString(row, 4).also(::requirePreparationSnapshotBudget)
+                    val base = decodeChange(baseJson) as RemoteChange.Upsert
+                    val local = decodeChange(localJson) as RemoteChange.Upsert
+                    require(base.eventId == eventId && local.eventId == eventId && local.revision == base.revision)
+                    LocalEditIntent(MutationId(archiveString(row, 0)), scope, AdapterFormat(archiveString(row, 1), preparationVersion(row, 2)),
+                        base, local.content, LocalEditState.valueOf(archiveString(row, 5)))
+                }
+            }
+        } catch (failure: CancellationException) { throw failure }
+        catch (failure: SQLiteException) { throw failure }
+        catch (_: Exception) { throw IllegalStateException("Invalid local text preparation owner") }
+
+    /** Text storage checks cancellation around even callbacks that cancel and then return or throw. */
+    private suspend fun <T> textStagingMutation(scope: CalendarScope, action: (SQLiteDatabase) -> T): T {
+        val coroutine = currentCoroutineContext()
+        coroutine.ensureActive()
+        return try {
+            access { db ->
+                coroutine.ensureActive()
+                check(admitTransaction(scope)) { "Inactive import lease" }
+                coroutine.ensureActive()
+                db.beginTransaction()
+                try {
+                    requireKnown(db, scope)
+                    val result = action(db)
+                    check(admitTransaction(scope)) { "Inactive import lease" }
+                    coroutine.ensureActive()
+                    db.setTransactionSuccessful()
+                    result
+                } finally { db.endTransaction() }
+            }
+        } catch (failure: Exception) {
+            coroutine.ensureActive()
+            throw failure
+        }
+    }
+
     /** Freeze an exact captured owner and sealed fragments together, without dispatch admission.
      * Existing evidence is immutable even after its current owner becomes conflicted or paused.
      */
@@ -1549,6 +2066,9 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
         val base = encodeChange(intent.base).also(::requirePreparationSnapshotBudget)
         val local = encodeChange(intent.base.copy(content = intent.content)).also(::requirePreparationSnapshotBudget)
         return stagingMutation(intent.scope) { db ->
+            check(!hasRawEventRow(db, "local_text_edit_preparations", intent.scope, intent.base.eventId)) {
+                "Text preparation already owns this event"
+            }
             val previous = readLocalEditPreparation(db, intent.scope, intent.base.eventId)
             if (previous != null) {
                 require(previous == frozen) { "Local edit preparation is immutable" }
@@ -1591,6 +2111,7 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
     private fun localTitlePreparationAdmission(db: SQLiteDatabase, intent: LocalEditIntent): LocalTitlePreparationAdmission {
         val target = intent.scope
         if (!activeProjectionScope(db, target)) return LocalTitlePreparationAdmission.INACTIVE
+        if (hasRawEventRow(db, "local_text_edit_preparations", target, intent.base.eventId)) return LocalTitlePreparationAdmission.UNQUALIFIED
         val format = db.rawQuery("SELECT checkpoint FROM calendars WHERE scope=?", arrayOf(key(target))).use {
             if (!it.moveToFirst() || it.isNull(0)) null else decodeCheckpoint(target, it.getString(0)).format
         }
@@ -1798,6 +2319,7 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
     private fun titleAcknowledgementSource(db: SQLiteDatabase, receipt: TitleUpdateAcknowledgementReceipt): Boolean {
         val scope = receipt.intent.scope
         val event = receipt.intent.base.eventId
+        if (hasRawEventRow(db, "local_text_edit_preparations", scope, event)) return false
         val frame = receipt.handoff ?: return ordinaryTitleAcknowledgement(db, receipt)
         if (!activeProjectionScope(db, scope) || !titleAcknowledgementFormatMatches(db, scope, receipt.intent.format) ||
             hasRawEventRow(db, "projection_receipts", scope, event)) return false
@@ -2378,6 +2900,9 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
 
     private fun checkStagingCapacity(db: SQLiteDatabase) {
         val bytes = db.rawQuery("SELECT COALESCE((SELECT SUM(length(CAST(payload AS BLOB))+COALESCE(length(CAST(coverage AS BLOB)),0)) FROM inbox),0) + COALESCE((SELECT SUM(length(CAST(payload AS BLOB))) FROM coverage_state),0) + COALESCE((SELECT SUM(length(CAST(payload AS BLOB))) FROM deferred_events),0) + COALESCE((SELECT SUM(length(CAST(received_payload AS BLOB))) FROM delta_state),0) + COALESCE((SELECT SUM(length(CAST(notice AS BLOB))+COALESCE(length(CAST(received AS BLOB)),0)) FROM delta_jobs),0) + COALESCE((SELECT SUM(length(CAST(payload AS BLOB))) FROM delta_reconciliation),0) + COALESCE((SELECT SUM(length(CAST(payload AS BLOB))+length(CAST(base AS BLOB))+length(CAST(local AS BLOB))) FROM local_edit_preparations),0)" +
+            " + COALESCE((SELECT SUM(length(CAST(payload AS BLOB))+length(CAST(base AS BLOB))+length(CAST(local AS BLOB))+16384) FROM local_text_edit_preparations),0)" +
+            " + COALESCE((SELECT SUM(length(CAST(receipt AS BLOB))+16384) FROM text_update_acknowledgements),0)" +
+            " + COALESCE((SELECT SUM(length(CAST(receipt AS BLOB))+16384) FROM text_update_acknowledgement_history),0)" +
             " + COALESCE((SELECT SUM(length(CAST(scope AS BLOB))+length(CAST(event AS BLOB))+length(CAST(mutation AS BLOB))+length(CAST(adapter AS BLOB))+length(CAST(base AS BLOB))+length(CAST(local AS BLOB))+64) FROM conflict_archives),0)" +
             " + COALESCE((SELECT SUM(COALESCE(length(CAST(payload AS BLOB)),0)+COALESCE(length(CAST(adapter AS BLOB)),0)+COALESCE(length(CAST(revision AS BLOB)),0)+128) FROM conflict_observations),0)", null).use {
             check(it.moveToFirst()); it.getLong(0)

@@ -302,7 +302,7 @@ class LocalEditStoreDeviceTest {
                 db.version = 7
             }
             ImportStore(context, name).use { store ->
-                assertEquals(19, store.readableDatabase.version)
+                assertEquals(20, store.readableDatabase.version)
                 assertEquals("Legacy", store.projectedBaseline(scope, EventId("stable"))?.content?.title)
                 listOf("pending","deferred","deleted").forEach { assertNull(store.projectedBaseline(scope, EventId(it))) }
                 assertNull(store.localEdit(scope, EventId("stable")))

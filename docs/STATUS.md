@@ -30,7 +30,7 @@ with known-empty details, no color, no
 recurrence and a title-only change. All-day date intervals and their exclusive
 end remain unchanged. Transferred CREATE requires its exact released waiting frame,
 complete immutable origin and matching native contents, with no pending projection receipt.
-Missing provenance cannot fall back to ordinary capture. Multi-field edits
+Missing provenance cannot fall back to ordinary capture. Broader edits
 and DELETE remain held locally without upload.
 
 The Proton boundary now shares its lossless title patcher with an internal
@@ -71,10 +71,18 @@ and request-identity checks in the same writer transaction. Bare title reservati
 and uncertain attempts hold ownership across generations; only fully qualified
 title completions release an event for a distinct text request. The additive schema
 upgrade preserves historical title bytes. The standalone text database remains
-quarantined, with no automatic import. No text journal is connected to workers or
-sending. Current native/SQL ownership qualification, durable guarded
-submission/acknowledgement, service round trips and
-system-editor qualification remain required. See
+quarantined, with no automatic import. Separate guarded submission, full verified
+result, native acknowledgement and completion contracts now preserve the raw local
+intent alongside the actual remote text. The shared journal releases an event only
+after its full completion proof qualifies, retaining request identities forever.
+Local recovery and per-calendar text consent have separate traversal positions;
+the production activation gate remains closed while automatic-worker and
+system-editor journeys are qualified. A separate ordinary timed service journey
+qualifies combined multiline title/description/location delivery, canonical LF
+readback and offline same-row acknowledgement after process restart. Its historical
+replay preserves a later local edit and never resends. This explicit composition
+does not qualify automatic scheduling or an OEM editor. Existing title
+formats and consent remain narrow. See
 [shared text preparation](SHARED_TEXT_PREPARATION.md).
 
 After title acknowledgement, the original CREATE follow-up can close from the

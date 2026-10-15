@@ -108,6 +108,7 @@ class MainActivity : ComponentActivity() {
                                 Uri.parse("package:$packageName"))) },
                             onMode = preferences.systemCreates::setEnabled,
                             onTitlesMode = preferences.systemCreates::setTitlesEnabled,
+                            onTextMode = preferences.systemCreates::setTextsEnabled,
                             onOpenConflicts = { selection -> archiveScope = selection.scope })
                     },
                 )

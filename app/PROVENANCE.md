@@ -48,11 +48,25 @@ integration for quarantined text-attempt persistence. They reuse the existing
 project's SQLite transaction/lease invariants with a separate schema and a bounded
 binary capsule; no upstream code, dependency or cryptographic primitive is added.
 Segmented BLOB reads avoid placing large payload cells in a CursorWindow. These
-text helpers are not composed into production sending. The existing title helper
+text helpers remain behind a closed production activation gate. The existing title helper
 hosts the shared SQL journal and checks cross-family ownership in one writer
 transaction; its additive schema preserves existing title history. The standalone
 text database remains quarantined without automatic import. Protected adapter
 bytes remain opaque. This local arbitration grants no new remote capability.
+
+`TextUpdateAcknowledgementCodec`, `TextUpdateProofStorageCodec`, the text owner
+gateway and its bounded orchestration are original project integration adapted
+from the project's title receipt and recovery invariants. Their separate tags,
+types, SQL history and namespaces do not reinterpret title history. Native text
+acknowledgement shares the existing atomic Provider recipe with stricter receipt
+validation and conditional CRLF/LF text canonicalization. No external application
+source or new cryptographic primitive is introduced by these additions.
+
+Host codec tests use `org.json:json:20250517` as a test-only dependency. The pinned
+[JSON-java POM](https://github.com/stleary/JSON-java/blob/20250517/pom.xml)
+declares Public Domain. It is not packaged in the APK; Android provides the runtime
+JSON implementation. Host codec results do not replace physical Android JSON,
+SQLite or Provider qualification.
 
 The configuration layout, teal appearance, simple vector calendar symbol,
 launcher resources, Calendar-specific text and translations are new material.

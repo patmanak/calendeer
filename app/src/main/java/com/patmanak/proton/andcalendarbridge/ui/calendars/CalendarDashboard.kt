@@ -42,6 +42,7 @@ fun CalendarDashboard(
     onTitlesMode: (ImportStore.Selection, Boolean) -> Unit,
     modifier: Modifier = Modifier,
     onOpenConflicts: (ImportStore.Selection) -> Unit = {},
+    onTextMode: (ImportStore.Selection, Boolean) -> Unit = { _, _ -> },
 ) {
     if (!imports.authenticated) return
     Column(modifier.fillMaxWidth().testTag(CalendarDashboardTags.PANEL),
@@ -65,7 +66,7 @@ fun CalendarDashboard(
             modifier = Modifier.testTag(CalendarDashboardTags.OUTGOING_ERROR).semantics { liveRegion = LiveRegionMode.Polite })
         imports.selections.forEach { selection ->
             key(selection.scope) {
-                CalendarCard(selection, imports, creates, onSetEnabled, onMode, onTitlesMode, onOpenConflicts)
+                CalendarCard(selection, imports, creates, onSetEnabled, onMode, onTitlesMode, onOpenConflicts, onTextMode)
             }
         }
         // A newly discovered row needs a persisted scope before its controls can be offered.
@@ -91,7 +92,7 @@ fun CalendarDashboard(
                 Text(stringResource(R.string.calendar_dashboard_refresh))
             }
         }
-        SyncHelp()
+        SyncHelp(creates.textSupportAvailable)
     }
 }
 
@@ -147,10 +148,12 @@ private fun CalendarCard(
     onMode: (ImportStore.Selection, Boolean) -> Unit,
     onTitlesMode: (ImportStore.Selection, Boolean) -> Unit,
     onOpenConflicts: (ImportStore.Selection) -> Unit,
+    onTextMode: (ImportStore.Selection, Boolean) -> Unit,
 ) {
     var expanded by rememberSaveable { mutableStateOf(false) }
     val createEnabled = selection.scope in creates.enabled
     val titlesEnabled = selection.scope in creates.titlesEnabled
+    val textsEnabled = selection.scope in creates.textsEnabled
     val outgoing = creates.pending[selection.scope] ?: 0
     val hasIssues = selection.deferredCount > 0 || selection.historyGap || selection.retainedLocalChangeCount > 0
     val status = when {
@@ -182,6 +185,7 @@ private fun CalendarCard(
                 Switch(selection.enabled, onCheckedChange = null, enabled = !imports.busy && selection.available)
             }
             Text(stringResource(when {
+                creates.textSupportAvailable && textsEnabled -> R.string.calendar_dashboard_text_mode
                 titlesEnabled -> R.string.calendar_dashboard_title_mode
                 createEnabled -> R.string.calendar_dashboard_create_mode
                 else -> R.string.calendar_dashboard_read_only
@@ -209,14 +213,20 @@ private fun CalendarCard(
                 val canEnable = imports.hasPermission && selection.enabled && selection.available
                 ModeToggle(stringResource(R.string.system_create_mode), createEnabled, createEnabled || canEnable,
                     "system-create-toggle") { onMode(selection, it) }
-                Text(stringResource(R.string.system_create_limits), style = MaterialTheme.typography.bodySmall,
+                Text(stringResource(if (creates.textSupportAvailable) R.string.system_text_overview else R.string.system_create_limits), style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
                 ModeToggle(stringResource(R.string.system_title_mode), titlesEnabled, titlesEnabled || (canEnable && createEnabled),
                     "system-title-toggle") { onTitlesMode(selection, it) }
-                Text(stringResource(R.string.system_title_limits), style = MaterialTheme.typography.bodySmall,
+                Text(stringResource(if (creates.textSupportAvailable) R.string.system_title_limits_with_text else R.string.system_title_limits), style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (creates.textSupportAvailable) {
+                    ModeToggle(stringResource(R.string.system_text_mode), textsEnabled, textsEnabled || (canEnable && createEnabled),
+                        "system-text-toggle") { onTextMode(selection, it) }
+                    Text(stringResource(R.string.system_text_limits), style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                CalendarDetails(selection)
+                CalendarDetails(selection, creates.textSupportAvailable)
                 TextButton(onClick = { onOpenConflicts(selection) },
                     modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag(ConflictArchiveTags.OPEN)) {
                     Text(stringResource(R.string.conflict_archive_open))
@@ -239,7 +249,7 @@ private fun PendingText(text: String, tag: String) {
 }
 
 @Composable
-private fun CalendarDetails(selection: ImportStore.Selection) {
+private fun CalendarDetails(selection: ImportStore.Selection, textSupportAvailable: Boolean) {
     Text(stringResource(R.string.calendar_dashboard_details), style = MaterialTheme.typography.titleSmall,
         modifier = Modifier.semantics { heading() })
     Text(stringResource(statusResource(if (!selection.available) "UNAVAILABLE" else if (selection.enabled) selection.status else "PAUSED")),
@@ -263,18 +273,18 @@ private fun CalendarDetails(selection: ImportStore.Selection) {
     if (selection.deferredCount > 0) Text(stringResource(R.string.import_deferred_categories,
         selection.deferredCount - selection.unverifiedCount, selection.unverifiedCount), style = MaterialTheme.typography.bodySmall)
     if (selection.historyGap) Text(stringResource(R.string.import_history_gap_help), style = MaterialTheme.typography.bodySmall)
-    if (selection.retainedLocalChangeCount > 0) Text(stringResource(R.string.import_local_changes_help),
+    if (selection.retainedLocalChangeCount > 0) Text(stringResource(if (textSupportAvailable) R.string.system_text_overview else R.string.import_local_changes_help),
         style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag(CalendarImportTags.LOCAL_CHANGES_HELP))
 }
 
 @Composable
-private fun SyncHelp() {
+private fun SyncHelp(textSupportAvailable: Boolean) {
     var expanded by rememberSaveable { mutableStateOf(false) }
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         TextButton(onClick = { expanded = !expanded }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
             .testTag(CalendarDashboardTags.HELP)) { Text(stringResource(R.string.calendar_dashboard_usage)) }
         if (expanded) {
-            for (resource in listOf(R.string.import_read_only, R.string.import_privacy, R.string.import_window,
+            for (resource in listOf(if (textSupportAvailable) R.string.system_text_overview else R.string.import_read_only, R.string.import_privacy, R.string.import_window,
                 R.string.import_field_limits, R.string.import_recurrence_limits, R.string.import_pause_help)) {
                 Text(stringResource(resource), style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)

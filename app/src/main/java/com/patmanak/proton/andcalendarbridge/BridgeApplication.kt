@@ -27,8 +27,11 @@ import com.patmanak.proton.andcalendarbridge.data.outgoing.AndroidTitleRecoveryC
 import com.patmanak.proton.andcalendarbridge.data.outgoing.SystemTitleRecoveryController
 import com.patmanak.proton.andcalendarbridge.data.outgoing.SystemTitleUpdateController
 import com.patmanak.proton.andcalendarbridge.data.outgoing.CoordinatorSystemTitleOperations
+import com.patmanak.proton.andcalendarbridge.data.outgoing.CoordinatorSystemTextOperations
 
 class BridgeApplication : Application() {
+    // Activation requires the complete native/service journey; component tests alone do not qualify it.
+    private val textSynchronizationQualified = false
     private val authenticationScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val createAttempts by lazy { CreateAttemptStore(this) }
     private val localCreateCaptures by lazy { LocalCreateStore(this) }
@@ -49,15 +52,35 @@ class BridgeApplication : Application() {
                 ProtonAuthentication.localEditPreparations(this), ProtonAuthentication.titleUpdates(this)),
             { target -> titleRecovery.reset(target) })
     }
+    private val textOperations: CoordinatorSystemTextOperations by lazy {
+        CoordinatorSystemTextOperations(imports, titleAttempts.textJournal,
+            ProtonAuthentication.localTextPreparations(this), ProtonAuthentication.textUpdates(this))
+    }
+    private val textRecovery by lazy {
+        SystemTitleRecoveryController(AndroidTitleRecoveryCursorStore(this, "calendar-text-recovery-cursors"),
+            recover = { com.patmanak.proton.andcalendarbridge.sync.TitleUpdateOfflineRecoveryProgress(inactive = true) },
+            guardedRecover = { query, active ->
+                textOperations.recoverOffline(query) { requested -> requested == query.scope && active() }
+            })
+    }
+    private val textUpdates by lazy {
+        SystemTitleUpdateController(
+            AndroidTitleRecoveryCursorStore(this, "calendar-text-owner-cursors"),
+            AndroidTitleRecoveryCursorStore(this, "calendar-text-inspection-cursors"),
+            textOperations, { target -> textRecovery.reset(target) })
+    }
     val systemCreates by lazy { SystemCreateController(this, imports, nativeCalendar, systemCreateWork,
         localCreateCaptures, createAttempts, ProtonAuthentication.createSubmissions(this), authenticationScope,
-        titleRecovery = titleRecovery, titleUpdates = titleUpdates) }
+        titleRecovery = titleRecovery, titleUpdates = titleUpdates,
+        textRecovery = if (textSynchronizationQualified) textRecovery else null,
+        textUpdates = if (textSynchronizationQualified) textUpdates else null) }
 
-    val imports by lazy {
+    val imports: ImportCoordinator by lazy {
         ImportCoordinator(this, ImportStore(this), ProtonAuthentication.events(this),
             nativeCalendar, authenticationScope, creates = createAttempts,
             localCreates = localCreateCaptures, systemCreatesEnabled = systemCreateWork::modeEnabled,
-            systemTitlesEnabled = systemCreateWork::titlesEnabled)
+            systemTitlesEnabled = systemCreateWork::titlesEnabled,
+            systemTextsEnabled = systemCreateWork::textsEnabled)
     }
 
     // App-owned: activity recreation must neither repeat login nor revoke a retained session.

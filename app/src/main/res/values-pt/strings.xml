@@ -25,4 +25,9 @@
     <string name="system_title_limits">Apenas títulos: eventos com horário ou de dia inteiro, sem repetição, lembretes, convidados ou cores personalizadas. Inclui eventos importados do Proton e criados no Android após a primeira sincronização bem-sucedida. As alterações de datas, descrições e locais permanecem no Android.</string>
     <string name="system_create_pending">%1$d criações pendentes ou por verificar. Um envio incerto nunca é repetido automaticamente.</string>
     <string name="system_create_error">A sincronização requer atenção. Os dados Android são preservados.</string>
+    <string name="system_text_mode">Sincronizar alterações de descrição e local (experimental)</string>
+    <string name="system_text_limits">Eventos simples com horário ou de dia inteiro, sem repetição, lembretes, convidados ou cores personalizadas. Inclui eventos Proton e os criados no Android após a primeira sincronização bem-sucedida. Um título alterado com a descrição ou o local também é incluído. Alterações de datas e eliminações ficam no Android.</string>
+    <string name="system_text_overview">Apenas leitura por predefinição. A criação, as alterações apenas do título e as alterações de descrição ou local exigem opções próprias. Outras alterações e eliminações ficam no Android; as operações pendentes são mantidas.</string>
+    <string name="system_title_limits_with_text">Para alterar apenas o título de eventos simples. A descrição e o local usam a opção de texto separada. Alterações de datas e eliminações ficam no Android.</string>
+    <string name="calendar_dashboard_text_mode">Alterações de texto ativadas</string>
 </resources>

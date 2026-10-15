@@ -138,11 +138,15 @@ class ConflictArchiveStoreDeviceTest {
         fun bytes(db: SQLiteDatabase) = db.rawQuery(sql, arrayOf(key())).use { row -> check(row.moveToFirst()); List(3) { row.getString(it) } }
         val original = bytes(store.readableDatabase)
         store.writableDatabase.apply {
+            // Remove empty later tables to reconstruct the historical fixture.
+            execSQL("DROP TABLE local_text_edit_preparations")
+            execSQL("DROP TABLE text_update_acknowledgements")
+            execSQL("DROP TABLE text_update_acknowledgement_history")
             execSQL("DROP TRIGGER conflict_archive_scope_delete"); execSQL("DROP TABLE conflict_observations"); execSQL("DROP TABLE conflict_archives"); version = 17
         }
         store.close()
         ImportStore(ApplicationProvider.getApplicationContext(), name).use { migrated ->
-            assertEquals(19, migrated.readableDatabase.version); assertEquals(original, bytes(migrated.readableDatabase))
+            assertEquals(20, migrated.readableDatabase.version); assertEquals(original, bytes(migrated.readableDatabase))
             val observation = migrated.observations().single()
             assertEquals(changed, observation.change); assertEquals(ConflictObservationOrigin.CACHED, observation.origin); assertNull(observation.observedAt)
             assertEquals(base, migrated.conflictArchive(migrated.ref())?.base)
@@ -233,7 +237,7 @@ class ConflictArchiveStoreDeviceTest {
         store.writableDatabase.execSQL("UPDATE sqlite_sequence SET seq=90 WHERE name='conflict_observations'")
         store.close()
         ImportStore(ApplicationProvider.getApplicationContext(), name).use { migrated ->
-            assertEquals(19, migrated.readableDatabase.version); assertEquals(before, evidenceRows(migrated.readableDatabase))
+            assertEquals(20, migrated.readableDatabase.version); assertEquals(before, evidenceRows(migrated.readableDatabase))
             assertEquals(owner, migrated.localEdit(scope, base.eventId)); assertEquals(ref, migrated.ref())
             val tail = migrated.conflictObservations(ConflictObservationQuery(ref, 1, first.next))
             assertEquals(changed, tail.entries.single().change); assertNull(tail.next)
@@ -265,13 +269,17 @@ class ConflictArchiveStoreDeviceTest {
             }
             raw.execSQL("UPDATE conflict_observations SET kind='VERIFIED' WHERE id=1")
         }
-        ImportStore(context, name).use { assertEquals(19, it.readableDatabase.version) }
+        ImportStore(context, name).use { assertEquals(20, it.readableDatabase.version) }
     }
     private fun evidenceRows(db: SQLiteDatabase): List<List<String?>> = db.rawQuery("SELECT * FROM conflict_observations ORDER BY id", null).use { row ->
         buildList { while (row.moveToNext()) add(List(row.columnCount) { if (row.isNull(it)) null else row.getString(it) }) }
     }
     /** Construct the exact version-18 observation constraint; retain all other version-18 tables. */
     private fun makeVersion18(db: SQLiteDatabase) {
+        // Remove empty later tables to reconstruct the historical fixture.
+        db.execSQL("DROP TABLE local_text_edit_preparations")
+        db.execSQL("DROP TABLE text_update_acknowledgements")
+        db.execSQL("DROP TABLE text_update_acknowledgement_history")
         db.execSQL("DROP TRIGGER conflict_archive_scope_delete")
         db.execSQL("DROP INDEX conflict_observation_archive")
         db.execSQL("ALTER TABLE conflict_observations RENAME TO fixture_new_observations")

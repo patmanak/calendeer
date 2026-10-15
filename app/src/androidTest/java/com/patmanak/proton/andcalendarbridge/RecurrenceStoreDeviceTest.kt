@@ -215,6 +215,10 @@ class RecurrenceStoreDeviceTest {
         store.close()
         val context = ApplicationProvider.getApplicationContext<Context>()
         SQLiteDatabase.openDatabase(context.getDatabasePath(name).path, null, SQLiteDatabase.OPEN_READWRITE).use { db ->
+            // Remove empty later tables to reconstruct the historical fixture.
+            db.execSQL("DROP TABLE local_text_edit_preparations")
+            db.execSQL("DROP TABLE text_update_acknowledgements")
+            db.execSQL("DROP TABLE text_update_acknowledgement_history")
             db.execSQL("DROP TRIGGER conflict_archive_scope_delete")
             db.execSQL("DROP TABLE conflict_observations")
             db.execSQL("DROP TABLE conflict_archives")
@@ -233,7 +237,7 @@ class RecurrenceStoreDeviceTest {
             db.version = 5
         }
         ImportStore(context, name).use { reopened ->
-            assertEquals(19, reopened.readableDatabase.version)
+            assertEquals(20, reopened.readableDatabase.version)
             assertEquals(legacy, reopened.readableDatabase.rawQuery("SELECT payload FROM records WHERE event='legacy'", null).use {
                 assertTrue(it.moveToFirst()); it.getString(0)
             })
