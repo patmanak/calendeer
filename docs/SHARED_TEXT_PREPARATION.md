@@ -261,8 +261,9 @@ through to acknowledgement. The import lock is acquired before the authenticated
 submission lock, and its source callback performs local reads without reacquiring
 either lock. This preserves the order used by incoming synchronization.
 
-The production text activation gate remains closed pending automatic-worker and
-system-editor qualification. The text option is hidden without both
+The production text activation gate is enabled for this restricted experimental
+profile after separate service, automatic-worker and system-editor qualification.
+The text option is hidden without both
 recovery and submission controllers. Its per-calendar consent is separate and
 off by default; disabling creation clears it. Existing durable proof can recover
 with text sending disabled, subject to current account, calendar and native access.
@@ -317,11 +318,20 @@ multiline title/description/location UPDATE through the real authenticated ports
 It verifies actual canonical LF content, retains raw CRLF intent after mode
 revocation, and acknowledges the same Android row offline in a distinct process.
 Historical replay preserves a later local owner and the complete original proof.
-This does not qualify the automatic worker, an OEM editor, transferred CREATE
-delivery against the service or an all-day service UPDATE.
+This explicit composition does not qualify scheduling or a system editor.
 
-The remaining qualification includes automatic-worker and physical system-editor
-journeys. Historical title records must not be
+A separate physical journey opens the imported ordinary timed event in the
+system editor, changes description and location, and observes production workers
+without calling an outgoing controller directly. It requires full immutable
+request/result/completion history, same-row native acknowledgement and converged
+queues. Active-worker replay in another process preserves that history without
+another attempt. A separate recovery phase qualifies an already saved interrupted
+editor edit, including its strictly redundant incoming receipt. All three calendar
+mode flags are restored for the target and temporarily isolated other calendars.
+The tested editor is `foundation.e.calendar`; Samsung, all-day service UPDATE,
+transferred CREATE text delivery and periodic scheduling remain unqualified.
+
+Historical title records must not be
 reinterpreted as permission for broader edits. The existing concurrent GET/PUT
 race remains; plaintext patching supplies no server-side write precondition.
 

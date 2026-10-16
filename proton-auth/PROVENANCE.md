@@ -880,5 +880,9 @@ The separate text port requires full preparation and wire binding, scoped source
 qualification, a durable UNKNOWN claim and an independent evidence lease. It
 cannot fall back to unguarded submission. Its actual decoded readback is retained
 separately from the raw local intent, allowing CRLF/LF equivalence only in text.
-The production text gate remains closed until complete device/service qualification.
+The production text option is separately gated, experimental and off by default.
+An ordinary timed combined-text service journey qualifies real signed/decrypted
+readback and offline acknowledgement in a new process. A separate system-editor
+journey qualifies automatic worker delivery and immutable replay after restart.
+Those results do not qualify every native profile or eliminate concurrent writes.
 The GET/PUT concurrency limit described above remains unchanged.

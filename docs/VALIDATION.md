@@ -90,6 +90,17 @@ raw-to-readback acknowledgement, explicit CREATE provenance and interrupted
 restoration. The gateway uses a synthetic transport; it makes no service or crypto
 compatibility claim. Its barrier-controlled concurrency cases check the
 import-before-auth lock order and revocation while waiting.
+Its twelve cases include completion through an interrupted redundant incoming
+receipt, plus recovery after the native write succeeded but its reply was lost.
+The original receipt is removed only after the full verified text result qualifies.
+
+`SystemTextRecoveryDeviceTest` adds eight real-SQL/controller cases with a
+controlled native boundary and forbidden service calls. They verify that durable
+proof recovery precedes discovery, traverses separate bounded cursors, survives
+new instances and respects account, permission, cancellation and original policy
+leases. Recovery cannot repeat a native write or turn uncertain work into a new
+submission. This suite passed on a physical device without skips; it does not
+establish Android Provider or Proton service behavior.
 
 `TextModesStoreDeviceTest` and `SystemTextModeUiDeviceTest` separately check
 default-off scope-bound consent, independent title/text options, permission and
@@ -111,7 +122,27 @@ recovery checks immutable history and the later local owner. Never renew the tok
 to retry an uncertain request. The timed combined multiline service journey is
 qualified separately from automatic scheduling and an OEM editor.
 
-The text production gate stays closed until those complete journeys qualify.
+`CalendarSystemTextWorkerLiveDeviceTest` separately qualifies the production
+pipeline with `calendarSystemTextWorker=true`, frozen `textFixtureToken` and
+`textAccountHash`, and `textWorkerPhase=RUN` followed by `REPLAY` in a new process.
+`RUN` opens the retained ordinary timed service example in the selected system
+editor; save only its enrolled synthetic description and location. After launch
+the fixture observes actual workers, with no direct outgoing controller calls.
+It requires full request/result/completion binding, same-row acknowledgement,
+successful network work and quiescent queues. `REPLAY` reactivates the same policy
+and compares the complete immutable history, not just displayed text.
+`RECOVER` is reserved for the exact previously enrolled unfinished editor change;
+it does not create a replacement identity or claim a fresh editor journey.
+The optional `isolateOtherModes=true` requires immutable local restoration
+provenance before changing flags. All three original flags on the target and
+other calendars must be restored; on process interruption inspect that provenance
+before another live run. Never discard it to bypass enrollment guards.
+
+The ordinary timed system-editor RUN and active-worker REPLAY passed in distinct
+processes, as did interrupted-edit RECOVER and its separate REPLAY. The tested
+editor is `foundation.e.calendar`. These cases do not qualify Samsung, all-day or
+transferred CREATE service text delivery, reboot/power loss or the periodic worker.
+The production text option is now enabled, experimental and off by default.
 Retain visible synthetic service events when performing authorized live tests;
 do not infer service success from opaque fixture strings or a local completion.
 The known GET/PUT concurrency window remains, as documented in

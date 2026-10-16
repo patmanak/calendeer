@@ -75,13 +75,18 @@ quarantined, with no automatic import. Separate guarded submission, full verifie
 result, native acknowledgement and completion contracts now preserve the raw local
 intent alongside the actual remote text. The shared journal releases an event only
 after its full completion proof qualifies, retaining request identities forever.
-Local recovery and per-calendar text consent have separate traversal positions;
-the production activation gate remains closed while automatic-worker and
-system-editor journeys are qualified. A separate ordinary timed service journey
+Local recovery and per-calendar text consent have separate traversal positions.
+A separate default-off experimental option now enables description and location
+changes, optionally with a simultaneous title change, through production workers.
+It requires creation to remain enabled for that calendar. An ordinary timed service journey
 qualifies combined multiline title/description/location delivery, canonical LF
 readback and offline same-row acknowledgement after process restart. Its historical
-replay preserves a later local edit and never resends. This explicit composition
-does not qualify automatic scheduling or an OEM editor. Existing title
+replay preserves a later local edit and never resends. A separate physical system
+editor journey qualifies automatic delivery and same-row acknowledgement, followed
+by active-worker replay in a new process without another attempt. Recovery of a
+previously saved interrupted edit also qualifies independently. These live cases
+use ordinary timed events and do not qualify Samsung, all-day service UPDATE or
+transferred CREATE delivery against the service. Existing title
 formats and consent remain narrow. See
 [shared text preparation](SHARED_TEXT_PREPARATION.md).
 

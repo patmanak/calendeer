@@ -34,6 +34,7 @@ class SystemTextOwnerGatewayDeviceTest {
     private class Projection(private val source: AndroidCalendarProjection) : CalendarProjection by source {
         var acknowledgements = 0
         var inspections = 0
+        var projectionInspections = 0
         var loseAcknowledgementReply = false
         override suspend fun acknowledgeTextUpdate(receipt: TextUpdateAcknowledgementReceipt): AppliedTextUpdateAcknowledgement? {
             acknowledgements++
@@ -44,8 +45,11 @@ class SystemTextOwnerGatewayDeviceTest {
         override suspend fun inspectTextUpdateAcknowledgement(receipt: TextUpdateAcknowledgementReceipt): AppliedTextUpdateAcknowledgement? {
             inspections++; return source.inspectTextUpdateAcknowledgement(receipt)
         }
+        override suspend fun inspectProjectionReceipt(receipt: ProjectionReceipt): AppliedProjectionWitness? {
+            projectionInspections++; return source.inspectProjectionReceipt(receipt)
+        }
     }
-    private class Fixture(val allDay: Boolean, val transferred: Boolean) {
+    private class Fixture(val allDay: Boolean, val transferred: Boolean, val redundantIncoming: Boolean) {
         val context = ApplicationProvider.getApplicationContext<Context>()
         private val token = UUID.randomUUID().toString()
         private val names = listOf("imports", "attempts", "captures", "creates").map { "text-gateway-$it-$token.db" }
@@ -100,6 +104,7 @@ class SystemTextOwnerGatewayDeviceTest {
         var row = -1L
         var initialFrame: CapturedCreateHandoffFrame? = null
         var originalSubmission: LocalCreateSubmission? = null
+        var redundantReceipt: ProjectionReceipt? = null
         fun uri(value: Uri = Events.CONTENT_URI): Uri = native.accountFor(target.account).let { account ->
             value.buildUpon().appendQueryParameter(CalendarContract.CALLER_IS_SYNCADAPTER, "true")
                 .appendQueryParameter(CalendarContract.Calendars.ACCOUNT_NAME, account.name)
@@ -132,15 +137,43 @@ class SystemTextOwnerGatewayDeviceTest {
             }
             context.contentResolver.query(uri(), arrayOf(Events._ID), "${Events.CALENDAR_ID}=?",
                 arrayOf(calendar.toString()), null)!!.use { assertTrue(it.moveToFirst()); assertEquals(1, it.count); row = it.getLong(0) }
+            if (redundantIncoming) {
+                check(!transferred)
+                // Incoming preparation precedes the editor's Save. No native batch has
+                // installed this new receipt marker, so later recovery cannot claim it did.
+                store.transaction(target) { putProjection(ProjectionIntent(target, base)) }
+                redundantReceipt = store.prepareProjection(ProjectionIntent(target, base), format)
+                assertEquals(base, redundantReceipt!!.change); assertEquals(base, redundantReceipt!!.previousBase)
+                assertEquals("0", values()[Events.DIRTY])
+            }
             edit(intent.content)
-            if (transferred) {
+            if (redundantIncoming) {
+                assertNull(store.localEdit(target, base.eventId))
+                assertEquals(listOf(ProjectionIntent(target, base)), store.pending(target))
+            } else if (transferred) {
                 val snapshot = native.captureCapturedHandoffCurrent(initialFrame!!) as CapturedHandoffCurrentObservation.Supported
                 assertEquals(LocalEditState.PAUSED, store.retainCapturedHandoffLocalChange(snapshot.snapshot, intent.id))
             } else assertEquals(intent, store.captureLocalEdit(intent))
-            assertEquals(LocalTextPreparationAdmission.STORED, store.retainCurrentLocalTextPreparation(preparation))
-            assertTrue(journal.remember(record) { it == target })
+            if (!redundantIncoming) {
+                assertEquals(LocalTextPreparationAdmission.STORED, store.retainCurrentLocalTextPreparation(preparation))
+                assertTrue(journal.remember(record) { it == target })
+            }
             coordinator.authenticationChanged(true)
             withTimeout(10_000) { scheduled.await() }
+            if (redundantIncoming) {
+                val dirty = values()
+                assertEquals(LocalEditCaptureResult.RETAINED, coordinator.captureLocalEdit(target, base.eventId, intent.id))
+                assertEquals(dirty, values()); assertEquals(1, projection.projectionInspections)
+                allowSql()
+                assertEquals(intent, store.localEdit(target, base.eventId))
+                assertEquals(redundantReceipt, store.projectionReceipt(target, base.eventId))
+                assertTrue(store.pending(target).isEmpty())
+                val lease = coordinator.systemTextRunAdmission(target)
+                val retained = owners.retain(preparation, lease)!!
+                assertEquals(preparation.intent, retained.intent); assertEquals(preparation.timestamp, retained.timestamp)
+                assertEquals(preparation.format, retained.format); assertEquals(preparation.protectedPayload, retained.protectedPayload)
+                assertTrue(journal.remember(record, lease))
+            }
         }
         private suspend fun seedTransfer() {
             val localId = LocalEventId(UUID.randomUUID().toString())
@@ -240,11 +273,12 @@ class SystemTextOwnerGatewayDeviceTest {
             } finally { fixture.inAuth = false }
         }
     }
-    private fun fixture(allDay: Boolean = false, transferred: Boolean = false, block: suspend Fixture.() -> Unit) = runBlocking {
+    private fun fixture(allDay: Boolean = false, transferred: Boolean = false, redundantIncoming: Boolean = false,
+        block: suspend Fixture.() -> Unit) = runBlocking {
         assumeTrue(InstrumentationRegistry.getArguments().getString("providerFixture") == "true")
         val context = ApplicationProvider.getApplicationContext<Context>()
         assumeTrue(AndroidCalendarProjection(context).hasPermissions())
-        val fixture = Fixture(allDay, transferred)
+        val fixture = Fixture(allDay, transferred, redundantIncoming)
         try { fixture.seed(); fixture.block() } finally { fixture.close() }
     }
 
@@ -381,5 +415,74 @@ class SystemTextOwnerGatewayDeviceTest {
         assertEquals("0", values()[Events.DIRTY])
         assertTrue(owners.acknowledge(result, journal, proofLease)); assertTrue(owners.complete(result, journal, proofLease))
         assertEquals(1, projection.acknowledgements); assertEquals(1, projection.inspections); assertEquals(1, port.sends)
+    }
+
+    @Test fun redundantIncomingReceiptSurvivesCaptureAndSubmissionUntilTextAcknowledgementIsProven() = fixture(redundantIncoming = true) {
+        val pending = checkNotNull(redundantReceipt)
+        val dirty = values()
+        assertEquals("1", dirty[Events.DIRTY])
+        assertNotEquals("calendeer-projection-receipt-v1:${pending.nonce}", dirty[Events.SYNC_DATA3])
+        val port = Port(this)
+        val observation = submit(port) as TextUpdateSubmissionObservation.Verified
+        val result = TextUpdateVerifiedResult.of(record.copy(state = TextUpdateAttemptState.OUTCOME_UNKNOWN), observation)
+        assertTrue(journal.retainVerified(result, coordinator.systemTextEvidenceAdmission(target)))
+        allowSql()
+        assertEquals(pending, store.projectionReceipt(target, base.eventId))
+        assertEquals(base, store.projectedBaseline(target, base.eventId))
+        assertEquals(intent, store.localEdit(target, base.eventId)); assertEquals(dirty, values())
+        assertEquals(0, projection.acknowledgements); assertNull(journal.readCompletion(target, record.id) { true })
+
+        toggleText(false)
+        val proofLease = coordinator.systemTextProofAdmission(target)
+        assertTrue(owners.acknowledge(result, journal, proofLease))
+        assertTrue(owners.complete(result, journal, proofLease))
+        allowSql()
+        assertNull(store.projectionReceipt(target, base.eventId)); assertNull(store.localEdit(target, base.eventId))
+        assertNull(store.localTextEditPreparation(target, base.eventId))
+        assertEquals(observed, store.projectedBaseline(target, base.eventId))
+        assertEquals(result, journal.readCompletion(target, record.id, proofLease)!!.result)
+        assertEquals(result, journal.readVerified(target, record.id, proofLease))
+        assertEquals(record.copy(state = TextUpdateAttemptState.OUTCOME_UNKNOWN, protectedEvidence = "synthetic-response"),
+            journal.read(target, record.id, proofLease))
+        val restored = values()
+        assertEquals(row.toString(), restored[Events._ID]); assertEquals("0", restored[Events.DIRTY])
+        assertEquals("Changed\nnotes", restored[Events.DESCRIPTION])
+        assertTrue(owners.acknowledge(result, journal, proofLease)); assertTrue(owners.complete(result, journal, proofLease))
+        assertEquals(restored, values()); assertEquals(1, projection.acknowledgements)
+        assertEquals(0, projection.inspections); assertEquals(1, port.calls); assertEquals(1, port.sends)
+    }
+
+    @Test fun redundantIncomingReceiptAfterLostNativeReplyRequiresHistoricalInspectionBeforeCleanup() = fixture(redundantIncoming = true) {
+        val pending = checkNotNull(redundantReceipt)
+        val port = Port(this)
+        val observation = submit(port) as TextUpdateSubmissionObservation.Verified
+        val result = TextUpdateVerifiedResult.of(record.copy(state = TextUpdateAttemptState.OUTCOME_UNKNOWN), observation)
+        assertTrue(journal.retainVerified(result, coordinator.systemTextEvidenceAdmission(target)))
+        val proofLease = coordinator.systemTextProofAdmission(target)
+        projection.loseAcknowledgementReply = true
+        assertFalse(owners.acknowledge(result, journal, proofLease))
+        allowSql()
+        assertEquals(pending, store.projectionReceipt(target, base.eventId))
+        assertEquals(base, store.projectedBaseline(target, base.eventId))
+        assertEquals(intent, store.localEdit(target, base.eventId))
+        assertEquals(TextUpdateAcknowledgementState.PENDING, store.textUpdateAcknowledgement(target, base.eventId, record.id)!!.state)
+        assertNull(journal.readCompletion(target, record.id, proofLease))
+        val applied = values()
+        assertEquals("0", applied[Events.DIRTY]); assertEquals("Changed\nnotes", applied[Events.DESCRIPTION])
+        assertEquals(1, projection.acknowledgements); assertEquals(0, projection.inspections)
+
+        // The still-enabled loss hook would fail another fresh native write. Only the
+        // historical marker inspection may close the two pending SQL obligations.
+        assertTrue(owners.acknowledge(result, journal, proofLease))
+        assertTrue(owners.complete(result, journal, proofLease))
+        allowSql()
+        assertNull(store.projectionReceipt(target, base.eventId)); assertNull(store.localEdit(target, base.eventId))
+        assertNull(store.localTextEditPreparation(target, base.eventId))
+        assertEquals(observed, store.projectedBaseline(target, base.eventId))
+        assertEquals(TextUpdateAcknowledgementState.RESTORED, store.textUpdateAcknowledgement(target, base.eventId, record.id)!!.state)
+        assertEquals(result, journal.readCompletion(target, record.id, proofLease)!!.result)
+        assertEquals(result, journal.readVerified(target, record.id, proofLease)); assertEquals(applied, values())
+        assertEquals(1, projection.acknowledgements); assertEquals(1, projection.inspections)
+        assertEquals(1, port.calls); assertEquals(1, port.sends)
     }
 }

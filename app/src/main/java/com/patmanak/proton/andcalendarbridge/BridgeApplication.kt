@@ -30,8 +30,8 @@ import com.patmanak.proton.andcalendarbridge.data.outgoing.CoordinatorSystemTitl
 import com.patmanak.proton.andcalendarbridge.data.outgoing.CoordinatorSystemTextOperations
 
 class BridgeApplication : Application() {
-    // Activation requires the complete native/service journey; component tests alone do not qualify it.
-    private val textSynchronizationQualified = false
+    // Per-calendar explicit consent remains required for this restricted experimental profile.
+    private val textSynchronizationQualified = true
     private val authenticationScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val createAttempts by lazy { CreateAttemptStore(this) }
     private val localCreateCaptures by lazy { LocalCreateStore(this) }
