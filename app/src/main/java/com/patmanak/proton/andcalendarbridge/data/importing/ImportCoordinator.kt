@@ -3076,6 +3076,13 @@ class ImportCoordinator(
         return null
     }
 
+    private suspend fun bootstrapInitialPage(target: CalendarScope, allowNetwork: Boolean,
+        deltaReady: Boolean): ImportProgress {
+        val engine = stagedEngine ?: return ImportProgress(0, false)
+        if (!deltaReady || store.transaction(target) { checkpoint != null }) return ImportProgress(0, false)
+        return engine.run(target, allowNetwork = allowNetwork, maxPages = 1)
+    }
+
     private suspend fun runLocked(network: Boolean, fresh: Boolean): ImportRunResult {
         val expected = generation
         val account = currentObservedAccount() ?: return ImportRunResult.COMPLETE
@@ -3135,6 +3142,12 @@ class ImportCoordinator(
                             store.prepareDeferredRetry(calendarScope)
                         }
                     }
+                    // A full refresh clears the old checkpoint before requeuing native work.
+                    // Commit its first staged page before draining: a DIRTY row may reject
+                    // projection, and capture needs a confirmed observation format to proceed.
+                    // Offline this only decodes an already retained page; it never invents one.
+                    val bootstrap = bootstrapInitialPage(calendarScope, allowNetwork, deltaReady)
+                    if (!isCurrent(expected, account)) return ImportRunResult.COMPLETE
                     suspend fun drain(): Boolean {
                         for (intent in runnableProjections(calendarScope)) {
                             if (!isCurrent(expected, account)) throw CancellationException()
@@ -3151,7 +3164,8 @@ class ImportCoordinator(
                             store.acknowledgeDeferredRetry(calendarScope, event)
                         }
                         val deferredNetwork = network && selection.nextAttempt > System.currentTimeMillis()
-                        val progress = if (deltaReady) stagedEngine.run(calendarScope, allowNetwork = allowNetwork)
+                        val progress = if (deltaReady) stagedEngine.run(calendarScope, allowNetwork = allowNetwork,
+                            maxPages = 4 - bootstrap.pagesCommitted)
                             else ImportProgress(0, false)
                         val deltaProgress = if (deltaReady && progress.traversalComplete)
                             deltaEngine?.run(calendarScope, allowNetwork) else null
@@ -3159,7 +3173,8 @@ class ImportCoordinator(
                         remaining = drain() || receivedPending || store.pendingDeferredRetries(calendarScope, 1).isNotEmpty() ||
                             (deltaProgress?.workRemaining == true && (network || !deltaProgress.needsNetwork))
                         val incompleteNetwork = network && !deferredNetwork && !progress.traversalComplete
-                        val localProgress = progress.pagesCommitted > 0 || recoveredLocally || (deltaProgress?.processed ?: 0) > 0
+                        val localProgress = bootstrap.pagesCommitted + progress.pagesCommitted > 0 ||
+                            recoveredLocally || (deltaProgress?.processed ?: 0) > 0
                         val blocked = !network && (selection.status in setOf("NETWORK", "ERROR", "AUTH") ||
                             !localProgress && selection.status in setOf("UNSUPPORTED", "CAPACITY", "LOCAL_KEYS"))
                         val historyGap = selection.historyGap || deltaProgress?.historyGap == true

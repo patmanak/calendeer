@@ -62,6 +62,18 @@ behavior changes, not for each command run.
 
 ## Guarded description/location delivery
 
+`DirtyProjectionRefreshDeviceTest` exercises eight isolated real-SQL cases with
+controlled remote and native ports. A missing checkpoint must be restored before
+an interrupted incoming projection reaches a dirty row. The complete case then
+captures the edit, retains its first text request, acknowledges its verified
+result and converges the next import. Other cases cover the four-page budget,
+offline absence versus a retained empty page, divergent remote content, receive
+and decode failures, and cancellation after the received page is durable. Failures
+retain the original receipt and raw edit without native writes. All eight cases
+passed on a physical device without skips; this controlled fixture does not
+qualify service compatibility or a system editor. The bootstrap is a separate
+suspending helper; cancellation remains observable in the calling child job.
+
 Run the portable policy, guarded adapter and host orchestration tests with
 `:sync:test :proton-auth:testDebugUnitTest :app:testDebugUnitTest`. The text suites
 cover full raw identity, first capsule/wire retention, uncertain outcomes,

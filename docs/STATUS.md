@@ -85,6 +85,13 @@ does not qualify automatic scheduling or an OEM editor. Existing title
 formats and consent remain narrow. See
 [shared text preparation](SHARED_TEXT_PREPARATION.md).
 
+An incoming full refresh now commits its first staged page before draining
+requeued projections when no checkpoint exists. This restores the observation
+format needed to capture an Android edit that interrupted projection. The page
+counts toward the existing four-page budget. Offline processing can consume an
+already retained page; it cannot fetch or invent one. A divergent remote version
+still preserves the local edit as a conflict.
+
 After title acknowledgement, the original CREATE follow-up can close from the
 exact current clean frame, with repeated native, origin and access checks and no
 local owner or pending projection receipt. Its immutable creation evidence stays intact;
