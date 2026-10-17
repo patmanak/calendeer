@@ -22,13 +22,13 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 
-/** Private, backup-excluded journal of one unresolved title attempt per remote event across generations.
+/** Private, backup-excluded shared title/text/time/deletion ownership across generations.
  * Payload/evidence are opaque protected strings; this store grants no HTTP or Provider capability.
  */
 class TitleUpdateAttemptStore(context: Context, name: String = "calendar-title-update-attempt-v1.db") :
-    SQLiteOpenHelper(context, name, null, 7), TitleUpdateRecoveryJournal, TitleUpdatePreparationJournal {
+    SQLiteOpenHelper(context, name, null, 8), TitleUpdateRecoveryJournal, TitleUpdatePreparationJournal {
     private val lock = Mutex()
-    /** Same connection/transaction as title ownership; still not composed into broader sending. */
+    /** Text history shares the same connection and reciprocal ownership transaction. */
     internal val textJournal: TextUpdateRecoveryJournal = SqlTextUpdateAttemptJournal(object : TextAttemptDatabase {
         override suspend fun <T> withDatabase(beforeOpen: () -> Unit, action: (SQLiteDatabase) -> T): T =
             withContext(Dispatchers.IO) { lock.withLock { beforeOpen(); action(writableDatabase) } }
@@ -38,6 +38,11 @@ class TitleUpdateAttemptStore(context: Context, name: String = "calendar-title-u
         override suspend fun <T> withDatabase(beforeOpen: () -> Unit, action: (SQLiteDatabase) -> T): T =
             withContext(Dispatchers.IO) { lock.withLock { beforeOpen(); action(writableDatabase) } }
     }, ::canTimeOwn)
+    /** DELETE has no completion protocol: its event hold remains unresolved. */
+    internal val deleteJournal: DeleteAttemptJournal = SqlDeleteAttemptJournal(object : DeleteAttemptDatabase {
+        override suspend fun <T> withDatabase(beforeOpen: () -> Unit, action: (SQLiteDatabase) -> T): T =
+            withContext(Dispatchers.IO) { lock.withLock { beforeOpen(); action(writableDatabase) } }
+    }, ::canDeleteOwn)
     override val completionProtocol = 1
     @Volatile var admitDispatch: (CalendarScope) -> Boolean = { false }
 
@@ -96,6 +101,7 @@ class TitleUpdateAttemptStore(context: Context, name: String = "calendar-title-u
         createReservationTable(db)
         TextUpdateAttemptSql.createTable(db)
         TimeUpdateAttemptSql.createTable(db)
+        DeleteAttemptSql.createTable(db)
     }
 
     private fun createReservationTable(db: SQLiteDatabase) {
@@ -110,13 +116,14 @@ class TitleUpdateAttemptStore(context: Context, name: String = "calendar-title-u
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        check(oldVersion in 1..6 && newVersion == 7) { "Explicit title update journal migration required" }
+        check(oldVersion in 1..7 && newVersion == 8) { "Explicit title update journal migration required" }
         if (oldVersion >= 3) {
             // Existing attempts, protected bytes, results and completions stay untouched.
             if (oldVersion == 3) createReservationTable(db)
             if (oldVersion == 5) TextUpdateAttemptSql.migrateProofs(db)
             else if (oldVersion < 5) TextUpdateAttemptSql.createTable(db)
-            TimeUpdateAttemptSql.createTable(db)
+            if (oldVersion < 7) TimeUpdateAttemptSql.createTable(db)
+            DeleteAttemptSql.createTable(db)
             return
         }
         // SQLiteOpenHelper owns the migration transaction. Copy opaque bytes without interpreting
@@ -470,27 +477,40 @@ class TitleUpdateAttemptStore(context: Context, name: String = "calendar-title-u
     private data class History(val scope: CalendarScope, val id: MutationId,
         val localIntentId: MutationId, val completed: Boolean)
 
-    /** Title, text and time checks are synchronous inside the owning writer transaction. No helper re-entry. */
+    /** All families are fully qualified before deciding; a hold cannot hide another corrupt history. */
     private fun otherFamilyOwns(db: SQLiteDatabase, scope: CalendarScope, event: EventId, id: MutationId,
         checkCancelled: () -> Unit): Boolean = qualifiedOwnership(checkCancelled) {
-        TextUpdateAttemptSql(db, checkCancelled).hasOwner(scope, event, id) ||
-            TimeUpdateAttemptSql(db, checkCancelled).hasOwner(scope, event, id)
+        val text = TextUpdateAttemptSql(db, checkCancelled).hasOwner(scope, event, id)
+        val time = TimeUpdateAttemptSql(db, checkCancelled).hasOwner(scope, event, id)
+        val delete = DeleteAttemptSql(db, checkCancelled).hasOwner(scope, event, id)
+        text || time || delete
     }
 
     private fun canTextOwn(db: SQLiteDatabase, work: TextUpdateAttemptRecord, checkCancelled: () -> Unit): Boolean =
         qualifiedOwnership(checkCancelled) {
             val history = ownershipHistory(db, work.scope, work.eventId)
-            // Even a completed title cannot donate its request UUID to a different family/event.
             val usedIdentity = titleRequestExists(db, work.scope, work.id, checkCancelled)
-            history.all { it.completed } && !usedIdentity &&
-                !TimeUpdateAttemptSql(db, checkCancelled).hasOwner(work.scope, work.eventId, work.id)
+            val time = TimeUpdateAttemptSql(db, checkCancelled).hasOwner(work.scope, work.eventId, work.id)
+            val delete = DeleteAttemptSql(db, checkCancelled).hasOwner(work.scope, work.eventId, work.id)
+            history.all { it.completed } && !usedIdentity && !time && !delete
         }
 
     private fun canTimeOwn(db: SQLiteDatabase, work: TimeUpdateAttemptRecord, checkCancelled: () -> Unit): Boolean =
         qualifiedOwnership(checkCancelled) {
             val history = ownershipHistory(db, work.scope, work.eventId)
-            history.all { it.completed } && !titleRequestExists(db, work.scope, work.id, checkCancelled) &&
-                !TextUpdateAttemptSql(db, checkCancelled).hasOwner(work.scope, work.eventId, work.id)
+            val usedIdentity = titleRequestExists(db, work.scope, work.id, checkCancelled)
+            val text = TextUpdateAttemptSql(db, checkCancelled).hasOwner(work.scope, work.eventId, work.id)
+            val delete = DeleteAttemptSql(db, checkCancelled).hasOwner(work.scope, work.eventId, work.id)
+            history.all { it.completed } && !usedIdentity && !text && !delete
+        }
+
+    private fun canDeleteOwn(db: SQLiteDatabase, work: DeleteAttemptRecord, checkCancelled: () -> Unit): Boolean =
+        qualifiedOwnership(checkCancelled) {
+            val history = ownershipHistory(db, work.scope, work.eventId)
+            val usedIdentity = titleRequestExists(db, work.scope, work.id, checkCancelled)
+            val text = TextUpdateAttemptSql(db, checkCancelled).hasOwner(work.scope, work.eventId, work.id)
+            val time = TimeUpdateAttemptSql(db, checkCancelled).hasOwner(work.scope, work.eventId, work.id)
+            history.all { it.completed } && !usedIdentity && !text && !time
         }
 
     private fun titleRequestExists(db: SQLiteDatabase, scope: CalendarScope, id: MutationId,

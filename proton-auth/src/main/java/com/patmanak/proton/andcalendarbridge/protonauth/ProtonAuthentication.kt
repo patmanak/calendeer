@@ -37,6 +37,8 @@ object ProtonAuthentication {
     fun titleUpdates(context: Context): CalendarTitleUpdateSubmissionPort = shared(context)
     fun textUpdates(context: Context): CalendarTextUpdateSubmissionPort = shared(context)
     fun timeUpdates(context: Context): CalendarTimeUpdateSubmissionPort = shared(context)
+    /** Experimental typed deletion; no system worker or user-facing capability is implied. */
+    fun deletions(context: Context): CalendarDeleteSubmissionPort = shared(context)
     /** Local display metadata only; unavailable or signed-out accounts return null. */
     suspend fun connectedAccountLabel(context: Context): String? = shared(context).connectedAccountLabel()
     internal suspend fun matchesIdentityHash(context: Context, account: AccountId, expectedHash: String): Boolean =
@@ -69,7 +71,7 @@ internal class SerializedAuthenticationPort(
     private val createGraph: () -> ProtonAuthenticationGraph,
     private val cancelVerification: () -> Unit,
     private val dispatcher: CoroutineDispatcher = Dispatchers.IO,
-) : AuthenticationFlowPort, CalendarCatalogPort, CalendarDeltaRemote, RollingCalendarRemote, ContentMappingRemote, CalendarCreatePreparationPort, CalendarCreateSubmissionPort, CalendarLocalEditPreparationPort, CalendarLocalTextPreparationPort, CalendarLocalTimePreparationPort, CalendarTitleUpdateSubmissionPort, CalendarTextUpdateSubmissionPort, CalendarTimeUpdateSubmissionPort {
+) : AuthenticationFlowPort, CalendarCatalogPort, CalendarDeltaRemote, RollingCalendarRemote, ContentMappingRemote, CalendarCreatePreparationPort, CalendarCreateSubmissionPort, CalendarLocalEditPreparationPort, CalendarLocalTextPreparationPort, CalendarLocalTimePreparationPort, CalendarTitleUpdateSubmissionPort, CalendarTextUpdateSubmissionPort, CalendarTimeUpdateSubmissionPort, CalendarDeleteSubmissionPort {
     override val contentMapping = EVENT_CONTENT_MAPPING
     override val localCreateFormat = LOCAL_CREATE_PREPARATION_FORMAT
     override val knownEmptySubmissionFormat = KNOWN_EMPTY_SUBMISSION_FORMAT
@@ -79,6 +81,7 @@ internal class SerializedAuthenticationPort(
     override val titleUpdateFormat = TITLE_UPDATE_SUBMISSION_FORMAT
     override val textUpdateFormat = TEXT_UPDATE_REQUEST_FORMAT
     override val timeUpdateFormat = TIME_UPDATE_REQUEST_FORMAT
+    override val deleteFormat = DELETE_SUBMISSION_FORMAT
     constructor(context: Context, verification: HumanVerificationHost) : this(
         { ProtonAuthenticationRuntime.build(context, verification.delegate.hooks) },
         verification::cancel,
@@ -229,6 +232,76 @@ internal class SerializedAuthenticationPort(
             else TimeUpdateSubmissionObservation.Unknown
         }
     }
+
+    override suspend fun prepareSubmission(id: MutationId, intent: LocalDeleteIntent,
+        admit: (CalendarScope) -> Boolean): DeleteAttemptRecord? {
+        currentCoroutineContext().ensureActive()
+        val frozen = DeleteSubmissionPolicy.freezeIntent(intent)
+        return deleteOperation(frozen.scope, admit, { false }, null) { runtime, lease, _ ->
+            val result = runtime.prepareSubmission(id, frozen, lease::allows)
+            currentCoroutineContext().ensureActive()
+            result?.takeIf { it.id == id && it.intent == frozen && it.format == deleteFormat &&
+                it.state == DeleteAttemptState.PREPARED && it.protectedEvidence == null }?.frozen()
+        }
+    }
+
+    override suspend fun submit(record: DeleteAttemptRecord, journal: DeleteAttemptJournal,
+        admit: (CalendarScope) -> Boolean, qualifySource: suspend (CalendarScope) -> Boolean,
+        admitEvidence: (CalendarScope) -> Boolean): DeleteSubmissionObservation {
+        currentCoroutineContext().ensureActive()
+        val frozen = record.frozen()
+        if (frozen.format != deleteFormat || frozen.state != DeleteAttemptState.PREPARED || frozen.protectedEvidence != null)
+            return DeleteSubmissionObservation.Unknown
+        return deleteOperation(frozen.scope, admit, admitEvidence, DeleteSubmissionObservation.Unknown as DeleteSubmissionObservation) {
+                runtime, lease, evidence ->
+            val source: suspend (CalendarScope) -> Boolean = { requested ->
+                if (!lease.allows(requested)) false else {
+                    val qualified = try { qualifySource(requested) }
+                    catch (failure: Exception) { lease.close(); currentCoroutineContext().ensureActive(); throw failure }
+                    if (!qualified) lease.close()
+                    currentCoroutineContext().ensureActive()
+                    qualified && lease.allows(requested)
+                }
+            }
+            val observed = runtime.submit(frozen, journal, lease::allows, source, evidence::allows)
+            currentCoroutineContext().ensureActive()
+            when (observed) {
+                DeleteSubmissionObservation.Unknown -> observed
+                is DeleteSubmissionObservation.Verified ->
+                    if (observed.record.copy(state = DeleteAttemptState.PREPARED, protectedEvidence = null) == frozen)
+                        DeleteSubmissionObservation.Verified(observed.record) else DeleteSubmissionObservation.Unknown
+                is DeleteSubmissionObservation.Conflict ->
+                    if (observed.record.copy(state = DeleteAttemptState.PREPARED, protectedEvidence = null) == frozen)
+                        DeleteSubmissionObservation.Conflict(observed.record, observed.event) else DeleteSubmissionObservation.Unknown
+            }
+        }
+    }
+
+    override suspend fun inspect(record: DeleteAttemptRecord, journal: DeleteAttemptJournal,
+        admit: (CalendarScope) -> Boolean): DeleteSubmissionObservation {
+        currentCoroutineContext().ensureActive()
+        val frozen = record.frozen()
+        if (frozen.format != deleteFormat || frozen.state != DeleteAttemptState.OUTCOME_UNKNOWN)
+            return DeleteSubmissionObservation.Unknown
+        return deleteOperation(frozen.scope, admit, { false }, DeleteSubmissionObservation.Unknown as DeleteSubmissionObservation) {
+                runtime, lease, _ ->
+            val observed = runtime.inspect(frozen, journal, lease::allows)
+            currentCoroutineContext().ensureActive()
+            when (observed) {
+                DeleteSubmissionObservation.Unknown -> observed
+                is DeleteSubmissionObservation.Verified -> if (observed.record == frozen)
+                    DeleteSubmissionObservation.Verified(observed.record) else DeleteSubmissionObservation.Unknown
+                is DeleteSubmissionObservation.Conflict -> if (observed.record == frozen)
+                    DeleteSubmissionObservation.Conflict(observed.record, observed.event) else DeleteSubmissionObservation.Unknown
+            }
+        }
+    }
+
+    private suspend fun <T> deleteOperation(scope: CalendarScope, admit: (CalendarScope) -> Boolean,
+        admitEvidence: (CalendarScope) -> Boolean, denied: T,
+        action: suspend (CalendarDeleteSubmissionPort, UpdateLease, UpdateLease) -> T): T =
+        updateOperation(scope, admit, admitEvidence, denied, false,
+            { it.deletions }, { it.deleteFormat == deleteFormat }, action)
 
     internal suspend fun connectedAccountLabel(): String? {
         val caller = currentCoroutineContext()

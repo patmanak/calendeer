@@ -932,3 +932,35 @@ readback and offline acknowledgement in a new process. A separate system-editor
 journey qualifies automatic worker delivery and immutable replay after restart.
 Those results do not qualify every native profile or eliminate concurrent writes.
 The GET/PUT concurrency limit described above remains unchanged.
+
+## Separate guarded deletion submission
+
+`ProtonDeleteRequestCodec` adapts the same-calendar deletion shape from the pinned
+Android `CalendarsApiImpl.kt` sync endpoint/DTOs at
+`83bbd6a15b0aaa135e424fb5ac195c0a52929b4f` and Web
+`packages/shared/lib/interfaces/calendar/Api.ts` at
+`40cc08c12c8fbac7f66521186c7297ddf3e17861`. The request supplies `MemberID` and one
+`Events` item with `ID` and ordinary user `DeletionReason=0`. It contains no new
+encrypted event replacement. Routes, source links and the absent atomic
+precondition are recorded in [conditional writes](../docs/research/CONDITIONAL_WRITES.md).
+
+The guarded adapter, protected request envelope, separate dispatch permit and
+response parsers are project integration adapted from the existing title writer.
+The current original is verified through the existing Proton Core signed/decrypted
+event reader; no new cryptographic primitive or upstream dependency is introduced.
+Indexed deletion success does not require a returned `Event`, and does not prove
+absence. A narrow exact-event GET parser accepts structured code 2501 only with
+the bound route and fresh membership/context checks. This interpretation requires
+real service qualification; HTTP 404 or a missing list entry alone is insufficient.
+
+The project-owned tagged GET witness is registered in the existing guarded Core
+client. It retains the exact authenticated route, status and JSON before Core's
+`ServerErrorInterceptor` translates a structured error. It uses standard Okio
+gzip decoding with separate compressed/decompressed limits and does not depend on
+internal Core exception types. Loopback Core tests qualify this plumbing, not the
+service meaning of absence.
+
+The typed port remains internal to integration and test composition, with no
+system worker, user-facing deletion option or native acknowledgement. See
+[deletion submission](../docs/DELETE_SUBMISSION.md) for its interruption rules,
+observed-state limits and remaining qualification.

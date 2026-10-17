@@ -95,11 +95,14 @@ internal class ProtonSingleDispatchApplicationGuard : Interceptor {
         val request = chain.request()
         val attempt = request.tag(ProtonSingleDispatchAttempt::class.java)
         val update = request.tag(ProtonTitleUpdateDispatchAttempt::class.java)
-        if (attempt != null && update != null) throw ProtonSingleDispatchDenied()
+        val deletion = request.tag(ProtonDeleteDispatchAttempt::class.java)
+        if (listOf(attempt, update, deletion).count { it != null } > 1) throw ProtonSingleDispatchDenied()
         if (attempt != null) {
             if (!attempt.enter(request)) throw ProtonSingleDispatchDenied()
         } else if (update != null) {
             if (!update.enter(request)) throw ProtonSingleDispatchDenied()
+        } else if (deletion != null) {
+            if (!deletion.enter(request)) throw ProtonSingleDispatchDenied()
         } else if (request.method == "PUT" && request.url.isCreateEndpoint()) throw ProtonSingleDispatchDenied()
         return chain.proceed(request)
     }
@@ -111,11 +114,14 @@ internal class ProtonSingleDispatchNetworkGuard : Interceptor {
         val request = chain.request()
         val attempt = request.tag(ProtonSingleDispatchAttempt::class.java)
         val update = request.tag(ProtonTitleUpdateDispatchAttempt::class.java)
-        if (attempt != null && update != null) throw ProtonSingleDispatchDenied()
+        val deletion = request.tag(ProtonDeleteDispatchAttempt::class.java)
+        if (listOf(attempt, update, deletion).count { it != null } > 1) throw ProtonSingleDispatchDenied()
         if (attempt != null) {
             if (!attempt.exchange(request)) throw ProtonSingleDispatchDenied()
         } else if (update != null) {
             if (!update.exchange(request)) throw ProtonSingleDispatchDenied()
+        } else if (deletion != null) {
+            if (!deletion.exchange(request)) throw ProtonSingleDispatchDenied()
         } else if (request.method == "PUT" && request.url.isCreateEndpoint()) throw ProtonSingleDispatchDenied()
         return chain.proceed(request)
     }
@@ -125,6 +131,7 @@ internal fun OkHttpClient.Builder.withSingleDispatchGuards(): OkHttpClient.Build
     followRedirects(false).followSslRedirects(false).retryOnConnectionFailure(false)
         .addInterceptor(ProtonSingleDispatchApplicationGuard())
         .addNetworkInterceptor(ProtonSingleDispatchNetworkGuard())
+        .addNetworkInterceptor(ProtonDeleteReadInterceptor())
 
 private fun HttpUrl.isCreateEndpoint(): Boolean = pathSegments.let {
     it.size == 5 && it[0] == "calendar" && it[1] == "v1" && it[2].isNotEmpty() && it[3] == "events" && it[4] == "sync"

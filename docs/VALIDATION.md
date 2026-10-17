@@ -1,5 +1,52 @@
 # Validation
 
+## Guarded deletion request foundation
+
+The [deletion submission contract](DELETE_SUBMISSION.md) separates the internal typed
+port from a user-facing system-calendar capability. This slice adds protected
+requests, a separate one-exchange DELETE permit, shared durable ownership and a
+serialized authenticated facade. It does not add a deletion worker, native ACK,
+user option or generic conditional-write capability.
+
+PASS: 423 domain, 839 backend and 143 app JVM cases, without skips, and debug app/test
+APK builds. Final app lint passes with zero errors and 42 warnings. The final
+app/test APKs were installed in place and Calendeer was launched on the enrolled
+phone under the shared lock. A focused guard RED run first failed all four new dispatch cases;
+adding the separate DELETE permit to both guards fixes qualified dispatch,
+reentry and mixed-tag refusal. The domain suite also reproduced malformed UTF-8
+escaping as an unsanitized exception; validation now rejects it with a sanitized
+argument error. New domain/backend/storage cases cover immutable raw request
+binding, independent scoped evidence retention, pre-send verified conflicts,
+interruption after claim, no UNKNOWN resend, generic 404 refusal, membership
+requalification and strict bounded binary decoding.
+
+A published Core/Retrofit regression then reproduced structured 2501 being
+converted to an error before Retrofit could return the raw response. The fix
+captures only the exact session-bound GET's response before conversion and ignores
+exception codes. Core tests now cover both identity and gzip 404 responses,
+unchanged authenticated request bytes, no token-refresh/repeated PUT, and foreign
+session refusal. Seven additional witness cases cover reentry, unique headers,
+consume-once/close, non-consuming capture, wire/inflated-size bounds and malformed
+or unsupported compression. Independent review found the pre-decompression gzip
+case; its bounded Okio fix and regression fixtures pass.
+
+PASS: 42 physical Android SQL executions, including ten new deletion cases and
+32 shared-ownership/migration regressions. They cover reopening UNKNOWN with the
+first wire/evidence unchanged, revoked/cancelled transactions, title/text/time
+exclusion across generations and request IDs, corrupted capsules/completions,
+segmented reads of large payloads and schema 7→8 preservation. Existing legacy
+migration fixtures explicitly reconstruct the older schema and now expect version
+8. These are isolated native SQLite tests, not an actual remote DELETE or a
+calendar-editor journey. Temporary databases were removed and the application was
+restored. App/test APKs were installed in place without clearing application data.
+
+PASS: focused independent source review and staged-blob confidentiality checks.
+The review examined the request/claim/inspection boundary, scoped absence parsing,
+shared ownership and final facade/HTTP integration. Real-service code 2501 semantics,
+remote conflict retention in the coordinator, native completion, offline ACK and
+actual system-editor deletion remain NOT RUN or unimplemented as stated in the
+contract. No live account event was deleted by this slice.
+
 ## Temporal preparation and delivery
 
 The current bounded temporal evidence is in [temporal delivery](TEMPORAL_UPDATE.md).

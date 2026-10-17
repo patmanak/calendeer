@@ -2,6 +2,7 @@
 // Adapted from Contako; see proton-auth/PROVENANCE.md.
 package com.patmanak.proton.andcalendarbridge.protonauth
 
+import com.patmanak.proton.andcalendarbridge.sync.CalendarDeleteSubmissionPort
 import com.patmanak.proton.andcalendarbridge.sync.CalendarTextUpdateSubmissionPort
 
 import android.content.Context
@@ -95,6 +96,7 @@ internal data class ProtonAuthenticationGraph(
     val localTimes: CalendarLocalTimePreparationPort = CalendarLocalTimePreparationPort { _, _ -> localEditUnavailable(LocalEditPreparationFailure.UNSUPPORTED) },
     val textUpdates: CalendarTextUpdateSubmissionPort? = null,
     val timeUpdates: CalendarTimeUpdateSubmissionPort? = null,
+    val deletions: CalendarDeleteSubmissionPort? = null,
     val connectedAccountLabel: suspend () -> String? = { null },
     val catalog: CalendarCatalogPort,
 )
@@ -302,6 +304,8 @@ internal object ProtonAuthenticationRuntime {
                 ProtonTitleUpdateSubmissionRemote(network.apiProvider), eventRemote, eventDecoder::decodeCreated),
             timeUpdates = ProtonTimeUpdateSubmissionAdapter(timePreparations, eventProtector, readSession, titleContext,
                 ProtonTitleUpdateSubmissionRemote(network.apiProvider), eventRemote, eventDecoder::decodeCreated),
+            deletions = ProtonDeleteSubmissionAdapter(eventProtector, readSession, titleContext,
+                ProtonDeleteSubmissionRemote(network.apiProvider), eventRemote, eventDecoder::decodeCreated),
             submissions = ProtonCreateSubmissionAdapter(ProtonCreatePreparationAdapter(readSession, contextRefresher,
                 ProtonCreateCalendarMetadataRemote(network.apiProvider), eventRemote, localAddresses,
                 ProtonCreateContextResolver(cryptoContext)::prepare, eventProtector, submission = true),

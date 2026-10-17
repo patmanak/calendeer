@@ -29,7 +29,8 @@ uncertain writes are retained, never silently discarded or resent.
 | Outgoing title | Default-off option for title-only edits of qualified ordinary or fully handed-off created timed/all-day events. Durable request ownership, inspection and native/SQL completion. | [Title submission](TITLE_UPDATE_SUBMISSION.md). Known-empty details, no recurrence/color; other fields must stay unchanged. |
 | Outgoing text | Default-off description/location option, optionally with simultaneous title change. Separate capsules, wire/proofs, cursors and consent; raw CRLF intent is distinct from canonical LF readback. | [Text delivery](SHARED_TEXT_PREPARATION.md). Creation mode must be enabled; narrow simple-event profile, unchanged dates and metadata. |
 | Outgoing time | Default-off date/duration option for simple timed/all-day events, retaining kind, zone and all other fields. Protected preparation, guarded readback, separate durable history and native completion. | [Temporal delivery](TEMPORAL_UPDATE.md). All-day metadata uses UTC midnight and exclusive end dates. Kind/zone transitions and combined edits remain unsupported. |
-| Recovery/conflicts | UNKNOWN is inspect-only. Native writes are guarded and receipts precede acknowledgement; newer local edits survive. A shared title/text/time journal prevents competing owners across generations. Local conflict dossiers preserve observed variants. | [Capture](LOCAL_EDIT_CAPTURE.md), [conflicts](CONFLICT_ARCHIVE.md). Trustworthy edit timestamps and general conflict resolution remain unfinished. |
+| Outgoing DELETE foundation | Separate typed request, guarded single-exchange transport, authenticated exact-event inspection, returned verified conflicts and durable UNKNOWN history. Shared schema 8 arbitrates deletion with title/text/time. | [Deletion submission](DELETE_SUBMISSION.md). No deletion worker, user option, result/conflict completion or native ACK yet; live service absence semantics are unqualified. |
+| Recovery/conflicts | UNKNOWN is inspect-only. Native writes are guarded and receipts precede acknowledgement; newer local edits survive. A shared title/text/time/deletion journal prevents competing owners across generations. Local conflict dossiers preserve observed variants. | [Capture](LOCAL_EDIT_CAPTURE.md), [conflicts](CONFLICT_ARCHIVE.md). Trustworthy edit timestamps and general conflict resolution remain unfinished. |
 
 A refresh with no checkpoint commits its first staged page before draining queued
 projections, so a dirty native edit cannot prevent its own capture indefinitely.
@@ -56,7 +57,7 @@ Four actual time-editor RUN/restarted REPLAY cases also pass: single/multiple
 all-day dates and Paris autumn/spring durations. The measured time editor is
 `foundation.e.calendar` 1.0.47 on Android API 35; Samsung remains unqualified.
 
-Current host suites pass 418 domain, 798 backend and 133 app JVM cases without
+Current host suites pass 423 domain, 839 backend and 143 app JVM cases without
 skips. Physical crypto, SQL/migration, Provider, worker/recovery and option UI
 checks pass; APK builds and app lint pass. Scope-specific evidence and remaining
 qualification are in [validation](VALIDATION.md) and the linked contracts.
@@ -70,7 +71,11 @@ For a useful bidirectional RC, finish:
    Extend editor/OEM qualification beyond the measured all-day and Paris cases,
    then qualify kind/zone transitions and combined edits; ambiguous local hours
    remain held rather than guessed.
-2. Outgoing DELETE with concurrent changes and interrupted acknowledgement.
+2. Finish [outgoing DELETE](DELETE_SUBMISSION.md): the guarded request and shared
+   journal foundation is implemented and its isolated native SQL checks pass. Add
+   current native-owner/worker admission, independent consent, durable result and
+   conflict retention, typed native/SQL ACK and interrupted recovery; then qualify
+   disposable service events through the actual calendar editor.
 3. Preservation of ordinary reminders/colors during supported edits; current
    send profiles still reject many such events.
 4. Safe handling of incomplete historical creation associations and actionable

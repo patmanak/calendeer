@@ -264,10 +264,11 @@ class SharedTextOwnershipDeviceTest {
         // Recreate the exact previous additive schema in this isolated fixture only.
         SQLiteDatabase.openDatabase(context.getDatabasePath(name).absolutePath, null, SQLiteDatabase.OPEN_READWRITE).use { legacy ->
             legacy.execSQL("DROP TABLE text_update_attempts")
+            legacy.execSQL("DROP TABLE delete_attempts")
             legacy.execSQL("DROP TABLE time_update_attempts"); legacy.version = 4
         }
         TitleUpdateAttemptStore(context, name).use { migrated ->
-            assertEquals(7, migrated.readableDatabase.version)
+            assertEquals(8, migrated.readableDatabase.version)
             assertEquals(before, historicalSnapshot(migrated.readableDatabase))
             assertEquals(proof, migrated.readCompletion(scope, title.id))
             assertEquals(bare, migrated.readPreparationReservation(bare.scope, bare.eventId))
@@ -290,6 +291,7 @@ class SharedTextOwnershipDeviceTest {
         val before = historicalSnapshot(store.readableDatabase)
         store.close()
         SQLiteDatabase.openDatabase(context.getDatabasePath(name).absolutePath, null, SQLiteDatabase.OPEN_READWRITE).use {
+            it.execSQL("DROP TABLE delete_attempts")
             it.execSQL("DROP TABLE time_update_attempts")
             it.version = 4 // Unexpected pre-existing nonempty text table must not be silently adopted.
         }
