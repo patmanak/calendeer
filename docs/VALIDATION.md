@@ -77,10 +77,18 @@ new cases for the account label, explicit retry, explanation, unchanged consent,
 busy/permission/selection gates and disappearance on cleanup or sign-out.
 Compile the app and instrumentation APK with `:app:assembleDebug` and
 `:app:assembleDebugAndroidTest`, then run those suites on an authorized physical
-device. Their physical execution for this change remains NOT RUN; compilation
-does not establish rendering, touch behavior or correction of a real sync failure.
+device. All 35 cases passed on a physical device without skips. A separate
+real-session settings check confirmed the displayed enrolled account name, and
+the explicit retry returned the real application to active synchronization.
+These checks do not establish every language, OEM or correction of the underlying
+failure; an attention flag can reappear after that work finishes.
 The aggregate attention flag cannot identify the cause of an individual failure.
 Retry uses the existing worker path and never resets uncertain requests.
+`CalendeerSync` warning logs identify the reporting branch using closed stage
+codes only, without exception messages, account identifiers or event contents.
+They do not identify an individual event or prove the underlying cause.
+The 17 isolated `SystemCreatePipelineDeviceTest` cases also passed after this
+diagnostic change, retaining cancellation, consent and uncertain-outcome behavior.
 
 ## Guarded description/location delivery
 

@@ -331,6 +331,9 @@ label does not prevent account actions. A system-sync alert offers an explicit
 retry through the existing worker pipeline and expandable guidance about retained
 local changes and supported edits. It does not reset requests, change consent or
 claim that an unsupported edit can be uploaded.
+Local Android diagnostics distinguish the reporting synchronization stage with
+closed codes. They do not expose event contents or identify the root cause from
+the aggregate alert alone.
 
 | Module | Implemented | Not established by this slice |
 | --- | --- | --- |

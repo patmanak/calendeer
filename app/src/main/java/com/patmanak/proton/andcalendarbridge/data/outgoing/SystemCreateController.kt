@@ -6,6 +6,7 @@ import android.database.ContentObserver
 import android.os.Handler
 import android.os.Looper
 import android.provider.CalendarContract
+import android.util.Log
 import com.patmanak.proton.andcalendarbridge.data.calendar.AndroidCalendarProjection
 import com.patmanak.proton.andcalendarbridge.data.calendar.SystemCalendarChangeKind
 import com.patmanak.proton.andcalendarbridge.data.importing.*
@@ -103,7 +104,7 @@ class SystemCreateController(
                         publish()
                         request()
                     } catch (cancelled: CancellationException) { throw cancelled }
-                    catch (_: Exception) { mutableState.update { state -> state.copy(failed = true) } }
+                    catch (_: Exception) { reportAttention(AttentionStage.OBSERVATION_SETUP) }
                 }
         }
     }
@@ -125,7 +126,7 @@ class SystemCreateController(
                 publish()
                 request()
             } catch (cancelled: CancellationException) { throw cancelled }
-            catch (_: Exception) { mutableState.update { it.copy(failed = true) } }
+            catch (_: Exception) { reportAttention(AttentionStage.CREATE_POLICY) }
         }
     }
 
@@ -144,7 +145,7 @@ class SystemCreateController(
                 publish()
                 request()
             } catch (cancelled: CancellationException) { throw cancelled }
-            catch (_: Exception) { mutableState.update { it.copy(failed = true) } }
+            catch (_: Exception) { reportAttention(AttentionStage.TEXT_POLICY) }
         }
     }
 
@@ -169,7 +170,7 @@ class SystemCreateController(
                 publish()
                 request()
             } catch (cancelled: CancellationException) { throw cancelled }
-            catch (_: Exception) { mutableState.update { it.copy(failed = true) } }
+            catch (_: Exception) { reportAttention(AttentionStage.TITLE_POLICY) }
         }
     }
 
@@ -197,14 +198,14 @@ class SystemCreateController(
                 // A failed native scan/CREATE must not block already durable title proof.
                 // This is the same captured epoch; no new authority is acquired after a pause.
                 val recovered = titleRecovery?.run(target, fresh) { active(target, epoch) }
-                if (recovered?.failed == true) mutableState.update { it.copy(failed = true) }
+                if (recovered?.failed == true) reportAttention(AttentionStage.TITLE_RECOVERY)
                 more = more || recovered?.more == true
                 if (!active(target, epoch)) continue
                 // Existing local text proof remains recoverable with text sending disabled.
                 val recoveredText = if (textSupportAvailable) textRecovery?.run(target, fresh) {
                     active(target, epoch) && textProofAdmission?.invoke(target) == true
                 } else null
-                if (recoveredText?.failed == true) mutableState.update { it.copy(failed = true) }
+                if (recoveredText?.failed == true) reportAttention(AttentionStage.TEXT_RECOVERY)
                 more = more || recoveredText?.more == true
                 if (!active(target, epoch)) continue
                 if (!imports.configureSystemCalendar(target)) { retry = true; continue }
@@ -218,24 +219,24 @@ class SystemCreateController(
                             val retained = work.read(target, change.row)
                             if (retained != null && retained.status != SystemCreateWorkStatus.COMPLETE)
                                 work.status(retained, SystemCreateWorkStatus.UNSUPPORTED)
-                            mutableState.update { it.copy(failed = true) }
+                            reportAttention(AttentionStage.NATIVE_IDENTITY_UNSUPPORTED)
                         }
                         SystemCalendarChangeKind.IMPORTED -> {
                             val event = change.event
-                            if (event == null) mutableState.update { it.copy(failed = true) }
+                            if (event == null) reportAttention(AttentionStage.IMPORTED_IDENTITY_UNRESOLVED)
                             else {
                                 val result = if (change.deleted) imports.captureLocalDelete(target, event,
                                     mutation(target, "imported-local-change", event.value))
                                     else imports.captureSystemLocalEdit(target, event)
                                 if (result == LocalEditCaptureResult.UNAVAILABLE) retry = true
                                 if (result == LocalEditCaptureResult.UNQUALIFIED)
-                                    mutableState.update { it.copy(failed = true) }
+                                    reportAttention(AttentionStage.IMPORTED_CAPTURE_UNQUALIFIED)
                             }
                         }
                         SystemCalendarChangeKind.CAPTURED -> {
                             // A stamped row without the identity journal is never adopted by row ID.
                             val retained = work.read(target, change.row)
-                            if (retained == null) mutableState.update { it.copy(failed = true) }
+                            if (retained == null) reportAttention(AttentionStage.CAPTURED_IDENTITY_UNRESOLVED)
                             else if (retained.status == SystemCreateWorkStatus.COMPLETE) {
                                 val result = imports.reconcileHandoffLocalCreate(target, retained.localId,
                                     retained.captureId, retained.attempt)
@@ -263,22 +264,34 @@ class SystemCreateController(
                 val titles = titleUpdates?.run(target, network, fresh) {
                     active(target, epoch) && titleAdmission(target)
                 }
-                if (titles?.failed == true) mutableState.update { it.copy(failed = true) }
+                if (titles?.failed == true) reportAttention(AttentionStage.TITLE_UPDATE)
                 more = more || titles?.more == true
                 if (!active(target, epoch)) continue
                 val texts = if (textSupportAvailable) textUpdates?.run(target, network, fresh) {
                     active(target, epoch) && work.textsEnabled(target) && textAdmission?.invoke(target) == true
                 } else null
-                if (texts?.failed == true) mutableState.update { it.copy(failed = true) }
+                if (texts?.failed == true) reportAttention(AttentionStage.TEXT_UPDATE)
                 more = more || texts?.more == true
             }
             publish()
             when { retry -> ImportRunResult.RETRY; more -> ImportRunResult.CONTINUE; else -> ImportRunResult.COMPLETE }
         } catch (cancelled: CancellationException) { throw cancelled }
         catch (_: Exception) {
-            mutableState.update { it.copy(failed = true) }
+            reportAttention(AttentionStage.WORKER_FAILURE)
             ImportRunResult.RETRY
         } finally { mutableState.update { it.copy(busy = false) } }
+    }
+
+    // Closed stage codes only: no scope, row, event, payload, exception or account values.
+    private enum class AttentionStage {
+        OBSERVATION_SETUP, CREATE_POLICY, TEXT_POLICY, TITLE_POLICY, TITLE_RECOVERY, TEXT_RECOVERY,
+        NATIVE_IDENTITY_UNSUPPORTED, IMPORTED_IDENTITY_UNRESOLVED, IMPORTED_CAPTURE_UNQUALIFIED,
+        CAPTURED_IDENTITY_UNRESOLVED, TITLE_UPDATE, TEXT_UPDATE, WORKER_FAILURE,
+    }
+
+    private fun reportAttention(stage: AttentionStage) {
+        Log.w("CalendeerSync", stage.name)
+        mutableState.update { it.copy(failed = true) }
     }
 
     /** True requests backoff only for a known transient failure, never for UNKNOWN alone. */
