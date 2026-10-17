@@ -24,7 +24,7 @@
     <string name="system_title_mode">Synchroniser les modifications de titre (expérimental)</string>
     <string name="system_title_limits">Titres uniquement : événements avec horaires ou en journée entière, sans répétition, rappel, invité ni couleur personnalisée. Cela inclut les événements importés de Proton et ceux créés depuis Android après leur première synchronisation réussie. Les changements de dates, description et lieu restent dans Android.</string>
     <string name="system_create_pending">%1$d créations en attente ou à vérifier. Un envoi incertain ne sera jamais répété automatiquement.</string>
-    <string name="system_create_error">La synchronisation système nécessite une vérification. Vos données Android sont conservées.</string>
+    <string name="system_create_error">La synchronisation avec Android a rencontré un problème. Vos données sont conservées.</string>
     <string name="system_text_mode">Synchroniser les changements de description et de lieu (expérimental)</string>
     <string name="system_text_limits">Événements horaires ou journée entière, sans répétition, rappel, invité ni couleur personnalisée. Inclut les événements Proton et ceux créés dans Android après leur première synchronisation réussie. Un titre modifié avec la description ou le lieu est inclus. Les changements de dates et les suppressions restent dans Android.</string>
     <string name="system_text_overview">Lecture seule par défaut. La création, les changements de titre seul et les changements de description ou de lieu nécessitent chacun leur option. Les autres modifications et suppressions restent dans Android ; les opérations en attente sont conservées.</string>

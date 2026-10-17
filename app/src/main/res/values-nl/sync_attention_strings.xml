@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="sync_attention_title">Synchronisatie onvolledig</string>
+    <string name="sync_attention_retry">Opnieuw proberen</string>
+    <string name="sync_attention_why">Waarom?</string>
+    <string name="sync_attention_hide">Uitleg verbergen</string>
+    <string name="sync_attention_explanation">Opnieuw proberen behoudt je instellingen. Een verzending met een onzekere uitkomst wordt gecontroleerd en nooit herhaald. Een verbindingsprobleem of een niet-ondersteunde wijziging kan synchronisatie verhinderen. Bekijk bij aanhoudende problemen de kalenderopties en de onderstaande beperkingen; niet-ondersteunde wijzigingen blijven op Android.</string>
+</resources>

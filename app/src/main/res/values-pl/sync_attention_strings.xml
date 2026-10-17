@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="sync_attention_title">Niepełna synchronizacja</string>
+    <string name="sync_attention_retry">Ponów</string>
+    <string name="sync_attention_why">Dlaczego?</string>
+    <string name="sync_attention_hide">Ukryj wyjaśnienie</string>
+    <string name="sync_attention_explanation">Ponowienie zachowuje Twoje ustawienia. Wysłanie o niepewnym wyniku jest sprawdzane i nigdy nie jest powtarzane. Problem z połączeniem lub nieobsługiwana zmiana może uniemożliwić synchronizację. Jeśli problem się utrzymuje, sprawdź opcje kalendarza i poniższe ograniczenia; nieobsługiwane zmiany pozostają w Androidzie.</string>
+</resources>

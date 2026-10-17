@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="sync_attention_title">Incomplete synchronization</string>
+    <string name="sync_attention_retry">Retry</string>
+    <string name="sync_attention_why">Why?</string>
+    <string name="sync_attention_hide">Hide explanation</string>
+    <string name="sync_attention_explanation">Retry uses your existing settings. An uncertain send is checked, never sent again. A connection problem or an unsupported change can prevent synchronization. If it remains blocked, check the calendar options and the limits below; unsupported changes stay on Android.</string>
+</resources>

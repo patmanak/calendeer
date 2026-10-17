@@ -324,10 +324,17 @@ account actions, appearance, language and About; login uses shorter guidance and
 a dedicated error surface. Navigation changes no consent and schedules no work.
 Protected authentication states take priority even when settings was opened before
 sign-in. The presentation changes do not extend supported event edits.
+Settings also show the connected account name, with its email as a fallback when
+no name is available. This metadata is read locally from the authenticated
+session, kept only in memory and hidden during cleanup or sign-out. An unavailable
+label does not prevent account actions. A system-sync alert offers an explicit
+retry through the existing worker pipeline and expandable guidance about retained
+local changes and supported edits. It does not reset requests, change consent or
+claim that an unsupported edit can be uploaded.
 
 | Module | Implemented | Not established by this slice |
 | --- | --- | --- |
-| `app` | Configuration, login, discovery, read-only imports, opt-in simple system CREATE and narrow imported title UPDATE; eight languages; durable queues, Calendar Provider projection, permissions and background scheduling. | Broad Android/OEM qualification, general UPDATE/DELETE or complete event feature coverage. |
+| `app` | Configuration, login, discovery, read-only imports, opt-in simple system CREATE and narrow title/text UPDATE; eight languages; durable queues, Calendar Provider projection, permissions and background scheduling. | Broad Android/OEM qualification, general UPDATE/DELETE or complete event feature coverage. |
 | `sync` | Pure scoped models, bounded transactional pagination, access gates, immutable simple local CREATE/UPDATE/DELETE intents, conflict checks, uncertain-outcome write states, title submission contract and a separate metadata catalog controller. | General outgoing queue, broader UPDATE submission or full bidirectional reconciliation. |
 | `auth` | Contako-derived secret contract and state controller, cancellation/cleanup gates, retry policy and focused tests. | Calendar bootstrap or per-calendar capability checks. |
 | `proton-auth` | Proton Core login/session integration, discovery, Calendar key bootstrap, paginated decryption, sealed change polling, bounded recurrence mapping, experimental single simple-event CREATE and internal title UPDATE transport. | All challenge variants, external-author trust resolution, complete recurrence/history coverage or general event editing. |

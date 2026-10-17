@@ -35,6 +35,8 @@ object ProtonAuthentication {
     fun localTextPreparations(context: Context): CalendarLocalTextPreparationPort = shared(context)
     fun titleUpdates(context: Context): CalendarTitleUpdateSubmissionPort = shared(context)
     fun textUpdates(context: Context): CalendarTextUpdateSubmissionPort = shared(context)
+    /** Local display metadata only; unavailable or signed-out accounts return null. */
+    suspend fun connectedAccountLabel(context: Context): String? = shared(context).connectedAccountLabel()
     internal suspend fun matchesIdentityHash(context: Context, account: AccountId, expectedHash: String): Boolean =
         shared(context).matchesIdentityHash(account, expectedHash)
 
@@ -81,6 +83,33 @@ internal class SerializedAuthenticationPort(
     private val lock = Mutex()
     private var graph: ProtonAuthenticationGraph? = null
     private var authenticated = false
+    internal suspend fun connectedAccountLabel(): String? {
+        val caller = currentCoroutineContext()
+        caller.ensureActive()
+        return try {
+            val label = withContext(dispatcher) {
+                lock.withLock {
+                    currentCoroutineContext().ensureActive()
+                    if (!authenticated) null else {
+                        val value = try {
+                            graph?.connectedAccountLabel?.invoke()
+                        } catch (failure: Exception) {
+                            currentCoroutineContext().ensureActive()
+                            throw failure
+                        }
+                        currentCoroutineContext().ensureActive()
+                        safeConnectedAccountLabel(value)
+                    }
+                }
+            }
+            caller.ensureActive()
+            label
+        } catch (failure: Exception) {
+            caller.ensureActive()
+            if (failure is CancellationException) throw failure
+            null
+        }
+    }
     override val format: AdapterFormat = EVENT_FORMAT
     override val deltaFormat: AdapterFormat = CALENDAR_DELTA_FORMAT
 

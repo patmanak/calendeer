@@ -19,7 +19,8 @@ import com.patmanak.proton.andcalendarbridge.data.outgoing.SystemCreateUiState
 @Composable
 fun SystemCreatePanel(imports: ImportUiState, state: SystemCreateUiState,
     onMode: (ImportStore.Selection, Boolean) -> Unit, modifier: Modifier = Modifier,
-    onTitlesMode: (ImportStore.Selection, Boolean) -> Unit = { _, _ -> }) {
+    onTitlesMode: (ImportStore.Selection, Boolean) -> Unit = { _, _ -> },
+    onRetry: (() -> Unit)? = null) {
     if (!imports.authenticated || imports.selections.isEmpty()) return
     Column(modifier.fillMaxWidth().testTag("system-create-panel"), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(stringResource(R.string.system_create_title), style = MaterialTheme.typography.titleMedium)
@@ -38,7 +39,7 @@ fun SystemCreatePanel(imports: ImportUiState, state: SystemCreateUiState,
             if (pending > 0) Text(stringResource(R.string.system_create_pending, pending),
                 style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("system-create-pending"))
         }
-        if (state.failed) Text(stringResource(R.string.system_create_error), color = MaterialTheme.colorScheme.error)
+        SystemSyncAttentionCard(imports, state, onRetry)
     }
 }
 

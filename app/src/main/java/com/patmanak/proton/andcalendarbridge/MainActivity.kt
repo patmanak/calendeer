@@ -65,6 +65,16 @@ class MainActivity : ComponentActivity() {
             val systemCreates by preferences.systemCreates.state.collectAsState()
             val authenticationState by authentication.state.collectAsState()
             val archiveEpoch by preferences.imports.conflictArchiveEpoch.collectAsState()
+            val accountLabelAllowed = !verification.isRequired && !authenticationState.isSubmitting &&
+                !authenticationState.isCleanupRequired && !authenticationState.isCleanupInProgress &&
+                authenticationState.destination == com.patmanak.proton.andcalendarbridge.auth.AuthenticationDestination.AUTHENTICATED
+            // Metadata is ephemeral and cannot survive an authentication/account epoch.
+            var connectedAccountLabel by remember(accountLabelAllowed, archiveEpoch) { mutableStateOf<String?>(null) }
+            LaunchedEffect(accountLabelAllowed, archiveEpoch) {
+                if (accountLabelAllowed) {
+                    connectedAccountLabel = ProtonAuthentication.connectedAccountLabel(preferences)
+                }
+            }
             // Event history stays in ephemeral memory and never crosses an authentication epoch.
             var archiveScope by remember(archiveEpoch) { mutableStateOf<CalendarScope?>(null) }
             val archiveAllowed = !verification.isRequired && !authenticationState.isSubmitting &&
@@ -96,7 +106,7 @@ class MainActivity : ComponentActivity() {
                         if (verification.isRequired) {
                             HumanVerificationPanel(ProtonAuthentication.verification, darkTheme)
                         } else {
-                            AuthenticationPanel(authentication)
+                            AuthenticationPanel(authentication, connectedAccountLabel = connectedAccountLabel)
                         }
                     },
                     calendarContent = {

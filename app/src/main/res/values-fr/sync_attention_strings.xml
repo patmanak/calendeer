@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="sync_attention_title">Synchronisation incomplète</string>
+    <string name="sync_attention_retry">Réessayer</string>
+    <string name="sync_attention_why">Pourquoi ?</string>
+    <string name="sync_attention_hide">Masquer les explications</string>
+    <string name="sync_attention_explanation">Réessayer conserve vos options. Un envoi au résultat incertain est vérifié, jamais renvoyé. Un problème de connexion ou une modification non prise en charge peut bloquer la synchronisation. Si le blocage persiste, consultez les options du calendrier et les limites ci-dessous ; les modifications non prises en charge restent dans Android.</string>
+</resources>

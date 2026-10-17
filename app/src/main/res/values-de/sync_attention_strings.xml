@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="sync_attention_title">Synchronisierung unvollständig</string>
+    <string name="sync_attention_retry">Erneut versuchen</string>
+    <string name="sync_attention_why">Warum?</string>
+    <string name="sync_attention_hide">Erklärung ausblenden</string>
+    <string name="sync_attention_explanation">Ein erneuter Versuch behält Ihre Einstellungen bei. Ein Versand mit ungewissem Ergebnis wird überprüft und niemals wiederholt. Ein Verbindungsproblem oder eine nicht unterstützte Änderung kann die Synchronisierung verhindern. Prüfen Sie bei anhaltenden Problemen die Kalenderoptionen und die folgenden Einschränkungen. Nicht unterstützte Änderungen bleiben auf Android.</string>
+</resources>

@@ -40,6 +40,7 @@ class CalendarDashboardUiDeviceTest {
     private val selectionChanges = mutableListOf<Boolean>()
     private val createChanges = mutableListOf<Boolean>()
     private val titleChanges = mutableListOf<Boolean>()
+    private val textChanges = mutableListOf<Boolean>()
 
     private fun start() {
         compose.setContent {
@@ -50,7 +51,8 @@ class CalendarDashboardUiDeviceTest {
                     onSync = { syncs++ }, onRequestPermission = { permissions++ }, onOpenSettings = { settings++ },
                     onMode = { selected, enabled -> assertEquals(selection.scope, selected.scope); createChanges += enabled },
                     onTitlesMode = { selected, enabled -> assertEquals(selection.scope, selected.scope); titleChanges += enabled },
-                    modifier = Modifier.verticalScroll(rememberScrollState()))
+                    modifier = Modifier.verticalScroll(rememberScrollState()),
+                    onTextMode = { selected, enabled -> assertEquals(selection.scope, selected.scope); textChanges += enabled })
             }
         }
     }
@@ -147,6 +149,84 @@ class CalendarDashboardUiDeviceTest {
         compose.onNodeWithTag(CalendarDashboardTags.OUTGOING_ERROR).assertExists()
         compose.onAllNodesWithText(summary.title).assertCountEquals(1)
         compose.onNodeWithTag(CalendarCatalogTags.REFRESH).assertIsNotEnabled()
+    }
+
+    @Test fun attentionExplainsPreservationAndRetriesOnlyAfterExplicitClickWithoutChangingConsent() {
+        creates.value = creates.value.copy(failed = true, textSupportAvailable = true)
+        start()
+        compose.onNodeWithTag(SystemSyncAttentionTags.PRESERVED)
+            .assertTextEquals(compose.activity.getString(R.string.system_create_error))
+        compose.onNodeWithTag(SystemSyncAttentionTags.DETAILS).assertDoesNotExist()
+        compose.onNodeWithTag(SystemSyncAttentionTags.WHY).performScrollTo().performClick()
+        compose.onNodeWithTag(SystemSyncAttentionTags.DETAILS).assertExists()
+        compose.onNode(hasText(compose.activity.getString(R.string.sync_attention_explanation)) and
+            hasAnyAncestor(hasTestTag(SystemSyncAttentionTags.DETAILS))).assertExists()
+        compose.onNode(hasText(compose.activity.getString(R.string.system_text_limits)) and
+            hasAnyAncestor(hasTestTag(SystemSyncAttentionTags.DETAILS))).assertExists()
+        compose.runOnIdle {
+            assertEquals(0, syncs); assertEquals(0, refreshes); assertEquals(0, permissions); assertEquals(0, settings)
+            assertEquals(emptyList<Boolean>(), createChanges); assertEquals(emptyList<Boolean>(), titleChanges)
+            assertEquals(emptyList<Boolean>(), textChanges); assertEquals(emptyList<Boolean>(), selectionChanges)
+        }
+        compose.onNodeWithTag(SystemSyncAttentionTags.RETRY).performScrollTo().performClick()
+        compose.runOnIdle { assertEquals(1, syncs); assertEquals(true, creates.value.failed) }
+        compose.onNodeWithTag(CalendarDashboardTags.OUTGOING_ERROR).assertExists()
+        compose.onNodeWithTag(SystemSyncAttentionTags.WHY).performScrollTo().performClick()
+        compose.onNodeWithTag(SystemSyncAttentionTags.DETAILS).assertDoesNotExist()
+        compose.runOnIdle {
+            assertEquals(emptyList<Boolean>(), createChanges); assertEquals(emptyList<Boolean>(), titleChanges)
+            assertEquals(emptyList<Boolean>(), textChanges); assertEquals(emptyList<Boolean>(), selectionChanges)
+        }
+    }
+
+    @Test fun retryAndMainSyncRequirePermissionAnAvailableSelectionAndBothWorkersIdle() {
+        creates.value = creates.value.copy(failed = true)
+        start()
+        val ready = imports.value
+        val blocked = listOf(ready.copy(hasPermission = false), ready.copy(busy = true),
+            ready.copy(selections = emptyList()), ready.copy(selections = listOf(selection.copy(enabled = false))),
+            ready.copy(selections = listOf(selection.copy(available = false))))
+        for (state in blocked) {
+            compose.runOnIdle { imports.value = state }
+            compose.onNodeWithTag(SystemSyncAttentionTags.RETRY).assertIsNotEnabled()
+            compose.onNodeWithTag(CalendarImportTags.SYNC).assertIsNotEnabled()
+        }
+        compose.runOnIdle { imports.value = ready; creates.value = creates.value.copy(busy = true) }
+        compose.onNodeWithTag(SystemSyncAttentionTags.RETRY).assertIsNotEnabled()
+        compose.onNodeWithTag(CalendarImportTags.SYNC).assertIsNotEnabled()
+        compose.onNodeWithText(compose.activity.getString(R.string.calendar_dashboard_working)).assertExists()
+        compose.runOnIdle { creates.value = creates.value.copy(busy = false) }
+        compose.onNodeWithTag(SystemSyncAttentionTags.RETRY).assertIsEnabled()
+        compose.onNodeWithTag(CalendarImportTags.SYNC).assertIsEnabled()
+        compose.runOnIdle { assertEquals(0, syncs) }
+    }
+
+    @Test fun attentionFollowsActualFailureAndAuthenticationWithoutAutomaticRequests() {
+        start()
+        compose.onNodeWithTag(CalendarDashboardTags.OUTGOING_ERROR).assertDoesNotExist()
+        compose.runOnIdle { creates.value = creates.value.copy(failed = true) }
+        compose.onNodeWithTag(SystemSyncAttentionTags.RETRY).assertExists()
+        compose.runOnIdle { creates.value = creates.value.copy(failed = false) }
+        compose.onNodeWithTag(CalendarDashboardTags.OUTGOING_ERROR).assertDoesNotExist()
+        compose.runOnIdle { creates.value = creates.value.copy(failed = true); imports.value = imports.value.copy(authenticated = false) }
+        compose.onNodeWithTag(CalendarDashboardTags.OUTGOING_ERROR).assertDoesNotExist()
+        compose.runOnIdle { assertEquals(0, syncs) }
+    }
+
+    @Test fun legacyPanelWithoutRetryCallbackOffersExplanationWithoutAnOrphanAction() {
+        creates.value = creates.value.copy(failed = true)
+        compose.setContent {
+            MaterialTheme {
+                SystemCreatePanel(imports.value, creates.value, onMode = { _, enabled -> createChanges += enabled },
+                    modifier = Modifier.verticalScroll(rememberScrollState()))
+            }
+        }
+        compose.onNodeWithTag(SystemSyncAttentionTags.RETRY).assertDoesNotExist()
+        compose.onNodeWithTag(SystemSyncAttentionTags.WHY).performScrollTo().performClick()
+        compose.onNodeWithTag(SystemSyncAttentionTags.DETAILS).assertExists()
+        compose.onNode(hasText(compose.activity.getString(R.string.system_title_limits)) and
+            hasAnyAncestor(hasTestTag(SystemSyncAttentionTags.DETAILS))).assertExists()
+        compose.runOnIdle { assertEquals(emptyList<Boolean>(), createChanges); assertEquals(0, syncs) }
     }
 
     @Test fun discoveryWithoutAPersistedScopeDoesNotInventAnActionableSelection() {

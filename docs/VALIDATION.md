@@ -60,6 +60,28 @@ Keep run-specific outputs, device/account identities, questions and reviewer
 handoffs in ignored local files. Update public acceptance and limitations when
 behavior changes, not for each command run.
 
+## Account label and actionable synchronization attention
+
+`ProtonConnectedAccountLabelTest` uses synthetic local Core account records and
+a serialized facade with event services that refuse every call. It covers a
+unique ready authenticated account, username/email selection, display bounds,
+unavailable metadata, fresh reads, logout serialization and cancellation priority.
+It does not establish live account or network behavior.
+The ten reader cases passed within the complete 676-case backend JVM suite;
+the 112 app JVM cases also passed. App and instrumentation APK compilation passed.
+
+The focused presentation suites are `ConnectedAccountUiDeviceTest`,
+`CalendarDashboardUiDeviceTest`, `AuthenticationUiDeviceTest` and
+`CalendeerScreenDeviceTest`. Their 35 cases use synthetic states, including eight
+new cases for the account label, explicit retry, explanation, unchanged consent,
+busy/permission/selection gates and disappearance on cleanup or sign-out.
+Compile the app and instrumentation APK with `:app:assembleDebug` and
+`:app:assembleDebugAndroidTest`, then run those suites on an authorized physical
+device. Their physical execution for this change remains NOT RUN; compilation
+does not establish rendering, touch behavior or correction of a real sync failure.
+The aggregate attention flag cannot identify the cause of an individual failure.
+Retry uses the existing worker path and never resets uncertain requests.
+
 ## Guarded description/location delivery
 
 `DirtyProjectionRefreshDeviceTest` exercises eight isolated real-SQL cases with

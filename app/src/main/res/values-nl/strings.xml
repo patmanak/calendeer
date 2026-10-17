@@ -24,7 +24,7 @@
     <string name="system_title_mode">Titelwijzigingen synchroniseren (experimenteel)</string>
     <string name="system_title_limits">Alleen titels: afspraken met tijdstip of voor een hele dag, zonder herhaling, herinneringen, gasten of eigen kleuren. Dit geldt voor uit Proton geïmporteerde afspraken en in Android aangemaakte afspraken na hun eerste geslaagde synchronisatie. Wijzigingen van datums, beschrijvingen en locaties blijven in Android.</string>
     <string name="system_create_pending">%1$d afspraken wachten of moeten worden gecontroleerd. Een onzekere verzending wordt nooit automatisch herhaald.</string>
-    <string name="system_create_error">De synchronisatie vereist aandacht. Je Android-gegevens blijven behouden.</string>
+    <string name="system_create_error">Er is een probleem opgetreden bij de synchronisatie met Android. Je gegevens blijven bewaard.</string>
     <string name="system_text_mode">Wijzigingen van beschrijving en locatie synchroniseren (experimenteel)</string>
     <string name="system_text_limits">Eenvoudige afspraken met een tijd of voor de hele dag, zonder herhaling, herinneringen, gasten of eigen kleuren. Voor Proton-afspraken en afspraken die in Android zijn gemaakt na hun eerste geslaagde synchronisatie. Een titel die samen met de beschrijving of locatie wijzigt, wordt meegenomen. Datumwijzigingen en verwijderingen blijven in Android.</string>
     <string name="system_text_overview">Standaard alleen lezen. Aanmaken, wijzigingen van alleen de titel en wijzigingen van beschrijving of locatie vereisen elk hun eigen optie. Andere wijzigingen en verwijderingen blijven in Android; wachtende acties blijven bewaard.</string>

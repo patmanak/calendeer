@@ -64,6 +64,7 @@ fun AuthenticationPanel(
     controller: AuthenticationController,
     modifier: Modifier = Modifier,
     onOpenAppSettings: (() -> Unit)? = null,
+    connectedAccountLabel: String? = null,
 ) {
     val state by controller.state.collectAsState()
     val context = LocalContext.current
@@ -75,6 +76,7 @@ fun AuthenticationPanel(
                 Uri.fromParts("package", context.packageName, null)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         },
         modifier = modifier,
+        connectedAccountLabel = connectedAccountLabel,
     )
 }
 
@@ -87,6 +89,7 @@ internal fun AuthenticationContent(
     onCancel: () -> Unit,
     onOpenAppSettings: () -> Unit,
     modifier: Modifier = Modifier,
+    connectedAccountLabel: String? = null,
 ) {
     // Deliberately excluded from saved state. Dropping Strings cannot guarantee heap zeroization;
     // only the transferred mutable arrays have the controller's explicit clearing guarantee.
@@ -136,8 +139,16 @@ internal fun AuthenticationContent(
             Text(stringResource(if (connected) R.string.auth_redesign_account else titleResource(state)),
                 style = if (connected) MaterialTheme.typography.titleMedium else MaterialTheme.typography.titleLarge,
                 modifier = Modifier.semantics { heading() })
-            if (connected) Text(stringResource(R.string.auth_redesign_connected),
-                style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+            if (connected) {
+                if (!state.isCleanupRequired && !state.isCleanupInProgress && !state.isSubmitting) {
+                    connectedAccountLabel?.takeIf { it.isNotBlank() }?.let { label ->
+                        Text(label, style = MaterialTheme.typography.bodyLarge,
+                            modifier = Modifier.testTag(AuthenticationTags.ACCOUNT_LABEL))
+                    }
+                }
+                Text(stringResource(R.string.auth_redesign_connected),
+                    style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+            }
             val description = when (state.destination) {
                 AuthenticationDestination.SIGN_IN -> R.string.auth_redesign_sign_in_help
                 AuthenticationDestination.CODE -> R.string.auth_redesign_code_help
@@ -269,4 +280,5 @@ internal object AuthenticationTags {
     const val CANCEL = "auth_cancel"
     const val MESSAGE = "auth_message"
     const val APP_SETTINGS = "auth_app_settings"
+    const val ACCOUNT_LABEL = "auth_account_label"
 }

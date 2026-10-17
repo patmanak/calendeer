@@ -51,19 +51,18 @@ fun CalendarDashboard(
             fontWeight = FontWeight.SemiBold, modifier = Modifier.semantics { heading() })
         Text(stringResource(R.string.calendar_dashboard_intro), color = MaterialTheme.colorScheme.onSurfaceVariant)
         if (!imports.hasPermission) PermissionCard(onRequestPermission, onOpenSettings)
+        val syncing = imports.busy || creates.busy
         Button(onClick = onSync,
-            enabled = imports.hasPermission && !imports.busy && imports.selections.any { it.enabled },
+            enabled = canRequestSystemSync(imports, creates),
             modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp).testTag(CalendarImportTags.SYNC)) {
-            if (imports.busy) {
+            if (syncing) {
                 CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
                 Spacer(Modifier.width(10.dp))
             }
-            Text(stringResource(if (imports.busy) R.string.calendar_dashboard_working else R.string.calendar_dashboard_sync))
+            Text(stringResource(if (syncing) R.string.calendar_dashboard_working else R.string.calendar_dashboard_sync))
         }
         CatalogNotice(catalog, imports.selections.isNotEmpty())
-        if (creates.failed) Text(stringResource(R.string.system_create_error),
-            color = MaterialTheme.colorScheme.error,
-            modifier = Modifier.testTag(CalendarDashboardTags.OUTGOING_ERROR).semantics { liveRegion = LiveRegionMode.Polite })
+        SystemSyncAttentionCard(imports, creates, onRetry = onSync)
         imports.selections.forEach { selection ->
             key(selection.scope) {
                 CalendarCard(selection, imports, creates, onSetEnabled, onMode, onTitlesMode, onOpenConflicts, onTextMode)

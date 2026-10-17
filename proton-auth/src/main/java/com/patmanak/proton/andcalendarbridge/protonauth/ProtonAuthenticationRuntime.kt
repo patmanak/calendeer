@@ -34,6 +34,8 @@ import java.nio.charset.CodingErrorAction
 import java.util.Optional
 import kotlin.math.ceil
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
 import me.proton.core.account.data.repository.AccountRepositoryImpl
@@ -89,8 +91,49 @@ internal data class ProtonAuthenticationGraph(
     val titleUpdates: CalendarTitleUpdateSubmissionPort? = null,
     val localTexts: CalendarLocalTextPreparationPort = CalendarLocalTextPreparationPort { _, _ -> localEditUnavailable(LocalEditPreparationFailure.UNSUPPORTED) },
     val textUpdates: CalendarTextUpdateSubmissionPort? = null,
+    val connectedAccountLabel: suspend () -> String? = { null },
     val catalog: CalendarCatalogPort,
 )
+
+/** Reads local account metadata, never users, addresses, sessions or credentials over HTTP. */
+internal suspend fun readConnectedAccountLabel(
+    readAccounts: suspend () -> List<me.proton.core.account.domain.entity.Account>,
+): String? {
+    val caller = currentCoroutineContext()
+    caller.ensureActive()
+    return try {
+        val accounts = readAccounts()
+        caller.ensureActive()
+        val account = accounts.singleOrNull()
+        if (account == null || account.state != me.proton.core.account.domain.entity.AccountState.Ready ||
+            account.sessionState != me.proton.core.account.domain.entity.SessionState.Authenticated ||
+            account.sessionId == null) null
+        else safeConnectedAccountLabel(account.username) ?: safeConnectedAccountLabel(account.email)
+    } catch (failure: Exception) {
+        caller.ensureActive()
+        if (failure is CancellationException) throw failure
+        null
+    }
+}
+
+/** A bounded display label, with no fallback to account or session identifiers. */
+internal fun safeConnectedAccountLabel(value: String?): String? {
+    if (value == null || value.length > 256 || value.any {
+            it.isISOControl() || Character.getType(it) == Character.FORMAT.toInt() ||
+                Character.getType(it) == Character.LINE_SEPARATOR.toInt() ||
+                Character.getType(it) == Character.PARAGRAPH_SEPARATOR.toInt()
+        }) return null
+    val label = value.trim().takeIf { it.isNotEmpty() } ?: return null
+    return try {
+        val bytes = Charsets.UTF_8.newEncoder()
+            .onMalformedInput(CodingErrorAction.REPORT)
+            .onUnmappableCharacter(CodingErrorAction.REPORT)
+            .encode(CharBuffer.wrap(label))
+        label.takeIf { bytes.remaining() <= 1024 }
+    } catch (_: java.nio.charset.CharacterCodingException) {
+        null
+    }
+}
 
 internal object ProtonAuthenticationRuntime {
     fun build(context: Context, humanVerification: GateCHumanVerificationHooks): ProtonAuthenticationGraph {
@@ -235,6 +278,7 @@ internal object ProtonAuthenticationRuntime {
                         .digest(account.username.orEmpty().trim().lowercase(java.util.Locale.ROOT).toByteArray(Charsets.UTF_8))
                         .joinToString("") { "%02x".format(it) } == expectedHash
             },
+            connectedAccountLabel = { readConnectedAccountLabel { accountRepository.getAccounts().first() } },
             preparations = ProtonCreatePreparationAdapter(readSession, contextRefresher,
                 ProtonCreateCalendarMetadataRemote(network.apiProvider), eventRemote, localAddresses,
                 ProtonCreateContextResolver(cryptoContext)::prepare, eventProtector),

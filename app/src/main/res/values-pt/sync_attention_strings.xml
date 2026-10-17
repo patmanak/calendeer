@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="sync_attention_title">Sincronização incompleta</string>
+    <string name="sync_attention_retry">Tentar novamente</string>
+    <string name="sync_attention_why">Porquê?</string>
+    <string name="sync_attention_hide">Ocultar explicação</string>
+    <string name="sync_attention_explanation">Uma nova tentativa mantém as suas opções. Um envio com resultado incerto é verificado, nunca repetido. Um problema de ligação ou uma alteração não suportada pode impedir a sincronização. Se o bloqueio persistir, consulte as opções do calendário e os limites abaixo; as alterações não suportadas permanecem no Android.</string>
+</resources>

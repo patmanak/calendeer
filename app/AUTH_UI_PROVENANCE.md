@@ -46,3 +46,10 @@ fixes when changing these adaptations; copied source does not update automatical
 When Proton cannot be reached, the panel offers an explicit action to open this
 application's standard Android settings page. It does not change permissions or
 network policy, and is absent from normal sign-in and authenticated states.
+
+The connected panel additionally accepts a display label from the serialized
+Proton session boundary. It does not reuse the credential input or persist the
+label in saved state. Settings show it only for an authenticated connection,
+outside submission and cleanup. Missing metadata leaves the existing connected
+status and sign-out action available. The presentation and its synthetic fixtures
+are original project changes; no additional upstream code is copied.
