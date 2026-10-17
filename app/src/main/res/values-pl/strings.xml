@@ -26,8 +26,11 @@
     <string name="system_create_pending">%1$d operacji oczekuje lub wymaga sprawdzenia. Niepewne wysłanie nigdy nie jest automatycznie powtarzane.</string>
     <string name="system_create_error">Wystąpił problem podczas synchronizacji z Androidem. Twoje dane są zachowane.</string>
     <string name="system_text_mode">Synchronizuj zmiany opisu i miejsca (eksperymentalne)</string>
-    <string name="system_text_limits">Proste wydarzenia godzinowe lub całodniowe, bez powtórzeń, przypomnień, gości ani własnych kolorów. Obejmuje wydarzenia Proton oraz utworzone w Androidzie po pierwszej udanej synchronizacji. Tytuł zmieniony razem z opisem lub miejscem też jest uwzględniany. Zmiany dat i usunięcia pozostają w Androidzie.</string>
-    <string name="system_text_overview">Domyślnie tylko odczyt. Tworzenie, zmiany samego tytułu oraz zmiany opisu lub miejsca wymagają osobnych opcji. Inne zmiany i usunięcia pozostają w Androidzie; oczekujące operacje są zachowywane.</string>
-    <string name="system_title_limits_with_text">Do zmiany samego tytułu prostych wydarzeń. Opis i miejsce korzystają z osobnej opcji tekstu. Zmiany dat i usunięcia pozostają w Androidzie.</string>
+    <string name="system_text_limits">Proste wydarzenia godzinowe lub całodniowe, bez powtórzeń, przypomnień, gości ani własnych kolorów. Obejmuje wydarzenia Proton oraz utworzone w Androidzie po pierwszej udanej synchronizacji. Tytuł zmieniony razem z opisem lub miejscem też jest uwzględniany. Zmiany samych dat korzystają z osobnej opcji czasu. Połączone zmiany dat i tekstu oraz usunięcia pozostają w Androidzie.</string>
+    <string name="system_text_overview">Domyślnie tylko do odczytu. Tworzenie oraz zmiany tytułu, tekstu i czasu wymagają osobnych opcji. Nieobsługiwane zmiany i usunięcia pozostają w Androidzie; oczekujące operacje są zachowywane.</string>
+    <string name="system_title_limits_with_text">Do zmiany samego tytułu prostych wydarzeń. Opis i miejsce korzystają z osobnej opcji tekstu. Zmiany samych dat korzystają z osobnej opcji czasu. Połączone zmiany dat i tekstu oraz usunięcia pozostają w Androidzie.</string>
     <string name="calendar_dashboard_text_mode">Zmiany tekstu włączone</string>
+    <string name="system_time_mode">Synchronizuj zmiany daty i godziny (eksperymentalne)</string>
+    <string name="system_time_limits">Tylko proste wydarzenia z godziną w tej samej strefie czasowej, bez powtórzeń, przypomnień, gości ani własnych kolorów. Zmieniaj daty lub czas trwania bez jednoczesnej zmiany innych pól. Wydarzenia całodniowe i usunięcia pozostają w Androidzie.</string>
+    <string name="calendar_dashboard_time_mode">Zmiany godzin włączone</string>
 </resources>

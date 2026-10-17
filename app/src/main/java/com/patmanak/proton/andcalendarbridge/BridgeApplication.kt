@@ -28,10 +28,13 @@ import com.patmanak.proton.andcalendarbridge.data.outgoing.SystemTitleRecoveryCo
 import com.patmanak.proton.andcalendarbridge.data.outgoing.SystemTitleUpdateController
 import com.patmanak.proton.andcalendarbridge.data.outgoing.CoordinatorSystemTitleOperations
 import com.patmanak.proton.andcalendarbridge.data.outgoing.CoordinatorSystemTextOperations
+import com.patmanak.proton.andcalendarbridge.data.outgoing.CoordinatorSystemTimeOperations
 
 class BridgeApplication : Application() {
     // Per-calendar explicit consent remains required for this restricted experimental profile.
     private val textSynchronizationQualified = true
+    // Timed service readback qualified; each calendar still requires separate time consent.
+    private val timeSynchronizationQualified = true
     private val authenticationScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val createAttempts by lazy { CreateAttemptStore(this) }
     private val localCreateCaptures by lazy { LocalCreateStore(this) }
@@ -69,18 +72,38 @@ class BridgeApplication : Application() {
             AndroidTitleRecoveryCursorStore(this, "calendar-text-inspection-cursors"),
             textOperations, { target -> textRecovery.reset(target) })
     }
+    private val timeOperations: CoordinatorSystemTimeOperations by lazy {
+        CoordinatorSystemTimeOperations(imports, titleAttempts.timeJournal,
+            ProtonAuthentication.localTimePreparations(this), ProtonAuthentication.timeUpdates(this))
+    }
+    private val timeRecovery by lazy {
+        SystemTitleRecoveryController(AndroidTitleRecoveryCursorStore(this, "calendar-time-recovery-cursors"),
+            recover = { com.patmanak.proton.andcalendarbridge.sync.TitleUpdateOfflineRecoveryProgress(inactive = true) },
+            guardedRecover = { query, active ->
+                timeOperations.recoverOffline(query) { requested -> requested == query.scope && active() }
+            })
+    }
+    private val timeUpdates by lazy {
+        SystemTitleUpdateController(
+            AndroidTitleRecoveryCursorStore(this, "calendar-time-owner-cursors"),
+            AndroidTitleRecoveryCursorStore(this, "calendar-time-inspection-cursors"),
+            timeOperations, { target -> timeRecovery.reset(target) })
+    }
     val systemCreates by lazy { SystemCreateController(this, imports, nativeCalendar, systemCreateWork,
         localCreateCaptures, createAttempts, ProtonAuthentication.createSubmissions(this), authenticationScope,
         titleRecovery = titleRecovery, titleUpdates = titleUpdates,
         textRecovery = if (textSynchronizationQualified) textRecovery else null,
-        textUpdates = if (textSynchronizationQualified) textUpdates else null) }
+        textUpdates = if (textSynchronizationQualified) textUpdates else null,
+        timeRecovery = if (timeSynchronizationQualified) timeRecovery else null,
+        timeUpdates = if (timeSynchronizationQualified) timeUpdates else null) }
 
     val imports: ImportCoordinator by lazy {
         ImportCoordinator(this, ImportStore(this), ProtonAuthentication.events(this),
             nativeCalendar, authenticationScope, creates = createAttempts,
             localCreates = localCreateCaptures, systemCreatesEnabled = systemCreateWork::modeEnabled,
             systemTitlesEnabled = systemCreateWork::titlesEnabled,
-            systemTextsEnabled = systemCreateWork::textsEnabled)
+            systemTextsEnabled = systemCreateWork::textsEnabled,
+            systemTimesEnabled = systemCreateWork::timesEnabled)
     }
 
     // App-owned: activity recreation must neither repeat login nor revoke a retained session.

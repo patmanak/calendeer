@@ -135,6 +135,15 @@ class SystemCreateWorkStore(context: Context, name: String = "system-creates.db"
         }
     }
 
+    @Synchronized fun timesEnabled(scope: CalendarScope): Boolean =
+        modeEnabled(scope) && modes.getBoolean("times-${modeKey(scope)}", false)
+
+    @Synchronized fun setTimesMode(scope: CalendarScope, enabled: Boolean) {
+        check(modes.edit().putBoolean("times-${modeKey(scope)}", enabled && modeEnabled(scope)).commit()) {
+            "System time mode was not persisted"
+        }
+    }
+
     @Synchronized fun titlesEnabled(scope: CalendarScope): Boolean =
         modeEnabled(scope) && modes.getBoolean("titles-${modeKey(scope)}", false)
 
@@ -146,7 +155,7 @@ class SystemCreateWorkStore(context: Context, name: String = "system-creates.db"
 
     @Synchronized fun setMode(scope: CalendarScope, enabled: Boolean) {
         val update = modes.edit().putBoolean(modeKey(scope), enabled)
-        if (!enabled) update.remove("titles-${modeKey(scope)}").remove("texts-${modeKey(scope)}")
+        if (!enabled) update.remove("titles-${modeKey(scope)}").remove("texts-${modeKey(scope)}").remove("times-${modeKey(scope)}")
         check(update.commit()) { "System create mode was not persisted" }
     }
 

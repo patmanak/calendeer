@@ -13,7 +13,7 @@ The narrower same-kind/same-zone profile refuses ambiguous local offsets, embedd
 timezone components and unsupported metadata layouts. Historical text/title APIs
 and protected formats are unchanged. No new copied source, dependency, signing,
 encryption or transport is added. See [temporal scope](../docs/TEMPORAL_UPDATE.md)
-for the implemented boundary and remaining service/crypto qualification.
+for the implemented boundary and measured qualification limits.
 
 The protected temporal continuation reuses the existing `ProtonEventDecryptor`
 shared-fragment verification/signing/encryption path and full-base decoder, with
@@ -33,8 +33,12 @@ The separate guarded temporal submission adapter reuses the existing context,
 transport, one-shot dispatch permit and decoder contracts. It adds typed temporal
 history and response evidence while retaining claim-before-send and UNKNOWN
 inspection-only behavior. The authentication facade shares mutex/lease mechanics
-between distinct text/time ports. Controlled tests qualify those mechanics; temporal
-service acceptance and automatic worker delivery remain unqualified and inactive.
+between distinct text/time ports. A controlled ordinary UTC timed service journey
+and production Provider/worker journey now qualify this measured wire/readback path,
+including offline ACK and immutable restarted replay. Sending requires independent
+per-calendar consent and is timed-only. No all-day API, non-UTC/DST service, actual
+calendar-editor or concurrency guarantee follows from this evidence. See the
+[temporal contract](../docs/TEMPORAL_UPDATE.md) for full scope.
 
 ## Offline shared-title preservation experiment
 

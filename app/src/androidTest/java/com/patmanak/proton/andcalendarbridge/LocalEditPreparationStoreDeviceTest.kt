@@ -205,6 +205,9 @@ class LocalEditPreparationStoreDeviceTest {
         store.close()
         raw(name) {
             // Remove empty later tables to reconstruct the historical fixture.
+            it.execSQL("DROP TABLE local_time_edit_preparations")
+            it.execSQL("DROP TABLE time_update_acknowledgements")
+            it.execSQL("DROP TABLE time_update_acknowledgement_history")
             it.execSQL("DROP TABLE local_text_edit_preparations")
             it.execSQL("DROP TABLE text_update_acknowledgements")
             it.execSQL("DROP TABLE text_update_acknowledgement_history")
@@ -217,7 +220,7 @@ class LocalEditPreparationStoreDeviceTest {
             it.version = 13
         }
         ImportStore(context, name).use { upgraded ->
-            assertEquals(20, upgraded.readableDatabase.version)
+            assertEquals(21, upgraded.readableDatabase.version)
             assertEquals(edit(), upgraded.localEdit(scope, base.eventId)); assertEquals(base, upgraded.projectedBaseline(scope, base.eventId))
             assertEquals(receipt, upgraded.transaction(scope) { (this as StagedSyncTransaction).received })
             assertNull(upgraded.localEditPreparation(scope, base.eventId)); assertTrue(upgraded.retainLocalEditPreparation(preparation()))

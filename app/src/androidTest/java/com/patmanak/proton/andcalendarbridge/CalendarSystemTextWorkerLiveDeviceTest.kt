@@ -127,6 +127,12 @@ class CalendarSystemTextWorkerLiveDeviceTest {
         assertTrue("Bound the enrolled selection set without duplicate scopes", initialSelections.size <= 128 &&
             initialSelections.map { it.scope }.distinct().size == initialSelections.size)
         assertTrue("Isolation never changes another account", initialSelections.all { it.scope.account == target.account })
+        // This historical fixture saves three flags. Refuse a fourth-mode preference rather
+        // than clearing time consent through a temporary CREATE disable that it cannot restore.
+        SystemCreateWorkStore(app).use { store ->
+            assertTrue("The historical text fixture cannot own time consent",
+                initialSelections.none { store.timesEnabled(it.scope) })
+        }
         val others = SystemCreateWorkStore(app).use { store ->
             initialSelections.filter { it.scope != target }.sortedWith(compareBy({ it.scope.calendar.value }, { it.scope.generation }))
                 .map { selected -> OtherModes(selected.scope, listOf(store.modeEnabled(selected.scope),

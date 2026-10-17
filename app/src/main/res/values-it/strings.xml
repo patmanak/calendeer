@@ -26,8 +26,11 @@
     <string name="system_create_pending">%1$d creazioni in attesa o da verificare. Un invio incerto non viene mai ripetuto automaticamente.</string>
     <string name="system_create_error">Si è verificato un problema durante la sincronizzazione con Android. I dati vengono conservati.</string>
     <string name="system_text_mode">Sincronizza le modifiche a descrizione e luogo (sperimentale)</string>
-    <string name="system_text_limits">Eventi semplici con orario o di un giorno intero, senza ripetizioni, promemoria, invitati o colori personalizzati. Include gli eventi Proton e quelli creati in Android dopo la prima sincronizzazione riuscita. Il titolo modificato insieme alla descrizione o al luogo è incluso. Modifiche alle date ed eliminazioni restano in Android.</string>
-    <string name="system_text_overview">Sola lettura per impostazione predefinita. Creazione, modifiche al solo titolo e modifiche a descrizione o luogo richiedono ciascuna la propria opzione. Altre modifiche ed eliminazioni restano in Android; le operazioni in attesa vengono conservate.</string>
-    <string name="system_title_limits_with_text">Per modificare solo il titolo degli eventi semplici. Descrizione e luogo usano l’opzione testo separata. Modifiche alle date ed eliminazioni restano in Android.</string>
+    <string name="system_text_limits">Eventi semplici con orario o di un giorno intero, senza ripetizioni, promemoria, invitati o colori personalizzati. Include gli eventi Proton e quelli creati in Android dopo la prima sincronizzazione riuscita. Il titolo modificato insieme alla descrizione o al luogo è incluso. Le sole modifiche alle date usano l’opzione orario separata. Le modifiche combinate di date e testo e le eliminazioni restano su Android.</string>
+    <string name="system_text_overview">Sola lettura per impostazione predefinita. La creazione e le modifiche di titolo, testo e orario richiedono ciascuna una propria opzione. Le modifiche non supportate e le eliminazioni restano su Android; le operazioni in attesa vengono conservate.</string>
+    <string name="system_title_limits_with_text">Per modificare solo il titolo degli eventi semplici. Descrizione e luogo usano l’opzione testo separata. Le sole modifiche alle date usano l’opzione orario separata. Le modifiche combinate di date e testo e le eliminazioni restano su Android.</string>
     <string name="calendar_dashboard_text_mode">Modifiche al testo attivate</string>
+    <string name="system_time_mode">Sincronizza modifiche di data e ora (sperimentale)</string>
+    <string name="system_time_limits">Solo eventi semplici con orario e lo stesso fuso orario, senza ripetizioni, promemoria, invitati o colori personalizzati. Modifica le date o la durata senza modificare altri campi contemporaneamente. Gli eventi di tutto il giorno e le eliminazioni restano su Android.</string>
+    <string name="calendar_dashboard_time_mode">Modifiche orario attivate</string>
 </resources>

@@ -2,14 +2,15 @@
 
 Confirmed target: date/time editing through the Android calendar client, with
 replaceable Proton integration, durable offline work and no bridge event editor.
-This document defines the initial bounded profile; it does not enable sending.
+This document defines the initial bounded profile.
 
-The immutable candidate, plaintext patcher, protected cryptographic preparation,
-authenticated preparation port and offline request/readback rules are implemented.
-Guarded submission, durable attempt ownership and typed native acknowledgement
-are implemented as separate capabilities. Import-coordinator orchestration,
-worker consent/UI and live service qualification remain unfinished. The installed
-application has no new time-edit option and performs no automatic temporal sending.
+Protected cryptographic preparation, guarded submission/readback, durable ownership,
+ImportCoordinator source qualification, native acknowledgement and bounded worker
+recovery are composed. Time changes have their own default-off per-calendar option;
+title or text consent cannot authorize them. Automatic discovery refuses all-day work
+before retaining a capsule. Production wire sending accepts timed
+same-zone changes only. All-day cryptographic preparation remains available behind
+its separate capability but has no qualified outgoing wire profile.
 
 ## Initial profile
 
@@ -77,9 +78,9 @@ use the observed API spelling `UTC`; other zone IDs must remain exact.
 `ProtonTimeUpdateReadbackVerifier` then requires real signature/decryption verification
 and complete expected mapped contents with a new computed revision.
 
-Supplied synthetic observations do not establish service acceptance or metadata
-recalculation. `IsBreakingChange=0` remains an explicit hypothesis for this restricted
-no-attendee profile, to qualify before transport activation. No local codec or
+Synthetic observations alone do not establish service acceptance or metadata
+recalculation. The measured UTC timed service journey below also passed the
+`IsBreakingChange=0` convention; other profiles need their own qualification. No local codec or
 successful reopen is a journal claim, a dispatch permit or a native acknowledgement.
 
 ## Guarded delivery capabilities
@@ -108,7 +109,9 @@ implementation reuses the guarded native CAS with a typed time receipt. It asser
 the complete raw dirty edit and complete CREATE handoff provenance when applicable.
 ACK retains desired DTSTART/DTEND, clears DIRTY and attaches the verified revision/
 nonce only on an exact current row. Inspection and historical replay preserve newer
-edits. These primitives are not yet composed into the time worker/coordinator flow.
+edits. The time owner composes these primitives under the import mutex, before entering
+the authenticated submission facade. Source callbacks stay inside that mutex without
+reentry; all sending and evidence leases expire when their invocation ends.
 
 ## Delivery and qualification
 
@@ -123,7 +126,8 @@ edits. These primitives are not yet composed into the time worker/coordinator fl
 4. Durable ownership/UNKNOWN inspection, native acknowledgement and worker/UI
    integration with explicit consent, then real editor/service/offline/restart journeys.
 
-Until the later stages qualify, production date/time sending remains disabled.
+Production time sending requires independent current consent and source qualification.
+Unsupported kind/zone transitions and combined field changes remain held locally.
 A GET followed by PUT is still non-atomic; no timestamp or plaintext equality
 supplies a remote write lock.
 
@@ -157,6 +161,61 @@ Isolated databases/Provider fixtures were cleaned. Independent source review fou
 no material defect in domain/journal/submission boundaries. These are controlled
 dependency/SQL/Provider tests, without temporal service or automatic worker delivery.
 
+## Coordinator, worker and measured service integration
+
+Import schema 21 adds separate preparation and acknowledgement/history tables.
+Migration preserves existing opaque records. Reciprocal title/text/time guards prevent
+another edit family from taking an already retained event. A receipt reserves one
+native CAS; retained PENDING receipts inspect only, and restoration preserves newer
+local intentions, capsules and remote observations.
+
+The existing bounded traversal is reused with three independent temporal cursor
+namespaces. SystemCreateController captures all policy leases before suspension and
+runs offline proof recovery before native discovery. Offline recovery has no
+preparation or transport capability. Revocation invalidates the original epoch;
+reenabling cannot lend fresh authority to suspended work. Disabling creation clears
+all editing consent. Settings expose the separate time option in all eight languages.
+
+Seventeen additional host orchestration cases passed, bringing app JVM coverage to
+133 cases. Thirty-nine physical isolated import/owner cases passed, followed by 379
+regression cases covering old schema reconstruction, title/text ownership and new
+worker recovery/mode persistence. No case was skipped. Isolated fixtures were cleaned.
+Independent read-only reviews found no material coordinator/storage/worker defect.
+
+The opt-in CalendarTimeGuardedJourneyLiveDeviceTest passed RUN, ACK and REPLAY in
+three processes against the controlled account. One synthetic ordinary UTC timed event
+moved its start by two hours and end by three hours, retaining all text. Exact temporal
+API metadata and signed readback passed through the real ports. Consent loss retained
+proof without native ACK; the next process completed offline, and replay preserved
+immutable attempt/proof/completion without another preparation, send or inspection.
+The recognizable service event is retained. This establishes the measured timed wire
+convention, including IsBreakingChange=0; it does not qualify all-day API metadata,
+other time zones, transferred-CREATE service delivery, or a Samsung editor journey.
+
+CalendarSystemTimeWorkerLiveDeviceTest also passed RUN and a fresh-process REPLAY
+through the production application. The fixture changed only the enrolled ordinary
+Provider event's dates (both bounds plus one hour); Android itself marked DIRTY.
+The usual ContentObserver/controller/WorkManager jobs prepared and sent the request,
+retained verified readback, restored SQL and acknowledged the same native row.
+The test never called a time preparation, submission, inspection, ACK or manual
+worker entry point. Restart preserved the complete first attempt/proof/completion
+and created no new time attempt. Only the target calendar's temporary consent was
+changed and restored; other calendars' four mode flags remained unchanged. Shared
+jobs could process other already-authorized work, so this is no global traffic or
+exclusive observer-causality guarantee.
+
+An ordinary incoming refresh may reproject the same content/revision with a fresh
+native nonce. Replay therefore checks the exact owner, event/row/calendar, revision,
+text, dates, zones, clean state and valid current ordinary projection marker, while
+requiring historical SQL proof/receipt/completion bytes to remain unchanged. It does
+not require a later native marker to equal the historical time ACK nonce. PENDING
+ACK inspection still requires its exact nonce; that safety rule is unchanged.
+
+Eight isolated time/text option UI cases passed; all eight resource bundles passed
+structural/encoding checks. Final app/test APK builds and app lint passed. These
+results qualify an ordinary UTC timed Provider/worker journey, not an actual editor,
+Samsung/One UI, all-day wire metadata or non-UTC/DST service behavior.
+
 ## Source evidence
 
 The pinned Android source at `83bbd6a15b0aaa135e424fb5ac195c0a52929b4f`
@@ -164,5 +223,5 @@ The pinned Android source at `83bbd6a15b0aaa135e424fb5ac195c0a52929b4f`
 `40cc08c12c8fbac7f66521186c7297ddf3e17861`
 (`applications/calendar/src/app/containers/calendar/eventActions/{sequence,dtstamp}.ts`) establish shared
 partition placement and sequence policy. Existing adapted serializer attribution
-is in [Proton provenance](../proton-auth/PROVENANCE.md). Request/readback behavior
-still needs its own qualification; upstream source alone is not service evidence.
+is in [Proton provenance](../proton-auth/PROVENANCE.md). Readback behavior outside the measured timed journey still needs qualification;
+upstream source alone is not service evidence.

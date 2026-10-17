@@ -159,6 +159,9 @@ class EventDetailsStoreDeviceTest {
         val context = ApplicationProvider.getApplicationContext<Context>()
         SQLiteDatabase.openDatabase(context.getDatabasePath(name).path, null, SQLiteDatabase.OPEN_READWRITE).use { db ->
             // Remove empty later tables to reconstruct the historical fixture.
+            db.execSQL("DROP TABLE local_time_edit_preparations")
+            db.execSQL("DROP TABLE time_update_acknowledgements")
+            db.execSQL("DROP TABLE time_update_acknowledgement_history")
             db.execSQL("DROP TABLE local_text_edit_preparations")
             db.execSQL("DROP TABLE text_update_acknowledgements")
             db.execSQL("DROP TABLE text_update_acknowledgement_history")
@@ -179,7 +182,7 @@ class EventDetailsStoreDeviceTest {
             db.version = 6
         }
         ImportStore(context, name).use { reopened ->
-            assertEquals(20, reopened.readableDatabase.version); assertEquals(0, profileCount(reopened))
+            assertEquals(21, reopened.readableDatabase.version); assertEquals(0, profileCount(reopened))
             assertEquals(receipt, reopened.delta { received }); assertEquals(ledger, reopened.delta { coverage })
             assertEquals("legacy-series", reopened.deletedSeriesUid(scope, master.eventId))
             assertEquals(legacy, reopened.readableDatabase.rawQuery("SELECT payload FROM records WHERE event='legacy'", null).use {

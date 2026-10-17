@@ -39,12 +39,14 @@ data class SystemCreateUiState(
     val failed: Boolean = false,
     val textsEnabled: Set<CalendarScope> = emptySet(),
     val textSupportAvailable: Boolean = false,
+    val timesEnabled: Set<CalendarScope> = emptySet(),
+    val timeSupportAvailable: Boolean = false,
 ) {
     override fun toString() = "SystemCreateUiState(REDACTED, busy=$busy, failed=$failed)"
 }
 
 /**
- * Separate opt-in CREATE, title and text triggers. Unsupported edits/deletes stay retained.
+ * Separate opt-in CREATE, title, text and time triggers. Unsupported edits/deletes stay retained.
  * All Provider admission stays inside ImportCoordinator's mutex; this owner never borrows or
  * modifies the mutable admission guards of its shared projection/capture dependencies.
  */
@@ -62,10 +64,14 @@ class SystemCreateController(
     private val titleUpdates: SystemTitleUpdateController? = null,
     private val textRecovery: SystemTitleRecoveryController? = null,
     private val textUpdates: SystemTitleUpdateController? = null,
+    private val timeRecovery: SystemTitleRecoveryController? = null,
+    private val timeUpdates: SystemTitleUpdateController? = null,
 ) {
     private val context = context.applicationContext
     private val textSupportAvailable = textRecovery != null && textUpdates != null
-    private val mutableState = MutableStateFlow(SystemCreateUiState(textSupportAvailable = textSupportAvailable))
+    private val timeSupportAvailable = timeRecovery != null && timeUpdates != null
+    private val mutableState = MutableStateFlow(SystemCreateUiState(textSupportAvailable = textSupportAvailable,
+        timeSupportAvailable = timeSupportAvailable))
     val state: StateFlow<SystemCreateUiState> = mutableState.asStateFlow()
     private val mutex = Mutex()
     private val started = AtomicBoolean()
@@ -149,6 +155,25 @@ class SystemCreateController(
         }
     }
 
+    fun setTimesEnabled(selection: ImportStore.Selection, enabled: Boolean) {
+        val target = selection.scope
+        val current = imports.state.value
+        if (enabled && (!timeSupportAvailable || !current.authenticated || !current.hasPermission || !work.modeEnabled(target) ||
+            current.selections.none { it.scope == target && it.enabled && it.available })) return
+        work.setTimesMode(target, enabled)
+        epochs.computeIfAbsent(target) { AtomicLong() }.incrementAndGet()
+        // Invalidate coordinator/adapter leases synchronously, before any cursor reset suspends.
+        imports.systemCreatePolicyChanged(target, work.modeEnabled(target))
+        scope.launch {
+            try {
+                resetEditingTraversal(target)
+                publish()
+                request()
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { reportAttention(AttentionStage.TIME_POLICY) }
+        }
+    }
+
     fun request() {
         if (activeScopes().isEmpty()) return
         scheduler.requestLocal()
@@ -179,6 +204,8 @@ class SystemCreateController(
         titleUpdates?.reset(target)
         textRecovery?.reset(target)
         textUpdates?.reset(target)
+        timeRecovery?.reset(target)
+        timeUpdates?.reset(target)
     }
 
     /** One bounded page per selected scope; unknown outcomes never cause immediate retry loops. */
@@ -190,10 +217,12 @@ class SystemCreateController(
             for (target in activeScopes()) {
                 val epoch = epochs.computeIfAbsent(target) { AtomicLong() }.get()
                 val titleAdmission = imports.systemTitleRunAdmission(target)
-                // Capture both policy leases before the first suspension. Re-enabling cannot
+                // Capture all policy leases before the first suspension. Re-enabling cannot
                 // lend fresh authority to a run already paused in title/CREATE work.
                 val textAdmission = if (textSupportAvailable) imports.systemTextRunAdmission(target) else null
                 val textProofAdmission = if (textSupportAvailable) imports.systemTextProofAdmission(target) else null
+                val timeAdmission = if (timeSupportAvailable) imports.systemTimeRunAdmission(target) else null
+                val timeProofAdmission = if (timeSupportAvailable) imports.systemTimeProofAdmission(target) else null
                 if (!active(target, epoch)) continue
                 // A failed native scan/CREATE must not block already durable title proof.
                 // This is the same captured epoch; no new authority is acquired after a pause.
@@ -207,6 +236,13 @@ class SystemCreateController(
                 } else null
                 if (recoveredText?.failed == true) reportAttention(AttentionStage.TEXT_RECOVERY)
                 more = more || recoveredText?.more == true
+                if (!active(target, epoch)) continue
+                // Existing local time proof remains recoverable with time sending disabled.
+                val recoveredTime = if (timeSupportAvailable) timeRecovery?.run(target, fresh) {
+                    active(target, epoch) && timeProofAdmission?.invoke(target) == true
+                } else null
+                if (recoveredTime?.failed == true) reportAttention(AttentionStage.TIME_RECOVERY)
+                more = more || recoveredTime?.more == true
                 if (!active(target, epoch)) continue
                 if (!imports.configureSystemCalendar(target)) { retry = true; continue }
                 val discovered = imports.discoverSystemChanges(target, cursor(target, "scan"), PAGE_SIZE)
@@ -272,6 +308,12 @@ class SystemCreateController(
                 } else null
                 if (texts?.failed == true) reportAttention(AttentionStage.TEXT_UPDATE)
                 more = more || texts?.more == true
+                if (!active(target, epoch)) continue
+                val times = if (timeSupportAvailable) timeUpdates?.run(target, network, fresh) {
+                    active(target, epoch) && work.timesEnabled(target) && timeAdmission?.invoke(target) == true
+                } else null
+                if (times?.failed == true) reportAttention(AttentionStage.TIME_UPDATE)
+                more = more || times?.more == true
             }
             publish()
             when { retry -> ImportRunResult.RETRY; more -> ImportRunResult.CONTINUE; else -> ImportRunResult.COMPLETE }
@@ -284,9 +326,9 @@ class SystemCreateController(
 
     // Closed stage codes only: no scope, row, event, payload, exception or account values.
     private enum class AttentionStage {
-        OBSERVATION_SETUP, CREATE_POLICY, TEXT_POLICY, TITLE_POLICY, TITLE_RECOVERY, TEXT_RECOVERY,
+        OBSERVATION_SETUP, CREATE_POLICY, TEXT_POLICY, TIME_POLICY, TITLE_POLICY, TITLE_RECOVERY, TEXT_RECOVERY, TIME_RECOVERY,
         NATIVE_IDENTITY_UNSUPPORTED, IMPORTED_IDENTITY_UNRESOLVED, IMPORTED_CAPTURE_UNQUALIFIED,
-        CAPTURED_IDENTITY_UNRESOLVED, TITLE_UPDATE, TEXT_UPDATE, WORKER_FAILURE,
+        CAPTURED_IDENTITY_UNRESOLVED, TITLE_UPDATE, TEXT_UPDATE, TIME_UPDATE, WORKER_FAILURE,
     }
 
     private fun reportAttention(stage: AttentionStage) {
@@ -412,8 +454,10 @@ class SystemCreateController(
         val pending = selections.associate { it.scope to work.count(it.scope) }
         val titles = selections.map { it.scope }.filter { work.titlesEnabled(it) }.toSet()
         val texts = selections.map { it.scope }.filter { work.textsEnabled(it) }.toSet()
+        val times = selections.map { it.scope }.filter { work.timesEnabled(it) }.toSet()
         mutableState.update { it.copy(enabled = enabled, titlesEnabled = titles, textsEnabled = texts,
-            textSupportAvailable = textSupportAvailable, pending = pending) }
+            textSupportAvailable = textSupportAvailable, timesEnabled = times,
+            timeSupportAvailable = timeSupportAvailable, pending = pending) }
     }
 
     @Synchronized private fun updateObserver() {

@@ -1,5 +1,24 @@
 # Validation
 
+## Temporal preparation and delivery
+
+The current bounded temporal evidence is in [temporal delivery](TEMPORAL_UPDATE.md).
+All host suites pass (418 sync, 785 backend, 133 app; no skips). Physical coverage
+includes six real-Core synthetic crypto cases, 66 isolated journal/Provider cases,
+39 isolated import/owner cases, 379 migration/ownership/worker regression cases and
+eight time/text option UI cases. Controlled UTC service RUN/offline ACK/replay and
+ordinary Provider-edit/production-worker RUN/restarted REPLAY also pass, retaining
+recognizable synthetic events. APK builds, resource checks and app lint pass.
+
+The production worker fixture changes only target consent and preserves other
+scopes' mode flags. It allows ordinary shared background processing under existing
+consent and does not establish global silence, exclusive observer causality or an
+actual calendar-editor/OEM journey. Current native projection nonces may advance
+on an unchanged incoming observation; immutable historical proof is checked in SQL.
+All-day wire metadata, non-UTC/DST service behavior and kind/zone transitions remain
+unqualified. Prior evidence below retains its own original scope and limitations.
+
+
 Use JDK 17 or a compatible newer JDK, Android SDK platform 36 and the checked-in
 Gradle wrapper. Set the SDK path in ignored `local.properties` or ANDROID_HOME.
 Install neither an emulator nor a device-specific environment as part of a build.

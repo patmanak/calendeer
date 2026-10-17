@@ -68,6 +68,32 @@ class SystemCreateWorkStoreDeviceTest {
         store.setMode(scope, true); assertFalse(store.titlesEnabled(scope))
     }
 
+    @Test fun timeOptInIsSeparateScopedAndNeverInheritedFromOtherModes() = fixture { context, name, store ->
+        store.setTimesMode(scope, true); assertFalse(store.timesEnabled(scope))
+        store.setMode(scope, true); store.setTitlesMode(scope, true); store.setTextsMode(scope, true)
+        assertFalse(store.timesEnabled(scope))
+        store.setTimesMode(scope, true); assertTrue(store.timesEnabled(scope))
+        store.setTextsMode(scope, false); store.setTitlesMode(scope, false)
+        assertTrue(store.timesEnabled(scope))
+        for (other in listOf(scope.copy(account = AccountId("other")), scope.copy(calendar = CalendarId("other")),
+            scope.copy(generation = 1))) { store.setMode(other, true); assertFalse(store.timesEnabled(other)) }
+        store.close()
+        SystemCreateWorkStore(context, name).use { reopened ->
+            assertTrue(reopened.timesEnabled(scope)); assertFalse(reopened.textsEnabled(scope)); assertFalse(reopened.titlesEnabled(scope))
+            reopened.setTimesMode(scope, false)
+            assertFalse(reopened.timesEnabled(scope)); assertTrue(reopened.modeEnabled(scope))
+        }
+    }
+
+    @Test fun disablingCreationClearsAllEditingConsentAndCannotRestoreTimeAuthority() = fixture { _, _, store ->
+        store.setMode(scope, true); store.setTimesMode(scope, true); store.setTitlesMode(scope, true); store.setTextsMode(scope, true)
+        assertTrue(store.timesEnabled(scope))
+        store.setMode(scope, false)
+        assertFalse(store.timesEnabled(scope)); assertFalse(store.titlesEnabled(scope)); assertFalse(store.textsEnabled(scope))
+        store.setMode(scope, true)
+        assertFalse(store.timesEnabled(scope)); assertFalse(store.titlesEnabled(scope)); assertFalse(store.textsEnabled(scope))
+    }
+
     @Test fun freshSchemaStoresOnlyIdentityAndReservationsSurviveReopen() = fixture { context, name, store ->
         val first = store.reserve(scope, 7)
         assertEquals(SystemCreateWorkStatus.PENDING, first.status)

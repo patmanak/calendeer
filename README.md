@@ -59,11 +59,13 @@ $calendar-specify."
 The Android configuration application, pure synchronization engine and Proton
 authentication integration are implemented. The connection UI uses a real Proton
 Core adapter and discovers calendar names and colors through the retained session.
-Selected calendars can import supported simple events into Android in read-only
-mode, with durable offline processing and background refresh. Calendar change
-polling handles individual updates and explicit deletion notices. Recurrence,
-reminders, participants, automatic recovery after a feed reset and bidirectional
-editing remain unavailable. See the [import boundary](docs/READ_ONLY_IMPORT.md).
+Selected calendars mirror supported events into Android with durable offline
+processing and bounded background refresh. Read-only remains the default. Separate
+experimental options enable simple-event creation and title, description/location
+or same-zone timed date changes through the system calendar. Uncertain sends are
+inspected instead of resent; unsupported edits and conflicts remain retained.
+Outgoing deletion, time-zone/kind transitions and combined date/text edits are not
+yet supported. See the [current capabilities and RC limits](docs/STATUS.md).
 Upstream workflow frameworks are selectively adapted; no installer/hook is required.
 
 ## Build
