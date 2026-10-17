@@ -44,6 +44,7 @@ fun CalendarDashboard(
     onOpenConflicts: (ImportStore.Selection) -> Unit = {},
     onTextMode: (ImportStore.Selection, Boolean) -> Unit = { _, _ -> },
     onTimeMode: (ImportStore.Selection, Boolean) -> Unit = { _, _ -> },
+    onDeleteMode: (ImportStore.Selection, Boolean) -> Unit = { _, _ -> },
 ) {
     if (!imports.authenticated) return
     Column(modifier.fillMaxWidth().testTag(CalendarDashboardTags.PANEL),
@@ -66,7 +67,7 @@ fun CalendarDashboard(
         SystemSyncAttentionCard(imports, creates, onRetry = onSync)
         imports.selections.forEach { selection ->
             key(selection.scope) {
-                CalendarCard(selection, imports, creates, onSetEnabled, onMode, onTitlesMode, onOpenConflicts, onTextMode, onTimeMode)
+                CalendarCard(selection, imports, creates, onSetEnabled, onMode, onTitlesMode, onOpenConflicts, onTextMode, onTimeMode, onDeleteMode)
             }
         }
         // A newly discovered row needs a persisted scope before its controls can be offered.
@@ -150,12 +151,14 @@ private fun CalendarCard(
     onOpenConflicts: (ImportStore.Selection) -> Unit,
     onTextMode: (ImportStore.Selection, Boolean) -> Unit,
     onTimeMode: (ImportStore.Selection, Boolean) -> Unit,
+    onDeleteMode: (ImportStore.Selection, Boolean) -> Unit,
 ) {
     var expanded by rememberSaveable { mutableStateOf(false) }
     val createEnabled = selection.scope in creates.enabled
     val titlesEnabled = selection.scope in creates.titlesEnabled
     val textsEnabled = selection.scope in creates.textsEnabled
     val timesEnabled = selection.scope in creates.timesEnabled
+    val deletesEnabled = selection.scope in creates.deletesEnabled
     val outgoing = creates.pending[selection.scope] ?: 0
     val hasIssues = selection.deferredCount > 0 || selection.historyGap || selection.retainedLocalChangeCount > 0
     val status = when {
@@ -187,6 +190,7 @@ private fun CalendarCard(
                 Switch(selection.enabled, onCheckedChange = null, enabled = !imports.busy && selection.available)
             }
             Text(stringResource(when {
+                creates.deleteSupportAvailable && deletesEnabled -> R.string.calendar_dashboard_delete_mode
                 creates.timeSupportAvailable && timesEnabled -> R.string.calendar_dashboard_time_mode
                 creates.textSupportAvailable && textsEnabled -> R.string.calendar_dashboard_text_mode
                 titlesEnabled -> R.string.calendar_dashboard_title_mode
@@ -232,6 +236,12 @@ private fun CalendarCard(
                     ModeToggle(stringResource(R.string.system_time_mode), timesEnabled, timesEnabled || (canEnable && createEnabled),
                         "system-time-toggle") { onTimeMode(selection, it) }
                     Text(stringResource(R.string.system_time_limits), style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                if (creates.deleteSupportAvailable) {
+                    ModeToggle(stringResource(R.string.system_delete_mode), deletesEnabled, deletesEnabled || (canEnable && createEnabled),
+                        "system-delete-toggle") { onDeleteMode(selection, it) }
+                    Text(stringResource(R.string.system_delete_limits), style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)

@@ -174,7 +174,7 @@ class SharedTimeOwnershipDeviceTest {
         store.close()
         val migrated = TitleUpdateAttemptStore(context, name)
         try {
-            assertEquals(8, migrated.readableDatabase.version)
+            assertEquals(9, migrated.readableDatabase.version)
             assertEquals(title, migrated.read(title.scope, title.id))
             assertEquals(text.copy(state = TextUpdateAttemptState.OUTCOME_UNKNOWN), migrated.textJournal.read(text.scope, text.id, allow))
             assertNull(migrated.timeJournal.read(scope, MutationId("missing"), allow))

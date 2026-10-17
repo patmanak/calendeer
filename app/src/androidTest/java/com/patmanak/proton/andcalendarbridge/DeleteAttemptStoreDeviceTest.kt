@@ -224,7 +224,7 @@ class DeleteAttemptStoreDeviceTest {
         store.writableDatabase.version = 7
         store.close()
         TitleUpdateAttemptStore(context, name).use { reopened ->
-            assertEquals(8, reopened.readableDatabase.version)
+            assertEquals(9, reopened.readableDatabase.version)
             assertEquals(title(), reopened.read(scope, title().id))
             reopened.readableDatabase.rawQuery("SELECT hex(capsule) FROM text_update_attempts", null).use {
                 assertTrue(it.moveToFirst()); assertEquals(bytes, it.getString(0))

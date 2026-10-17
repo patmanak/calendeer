@@ -28,9 +28,13 @@ class SystemTitleUpdateController(
     private val operations: SystemTitleUpdateOperations,
     private val wakeProof: suspend (CalendarScope) -> Unit,
     private val pageSize: Int = 25,
+    private val mutationKind: MutationKind = MutationKind.UPDATE,
 ) {
     private val mutex = Mutex()
-    init { require(pageSize in 1..TitleUpdateWorkQuery.MAX_PAGE_SIZE) }
+    init {
+        require(pageSize in 1..TitleUpdateWorkQuery.MAX_PAGE_SIZE)
+        require(mutationKind in setOf(MutationKind.UPDATE, MutationKind.DELETE))
+    }
 
     suspend fun reset(target: CalendarScope) = mutex.withLock {
         currentCoroutineContext().ensureActive()
@@ -86,7 +90,7 @@ class SystemTitleUpdateController(
                         var failed = 0
                         for (reference in page.entries) {
                             if (!active()) break
-                            if (reference.kind != MutationKind.UPDATE || reference.state != LocalEditState.PAUSED) continue
+                            if (reference.kind != mutationKind || reference.state != LocalEditState.PAUSED) continue
                             try {
                                 if (operations.process(target, reference, MutationId(UUID.randomUUID().toString()),
                                         Instant.now().truncatedTo(ChronoUnit.SECONDS), admit, proved)) failed++

@@ -268,7 +268,7 @@ class SharedTextOwnershipDeviceTest {
             legacy.execSQL("DROP TABLE time_update_attempts"); legacy.version = 4
         }
         TitleUpdateAttemptStore(context, name).use { migrated ->
-            assertEquals(8, migrated.readableDatabase.version)
+            assertEquals(9, migrated.readableDatabase.version)
             assertEquals(before, historicalSnapshot(migrated.readableDatabase))
             assertEquals(proof, migrated.readCompletion(scope, title.id))
             assertEquals(bare, migrated.readPreparationReservation(bare.scope, bare.eventId))

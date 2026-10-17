@@ -100,6 +100,47 @@ class SystemTitleUpdateControllerTest {
         }
     }
 
+    @Test fun deletionTraversalInspectsBeforeProcessingOnlyPausedDeletesAndClosesItsLease() = runBlocking {
+        val operations = Operations(); val deletion = ref("b", MutationKind.DELETE)
+        operations.discoverBlock = { page(it, ref("a"), deletion, ref("c", MutationKind.DELETE, LocalEditState.CONFLICT)) }
+        var retainedLease: ((CalendarScope) -> Boolean)? = null
+        operations.processBlock = { requested, _, admit, proof ->
+            assertTrue(admit(requested)); retainedLease = admit; proof(); false
+        }
+        var wakes = 0
+        val controller = SystemTitleUpdateController(Cursors(), Cursors(), operations, { wakes++ },
+            mutationKind = MutationKind.DELETE)
+        assertEquals(SystemTitleRecoveryProgress(), controller.run(target, network = false) { true })
+        assertTrue(operations.calls.isEmpty())
+        assertEquals(SystemTitleRecoveryProgress(more = true), controller.run(target, network = true) { true })
+        assertEquals(listOf("inspect", "discover", "process"), operations.calls)
+        assertEquals(listOf(deletion), operations.processed); assertEquals(1, wakes)
+        assertFalse(checkNotNull(retainedLease)(target))
+    }
+
+    @Test fun restartedDeletionTraversalKeepsItsBoundAndNeverReopensARevokedRun() = runBlocking {
+        val changes = Cursors(); val attempts = Cursors(); val operations = Operations()
+        operations.discoverBlock = { query ->
+            if (query.cursor == null) page(query, ref("a", MutationKind.DELETE), ref("b", MutationKind.DELETE))
+            else page(query, ref("b", MutationKind.DELETE))
+        }
+        var allowed = true
+        val first = SystemTitleUpdateController(changes, attempts, operations, { error("No proof") },
+            pageSize = 1, mutationKind = MutationKind.DELETE)
+        assertTrue(first.run(target, network = true) { allowed }.more)
+        assertEquals(listOf(ref("a", MutationKind.DELETE)), operations.processed)
+        operations.processBlock = { requested, _, admit, _ ->
+            allowed = false; assertFalse(admit(requested))
+            allowed = true; assertFalse(admit(requested)); false
+        }
+        val restarted = SystemTitleUpdateController(changes, attempts, operations, { error("No proof") },
+            pageSize = 1, mutationKind = MutationKind.DELETE)
+        assertFalse(restarted.run(target, network = true, fresh = false) { allowed }.more)
+        assertEquals(RetainedLocalChangeCursor(target, EventId("a")), operations.discovered.last().cursor)
+        assertEquals(listOf(ref("a", MutationKind.DELETE), ref("b", MutationKind.DELETE)), operations.processed)
+        assertEquals(1, operations.inspected.size)
+    }
+
     @Test fun freshProofWakesExhaustedOfflineRecoveryOnceAndForcesOnlyOneContinuation() = runBlocking {
         val changes = Cursors(); val attempts = Cursors(); val offline = Cursors(); offline.done += target
         val operations = Operations(); operations.discoverBlock = { page(it, ref("a"), ref("b")) }

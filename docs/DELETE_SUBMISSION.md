@@ -2,9 +2,11 @@
 
 ## Capability and supported scope
 
-The typed deletion port is an internal integration boundary. It does not advertise
-conditional DELETE in `RemoteCalendarAdapter`, enable a system worker, expose a
-calendar option or acknowledge Android. Local tombstone capture is described in
+The typed deletion port has separate worker orchestration, default-off experimental
+per-calendar consent, durable proofs and native acknowledgement. Ordinary timed
+service/editor/production-worker and restarted replay journeys are qualified;
+it does not advertise conditional DELETE in `RemoteCalendarAdapter`. Local
+tombstone capture is described in
 [local edit capture](LOCAL_EDIT_CAPTURE.md).
 
 The first submission profile accepts an ordinary nonrecurring event with known-empty
@@ -24,8 +26,9 @@ The shared SQLite journal arbitrates title, text, time and deletion owners acros
 generations. It preserves the first prepared wire, commits `OUTCOME_UNKNOWN` before
 transport, and retains the first available protected HTTP response independently of
 continued write consent. Unknown work is never reset, replaced or automatically
-resent. Corrupt or foreign history fails closed. This first journal stage has no
-completion operation and keeps its owner reserved.
+resent. Corrupt or foreign history fails closed. Shared journal schema 9 adds
+authenticated-absence results and immutable completion proofs without releasing
+the event or request identity, including across generations.
 
 A separate DELETE permit authorizes one exchange of the precise single-event
 operation. CREATE and UPDATE permits cannot authorize it. Mixed tags, body/URL
@@ -46,7 +49,11 @@ calendar and event, with membership/context rechecked afterward. A generic HTTP
 404, missing list entry, failed scan, lost access, malformed reply, cancellation or
 network error is not deletion evidence. Absence establishes current convergence,
 not causal attribution, immutable remote history or a server lock. This scoped
-2501 interpretation still requires live service qualification.
+2501 interpretation is qualified on a controlled disposable ordinary timed event.
+The bounded parser
+accepts only the exact authenticated event route, status 200/400/404/422 and the
+expected structured error fields. Optional `Details` must be an empty object;
+unknown keys, nonempty details and malformed or duplicate fields remain unresolved.
 
 Core can convert a structured API error before Retrofit returns its response. A
 separate single-use GET witness captures only the exact route and authenticated
@@ -60,19 +67,58 @@ race with deletion; see [conditional writes](research/CONDITIONAL_WRITES.md).
 Without trustworthy comparable modification timestamps, preserving observed
 variants takes precedence over inventing last-modification-wins ordering.
 
-## Remaining integration and qualification
+## Worker, acknowledgement and incoming barrier
 
-Before enabling deletion from an ordinary system calendar, add an independent
-default-off per-calendar consent, current local owner/source admission under the
-import coordinator lock, durable conflict/result retention, bounded inspection,
-and typed native/SQL acknowledgement with restart recovery. A changed or restored
-native event must survive acknowledgement. A missing native row cannot establish
-historical success without an exact previously retained acknowledgement proof.
-Retain a deletion barrier across already-staged incoming work: replaying an older
-upsert must not recreate an acknowledged deletion. Subsequent remote observations
-need explicit qualification, without ordering them by local processing time.
+Deletion has independent default-off per-calendar consent. Disabling general
+editing clears it. The worker captures original account/generation/policy leases,
+uses separate bounded owner/inspection/offline cursors and never renews an expired
+lease. Factual response retention survives sending-consent loss, but not logout or
+account replacement. Local source admission runs under the import lock before the
+authenticated adapter; callbacks never re-enter authentication or the import lock.
 
-Qualify disposable events through the actual system calendar application, including
-remote conflict, lost reply, process interruption before/after claim and native
-acknowledgement, offline restart and repeated inspection without another send.
+Import schema 22 reserves one immutable full-binding native receipt before the
+network claim. Reservation is neither remote absence nor acknowledgement authority.
+Only a durable verified result can authorize native acknowledgement. A matching
+remote deletion echo may converge without creating a conflict; any different
+verified upsert or deferred variant remains preserved as a visible conflict.
+
+A dirty deletion can interrupt an incoming no-change projection. Its receipt may
+coexist only when both its change and previous base equal the entire deletion
+base, its import format/protocol match and both representations are historical
+direct mode. The receipt stays intact through preparation and reservation. Only
+verified native acknowledgement can retire this exact obligation by a full-tuple
+SQL comparison in the same transaction as restoration. Changed or malformed
+receipts remain held; a rollback retains both obligations.
+
+Native acknowledgement conditionally changes only DIRTY and its exact receipt
+marker on the unique, unchanged, ordinary deleted row. DELETED remains set, with
+the original content and base revision. Android's Provider also clears its
+[`MUTATORS` history](https://android.googlesource.com/platform/packages/providers/CalendarProvider/+/a37b87f14b6ac0daeade7f8c29a83b02cae581fe/src/com/android/providers/calendar/CalendarProvider2.java#4154)
+when the sync adapter resets DIRTY; the bridge does not rewrite
+event content to perform acknowledgement. The same atomic batch asserts the retained
+post-write row: a Provider that purges it cannot qualify this protocol. A missing
+row alone is never success. Historical inspection of the exact marker recovers a
+lost reply without rewriting newer content, flags or children. Before the first
+write, the reserved receipt can be retried only against the complete original
+native source. SQL restoration and journal completion are idempotent.
+
+The original local owner and baseline remain a permanent incoming barrier after
+completion. Finished paused deletions disappear from actionable counts; conflicts
+remain visible. Pending projection queues, requeues and old retained receipts
+cannot recreate the event. A later native restoration or edit is preserved and
+reported as conflict. Equal-valued remote recreation cannot be distinguished from
+stale replay and stays held; no ordering is invented from opaque revisions.
+
+## Qualification
+
+Disposable ordinary timed events pass actual `foundation.e.calendar` deletion,
+production worker RUN and fresh-process REPLAY with one immutable request and
+exact restoration of the five target modes. A separate service journey passes
+restarted inspection without another send, deferred ACK, new-process local
+acknowledgement and replay. Physical isolated tests cover native conflicts,
+lost replies, source/policy loss, SQL rollback and interrupted incoming projection.
+Real remote-conflict, all-day service deletion, further network/power interruption
+profiles and Samsung/One UI remain unqualified.
 Existing retained synthetic events must not be used as disposable fixtures.
+Detailed measured evidence is recorded in [validation](VALIDATION.md); passing fake
+boundaries alone does not qualify the service, Provider, editor or WorkManager.

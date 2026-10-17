@@ -26,7 +26,7 @@ import org.json.JSONObject
  * Payload/evidence are opaque protected strings; this store grants no HTTP or Provider capability.
  */
 class TitleUpdateAttemptStore(context: Context, name: String = "calendar-title-update-attempt-v1.db") :
-    SQLiteOpenHelper(context, name, null, 8), TitleUpdateRecoveryJournal, TitleUpdatePreparationJournal {
+    SQLiteOpenHelper(context, name, null, 9), TitleUpdateRecoveryJournal, TitleUpdatePreparationJournal {
     private val lock = Mutex()
     /** Text history shares the same connection and reciprocal ownership transaction. */
     internal val textJournal: TextUpdateRecoveryJournal = SqlTextUpdateAttemptJournal(object : TextAttemptDatabase {
@@ -38,8 +38,8 @@ class TitleUpdateAttemptStore(context: Context, name: String = "calendar-title-u
         override suspend fun <T> withDatabase(beforeOpen: () -> Unit, action: (SQLiteDatabase) -> T): T =
             withContext(Dispatchers.IO) { lock.withLock { beforeOpen(); action(writableDatabase) } }
     }, ::canTimeOwn)
-    /** DELETE has no completion protocol: its event hold remains unresolved. */
-    internal val deleteJournal: DeleteAttemptJournal = SqlDeleteAttemptJournal(object : DeleteAttemptDatabase {
+    /** Completed DELETE retains its permanent event and request hold. */
+    internal val deleteJournal: DeleteRecoveryJournal = SqlDeleteAttemptJournal(object : DeleteAttemptDatabase {
         override suspend fun <T> withDatabase(beforeOpen: () -> Unit, action: (SQLiteDatabase) -> T): T =
             withContext(Dispatchers.IO) { lock.withLock { beforeOpen(); action(writableDatabase) } }
     }, ::canDeleteOwn)
@@ -116,14 +116,15 @@ class TitleUpdateAttemptStore(context: Context, name: String = "calendar-title-u
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        check(oldVersion in 1..7 && newVersion == 8) { "Explicit title update journal migration required" }
+        check(oldVersion in 1..8 && newVersion == 9) { "Explicit title update journal migration required" }
         if (oldVersion >= 3) {
             // Existing attempts, protected bytes, results and completions stay untouched.
             if (oldVersion == 3) createReservationTable(db)
             if (oldVersion == 5) TextUpdateAttemptSql.migrateProofs(db)
             else if (oldVersion < 5) TextUpdateAttemptSql.createTable(db)
             if (oldVersion < 7) TimeUpdateAttemptSql.createTable(db)
-            DeleteAttemptSql.createTable(db)
+            if (oldVersion < 8) DeleteAttemptSql.createTable(db)
+            else DeleteAttemptSql.migrateProofs(db)
             return
         }
         // SQLiteOpenHelper owns the migration transaction. Copy opaque bytes without interpreting

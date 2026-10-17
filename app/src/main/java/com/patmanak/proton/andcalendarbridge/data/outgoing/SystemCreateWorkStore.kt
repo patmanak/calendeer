@@ -147,6 +147,15 @@ class SystemCreateWorkStore(context: Context, name: String = "system-creates.db"
     @Synchronized fun titlesEnabled(scope: CalendarScope): Boolean =
         modeEnabled(scope) && modes.getBoolean("titles-${modeKey(scope)}", false)
 
+    @Synchronized fun deletesEnabled(scope: CalendarScope): Boolean =
+        modeEnabled(scope) && modes.getBoolean("deletes-${modeKey(scope)}", false)
+
+    @Synchronized fun setDeletesMode(scope: CalendarScope, enabled: Boolean) {
+        check(modes.edit().putBoolean("deletes-${modeKey(scope)}", enabled && modeEnabled(scope)).commit()) {
+            "System delete mode was not persisted"
+        }
+    }
+
     @Synchronized fun setTitlesMode(scope: CalendarScope, enabled: Boolean) {
         check(modes.edit().putBoolean("titles-${modeKey(scope)}", enabled && modeEnabled(scope)).commit()) {
             "System title mode was not persisted"
@@ -155,7 +164,8 @@ class SystemCreateWorkStore(context: Context, name: String = "system-creates.db"
 
     @Synchronized fun setMode(scope: CalendarScope, enabled: Boolean) {
         val update = modes.edit().putBoolean(modeKey(scope), enabled)
-        if (!enabled) update.remove("titles-${modeKey(scope)}").remove("texts-${modeKey(scope)}").remove("times-${modeKey(scope)}")
+        if (!enabled) update.remove("titles-${modeKey(scope)}").remove("texts-${modeKey(scope)}")
+            .remove("times-${modeKey(scope)}").remove("deletes-${modeKey(scope)}")
         check(update.commit()) { "System create mode was not persisted" }
     }
 

@@ -5,6 +5,7 @@ import android.content.ContentValues
 import android.database.Cursor
 import android.database.sqlite.SQLiteDatabase
 import com.patmanak.proton.andcalendarbridge.data.serialization.DeleteAttemptStorageCodec
+import com.patmanak.proton.andcalendarbridge.data.serialization.DeleteProofStorageCodec
 import com.patmanak.proton.andcalendarbridge.sync.*
 import java.io.ByteArrayOutputStream
 import java.nio.ByteBuffer
@@ -16,7 +17,8 @@ import java.nio.charset.CodingErrorAction
 internal class DeleteAttemptSql(private val db: SQLiteDatabase, private val checkCancelled: () -> Unit) {
     fun hasOwner(scope: CalendarScope, event: EventId, id: MutationId): Boolean =
         owners(scope, event, id).isNotEmpty()
-    fun read(scope: CalendarScope, id: MutationId): DeleteAttemptRecord? = readStored(db, scope, id)?.record
+    fun read(scope: CalendarScope, id: MutationId): DeleteAttemptRecord? =
+        readStored(db, scope, id)?.also { readCompletion(it) }?.record
 
     fun remember(record: DeleteAttemptRecord, capsule: ByteArray): Boolean {
         val existing = readStored(db, record.scope, record.id)
@@ -42,6 +44,7 @@ internal class DeleteAttemptSql(private val db: SQLiteDatabase, private val chec
     }
     fun retainEvidence(expected: DeleteAttemptRecord, evidence: String, capsule: ByteArray): Boolean {
         val current = readStored(db, expected.scope, expected.id)
+        current?.let { readCompletion(it) }
         if (current == null || current.record.copy(protectedEvidence = null) != expected.copy(protectedEvidence = null) ||
             current.record.state != DeleteAttemptState.OUTCOME_UNKNOWN) return false
         if (current.record.protectedEvidence != null) return current.record.protectedEvidence == evidence
@@ -51,7 +54,7 @@ internal class DeleteAttemptSql(private val db: SQLiteDatabase, private val chec
     }
 
     private data class Stored(val rowId: Long, val record: DeleteAttemptRecord)
-    private data class Owner(val rowId: Long, val id: MutationId, val event: EventId)
+    private data class Owner(val rowId: Long, val id: MutationId, val event: EventId, val completed: Boolean)
     private fun identity(scope: CalendarScope, id: MutationId) = arrayOf(scope.account.value, scope.calendar.value,
         scope.generation.toString(), id.value)
 
@@ -63,11 +66,57 @@ internal class DeleteAttemptSql(private val db: SQLiteDatabase, private val chec
                 while (rows.moveToNext()) {
                     checkCancelled(); require(rows.getType(0) == Cursor.FIELD_TYPE_INTEGER)
                     val stored = requireNotNull(readStored(db, "rowid=?", arrayOf(rows.getLong(0).toString())))
-                    add(Owner(stored.rowId, stored.record.id, stored.record.eventId))
+                    // Non-null completion alone never releases an event. Decode one whole history at a time.
+                    val completed = readCompletion(stored) != null
+                    add(Owner(stored.rowId, stored.record.id, stored.record.eventId, completed))
                 }
             }.also { owners -> require(owners.groupBy { it.event }.all { it.value.size <= 1 }) }
         }
 
+    fun readVerified(scope: CalendarScope, id: MutationId): DeleteVerifiedResult? =
+        readStored(db, scope, id)?.let { readCompletion(it); readVerified(it) }
+    private fun readVerified(stored: Stored): DeleteVerifiedResult? {
+        val bytes = proofBlob(stored.rowId, "result") ?: return null
+        val result = DeleteProofStorageCodec.decodeResult(bytes)
+        require(stored.record.state == DeleteAttemptState.OUTCOME_UNKNOWN &&
+            result.record == stored.record.copy(protectedEvidence = null))
+        return result
+    }
+    fun retainVerified(value: DeleteVerifiedResult, capsule: ByteArray): Boolean {
+        val stored = readStored(db, value.record.scope, value.record.id) ?: return false
+        if (stored.record.state != DeleteAttemptState.OUTCOME_UNKNOWN ||
+            stored.record.copy(protectedEvidence = null) != value.record) return false
+        readCompletion(stored)
+        val first = readVerified(stored)
+        if (first != null) return first == value
+        require(proofBlob(stored.rowId, "completion") == null)
+        check(db.update(TABLE, ContentValues().apply { put("result", capsule) },
+            "rowid=? AND result IS NULL", arrayOf(stored.rowId.toString())) == 1)
+        return true
+    }
+    fun readCompletion(scope: CalendarScope, id: MutationId): DeleteCompletion? =
+        readStored(db, scope, id)?.let(::readCompletion)
+    private fun readCompletion(stored: Stored): DeleteCompletion? {
+        val result = readVerified(stored)
+        val bytes = proofBlob(stored.rowId, "completion") ?: return null
+        val completion = DeleteProofStorageCodec.decodeCompletion(bytes)
+        require(completion.result == result && completion.result.record == stored.record.copy(protectedEvidence = null))
+        return completion
+    }
+    fun retainCompletion(value: DeleteCompletion, capsule: ByteArray, admitOwnership: () -> Boolean): Boolean {
+        val stored = readStored(db, value.result.record.scope, value.result.record.id) ?: return false
+        if (stored.record.state != DeleteAttemptState.OUTCOME_UNKNOWN ||
+            stored.record.copy(protectedEvidence = null) != value.result.record) return false
+        val first = readCompletion(stored)
+        if (!admitOwnership()) return false
+        val owner = owners(stored.record.scope, stored.record.eventId, stored.record.id).singleOrNull()
+        if (owner?.rowId != stored.rowId) return false
+        if (first != null) return first == value
+        if (readVerified(stored) != value.result) return false
+        check(db.update(TABLE, ContentValues().apply { put("completion", capsule) },
+            "rowid=? AND completion IS NULL", arrayOf(stored.rowId.toString())) == 1)
+        return true
+    }
     private fun readStored(db: SQLiteDatabase, scope: CalendarScope, id: MutationId): Stored? =
         readStored(db, "account=? AND calendar=? AND generation=? AND mutation=?", identity(scope, id))?.also {
             require(it.record.scope == scope && it.record.id == id)
@@ -117,6 +166,36 @@ internal class DeleteAttemptSql(private val db: SQLiteDatabase, private val chec
     private data class Metadata(val rowId: Long, val scope: CalendarScope, val id: MutationId,
         val event: EventId, val state: String, val length: Int)
 
+    /** Fixed internal column names only; metadata is bounded before materializing any BLOB. */
+    private fun proofBlob(rowId: Long, column: String): ByteArray? {
+        require(column == "result" || column == "completion")
+        checkCancelled()
+        val length = db.rawQuery("SELECT CASE WHEN $column IS NULL THEN -1 " +
+            "WHEN typeof($column)='blob' AND length($column) BETWEEN 1 AND 16777216 THEN length($column) END " +
+            "FROM $TABLE WHERE rowid=?", arrayOf(rowId.toString())).use { row ->
+            require(row.moveToFirst() && row.getType(0) == Cursor.FIELD_TYPE_INTEGER)
+            row.getInt(0).also { require(!row.moveToNext()) }
+        }
+        if (length == -1) return null
+        require(length in 1..16777216)
+        val bytes = ByteArray(length)
+        var offset = 0
+        while (offset < length) {
+            checkCancelled()
+            val count = minOf(CHUNK_BYTES, length - offset)
+            db.rawQuery("SELECT substr($column,?,?) FROM $TABLE WHERE rowid=?",
+                arrayOf((offset + 1).toString(), count.toString(), rowId.toString())).use { row ->
+                require(row.moveToFirst() && row.getType(0) == Cursor.FIELD_TYPE_BLOB)
+                val part = row.getBlob(0)
+                require(part.size == count && !row.moveToNext())
+                part.copyInto(bytes, offset)
+            }
+            offset += count
+        }
+        checkCancelled()
+        return bytes
+    }
+
     companion object {
         private const val TABLE = "delete_attempts"
         private const val CHUNK_BYTES = 64 * 1024
@@ -126,11 +205,16 @@ internal class DeleteAttemptSql(private val db: SQLiteDatabase, private val chec
                 generation INTEGER NOT NULL CHECK(generation >= 0),
                 mutation TEXT NOT NULL, event TEXT NOT NULL,
                 state TEXT NOT NULL CHECK(state IN ('PREPARED','OUTCOME_UNKNOWN')),
-                capsule BLOB NOT NULL,
+                capsule BLOB NOT NULL, result BLOB, completion BLOB,
                 PRIMARY KEY(account,calendar,generation,mutation),
                 UNIQUE(account,calendar,mutation)
             )""".trimIndent())
             db.execSQL("CREATE UNIQUE INDEX delete_unresolved_event ON delete_attempts(account,calendar,event)")
+        }
+        /** SQLiteOpenHelper owns the upgrade transaction. Copy opaque bytes without interpretation. */
+        fun migrateProofs(db: SQLiteDatabase) {
+            db.execSQL("ALTER TABLE delete_attempts ADD COLUMN result BLOB")
+            db.execSQL("ALTER TABLE delete_attempts ADD COLUMN completion BLOB")
         }
     }
 }

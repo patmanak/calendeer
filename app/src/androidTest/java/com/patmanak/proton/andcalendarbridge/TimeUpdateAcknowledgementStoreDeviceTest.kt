@@ -329,7 +329,7 @@ class TimeUpdateAcknowledgementStoreDeviceTest {
     @Test fun migrationFromTwentyPreservesExistingTitleTextHistoryAndAddsEmptyTimeTables() = fixture { store, name ->
         seedOtherFamiliesHistory(store)
         // A current helper seeded this legacy fixture: remove every new table before marking it version 20.
-        val added = listOf("local_time_edit_preparations", "time_update_acknowledgements", "time_update_acknowledgement_history")
+        val added = listOf("delete_acknowledgements", "local_time_edit_preparations", "time_update_acknowledgements", "time_update_acknowledgement_history")
         for (table in added) store.writableDatabase.execSQL("DROP TABLE $table")
         val existing = listOf("calendars", "records", "projection_bases", "local_edits", "conflict_archives", "conflict_observations",
             "local_edit_preparations", "title_update_acknowledgements", "title_update_acknowledgement_history",
@@ -339,7 +339,7 @@ class TimeUpdateAcknowledgementStoreDeviceTest {
         assertFalse(before.getValue("text_update_acknowledgement_history").isEmpty())
         store.writableDatabase.version = 20; store.close()
         ImportStore(context, name).use { reopened ->
-            assertEquals(21, reopened.readableDatabase.version)
+            assertEquals(22, reopened.readableDatabase.version)
             assertEquals(before, existing.associateWith { rows(reopened.readableDatabase, it) })
             for (table in added) assertTrue(rows(reopened.readableDatabase, table).isEmpty())
             assertEquals(LocalTimePreparationAdmission.STORED, reopened.retainCurrentLocalTimePreparation(preparation))
@@ -352,7 +352,7 @@ class TimeUpdateAcknowledgementStoreDeviceTest {
         val old = listOf("calendars", "records", "projection_bases", "local_edits", "title_update_acknowledgements",
             "title_update_acknowledgement_history", "text_update_acknowledgements", "text_update_acknowledgement_history")
         val before = old.associateWith { rows(store.readableDatabase, it) }
-        for (table in listOf("local_time_edit_preparations", "time_update_acknowledgements", "time_update_acknowledgement_history"))
+        for (table in listOf("delete_acknowledgements", "local_time_edit_preparations", "time_update_acknowledgements", "time_update_acknowledgement_history"))
             store.writableDatabase.execSQL("DROP TABLE $table")
         // Collision at the second additive table forces rollback of earlier CREATEs too.
         store.writableDatabase.execSQL("CREATE TABLE time_update_acknowledgements (incompatible TEXT)")

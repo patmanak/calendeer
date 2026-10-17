@@ -45,6 +45,30 @@ class SystemCreateWorkStoreDeviceTest {
         finally { store.close(); base.deleteDatabase(name); base.deleteSharedPreferences(preferenceName) }
     }
 
+    @Test fun deletionConsentIsSeparateScopedAndDurable() = fixture { context, name, store ->
+        store.setDeletesMode(scope, true); assertFalse(store.deletesEnabled(scope))
+        store.setMode(scope, true); store.setTitlesMode(scope, true)
+        store.setTextsMode(scope, true); store.setTimesMode(scope, true)
+        assertFalse(store.deletesEnabled(scope))
+        store.setDeletesMode(scope, true); assertTrue(store.deletesEnabled(scope))
+        store.setTimesMode(scope, false); assertTrue(store.deletesEnabled(scope))
+        for (other in listOf(scope.copy(account = AccountId("other")), scope.copy(calendar = CalendarId("other")),
+            scope.copy(generation = 1))) { store.setMode(other, true); assertFalse(store.deletesEnabled(other)) }
+        store.close()
+        SystemCreateWorkStore(context, name).use { reopened ->
+            assertTrue(reopened.deletesEnabled(scope))
+            reopened.setDeletesMode(scope, false)
+            assertFalse(reopened.deletesEnabled(scope)); assertTrue(reopened.modeEnabled(scope))
+        }
+    }
+
+    @Test fun disablingGeneralEditingRevokesDeletionWithoutRestoringConsent() = fixture { _, _, store ->
+        store.setMode(scope, true); store.setDeletesMode(scope, true)
+        assertTrue(store.deletesEnabled(scope))
+        store.setMode(scope, false); assertFalse(store.deletesEnabled(scope))
+        store.setMode(scope, true); assertFalse(store.deletesEnabled(scope))
+    }
+
     @Test fun titleOptInIsSeparateScopedAndNeverInheritedFromCreation() = fixture { context, name, store ->
         store.setMode(scope, true)
         assertFalse(store.titlesEnabled(scope))

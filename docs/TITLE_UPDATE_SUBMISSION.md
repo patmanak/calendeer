@@ -18,8 +18,9 @@ Production accepts ordinary imported and fully handed-off Android-created timed
 and all-day events: known-empty details,
 no color, no recurrence, and exactly a title change. All-day start and exclusive
 end dates must remain identical, with the existing strict native UTC representation.
-Broader edits and deletion remain captured locally without upload. The
-interface explains this limit; all editing stays in the system calendar client.
+Broader edits are outside this title-only port. Separate default-off text, date
+and [deletion](DELETE_SUBMISSION.md) options have their own supported profiles;
+other changes remain captured locally. All editing stays in the system calendar client.
 
 A transferred CREATE must retain its complete original submission, binding,
 attachment and proven acknowledgement. Preparation and claim require the exact

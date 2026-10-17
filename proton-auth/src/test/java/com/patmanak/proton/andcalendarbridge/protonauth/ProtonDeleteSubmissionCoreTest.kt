@@ -60,9 +60,10 @@ class ProtonDeleteSubmissionCoreTest {
         }
     }
     @Test fun exactNotFoundIsCapturedBeforeCoreConvertsItToAnError() = runBlocking {
-        for (compressed in listOf(false, true)) withServer { server ->
-            val body = """{"Code":2501,"Error":"Synthetic event does not exist"}"""
-            val response = MockResponse().setResponseCode(404)
+        for (status in listOf(404, 422)) for (compressed in listOf(false, true)) withServer { server ->
+            val body = if (status == 422) """{"Code":2501,"Error":"Synthetic missing","Details":{}}"""
+                else """{"Code":2501,"Error":"Synthetic event does not exist"}"""
+            val response = MockResponse().setResponseCode(status)
             if (compressed) {
                 val bytes = java.io.ByteArrayOutputStream().run {
                     java.util.zip.GZIPOutputStream(this).use { it.write(body.toByteArray(Charsets.UTF_8)) }; toByteArray()
@@ -79,7 +80,7 @@ class ProtonDeleteSubmissionCoreTest {
                 // The exact raw witness must survive it; its parsed exception is not absence proof.
                 assertTrue(result is ApiResult.Error.Http)
                 val captured = requireNotNull(probe.finish())
-                assertEquals(body, captured.body); assertEquals(404, captured.httpCode); assertEquals(url, captured.url)
+                assertEquals(body, captured.body); assertEquals(status, captured.httpCode); assertEquals(url, captured.url)
                 assertNull(probe.finish())
                 assertEquals(1, server.requestCount); assertEquals(0, sessions.refreshes)
                 val sent = server.takeRequest()

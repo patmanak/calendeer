@@ -950,8 +950,10 @@ The current original is verified through the existing Proton Core signed/decrypt
 event reader; no new cryptographic primitive or upstream dependency is introduced.
 Indexed deletion success does not require a returned `Event`, and does not prove
 absence. A narrow exact-event GET parser accepts structured code 2501 only with
-the bound route and fresh membership/context checks. This interpretation requires
-real service qualification; HTTP 404 or a missing list entry alone is insufficient.
+the bound route and fresh membership/context checks. A controlled disposable timed
+event qualifies the measured HTTP 422/code 2501/empty `Details` response. Unknown
+keys or nonempty details remain held; HTTP 404 or a missing list entry alone is
+insufficient.
 
 The project-owned tagged GET witness is registered in the existing guarded Core
 client. It retains the exact authenticated route, status and JSON before Core's
@@ -960,7 +962,10 @@ gzip decoding with separate compressed/decompressed limits and does not depend o
 internal Core exception types. Loopback Core tests qualify this plumbing, not the
 service meaning of absence.
 
-The typed port remains internal to integration and test composition, with no
-system worker, user-facing deletion option or native acknowledgement. See
+The typed port is integrated with separate worker, consent and native/SQL
+acknowledgement boundaries. An ordinary timed system-editor/production-worker
+journey and fresh-process replay qualify the default-off experimental option.
+The debug-only inspection probe reports closed local/GET shapes and cannot send,
+retain a result or acknowledge Android. See
 [deletion submission](../docs/DELETE_SUBMISSION.md) for its interruption rules,
 observed-state limits and remaining qualification.

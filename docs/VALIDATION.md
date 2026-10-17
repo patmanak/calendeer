@@ -1,6 +1,74 @@
 # Validation
 
-## Guarded deletion request foundation
+## Deletion worker and Android acknowledgement
+
+The [deletion contract](DELETE_SUBMISSION.md) now has separate production worker
+orchestration, default-off per-calendar consent, authenticated absence results,
+native acknowledgement and durable completion. Shared journal schema 9 and import
+schema 22 preserve request ownership, pending receipts and the incoming barrier.
+Completion never releases the original deleted event for reprojection.
+
+PASS: 427 domain, 840 backend and 167 app JVM cases, without failures or skips.
+Focused cases cover cancellation and access revocation, immutable first requests,
+inspect-only UNKNOWN recovery, independent offline proof recovery, foreign conflict
+binding, separate DELETE cursors and bounded/corrupt result and completion decoding.
+
+A failing regression reproduced the measured exact-event GET response: HTTP 422,
+structured code 2501 and empty `Details`. The strict parser now accepts this form
+only on the bound authenticated route with current context/membership checks.
+Nonempty, null, scalar or array details, unknown/duplicate fields, unrelated routes
+and generic errors remain unresolved. Core loopback tests cover both plain and
+gzip responses before structured API-error conversion. Absence is current
+convergence, not proof of causality or an atomic write precondition.
+
+PASS: 81 focused physical Provider, owner-gateway, migration, CREATE-pipeline and
+option UI cases, including ordinary editor deletion and Provider-cleared `MUTATORS`.
+Wider SQLite/Provider regression coverage includes 543 passing physical executions.
+The remaining fixture failures were invalid color setup/cleanup, expected identity
+refusal and historical-schema reconstruction; corrected focused cases pass.
+Native checks cover retained clean tombstones, full receipt binding, newer edits,
+lost replies, child/metadata refusal, revoked leases and permanent incoming barriers.
+
+PASS: 65 further physical executions cover 18 deletion-store, nine owner-gateway,
+24 ordinary projection and 14 temporal-acknowledgement cases. The production
+journey reproduced a held local DELETE with no network request because an identical
+incoming projection receipt remained pending. Its strict no-change exception now
+retains the incoming obligation through reservation and retires it only after
+native ACK. Regressions preserve different incoming contents, previous revisions,
+formats and initial projections, verify rollback/reopening after a SQL fault and
+refuse old projection replay after completion.
+
+The isolated live fixture uses a new disposable service event, opened and deleted
+in `foundation.e.calendar`. A restarted read-only inspection retained authenticated
+absence without preparing or sending another DELETE, with native ACK deliberately
+deferred. New-process ACK and another fresh-process replay pass with the same row,
+immutable request/result/completion and old-upsert suppression. This fixture's
+recovery ports cannot access HTTP; independent application traffic is not claimed
+to be offline.
+
+PASS: actual system-editor/production-worker RUN and fresh-process REPLAY for a
+second new disposable ordinary timed event. PREPARE creates and verifies the
+service event and seeds its ordinary production mirror. The external driver
+verifies the exact enrolled title, then deletes it through `foundation.e.calendar`
+and its observed confirmation dialog. RUN uses only production consent setters
+and the normal WorkManager scheduling trigger; it does not directly prepare,
+capture, submit, inspect or acknowledge the deletion. Exact result/completion,
+same-row native ACK and the permanent incoming barrier pass. Active restarted
+REPLAY retains one attempt and the identical request/result/completion hashes.
+
+The five original target modes are durably restored, including initially read-only
+QA activation after full quiescence checks. Before activation, bounded audits reject
+foreign CREATE work, native changes, local owners/preparations, unfinished
+acknowledgements and invalid/unclosed title/text/time history. Only the enrolled
+deletion in its exact generation is exempt. Other calendars retain existing
+consent and may run their authorized work; global silence is not claimed.
+
+Final app JVM cases and debug app/test APK builds pass; lint passes with zero
+errors and 43 warnings. Focused independent reviews and staged-blob confidentiality
+checks pass. Real remote-conflict, all-day service deletion, additional network/
+power interruption and Samsung/One UI qualification remain NOT RUN.
+
+## Guarded deletion request foundation (earlier slice)
 
 The [deletion submission contract](DELETE_SUBMISSION.md) separates the internal typed
 port from a user-facing system-calendar capability. This slice adds protected

@@ -120,6 +120,7 @@ class MainActivity : ComponentActivity() {
                             onTitlesMode = preferences.systemCreates::setTitlesEnabled,
                             onTextMode = preferences.systemCreates::setTextsEnabled,
                             onTimeMode = preferences.systemCreates::setTimesEnabled,
+                            onDeleteMode = preferences.systemCreates::setDeletesEnabled,
                             onOpenConflicts = { selection -> archiveScope = selection.scope })
                     },
                 )

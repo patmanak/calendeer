@@ -12,6 +12,7 @@ import com.patmanak.proton.andcalendarbridge.sync.*
 import com.patmanak.proton.andcalendarbridge.data.serialization.TitleUpdateAcknowledgementCodec
 import com.patmanak.proton.andcalendarbridge.data.serialization.TextUpdateAcknowledgementCodec
 import com.patmanak.proton.andcalendarbridge.data.serialization.TimeUpdateAcknowledgementCodec
+import com.patmanak.proton.andcalendarbridge.data.serialization.DeleteAcknowledgementCodec
 import com.patmanak.proton.andcalendarbridge.sync.catalog.CalendarSummary
 import java.time.Instant
 import java.time.LocalDate
@@ -37,7 +38,7 @@ enum class LocalTextPreparationAdmission { ELIGIBLE, STORED, HISTORICAL, INACTIV
 enum class LocalTimePreparationAdmission { ELIGIBLE, STORED, HISTORICAL, INACTIVE, UNQUALIFIED, CONFLICT }
 
 class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
-    SQLiteOpenHelper(context, name, null, 21), SyncStore {
+    SQLiteOpenHelper(context, name, null, 22), SyncStore {
     private val lock = Mutex()
     /** Check the run lease both before its transaction and before durable commit. */
     @Volatile var admitTransaction: (CalendarScope) -> Boolean = { true }
@@ -65,9 +66,12 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
         createTextPreparationAndAcknowledgements(db)
         createTimePreparationAndAcknowledgements(db)
         createConflictArchives(db)
+        createDeleteAcknowledgements(db)
     }
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        check(oldVersion in 1..20 && newVersion == 21) { "Explicit import schema migration required" }
+        check(oldVersion in 1..21 && newVersion == 22) { "Explicit import schema migration required" }
+        createDeleteAcknowledgements(db)
+        if (oldVersion == 21) return
         createTimePreparationAndAcknowledgements(db)
         if (oldVersion == 20) return
         // Add these before every legacy branch, including the schema-18 observation rebuild.
@@ -603,7 +607,8 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
                         hasReconciliation(db, CalendarScope(account, id, long("generation"))),
                         readCoverage(db, CalendarScope(account, id, long("generation"))).active,
                         countPending(db, CalendarScope(account, id, long("generation"))),
-                        cursor.getInt(cursor.getColumnIndexOrThrow("retained_local_changes")),
+                        cursor.getInt(cursor.getColumnIndexOrThrow("retained_local_changes")) -
+                            completedDeleteEvents(db, CalendarScope(account, id, long("generation"))).size,
                         cursor.getInt(cursor.getColumnIndexOrThrow("local_conflicts"))))
                 }
             }
@@ -1532,8 +1537,10 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
                     "CASE WHEN typeof(kind)='text' AND length(CAST(kind AS BLOB)) <= 6 THEN kind END, " +
                     "CASE WHEN typeof(state)='text' AND length(CAST(state AS BLOB)) <= 8 THEN state END"
                 val position = if (query.cursor == null) "" else " AND event COLLATE BINARY > ?"
+                val completed = completedDeleteEvents(db,query.scope)
                 val args = buildList {
-                    add(key(query.scope)); query.cursor?.let { add(it.afterEvent.value) }; add((query.limit + 1).toString())
+                    add(key(query.scope)); query.cursor?.let { add(it.afterEvent.value) }
+                    add((query.limit.toLong() + 1 + completed.size).toString())
                 }.toTypedArray()
                 val rows = db.rawQuery("SELECT $columns FROM local_edits WHERE scope=?$position " +
                     "ORDER BY event COLLATE BINARY LIMIT ?", args).use { row ->
@@ -1543,8 +1550,11 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
                             fun identity(column: Int) = Charsets.UTF_8.newDecoder()
                                 .onMalformedInput(CodingErrorAction.REPORT).onUnmappableCharacter(CodingErrorAction.REPORT)
                                 .decode(java.nio.ByteBuffer.wrap(row.getBlob(column))).toString()
-                            add(RetainedLocalChangeRef(EventId(identity(0)), MutationId(identity(1)),
+                            val event = EventId(identity(0))
+                            if (event in completed) continue
+                            add(RetainedLocalChangeRef(event, MutationId(identity(1)),
                                 MutationKind.valueOf(row.getString(2)), LocalEditState.valueOf(row.getString(3))))
+                            if (size == query.limit + 1) break
                         }
                     }
                 }
@@ -2988,6 +2998,144 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
         } catch (failure: CancellationException) { throw failure }
         catch (failure: SQLiteException) { throw failure }
         catch (_: Exception) { throw IllegalStateException("Invalid retained edit preparation") }
+    private fun createDeleteAcknowledgements(db: SQLiteDatabase) {
+        db.execSQL("CREATE TABLE delete_acknowledgements (scope TEXT NOT NULL, event TEXT NOT NULL, mutation TEXT NOT NULL, attempt TEXT NOT NULL, payload TEXT NOT NULL, state TEXT NOT NULL CHECK(state IN ('PENDING','RESTORED')), PRIMARY KEY(scope,event), UNIQUE(scope,mutation), UNIQUE(scope,attempt))")
+    }
+
+    /** Decode the complete immutable binding before using even its completion state. */
+    private fun readDeleteAcknowledgement(db: SQLiteDatabase, scope: CalendarScope, event: EventId): DeleteAcknowledgementRecord? = try {
+        stagedQuery(db, "SELECT ${archiveText("mutation",4096)},${archiveText("attempt",4096)},${archiveText("payload",1048576)},${archiveText("state",16)} FROM delete_acknowledgements WHERE scope=? AND event=?",
+            arrayOf(key(scope),event.value)).use { row ->
+            if (!row.moveToFirst()) null else {
+                val receipt = DeleteAcknowledgementCodec.decode(archiveString(row,2))
+                require(receipt.intent.scope == scope && receipt.intent.base.eventId == event &&
+                    receipt.intent.id.value == archiveString(row,0) && receipt.attempt.id.value == archiveString(row,1))
+                DeleteAcknowledgementRecord(receipt,DeleteAcknowledgementState.valueOf(archiveString(row,3)))
+            }
+        }
+    } catch (failure: CancellationException) { throw failure }
+      catch (failure: SQLiteException) { throw failure }
+      catch (_: Exception) { throw IllegalStateException("Invalid retained delete acknowledgement") }
+
+    suspend fun deleteAcknowledgement(scope: CalendarScope, event: EventId, attempt: MutationId): DeleteAcknowledgementRecord? =
+        stagingMutation(scope) { db -> readDeleteAcknowledgement(db,scope,event)?.takeIf { it.receipt.attempt.id == attempt } }
+
+    suspend fun deleteAcknowledgement(scope: CalendarScope, event: EventId): DeleteAcknowledgementRecord? =
+        stagingMutation(scope) { db -> readDeleteAcknowledgement(db,scope,event) }
+
+    private fun matchingDeleteReservation(db: SQLiteDatabase, scope: CalendarScope, event: EventId): Boolean {
+        val record = readDeleteAcknowledgement(db,scope,event) ?: return false
+        val owner = readInspectionDeleteOwner(db,scope,event) ?: return false
+        return owner.copy(state = LocalEditState.PAUSED) == record.receipt.intent && archiveCurrentFormat(db,scope) == owner.format
+    }
+
+    private fun completedDeleteEvents(db: SQLiteDatabase, scope: CalendarScope): Set<EventId> {
+        val events = stagedQuery(db,"SELECT ${archiveText("event",4096)} FROM delete_acknowledgements WHERE scope=?",arrayOf(key(scope))).use { rows ->
+            buildList { while (rows.moveToNext()) add(EventId(archiveString(rows,0))) }
+        }
+        return events.filterTo(mutableSetOf()) { event ->
+            val record = checkNotNull(readDeleteAcknowledgement(db,scope,event))
+            val owner = readInspectionDeleteOwner(db,scope,event)
+            record.state == DeleteAcknowledgementState.RESTORED && owner == record.receipt.intent
+        }
+    }
+
+    private fun qualifyLocalDelete(db: SQLiteDatabase, intent: LocalDeleteIntent, allowReservedAbsence: Boolean): Boolean {
+        val scope = intent.scope; val event = intent.base.eventId
+        if (intent.state != LocalEditState.PAUSED || !activeProjectionScope(db,scope)) return false
+        // Freeze validates the narrow supported deletion profile without creating new identities.
+        try { DeleteSubmissionPolicy.freezeIntent(intent) } catch (_: IllegalArgumentException) { return false }
+        if (listOf("captured_create_bases","captured_create_acknowledgements","captured_create_handoffs")
+            .any { hasRawEventRow(db,it,scope,event) }) return false
+        val reservation = readDeleteAcknowledgement(db,scope,event)
+        if (reservation != null && reservation.receipt.intent != intent) return false
+        if (hasForeignLocalPreparation(db,scope,event,null) ||
+            hasRawEventRow(db,"deferred_events",scope,event)) return false
+        val pendingProjection = readProjectionReceipt(db,scope,event)
+        if (pendingProjection != null && !redundantDeleteProjection(pendingProjection,intent)) return false
+        if (archiveCurrentFormat(db,scope) != intent.format || readInspectionDeleteOwner(db,scope,event) != intent ||
+            readProjectionBase(db,scope,event)?.let { it.change != intent.base ||
+                it.representation?.representation?.let { value -> value != ProjectionRepresentation.DIRECT_V1 } == true } != false) return false
+        val current = stagedQuery(db,"SELECT payload FROM records WHERE scope=? AND event=?",arrayOf(key(scope),event.value)).use {
+            if (it.moveToFirst()) decodeChange(it.getString(0)) else null
+        }
+        return current == intent.base || allowReservedAbsence && current is RemoteChange.Deleted && matchingDeleteReservation(db,scope,event)
+    }
+
+    suspend fun qualifyLocalDelete(intent: LocalDeleteIntent): Boolean = stagingMutation(intent.scope) { db ->
+        qualifyLocalDelete(db,intent,true)
+    }
+
+    /** A dirty tombstone can interrupt an identical incoming re-projection. Retain its
+     * obligation through preparation and sending; only a proven native DELETE ACK supersedes it.
+     */
+    private fun redundantDeleteProjection(pending: ProjectionReceipt, intent: LocalDeleteIntent): Boolean =
+        pending.scope == intent.scope && pending.protocol == 1 && pending.format == intent.format &&
+            pending.change == intent.base && pending.previousBase == intent.base &&
+            pending.representation == null && pending.previousRepresentation == null
+
+    private fun retireRedundantDeleteProjection(db: SQLiteDatabase, intent: LocalDeleteIntent) {
+        val pending = readProjectionReceipt(db,intent.scope,intent.base.eventId) ?: return
+        check(redundantDeleteProjection(pending,intent)) { "Deletion projection obligation changed" }
+        check(db.delete("projection_receipts", "scope=? AND event=? AND nonce=? AND payload=? AND adapter=? AND version=? " +
+            "AND previous_base=? AND protocol=? AND representation IS NULL AND previous_representation IS NULL",
+            arrayOf(key(pending.scope),pending.change.eventId.value,pending.nonce,encodeChange(pending.change),
+                pending.format.id,pending.format.version.toString(),encodeChange(checkNotNull(pending.previousBase)),
+                pending.protocol.toString())) == 1) { "Deletion projection obligation changed" }
+    }
+
+    /** Reservation precedes network claim; it is never native acknowledgement authority. */
+    suspend fun prepareDeleteAcknowledgement(record: DeleteAttemptRecord): DeleteAcknowledgementReservation? = stagingMutation(record.scope) { db ->
+        val frozen = record.frozen(); val identity = DeleteAttemptIdentity.of(frozen)
+        val existing = readDeleteAcknowledgement(db,frozen.scope,frozen.eventId)
+        if (existing != null) return@stagingMutation if (existing.receipt.attempt == identity && existing.receipt.intent == frozen.intent &&
+            qualifyLocalDelete(db,frozen.intent,true))
+            DeleteAcknowledgementReservation(existing,false) else null
+        if (frozen.state != DeleteAttemptState.PREPARED || !qualifyLocalDelete(db,frozen.intent,false)) return@stagingMutation null
+        val receipt = DeleteAcknowledgementReceipt(identity,frozen.intent,UUID.randomUUID().toString())
+        db.insertOrThrow("delete_acknowledgements",null,ContentValues().apply {
+            put("scope",key(frozen.scope)); put("event",frozen.eventId.value); put("mutation",frozen.intent.id.value)
+            put("attempt",frozen.id.value); put("payload",DeleteAcknowledgementCodec.encode(receipt)); put("state","PENDING")
+        })
+        checkStagingCapacity(db)
+        DeleteAcknowledgementReservation(DeleteAcknowledgementRecord(receipt,DeleteAcknowledgementState.PENDING),true)
+    }
+
+    suspend fun restoreDeleteAcknowledgement(witness: AppliedDeleteAcknowledgement): Boolean = stagingMutation(witness.receipt.intent.scope) { db ->
+        val receipt = witness.receipt.snapshot(); val scope = receipt.intent.scope; val event = receipt.intent.base.eventId
+        val retained = readDeleteAcknowledgement(db,scope,event) ?: return@stagingMutation false
+        if (retained.receipt != receipt || !qualifyLocalDelete(db,receipt.intent,true)) return@stagingMutation false
+        if (retained.state == DeleteAcknowledgementState.RESTORED) return@stagingMutation true
+        retireRedundantDeleteProjection(db,receipt.intent)
+        db.update("records",ContentValues().apply { put("pending",0) },"scope=? AND event=?",arrayOf(key(scope),event.value))
+        db.update("delete_acknowledgements",ContentValues().apply { put("state","RESTORED") },
+            "scope=? AND event=? AND mutation=? AND attempt=? AND payload=? AND state='PENDING'",
+            arrayOf(key(scope),event.value,receipt.intent.id.value,receipt.attempt.id.value,DeleteAcknowledgementCodec.encode(receipt))) == 1
+    }
+
+    suspend fun conflictLocalDelete(intent: LocalDeleteIntent, observed: RemoteChange.Upsert): Boolean = stagingMutation(intent.scope) { db ->
+        val scope = intent.scope; val event = intent.base.eventId
+        val owner = readInspectionDeleteOwner(db,scope,event) ?: return@stagingMutation false
+        if (owner.copy(state = LocalEditState.PAUSED) != intent || observed.eventId != event || observed == intent.base ||
+            archiveCurrentFormat(db,scope) != intent.format) return@stagingMutation false
+        val archive = checkNotNull(ensureConflictArchive(db,scope,event,true))
+        appendConflictObservation(db,archive,ConflictObservationKind.VERIFIED,ConflictObservationOrigin.RECEIVED,
+            intent.format,observed.revision,null,encodeChange(observed))
+        db.update("local_edits",ContentValues().apply { put("state","CONFLICT") },"scope=? AND event=? AND mutation=? AND kind='DELETE'",
+            arrayOf(key(scope),event.value,intent.id.value)) == 1
+    }
+
+    /** Caller has observed a changed native snapshot; do not fabricate remote evidence. */
+    suspend fun conflictAcknowledgedDelete(intent: LocalDeleteIntent): Boolean = stagingMutation(intent.scope) { db ->
+        val scope = intent.scope; val event = intent.base.eventId
+        val retained = readDeleteAcknowledgement(db,scope,event) ?: return@stagingMutation false
+        val owner = readInspectionDeleteOwner(db,scope,event) ?: return@stagingMutation false
+        if (retained.receipt.intent != intent || owner.copy(state=LocalEditState.PAUSED) != intent) return@stagingMutation false
+        ensureConflictArchive(db,scope,event,true)
+        db.update("local_edits",ContentValues().apply { put("state","CONFLICT") },"scope=? AND event=? AND mutation=? AND kind='DELETE'",
+            arrayOf(key(scope),event.value,intent.id.value)) == 1
+    }
+
     suspend fun localDelete(scope: CalendarScope, eventId: EventId): LocalDeleteIntent? = access { db ->
         check(admitTransaction(scope)) { "Inactive import lease" }; requireKnown(db, scope)
         val deletion = readLocalDelete(db, scope, eventId)
@@ -3380,6 +3528,7 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
             " + COALESCE((SELECT SUM(length(CAST(payload AS BLOB))+length(CAST(base AS BLOB))+length(CAST(local AS BLOB))+16384) FROM local_time_edit_preparations),0)" +
             " + COALESCE((SELECT SUM(length(CAST(receipt AS BLOB))+16384) FROM time_update_acknowledgements),0)" +
             " + COALESCE((SELECT SUM(length(CAST(receipt AS BLOB))+16384) FROM time_update_acknowledgement_history),0)" +
+            " + COALESCE((SELECT SUM(length(CAST(payload AS BLOB))+16384) FROM delete_acknowledgements),0)" +
             " + COALESCE((SELECT SUM(length(CAST(scope AS BLOB))+length(CAST(event AS BLOB))+length(CAST(mutation AS BLOB))+length(CAST(adapter AS BLOB))+length(CAST(base AS BLOB))+length(CAST(local AS BLOB))+64) FROM conflict_archives),0)" +
             " + COALESCE((SELECT SUM(COALESCE(length(CAST(payload AS BLOB)),0)+COALESCE(length(CAST(adapter AS BLOB)),0)+COALESCE(length(CAST(revision AS BLOB)),0)+128) FROM conflict_observations),0)", null).use {
             check(it.moveToFirst()); it.getLong(0)
@@ -3540,14 +3689,15 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
                 }
                 override fun putRemote(change: RemoteChange) {
                     val ownerBase = localMutationBase(db, scope, change.eventId)
-                    val archive = ensureConflictArchive(db, scope, change.eventId, force = ownerBase != null && change != ownerBase)
+                    val deletionEcho = change is RemoteChange.Deleted && matchingDeleteReservation(db,scope,change.eventId)
+                    val archive = ensureConflictArchive(db, scope, change.eventId, force = ownerBase != null && change != ownerBase && !deletionEcho)
                     updateSeries(db, scope, change)
                     db.insertWithOnConflict("records", null, ContentValues().apply {
                         put("scope", key(scope)); put("event", change.eventId.value)
                         put("payload", encodeChange(change)); put("pending", 0)
                     }, SQLiteDatabase.CONFLICT_REPLACE).also { check(it != -1L) }
                     localMutationBase(db, scope, change.eventId)?.let { base ->
-                        if (change != base) db.update("local_edits", ContentValues().apply {
+                        if (change != base && !deletionEcho) db.update("local_edits", ContentValues().apply {
                             put("state", LocalEditState.CONFLICT.name)
                         }, "scope=? AND event=?", arrayOf(key(scope), change.eventId.value))
                     }

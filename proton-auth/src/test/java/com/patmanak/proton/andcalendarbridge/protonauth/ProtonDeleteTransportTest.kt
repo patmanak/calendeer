@@ -23,6 +23,26 @@ class ProtonDeleteTransportTest {
             parse(body = "{\"Code\":2501,\"Code\":2501}"), parse(body = "{\"Code\":2501,\"Event\":{}}")))
             assertEquals(ProtonDeleteEventRead.Unknown, result)
     }
+    @Test fun exact422WithEmptyDetailsIsScopedAbsenceButUnknownDetailsRemainHeld() {
+        fun parse(body: String, status: Int = 422, url: okhttp3.HttpUrl = eventUrl) =
+            ProtonDeleteEventResponseParser.parse(url, "synthetic-calendar", "synthetic-event", status, body)
+        val body = """{"Code":2501,"Error":"Synthetic missing","Details":{}}"""
+        val absent = parse(body)
+        assertTrue("The measured 422/2501 envelope must be understood", absent is ProtonDeleteEventRead.Absent)
+        absent as ProtonDeleteEventRead.Absent
+        assertEquals("synthetic-calendar", absent.calendar); assertEquals("synthetic-event", absent.eventId)
+        for (unsafe in listOf(
+            """{"Code":2501,"Details":{"Reason":"Unknown"}}""",
+            """{"Code":2501,"Details":null}""", """{"Code":2501,"Details":[]}""",
+            """{"Code":2501,"Details":"unknown"}""", """{"Code":2501,"Details":{},"Event":null}""",
+            """{"Code":2501,"Details":{},"Other":{}}""", """{"Code":2501,"Details":{},"Details":{}}""",
+            """{"Code":2501,"Details":{},"Error":1}""", """{"Code":2500,"Details":{}}"""))
+            assertEquals(ProtonDeleteEventRead.Unknown, parse(unsafe))
+        assertEquals(ProtonDeleteEventRead.Unknown, parse(body, status = 403))
+        assertEquals(ProtonDeleteEventRead.Unknown, parse(body, url = syncUrl))
+        assertEquals(ProtonDeleteEventRead.Unknown, parse(body, url = eventUrl.newBuilder().addQueryParameter("query", "value").build()))
+    }
+
     @Test fun indexedSuccessDoesNotRequireAnEventAnd2501MutationResponseIsOnlyFailure() {
         assertEquals(ProtonDeleteResponse.ReportedSuccess,
             ProtonDeleteResponseParser.parse("{\"Code\":1001,\"Responses\":[{\"Index\":0,\"Response\":{\"Code\":1000}}]}"))

@@ -29,12 +29,16 @@ import com.patmanak.proton.andcalendarbridge.data.outgoing.SystemTitleUpdateCont
 import com.patmanak.proton.andcalendarbridge.data.outgoing.CoordinatorSystemTitleOperations
 import com.patmanak.proton.andcalendarbridge.data.outgoing.CoordinatorSystemTextOperations
 import com.patmanak.proton.andcalendarbridge.data.outgoing.CoordinatorSystemTimeOperations
+import com.patmanak.proton.andcalendarbridge.data.outgoing.CoordinatorSystemDeleteOperations
+import com.patmanak.proton.andcalendarbridge.sync.MutationKind
 
 class BridgeApplication : Application() {
     // Per-calendar explicit consent remains required for this restricted experimental profile.
     private val textSynchronizationQualified = true
     // Timed service readback qualified; each calendar still requires separate time consent.
     private val timeSynchronizationQualified = true
+    // Ordinary service/editor/worker profile qualified; separate deletion consent stays off by default.
+    private val deleteSynchronizationQualified = true
     private val authenticationScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val createAttempts by lazy { CreateAttemptStore(this) }
     private val localCreateCaptures by lazy { LocalCreateStore(this) }
@@ -89,13 +93,32 @@ class BridgeApplication : Application() {
             AndroidTitleRecoveryCursorStore(this, "calendar-time-inspection-cursors"),
             timeOperations, { target -> timeRecovery.reset(target) })
     }
+    private val deleteOperations: CoordinatorSystemDeleteOperations by lazy {
+        CoordinatorSystemDeleteOperations(imports, titleAttempts.deleteJournal,
+            ProtonAuthentication.deletions(this))
+    }
+    private val deleteRecovery by lazy {
+        SystemTitleRecoveryController(AndroidTitleRecoveryCursorStore(this, "calendar-delete-recovery-cursors"),
+            recover = { com.patmanak.proton.andcalendarbridge.sync.TitleUpdateOfflineRecoveryProgress(inactive = true) },
+            guardedRecover = { query, active ->
+                deleteOperations.recoverOffline(query) { requested -> requested == query.scope && active() }
+            })
+    }
+    private val deleteUpdates by lazy {
+        SystemTitleUpdateController(
+            AndroidTitleRecoveryCursorStore(this, "calendar-delete-owner-cursors"),
+            AndroidTitleRecoveryCursorStore(this, "calendar-delete-inspection-cursors"),
+            deleteOperations, { target -> deleteRecovery.reset(target) }, mutationKind = MutationKind.DELETE)
+    }
     val systemCreates by lazy { SystemCreateController(this, imports, nativeCalendar, systemCreateWork,
         localCreateCaptures, createAttempts, ProtonAuthentication.createSubmissions(this), authenticationScope,
         titleRecovery = titleRecovery, titleUpdates = titleUpdates,
         textRecovery = if (textSynchronizationQualified) textRecovery else null,
         textUpdates = if (textSynchronizationQualified) textUpdates else null,
         timeRecovery = if (timeSynchronizationQualified) timeRecovery else null,
-        timeUpdates = if (timeSynchronizationQualified) timeUpdates else null) }
+        timeUpdates = if (timeSynchronizationQualified) timeUpdates else null,
+        deleteRecovery = if (deleteSynchronizationQualified) deleteRecovery else null,
+        deleteUpdates = if (deleteSynchronizationQualified) deleteUpdates else null) }
 
     val imports: ImportCoordinator by lazy {
         ImportCoordinator(this, ImportStore(this), ProtonAuthentication.events(this),
@@ -103,7 +126,8 @@ class BridgeApplication : Application() {
             localCreates = localCreateCaptures, systemCreatesEnabled = systemCreateWork::modeEnabled,
             systemTitlesEnabled = systemCreateWork::titlesEnabled,
             systemTextsEnabled = systemCreateWork::textsEnabled,
-            systemTimesEnabled = systemCreateWork::timesEnabled)
+            systemTimesEnabled = systemCreateWork::timesEnabled,
+            systemDeletesEnabled = { target -> deleteSynchronizationQualified && systemCreateWork.deletesEnabled(target) })
     }
 
     // App-owned: activity recreation must neither repeat login nor revoke a retained session.

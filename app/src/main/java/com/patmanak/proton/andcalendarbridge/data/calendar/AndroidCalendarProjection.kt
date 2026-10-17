@@ -1,5 +1,7 @@
 package com.patmanak.proton.andcalendarbridge.data.calendar
 
+import com.patmanak.proton.andcalendarbridge.sync.DeleteAcknowledgementReceipt
+import com.patmanak.proton.andcalendarbridge.sync.AppliedDeleteAcknowledgement
 import android.Manifest
 import android.accounts.Account
 import android.accounts.AccountManager
@@ -99,6 +101,41 @@ data class EnsuredCalendar(val id: Long, val created: Boolean)
  * order opaque revisions and never infers deletion from an absent event in a server page.
  */
 class AndroidCalendarProjection(context: Context) : CalendarProjection {
+    override val deleteAcknowledgementProtocol: Int? = 1
+    override suspend fun acknowledgeDelete(receipt: DeleteAcknowledgementReceipt): AppliedDeleteAcknowledgement? =
+        deleteAcknowledgementOperation(receipt) { frozen, checkActive ->
+            if (captureSimpleSnapshot(frozen.intent.scope, frozen.intent.base, deleted = true,
+                    deleteAcknowledgement = frozen, checkDeleteActive = checkActive) != null)
+                AppliedDeleteAcknowledgement(frozen) else null
+        }
+    override suspend fun inspectDeleteAcknowledgement(receipt: DeleteAcknowledgementReceipt): AppliedDeleteAcknowledgement? =
+        deleteAcknowledgementOperation(receipt) { frozen, checkActive ->
+            if (inspectOrdinaryAcknowledgement(frozen.intent.scope, frozen.intent.base.eventId,
+                    frozen.intent.base.revision, deleteReceiptMarker(frozen), checkActive))
+                AppliedDeleteAcknowledgement(frozen) else null
+        }
+    private suspend fun <T> deleteAcknowledgementOperation(receipt: DeleteAcknowledgementReceipt,
+        block: (DeleteAcknowledgementReceipt, () -> Unit) -> T): T {
+        val caller = currentCoroutineContext()
+        caller.ensureActive()
+        val frozen = receipt.snapshot()
+        val checkActive = { caller.ensureActive() }
+        try {
+            return operation {
+                checkActive(); requirePermissions(); checkActive()
+                val result = block(frozen, checkActive)
+                checkActive(); requirePermissions(); checkActive()
+                result
+            }
+        } catch (failure: Exception) { checkActive(); throw failure }
+    }
+    private fun deleteReceiptMarker(receipt: DeleteAcknowledgementReceipt): String {
+        val attempt = receipt.attempt
+        return "calendeer-delete-ack-v1:" + strictAttachmentDigest(
+            receipt.nonce, attempt.scope.account.value, attempt.scope.calendar.value, attempt.scope.generation.toString(),
+            attempt.id.value, attempt.localIntentId.value, attempt.eventId.value, attempt.baseRevision.value,
+            attempt.format.id, attempt.format.version.toString(), attempt.intentFingerprint, attempt.payloadFingerprint)
+    }
     override val timeUpdateAcknowledgementProtocol: Int? = 1
     override suspend fun acknowledgeTimeUpdate(receipt: TimeUpdateAcknowledgementReceipt): AppliedTimeUpdateAcknowledgement? {
         val caller = currentCoroutineContext()
@@ -218,10 +255,14 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
         receipt.handoff?.let { frame ->
             return inspectCapturedHistory(frame.receipt.acknowledgement, receipt.projection, receipt.checkActive)
         }
-        val scope = receipt.intent.scope
+        return inspectOrdinaryAcknowledgement(receipt.intent.scope, receipt.intent.base.eventId,
+            receipt.projection.change.revision, receiptMarker(receipt.projection), receipt.checkActive)
+    }
+    private fun inspectOrdinaryAcknowledgement(scope: CalendarScope, eventId: EventId, revision: Revision,
+        marker: String, checkActive: () -> Unit): Boolean {
         val account = accountFor(scope.account)
         val calendar = calendarRow(scope, account) ?: return false
-        val remoteId = digest("event-v1", calendarSyncId(scope), receipt.intent.base.eventId.value)
+        val remoteId = digest("event-v1", calendarSyncId(scope), eventId.value)
         val uri = syncUri(Events.CONTENT_URI, account)
         val identity = Selection("${Events.CALENDAR_ID}=? AND (${Events.SYNC_DATA4}=? OR " +
             "(${Events.SYNC_DATA4} IS NULL AND ${Events._SYNC_ID}=?))", arrayOf(calendar.toString(), remoteId, remoteId))
@@ -236,19 +277,19 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
         if (metadata.getAsLong(Events._ID) != row || metadata.getAsLong(Events.CALENDAR_ID) != calendar ||
             metadata.getAsString(Events._SYNC_ID) != remoteId || metadata.getAsString(Events.SYNC_DATA4) != remoteId ||
             metadata.getAsString(Events.SYNC_DATA1) != OWNER_MARKER ||
-            metadata.getAsString(Events.SYNC_DATA2) != digest("revision-v1", receipt.projection.change.revision.value) ||
-            metadata.getAsString(Events.SYNC_DATA3) != receiptMarker(receipt.projection) ||
+            metadata.getAsString(Events.SYNC_DATA2) != digest("revision-v1", revision.value) ||
+            metadata.getAsString(Events.SYNC_DATA3) != marker ||
             ORDINARY_RESERVED_COLUMNS.any { metadata[it] != null }) return false
         val syncIdentity = Selection("${Events.CALENDAR_ID}=? AND ${Events._SYNC_ID}=?", arrayOf(calendar.toString(), remoteId))
         if (ownedRow(uri, syncIdentity, Events.SYNC_DATA1) != row) return false
-        requireEditPermissions(receipt)
+        checkActive(); requirePermissions(); checkActive()
         capturedBatch(arrayListOf(
             assertion(syncUri(Calendars.CONTENT_URI, account), calendarSelection(scope, account), calendar),
             ContentProviderOperation.newAssertQuery(uri).withSelection(identity.sql, identity.args)
                 .withValues(metadata).withExpectedCount(1).build(),
             assertion(uri, syncIdentity, row),
         ), intArrayOf(1, 1, 1))
-        requireEditPermissions(receipt)
+        checkActive(); requirePermissions(); checkActive()
         return true
     }
     @Volatile override var admitOperation: () -> Boolean = { true }
@@ -591,7 +632,13 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
     }
 
     private fun captureSimpleSnapshot(scope: CalendarScope, base: RemoteChange.Upsert, deleted: Boolean,
-        acknowledgement: NativeEditAcknowledgement? = null): OwnedLocalEditSnapshot? {
+        acknowledgement: NativeEditAcknowledgement? = null, deleteAcknowledgement: DeleteAcknowledgementReceipt? = null,
+        checkDeleteActive: () -> Unit = {}): OwnedLocalEditSnapshot? {
+        require(acknowledgement == null || deleteAcknowledgement == null)
+        val acknowledging = acknowledgement != null || deleteAcknowledgement != null
+        fun checkPermissions() {
+            checkDeleteActive(); requireEditPermissions(acknowledgement); checkDeleteActive()
+        }
         if (base.content.recurrence != null ||
             (base.content.details != null && base.content.details != EventDetails())) return null
         val account = accountFor(scope.account)
@@ -610,7 +657,7 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
             Events.ORIGINAL_ALL_DAY, Events.STATUS, Events.HAS_ATTENDEE_DATA, Events.ORGANIZER, Events.IS_ORGANIZER,
             Events.GUESTS_CAN_MODIFY, Events.GUESTS_CAN_INVITE_OTHERS, Events.GUESTS_CAN_SEE_GUESTS,
             Events.HAS_ALARM, Events.SELF_ATTENDEE_STATUS, Events.AVAILABILITY, Events.ACCESS_LEVEL,
-            Events.CUSTOM_APP_PACKAGE, Events.CUSTOM_APP_URI) + if (acknowledgement == null) emptyArray() else
+            Events.CUSTOM_APP_PACKAGE, Events.CUSTOM_APP_URI) + if (!acknowledging) emptyArray() else
                 arrayOf(Events.SYNC_DATA3, Events.SYNC_DATA8, Events.SYNC_DATA9, Events.SYNC_DATA10)
         val values = resolver.query(uri, columns, identity.sql, identity.args, null)?.use {
             if (it.count != 1 || !it.moveToFirst()) return null
@@ -622,7 +669,7 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
             CAPTURED_ORIGIN_COLUMNS.any { values[it] != null } ||
             values.getAsInteger(Events.DIRTY) != 1 || values.getAsInteger(Events.DELETED) != (if (deleted) 1 else 0))
             return null
-        if (acknowledgement != null && (values.getAsString(Events.SYNC_DATA4) != remoteId ||
+        if (acknowledging && (values.getAsString(Events.SYNC_DATA4) != remoteId ||
                 ORDINARY_RESERVED_COLUMNS.any { values[it] != null } ||
                 !ordinaryReceiptMarker(values.getAsString(Events.SYNC_DATA3)))) return null
         val unsupported = arrayOf(Events.RRULE, Events.RDATE, Events.EXRULE, Events.EXDATE, Events.DURATION,
@@ -644,6 +691,7 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
             base.content.colorRgb, details = base.content.details)
         if (!deleted && content == base.content) return null
         if (acknowledgement != null && content != acknowledgement.intent.content) return null
+        if (deleteAcknowledgement != null && content != deleteAcknowledgement.intent.content) return null
         // Capture stays assertion-only. ACK asserts the complete raw edit; its typed recipe
         // adds metadata and, for text/time receipts, verified CRLF/LF differences.
         val checks = arrayListOf(assertion(syncUri(Calendars.CONTENT_URI, account), calendarSelection(scope, account), calendar),
@@ -651,7 +699,7 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
             ContentProviderOperation.newAssertQuery(uri).withSelection(identity.sql, identity.args)
                 .withValues(values).withExpectedCount(1).build())
         val expected = mutableListOf(1, 1, 1)
-        if (acknowledgement != null) {
+        if (acknowledging) {
             val syncIdentity = Selection("${Events.CALENDAR_ID}=? AND ${Events._SYNC_ID}=?", arrayOf(calendar.toString(), remoteId))
             if (ownedRow(uri, syncIdentity, Events.SYNC_DATA1) != row) return null
             checks += assertion(uri, syncIdentity, row)
@@ -673,9 +721,22 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
                 .withExpectedCount(1).build()
             expected += 1
         }
-        requireEditPermissions(acknowledgement)
+        if (deleteAcknowledgement != null) {
+            val changes = ContentValues().apply {
+                put(Events.DIRTY, 0); put(Events.SYNC_DATA3, deleteReceiptMarker(deleteAcknowledgement))
+            }
+            checks += ContentProviderOperation.newUpdate(uri).withSelection(identity.sql, identity.args)
+                .withValues(changes).withExpectedCount(1).build()
+            expected += 1
+            // A Provider that purges a clean tombstone must roll back, never produce absence proof.
+            val retained = ContentValues(values).apply { putAll(changes) }
+            checks += ContentProviderOperation.newAssertQuery(uri).withSelection(identity.sql, identity.args)
+                .withValues(retained).withExpectedCount(1).build()
+            expected += 1
+        }
+        checkPermissions()
         capturedBatch(checks, expected.toIntArray())
-        requireEditPermissions(acknowledgement)
+        checkPermissions()
         return OwnedLocalEditSnapshot(calendar, row, content)
     }
 
@@ -698,7 +759,7 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
         val sync = arrayOf(Events._SYNC_ID, Events.SYNC_DATA1, Events.SYNC_DATA2, Events.SYNC_DATA3,
             Events.SYNC_DATA4, Events.SYNC_DATA5, Events.SYNC_DATA6, Events.SYNC_DATA7, Events.SYNC_DATA8,
             Events.SYNC_DATA9, Events.SYNC_DATA10)
-        val columns = arrayOf(Events._ID, Events.DELETED) + sync
+        val columns = arrayOf(Events._ID, Events.DELETED, Events.DIRTY) + sync
         val changes = mutableListOf<SystemCalendarChange>()
         var more = false
         resolver.query(syncUri(Events.CONTENT_URI, account), columns,
@@ -719,7 +780,8 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
                 // Provider keys are one-way hashes (and master sync IDs can identify a series).
                 // Only the owner can resolve them against scoped, acknowledged canonical IDs.
                 changes += SystemCalendarChange(row, kind, deleted = deleted,
-                    nativeKey = if (kind == SystemCalendarChangeKind.IMPORTED) remote else null)
+                    nativeKey = if (kind == SystemCalendarChangeKind.IMPORTED) remote else null,
+                    dirty = cursor.getInt(cursor.getColumnIndexOrThrow(Events.DIRTY)) != 0)
             }
         } ?: fail(CalendarProjectionFailure.PROVIDER_UNAVAILABLE)
         SystemCalendarChangePage(changes.toList(), changes.lastOrNull()?.row ?: afterRow, more)

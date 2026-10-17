@@ -8,7 +8,7 @@ contract relevant to the task. Existing detailed evidence is in
 
 Calendeer bridges Proton Calendar and Android's Calendar Provider. Event viewing
 and editing stay in system calendar applications. Read-only is the default;
-creation, title-only, description/location and same-kind date changes have separate
+creation, title-only, description/location, same-kind date changes and deletion have separate
 experimental per-calendar options. See [requirements](SPECIFICATION.md),
 [architecture](ARCHITECTURE.md) and [acceptance](ACCEPTANCE.md).
 
@@ -29,7 +29,7 @@ uncertain writes are retained, never silently discarded or resent.
 | Outgoing title | Default-off option for title-only edits of qualified ordinary or fully handed-off created timed/all-day events. Durable request ownership, inspection and native/SQL completion. | [Title submission](TITLE_UPDATE_SUBMISSION.md). Known-empty details, no recurrence/color; other fields must stay unchanged. |
 | Outgoing text | Default-off description/location option, optionally with simultaneous title change. Separate capsules, wire/proofs, cursors and consent; raw CRLF intent is distinct from canonical LF readback. | [Text delivery](SHARED_TEXT_PREPARATION.md). Creation mode must be enabled; narrow simple-event profile, unchanged dates and metadata. |
 | Outgoing time | Default-off date/duration option for simple timed/all-day events, retaining kind, zone and all other fields. Protected preparation, guarded readback, separate durable history and native completion. | [Temporal delivery](TEMPORAL_UPDATE.md). All-day metadata uses UTC midnight and exclusive end dates. Kind/zone transitions and combined edits remain unsupported. |
-| Outgoing DELETE foundation | Separate typed request, guarded single-exchange transport, authenticated exact-event inspection, returned verified conflicts and durable UNKNOWN history. Shared schema 8 arbitrates deletion with title/text/time. | [Deletion submission](DELETE_SUBMISSION.md). No deletion worker, user option, result/conflict completion or native ACK yet; live service absence semantics are unqualified. |
+| Outgoing DELETE | Default-off option with separate worker/consent, protected first request, authenticated inspection, durable results/completion and exact native/SQL ACK. Shared schema 9 and import schema 22 retain a permanent incoming barrier. | [Deletion submission](DELETE_SUBMISSION.md). Ordinary timed service/editor/production-worker RUN and restarted REPLAY pass. Simple imported events only; uncertain results never trigger another send. |
 | Recovery/conflicts | UNKNOWN is inspect-only. Native writes are guarded and receipts precede acknowledgement; newer local edits survive. A shared title/text/time/deletion journal prevents competing owners across generations. Local conflict dossiers preserve observed variants. | [Capture](LOCAL_EDIT_CAPTURE.md), [conflicts](CONFLICT_ARCHIVE.md). Trustworthy edit timestamps and general conflict resolution remain unfinished. |
 
 A refresh with no checkpoint commits its first staged page before draining queued
@@ -56,8 +56,13 @@ interrupted-edit recovery and active restart replay without another attempt.
 Four actual time-editor RUN/restarted REPLAY cases also pass: single/multiple
 all-day dates and Paris autumn/spring durations. The measured time editor is
 `foundation.e.calendar` 1.0.47 on Android API 35; Samsung remains unqualified.
+Deletion also has an actual system-editor/production-worker RUN and fresh-process
+REPLAY on a disposable ordinary timed event, with exact native acknowledgement,
+immutable history and five-mode restoration. Separate real-service inspection,
+new-process local ACK and replay pass. An interrupted identical incoming projection
+is retained until native ACK and cannot resurrect the deletion.
 
-Current host suites pass 423 domain, 839 backend and 143 app JVM cases without
+Current host suites pass 427 domain, 840 backend and 167 app JVM cases without
 skips. Physical crypto, SQL/migration, Provider, worker/recovery and option UI
 checks pass; APK builds and app lint pass. Scope-specific evidence and remaining
 qualification are in [validation](VALIDATION.md) and the linked contracts.
@@ -71,11 +76,11 @@ For a useful bidirectional RC, finish:
    Extend editor/OEM qualification beyond the measured all-day and Paris cases,
    then qualify kind/zone transitions and combined edits; ambiguous local hours
    remain held rather than guessed.
-2. Finish [outgoing DELETE](DELETE_SUBMISSION.md): the guarded request and shared
-   journal foundation is implemented and its isolated native SQL checks pass. Add
-   current native-owner/worker admission, independent consent, durable result and
-   conflict retention, typed native/SQL ACK and interrupted recovery; then qualify
-   disposable service events through the actual calendar editor.
+2. Extend [outgoing DELETE](DELETE_SUBMISSION.md): ordinary timed service/editor/
+   production-worker and restarted recovery journeys pass. Qualify all-day service
+   deletion, real remote-conflict and further network/power interruption profiles,
+   then richer events and OEM behavior. Current source checks and permanent incoming
+   barriers remain required; UNKNOWN is never reset or resent.
 3. Preservation of ordinary reminders/colors during supported edits; current
    send profiles still reject many such events.
 4. Safe handling of incomplete historical creation associations and actionable

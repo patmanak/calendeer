@@ -1,5 +1,7 @@
 package com.patmanak.proton.andcalendarbridge.data.calendar
 
+import com.patmanak.proton.andcalendarbridge.sync.DeleteAcknowledgementReceipt
+import com.patmanak.proton.andcalendarbridge.sync.AppliedDeleteAcknowledgement
 import android.accounts.Account
 import com.patmanak.proton.andcalendarbridge.sync.AccountId
 import com.patmanak.proton.andcalendarbridge.sync.CalendarScope
@@ -33,6 +35,13 @@ import com.patmanak.proton.andcalendarbridge.sync.catalog.CalendarSummary
 
 /** Android-layer boundary. A failed apply leaves its durable intent unacknowledged for replay. */
 interface CalendarProjection {
+    val deleteAcknowledgementProtocol: Int? get() = null
+    /** Metadata-only ACK of one exact ordinary dirty tombstone. Keep DELETED and base revision.
+     * Caller must first reserve this receipt durably. Never purge or insert.
+     */
+    suspend fun acknowledgeDelete(receipt: DeleteAcknowledgementReceipt): AppliedDeleteAcknowledgement? = null
+    /** Historical marker/origin proof only; preserve later edits, flags and children. */
+    suspend fun inspectDeleteAcknowledgement(receipt: DeleteAcknowledgementReceipt): AppliedDeleteAcknowledgement? = null
     val timeUpdateAcknowledgementProtocol: Int? get() = null
     /** Assert the exact raw native temporal edit and origin before clearing DIRTY on the same row.
      * Retain the desired time; only verified CRLF/LF text normalization and metadata may change.

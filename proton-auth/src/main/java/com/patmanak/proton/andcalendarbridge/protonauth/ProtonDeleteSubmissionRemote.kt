@@ -47,8 +47,11 @@ internal object ProtonDeleteEventResponseParser {
                 require(row.string("ID") == eventId && row.string("CalendarID") == calendar)
                 ProtonDeleteEventRead.Present(row)
             }
-            httpCode in setOf(200, 400, 404) && root.number("Code") == 2501L -> {
-                require(root.keys.all { it in setOf("Code", "Error") } && root["Event"] == null)
+            httpCode in setOf(200, 400, 404, 422) && root.number("Code") == 2501L -> {
+                require(root.keys.all { it in setOf("Code", "Error", "Details") } && root["Event"] == null)
+                // The measured exact-event 422 envelope includes an empty Details object.
+                // Nonempty, null or differently typed details remain ambiguous and held.
+                root["Details"]?.let { require(it is JsonObject && it.isEmpty()) }
                 root["Error"]?.let { require(it is JsonPrimitive && it.isString) }
                 ProtonDeleteEventRead.Absent(calendar, eventId)
             }

@@ -10,6 +10,7 @@ import com.patmanak.proton.andcalendarbridge.data.outgoing.LocalCreateStore
 import com.patmanak.proton.andcalendarbridge.data.outgoing.SystemTextLocalOwner
 import com.patmanak.proton.andcalendarbridge.data.outgoing.SystemTextEditProfile
 import com.patmanak.proton.andcalendarbridge.data.outgoing.TextLocalOwnerSnapshot
+import com.patmanak.proton.andcalendarbridge.data.outgoing.SystemDeleteLocalOwner
 import com.patmanak.proton.andcalendarbridge.data.outgoing.SystemTimeLocalOwner
 import com.patmanak.proton.andcalendarbridge.data.outgoing.SystemTimeEditProfile
 import com.patmanak.proton.andcalendarbridge.data.outgoing.TimeLocalOwnerSnapshot
@@ -95,6 +96,7 @@ class ImportCoordinator(
     private val systemTitlesEnabled: (CalendarScope) -> Boolean = { false },
     private val systemTextsEnabled: (CalendarScope) -> Boolean = { false },
     private val systemTimesEnabled: (CalendarScope) -> Boolean = { false },
+    private val systemDeletesEnabled: (CalendarScope) -> Boolean = { false },
 ) {
     private val mutex = Mutex()
     private val serial = AccountSerialExecutor()
@@ -561,12 +563,12 @@ class ImportCoordinator(
     internal val localTimeOwners: SystemTimeLocalOwner = object : SystemTimeLocalOwner {
         override suspend fun observe(scope: CalendarScope, event: EventId, owner: MutationId,
             admit: (CalendarScope) -> Boolean): TimeLocalOwnerSnapshot? =
-            withTimeOwner(scope, admit, consent = true, denied = null) { access ->
-                val intent = access.read { store.localEdit(scope, event) } ?: return@withTimeOwner null
-                if (intent.id != owner || !SystemTimeEditProfile.accepts(intent)) return@withTimeOwner null
+            withScopedEditOwner(scope, admit, consent = true, denied = null) { access ->
+                val intent = access.read { store.localEdit(scope, event) } ?: return@withScopedEditOwner null
+                if (intent.id != owner || !SystemTimeEditProfile.accepts(intent)) return@withScopedEditOwner null
                 val frozen = LocalTimeEditCandidate(intent).intent
                 val preparation = access.read { store.localTimeEditPreparation(scope, event) }
-                if (!timeSource(frozen, preparation, access)) return@withTimeOwner null
+                if (!timeSource(frozen, preparation, access)) return@withScopedEditOwner null
                 TimeLocalOwnerSnapshot(frozen, preparation)
             }
 
@@ -574,16 +576,16 @@ class ImportCoordinator(
             admit: (CalendarScope) -> Boolean): LocalTimeEditPreparation? {
             currentCoroutineContext().ensureActive()
             val frozen = freezeTimePreparation(preparation)
-            return withTimeOwner(frozen.intent.scope, admit, consent = true, denied = null) { access ->
+            return withScopedEditOwner(frozen.intent.scope, admit, consent = true, denied = null) { access ->
                 val retained = access.read { store.localTimeEditPreparation(frozen.intent.scope, frozen.intent.base.eventId) }
-                if (retained != null && !sameTimePreparation(retained, frozen)) return@withTimeOwner null
-                if (!timeSource(frozen.intent, retained, access)) return@withTimeOwner null
+                if (retained != null && !sameTimePreparation(retained, frozen)) return@withScopedEditOwner null
+                if (!timeSource(frozen.intent, retained, access)) return@withScopedEditOwner null
                 val outcome = access.read { store.retainCurrentLocalTimePreparation(frozen) }
                 if (outcome !in listOf(LocalTimePreparationAdmission.STORED, LocalTimePreparationAdmission.HISTORICAL))
-                    return@withTimeOwner null
+                    return@withScopedEditOwner null
                 val durable = access.read { store.localTimeEditPreparation(frozen.intent.scope, frozen.intent.base.eventId) }
                 if (!sameTimePreparation(durable, frozen) || !timeSource(frozen.intent, frozen, access))
-                    return@withTimeOwner null
+                    return@withScopedEditOwner null
                 freezeTimePreparation(requireNotNull(durable))
             }
         }
@@ -591,7 +593,7 @@ class ImportCoordinator(
         override suspend fun qualify(preparation: LocalTimeEditPreparation, admit: (CalendarScope) -> Boolean): Boolean {
             currentCoroutineContext().ensureActive()
             val frozen = freezeTimePreparation(preparation)
-            return withTimeOwner(frozen.intent.scope, admit, consent = true, denied = false) { access ->
+            return withScopedEditOwner(frozen.intent.scope, admit, consent = true, denied = false) { access ->
                 timeSource(frozen.intent, frozen, access)
             }
         }
@@ -620,7 +622,7 @@ class ImportCoordinator(
                     port.timeUpdateFormat != frozen.format ||
                     frozen.id != TimeUpdateAttemptIdentity.requestId(frozen.preparation, frozen.format))
                     return TimeUpdateSubmissionObservation.Unknown
-                return withTimeOwner(target, admit, consent = true, denied = TimeUpdateSubmissionObservation.Unknown,
+                return withScopedEditOwner(target, admit, consent = true, denied = TimeUpdateSubmissionObservation.Unknown,
                     finalAccessRequired = false) { access ->
                     val sending: (CalendarScope) -> Boolean = { requested ->
                         operation.ensureActive()
@@ -641,18 +643,18 @@ class ImportCoordinator(
                           catch (_: Exception) { operation.ensureActive(); sourceClosed.set(true); false }
                     }
                     if (!sending(target) || access.read { journal.read(target, frozen.id, sending) } != frozen ||
-                        !source(target)) return@withTimeOwner TimeUpdateSubmissionObservation.Unknown
+                        !source(target)) return@withScopedEditOwner TimeUpdateSubmissionObservation.Unknown
                     // Lock order is import then authenticated adapter. The callback never retakes the import lock.
                     val observation = port.submit(frozen, journal, sending, ::source, evidence)
                     operation.ensureActive()
                     if (observation !is TimeUpdateSubmissionObservation.Verified || !evidence(target) ||
                         observation.record.copy(state = TimeUpdateAttemptState.PREPARED, protectedEvidence = null) != frozen ||
-                        observation.record.protectedEvidence == null) return@withTimeOwner TimeUpdateSubmissionObservation.Unknown
+                        observation.record.protectedEvidence == null) return@withScopedEditOwner TimeUpdateSubmissionObservation.Unknown
                     // Response facts survive editing-policy revocation. No ACK authority is derived here.
                     val durable = journal.read(target, frozen.id, evidence)
                     operation.ensureActive()
                     if (!evidence(target) || durable == null || durable != observation.record)
-                        return@withTimeOwner TimeUpdateSubmissionObservation.Unknown
+                        return@withScopedEditOwner TimeUpdateSubmissionObservation.Unknown
                     TimeUpdateSubmissionObservation.Verified(durable, observation.event)
                 }
             } finally {
@@ -664,7 +666,7 @@ class ImportCoordinator(
             admit: (CalendarScope) -> Boolean): Boolean {
             currentCoroutineContext().ensureActive()
             val frozen = result.snapshot()
-            return withTimeOwner(frozen.record.scope, admit, consent = false, denied = false) { access ->
+            return withScopedEditOwner(frozen.record.scope, admit, consent = false, denied = false) { access ->
                 acknowledgeTime(frozen, journal, access)
             }
         }
@@ -673,17 +675,201 @@ class ImportCoordinator(
             admit: (CalendarScope) -> Boolean): Boolean {
             currentCoroutineContext().ensureActive()
             val frozen = result.snapshot()
-            return withTimeOwner(frozen.record.scope, admit, consent = false, denied = false) { access ->
+            return withScopedEditOwner(frozen.record.scope, admit, consent = false, denied = false) { access ->
                 completeTime(frozen, journal, access)
             }
         }
     }
 
-    private class TimeOwnerDenied : IllegalStateException("Text owner access is inactive")
+    fun systemDeleteRunAdmission(target: CalendarScope): (CalendarScope) -> Boolean = deleteAdmission(target, true)
+    fun systemDeleteProofAdmission(target: CalendarScope): (CalendarScope) -> Boolean = deleteAdmission(target, false)
+    fun systemDeleteEvidenceAdmission(target: CalendarScope): (CalendarScope) -> Boolean = systemTimeEvidenceAdmission(target)
 
-    private inner class TimeOwnerAccess(val target: CalendarScope, private val expected: Long,
+    private fun deleteAdmission(target: CalendarScope, consent: Boolean): (CalendarScope) -> Boolean {
+        val base = timeRunAdmission(target, false)
+        val closed = AtomicBoolean(false)
+        return { requested ->
+            val allowed = !closed.get() && base(requested) && (!consent || systemDeletesEnabled(target))
+            if (!allowed) closed.set(true)
+            allowed && !closed.get()
+        }
+    }
+
+    internal val localDeleteOwners: SystemDeleteLocalOwner = object : SystemDeleteLocalOwner {
+        override suspend fun observe(scope: CalendarScope, event: EventId, owner: MutationId,
+            admit: (CalendarScope) -> Boolean): LocalDeleteIntent? =
+            withScopedEditOwner(scope, admit, true, null, sendingEnabled = systemDeletesEnabled) { access ->
+                val intent = access.read { store.localDelete(scope, event) } ?: return@withScopedEditOwner null
+                if (intent.id != owner || !deleteSource(intent, access)) return@withScopedEditOwner null
+                DeleteSubmissionPolicy.freezeIntent(intent)
+            }
+
+        override suspend fun reserve(record: DeleteAttemptRecord, admit: (CalendarScope) -> Boolean): Boolean =
+            withScopedEditOwner(record.scope, admit, true, false, sendingEnabled = systemDeletesEnabled) { access ->
+                if (record.state != DeleteAttemptState.PREPARED || record.protectedEvidence != null ||
+                    record.id != DeleteAttemptIdentity.requestId(record.intent, record.format) ||
+                    !deleteSource(record.intent, access)) return@withScopedEditOwner false
+                val reservation = access.read { store.prepareDeleteAcknowledgement(record) } ?: return@withScopedEditOwner false
+                reservation.record.receipt.attempt == DeleteAttemptIdentity.of(record) && deleteSource(record.intent, access)
+            }
+
+        override suspend fun submit(record: DeleteAttemptRecord, journal: DeleteRecoveryJournal,
+            port: CalendarDeleteSubmissionPort, admit: (CalendarScope) -> Boolean,
+            admitEvidence: (CalendarScope) -> Boolean): DeleteSubmissionObservation {
+            val frozen = record.frozen()
+            val operation = currentCoroutineContext()
+            val factual = systemDeleteEvidenceAdmission(frozen.scope)
+            val open = AtomicBoolean(true)
+            val sourceOpen = AtomicBoolean(true)
+            val evidenceOpen = AtomicBoolean(true)
+            val evidence: (CalendarScope) -> Boolean = { requested ->
+                operation.ensureActive()
+                val allowed = open.get() && evidenceOpen.get() && requested == frozen.scope && factual(requested) && admitEvidence(requested)
+                if (!allowed) evidenceOpen.set(false)
+                allowed && open.get() && evidenceOpen.get()
+            }
+            try {
+                if (frozen.state != DeleteAttemptState.PREPARED || frozen.protectedEvidence != null ||
+                    port.deleteFormat != frozen.format || frozen.id != DeleteAttemptIdentity.requestId(frozen.intent, frozen.format))
+                    return DeleteSubmissionObservation.Unknown
+                return withScopedEditOwner(frozen.scope, admit, true, DeleteSubmissionObservation.Unknown,
+                    finalAccessRequired = false, sendingEnabled = systemDeletesEnabled) { access ->
+                    val sending: (CalendarScope) -> Boolean = { requested ->
+                        operation.ensureActive()
+                        val valid = open.get() && sourceOpen.get() && requested == frozen.scope && access.active() && port.deleteFormat == frozen.format
+                        if (!valid) sourceOpen.set(false)
+                        valid && open.get() && sourceOpen.get()
+                    }
+                    suspend fun source(requested: CalendarScope): Boolean = try {
+                        val valid = sending(requested) && deleteSource(frozen.intent, access) && sending(requested)
+                        if (!valid) sourceOpen.set(false)
+                        valid
+                    } catch (cancelled: CancellationException) { throw cancelled }
+                      catch (_: Exception) { operation.ensureActive(); sourceOpen.set(false); false }
+                    val reservation = access.read { store.deleteAcknowledgement(frozen.scope, frozen.eventId, frozen.id) }
+                    if (reservation?.receipt?.attempt != DeleteAttemptIdentity.of(frozen) ||
+                        access.read { journal.read(frozen.scope, frozen.id, sending) } != frozen || !source(frozen.scope))
+                        return@withScopedEditOwner DeleteSubmissionObservation.Unknown
+                    // Import -> auth lock order. Source callbacks never retake either lock.
+                    val observation = port.submit(frozen, journal, sending, ::source, evidence)
+                    operation.ensureActive()
+                    when (observation) {
+                        DeleteSubmissionObservation.Unknown -> observation
+                        is DeleteSubmissionObservation.Conflict -> if (sending(frozen.scope) &&
+                            observation.record.copy(state = DeleteAttemptState.PREPARED, protectedEvidence = null) == frozen)
+                            observation else DeleteSubmissionObservation.Unknown
+                        is DeleteSubmissionObservation.Verified -> {
+                            if (!evidence(frozen.scope) ||
+                                observation.record.copy(state = DeleteAttemptState.PREPARED, protectedEvidence = null) != frozen)
+                                return@withScopedEditOwner DeleteSubmissionObservation.Unknown
+                            val durable = journal.read(frozen.scope, frozen.id, evidence)
+                            operation.ensureActive()
+                            if (durable == null || durable != observation.record || !evidence(frozen.scope))
+                                DeleteSubmissionObservation.Unknown else DeleteSubmissionObservation.Verified(durable)
+                        }
+                    }
+                }
+            } finally { open.set(false); sourceOpen.set(false); evidenceOpen.set(false) }
+        }
+
+        override suspend fun conflict(intent: LocalDeleteIntent, observed: RemoteChange.Upsert,
+            admit: (CalendarScope) -> Boolean): Boolean =
+            withScopedEditOwner(intent.scope, admit, false, false, sendingEnabled = systemDeletesEnabled) { access ->
+                access.read { store.conflictLocalDelete(intent, observed) }.also { refreshState() }
+            }
+
+        override suspend fun acknowledge(result: DeleteVerifiedResult, journal: DeleteRecoveryJournal,
+            admit: (CalendarScope) -> Boolean): Boolean =
+            withScopedEditOwner(result.record.scope, admit, false, false, sendingEnabled = systemDeletesEnabled) { access ->
+                acknowledgeDelete(result.snapshot(), journal, access)
+            }
+
+        override suspend fun complete(result: DeleteVerifiedResult, journal: DeleteRecoveryJournal,
+            admit: (CalendarScope) -> Boolean): Boolean =
+            withScopedEditOwner(result.record.scope, admit, false, false, sendingEnabled = systemDeletesEnabled) { access ->
+                if (journal.completionProtocol != 1 || !currentDeleteResult(result, journal, access)) return@withScopedEditOwner false
+                val ack = access.read { store.deleteAcknowledgement(result.record.scope, result.record.eventId, result.record.id) }
+                    ?: return@withScopedEditOwner false
+                if (ack.state != DeleteAcknowledgementState.RESTORED || !ack.receipt.matches(DeleteSubmissionObservation.Verified(result.record)))
+                    return@withScopedEditOwner false
+                val completion = DeleteCompletion.of(result, ack)
+                val prior = access.read { journal.readCompletion(result.record.scope, result.record.id, access.admit) }
+                if (prior != null && prior != completion) return@withScopedEditOwner false
+                if (prior == null && !access.read { journal.retainCompletion(completion, access.admit) }) return@withScopedEditOwner false
+                access.read { journal.readCompletion(result.record.scope, result.record.id, access.admit) } == completion &&
+                    currentDeleteResult(result, journal, access)
+            }
+    }
+
+    private suspend fun deleteSource(intent: LocalDeleteIntent, access: ScopedEditOwnerAccess): Boolean {
+        if (intent.scope != access.target || intent.format != remote.format || intent.state != LocalEditState.PAUSED) return false
+        DeleteSubmissionPolicy.freezeIntent(intent)
+        suspend fun sql(): Boolean = remote.format == intent.format && access.read { store.qualifyLocalDelete(intent) } &&
+            access.read { store.capturedHandoff(intent.scope, intent.base.eventId) } == null
+        if (!sql()) return false
+        val hold = access.read { capturedRawHold(intent.scope) }
+        if (hold.scopeBlocked || hold.holds(intent.base.eventId)) return false
+        val native = access.read { projection.captureOwnedSimpleDelete(intent.scope, intent.base) }
+        if (native?.content != intent.content) return false
+        val after = access.read { capturedRawHold(intent.scope) }
+        return !after.scopeBlocked && !after.holds(intent.base.eventId) && sql()
+    }
+
+    private suspend fun currentDeleteResult(result: DeleteVerifiedResult, journal: DeleteRecoveryJournal,
+        access: ScopedEditOwnerAccess): Boolean {
+        val record = result.record
+        if (record.scope != access.target || record.state != DeleteAttemptState.OUTCOME_UNKNOWN ||
+            record.intent.format != remote.format ||
+            access.read { store.transaction(record.scope) { checkpoint?.format } } != record.intent.format) return false
+        val durable = access.read { journal.read(record.scope, record.id, access.admit) } ?: return false
+        return durable.copy(protectedEvidence = null) == record &&
+            access.read { journal.readVerified(record.scope, record.id, access.admit) } == result &&
+            remote.format == record.intent.format
+    }
+
+    private suspend fun acknowledgeDelete(result: DeleteVerifiedResult, journal: DeleteRecoveryJournal,
+        access: ScopedEditOwnerAccess): Boolean {
+        if (projection.deleteAcknowledgementProtocol != 1 || !currentDeleteResult(result, journal, access)) return false
+        val record = result.record
+        val ack = access.read { store.deleteAcknowledgement(record.scope, record.eventId, record.id) } ?: return false
+        if (!ack.receipt.matches(DeleteSubmissionObservation.Verified(record))) return false
+        if (ack.state == DeleteAcknowledgementState.RESTORED) return currentDeleteResult(result, journal, access)
+        if (!access.read { store.qualifyLocalDelete(record.intent) }) return false
+        val witness = access.read { projection.inspectDeleteAcknowledgement(ack.receipt) } ?: run {
+            if (!deleteSource(record.intent, access)) return false
+            access.read { projection.acknowledgeDelete(ack.receipt) }
+        } ?: return false
+        if (witness.receipt != ack.receipt || !currentDeleteResult(result, journal, access) ||
+            access.read { store.deleteAcknowledgement(record.scope, record.eventId, record.id) } != ack) return false
+        return access.read { store.restoreDeleteAcknowledgement(witness) }.also { if (it) refreshState() }
+    }
+
+    /** A retained ACK explains only its exact marker. Native restoration/new edits become visible conflicts. */
+    suspend fun reconcileReservedDeleteChange(target: CalendarScope, event: EventId, deleted: Boolean, dirty: Boolean): Boolean =
+        withScopedEditOwner(target, systemDeleteProofAdmission(target), false, true,
+            sendingEnabled = systemDeletesEnabled) { access ->
+            val ack = access.read { store.deleteAcknowledgement(target, event) } ?: return@withScopedEditOwner false
+            suspend fun conflict(): Boolean {
+                access.read { store.conflictAcknowledgedDelete(ack.receipt.intent) }
+                refreshState()
+                return true
+            }
+            if (!deleted || (ack.state == DeleteAcknowledgementState.RESTORED && dirty)) return@withScopedEditOwner conflict()
+            if (!dirty) {
+                if (access.read { projection.inspectDeleteAcknowledgement(ack.receipt) }?.receipt != ack.receipt)
+                    conflict()
+                return@withScopedEditOwner true
+            }
+            val current = access.read { projection.captureOwnedSimpleDelete(target, ack.receipt.intent.base) }
+            if (current?.content != ack.receipt.intent.content) conflict() else false
+        }
+
+    private class ScopedEditOwnerDenied : IllegalStateException("Edit owner access is inactive")
+
+    private inner class ScopedEditOwnerAccess(val target: CalendarScope, private val expected: Long,
         private val policy: Long, private val consent: Boolean, private val admission: (CalendarScope) -> Boolean,
-        private val operation: kotlin.coroutines.CoroutineContext) {
+        private val operation: kotlin.coroutines.CoroutineContext,
+        private val sendingEnabled: (CalendarScope) -> Boolean) {
         private val closed = AtomicBoolean(false)
         fun close() { closed.set(true) }
         fun active(): Boolean {
@@ -691,7 +877,7 @@ class ImportCoordinator(
             if (closed.get()) return false
             val allowed = authenticated && generation == expected && createPolicyRevision.get() == policy &&
                 createAccount.get() == target.account && hasCalendarPermissions() && systemCreatesEnabled(target) &&
-                (!consent || systemTimesEnabled(target)) &&
+                (!consent || sendingEnabled(target)) &&
                 state.value.selections.any { it.scope == target && it.enabled && it.available } && admission(target)
             operation.ensureActive()
             if (!allowed || generation != expected || createPolicyRevision.get() != policy ||
@@ -701,11 +887,11 @@ class ImportCoordinator(
         val admit: (CalendarScope) -> Boolean = { requested -> requested == target && active() }
         suspend fun requireAvailable() {
             operation.ensureActive()
-            if (!active()) throw TimeOwnerDenied()
+            if (!active()) throw ScopedEditOwnerDenied()
             val selected = store.selections(target.account).singleOrNull { it.scope == target }
             operation.ensureActive()
             if (!active() || selected == null || !selected.enabled || !selected.available) {
-                close(); throw TimeOwnerDenied()
+                close(); throw ScopedEditOwnerDenied()
             }
         }
         suspend fun <T> read(action: suspend () -> T): T {
@@ -717,13 +903,15 @@ class ImportCoordinator(
         }
     }
 
-    private suspend fun <T> withTimeOwner(target: CalendarScope, admit: (CalendarScope) -> Boolean,
-        consent: Boolean, denied: T, finalAccessRequired: Boolean = true, action: suspend (TimeOwnerAccess) -> T): T {
+    private suspend fun <T> withScopedEditOwner(target: CalendarScope, admit: (CalendarScope) -> Boolean,
+        consent: Boolean, denied: T, finalAccessRequired: Boolean = true,
+        sendingEnabled: (CalendarScope) -> Boolean = systemTimesEnabled,
+        action: suspend (ScopedEditOwnerAccess) -> T): T {
         currentCoroutineContext().ensureActive()
         val expected = generation
         val policy = createPolicyRevision.get()
         return mutex.withLock {
-            val access = TimeOwnerAccess(target, expected, policy, consent, admit, currentCoroutineContext())
+            val access = ScopedEditOwnerAccess(target, expected, policy, consent, admit, currentCoroutineContext(), sendingEnabled)
             try {
                 access.requireAvailable()
                 store.admitTransaction = access.admit
@@ -733,7 +921,7 @@ class ImportCoordinator(
                 if (finalAccessRequired) access.requireAvailable()
                 result
             } catch (cancelled: CancellationException) { throw cancelled }
-              catch (_: TimeOwnerDenied) { currentCoroutineContext().ensureActive(); denied }
+              catch (_: ScopedEditOwnerDenied) { currentCoroutineContext().ensureActive(); denied }
               catch (_: Exception) { currentCoroutineContext().ensureActive(); denied }
               finally {
                   access.close()
@@ -753,7 +941,7 @@ class ImportCoordinator(
 
     /** Exact SQL and native source, including complete immutable origin for a handed-off CREATE. */
     private suspend fun timeSource(intent: LocalEditIntent, preparation: LocalTimeEditPreparation?,
-        access: TimeOwnerAccess): Boolean {
+        access: ScopedEditOwnerAccess): Boolean {
         val target = access.target
         val event = intent.base.eventId
         if (intent.scope != target || !SystemTimeEditProfile.accepts(intent) || intent.format != remote.format) return false
@@ -785,7 +973,7 @@ class ImportCoordinator(
     }
 
     private suspend fun currentTimeResult(result: TimeUpdateVerifiedResult, journal: TimeUpdateRecoveryJournal,
-        access: TimeOwnerAccess): Boolean {
+        access: ScopedEditOwnerAccess): Boolean {
         val record = result.record
         if (record.scope != access.target || record.state != TimeUpdateAttemptState.OUTCOME_UNKNOWN ||
             record.preparation.intent.format != remote.format ||
@@ -799,7 +987,7 @@ class ImportCoordinator(
     }
 
     private suspend fun acknowledgeTime(result: TimeUpdateVerifiedResult, journal: TimeUpdateRecoveryJournal,
-        access: TimeOwnerAccess): Boolean {
+        access: ScopedEditOwnerAccess): Boolean {
         if (projection.timeUpdateAcknowledgementProtocol != 1 || !currentTimeResult(result, journal, access)) return false
         val target = access.target
         val attempt = result.record.id
@@ -857,7 +1045,7 @@ class ImportCoordinator(
     }
 
     private suspend fun completeTime(result: TimeUpdateVerifiedResult, journal: TimeUpdateRecoveryJournal,
-        access: TimeOwnerAccess): Boolean {
+        access: ScopedEditOwnerAccess): Boolean {
         if (journal.completionProtocol != 1 || !currentTimeResult(result, journal, access)) return false
         val target = access.target
         val event = result.event.eventId
@@ -3198,6 +3386,7 @@ class ImportCoordinator(
         store.status(target, if (held) "CREATE_PENDING" else status, if (held) null else completedAt)
     }
     private suspend fun requireProjectionAvailable(target: CalendarScope, eventId: EventId) {
+        if (store.transaction(target) { hasPendingMutation(eventId) }) throw CapturedProjectionPending()
         if (capturedProjectionHold(target).holds(eventId)) throw CapturedProjectionPending()
     }
     private suspend fun runnableProjections(target: CalendarScope, limit: Int = 100): List<ProjectionIntent> {
