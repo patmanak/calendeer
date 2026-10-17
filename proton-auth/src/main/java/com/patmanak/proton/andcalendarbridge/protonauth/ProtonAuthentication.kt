@@ -36,6 +36,7 @@ object ProtonAuthentication {
     fun localTimePreparations(context: Context): CalendarLocalTimePreparationPort = shared(context)
     fun titleUpdates(context: Context): CalendarTitleUpdateSubmissionPort = shared(context)
     fun textUpdates(context: Context): CalendarTextUpdateSubmissionPort = shared(context)
+    fun timeUpdates(context: Context): CalendarTimeUpdateSubmissionPort = shared(context)
     /** Local display metadata only; unavailable or signed-out accounts return null. */
     suspend fun connectedAccountLabel(context: Context): String? = shared(context).connectedAccountLabel()
     internal suspend fun matchesIdentityHash(context: Context, account: AccountId, expectedHash: String): Boolean =
@@ -68,7 +69,7 @@ internal class SerializedAuthenticationPort(
     private val createGraph: () -> ProtonAuthenticationGraph,
     private val cancelVerification: () -> Unit,
     private val dispatcher: CoroutineDispatcher = Dispatchers.IO,
-) : AuthenticationFlowPort, CalendarCatalogPort, CalendarDeltaRemote, RollingCalendarRemote, ContentMappingRemote, CalendarCreatePreparationPort, CalendarCreateSubmissionPort, CalendarLocalEditPreparationPort, CalendarLocalTextPreparationPort, CalendarLocalTimePreparationPort, CalendarTitleUpdateSubmissionPort, CalendarTextUpdateSubmissionPort {
+) : AuthenticationFlowPort, CalendarCatalogPort, CalendarDeltaRemote, RollingCalendarRemote, ContentMappingRemote, CalendarCreatePreparationPort, CalendarCreateSubmissionPort, CalendarLocalEditPreparationPort, CalendarLocalTextPreparationPort, CalendarLocalTimePreparationPort, CalendarTitleUpdateSubmissionPort, CalendarTextUpdateSubmissionPort, CalendarTimeUpdateSubmissionPort {
     override val contentMapping = EVENT_CONTENT_MAPPING
     override val localCreateFormat = LOCAL_CREATE_PREPARATION_FORMAT
     override val knownEmptySubmissionFormat = KNOWN_EMPTY_SUBMISSION_FORMAT
@@ -77,6 +78,7 @@ internal class SerializedAuthenticationPort(
     override val localTimeFormat = LOCAL_TIME_PREPARATION_FORMAT
     override val titleUpdateFormat = TITLE_UPDATE_SUBMISSION_FORMAT
     override val textUpdateFormat = TEXT_UPDATE_REQUEST_FORMAT
+    override val timeUpdateFormat = TIME_UPDATE_REQUEST_FORMAT
     constructor(context: Context, verification: HumanVerificationHost) : this(
         { ProtonAuthenticationRuntime.build(context, verification.delegate.hooks) },
         verification::cancel,
@@ -170,6 +172,64 @@ internal class SerializedAuthenticationPort(
 
     private var graph: ProtonAuthenticationGraph? = null
     private var authenticated = false
+    override suspend fun prepareSubmission(id: MutationId, preparation: LocalTimeEditPreparation,
+        admit: (CalendarScope) -> Boolean): TimeUpdateAttemptRecord? {
+        currentCoroutineContext().ensureActive()
+        val frozen = LocalTimeEditPreparation(freezeLocalTimeRequest(preparation.intent, preparation.timestamp),
+            preparation.timestamp, preparation.format, preparation.protectedPayload)
+        if (frozen.format != LOCAL_TIME_PREPARATION_FORMAT) return null
+        return timeOperation(frozen.intent.scope, admit, { false }, null, preparation = true) { runtime, lease, _ ->
+            val result = runtime.prepareSubmission(id, frozen, lease::allows)
+            currentCoroutineContext().ensureActive()
+            result?.takeIf { it.id == id && it.format == timeUpdateFormat && it.state == TimeUpdateAttemptState.PREPARED &&
+                it.protectedEvidence == null && it.preparation.intent == frozen.intent && it.preparation.timestamp == frozen.timestamp &&
+                it.preparation.format == frozen.format && it.preparation.protectedPayload == frozen.protectedPayload }?.frozen()
+        }
+    }
+
+    override suspend fun submit(record: TimeUpdateAttemptRecord, journal: TimeUpdateAttemptJournal,
+        admit: (CalendarScope) -> Boolean, qualifySource: suspend (CalendarScope) -> Boolean,
+        admitEvidence: (CalendarScope) -> Boolean): TimeUpdateSubmissionObservation {
+        currentCoroutineContext().ensureActive()
+        val frozen = record.frozen()
+        if (frozen.format != timeUpdateFormat || frozen.state != TimeUpdateAttemptState.PREPARED || frozen.protectedEvidence != null)
+            return TimeUpdateSubmissionObservation.Unknown
+        return timeOperation(frozen.scope, admit, admitEvidence, TimeUpdateSubmissionObservation.Unknown as TimeUpdateSubmissionObservation) {
+                runtime, lease, evidence ->
+            val source: suspend (CalendarScope) -> Boolean = { requested ->
+                if (!lease.allows(requested)) false else {
+                    val qualified = try { qualifySource(requested) }
+                    catch (failure: Exception) { lease.close(); currentCoroutineContext().ensureActive(); throw failure }
+                    if (!qualified) lease.close()
+                    currentCoroutineContext().ensureActive()
+                    qualified && lease.allows(requested)
+                }
+            }
+            val observed = runtime.submit(frozen, journal, lease::allows, source, evidence::allows)
+            currentCoroutineContext().ensureActive()
+            if (observed is TimeUpdateSubmissionObservation.Verified &&
+                observed.record.copy(state = TimeUpdateAttemptState.PREPARED, protectedEvidence = null) == frozen)
+                TimeUpdateSubmissionObservation.Verified(observed.record, observed.event)
+            else TimeUpdateSubmissionObservation.Unknown
+        }
+    }
+
+    override suspend fun inspect(record: TimeUpdateAttemptRecord, journal: TimeUpdateAttemptJournal,
+        admit: (CalendarScope) -> Boolean): TimeUpdateSubmissionObservation {
+        currentCoroutineContext().ensureActive()
+        val frozen = record.frozen()
+        if (frozen.format != timeUpdateFormat || frozen.state != TimeUpdateAttemptState.OUTCOME_UNKNOWN)
+            return TimeUpdateSubmissionObservation.Unknown
+        return timeOperation(frozen.scope, admit, { false }, TimeUpdateSubmissionObservation.Unknown as TimeUpdateSubmissionObservation) {
+                runtime, lease, _ ->
+            val observed = runtime.inspect(frozen, journal, lease::allows)
+            currentCoroutineContext().ensureActive()
+            if (observed is TimeUpdateSubmissionObservation.Verified && observed.record == frozen)
+                TimeUpdateSubmissionObservation.Verified(observed.record, observed.event)
+            else TimeUpdateSubmissionObservation.Unknown
+        }
+    }
+
     internal suspend fun connectedAccountLabel(): String? {
         val caller = currentCoroutineContext()
         caller.ensureActive()
@@ -265,11 +325,25 @@ internal class SerializedAuthenticationPort(
     /** Shared logout serialization, but separate expiring edit and response-retention permissions. */
     private suspend fun <T> textOperation(scope: CalendarScope, admit: (CalendarScope) -> Boolean,
         admitEvidence: (CalendarScope) -> Boolean, denied: T, preparation: Boolean = false,
-        action: suspend (CalendarTextUpdateSubmissionPort, TextLease, TextLease) -> T): T {
+        action: suspend (CalendarTextUpdateSubmissionPort, UpdateLease, UpdateLease) -> T): T =
+        updateOperation(scope, admit, admitEvidence, denied, preparation,
+            { it.textUpdates }, { it.textUpdateFormat == textUpdateFormat }, action)
+
+    private suspend fun <T> timeOperation(scope: CalendarScope, admit: (CalendarScope) -> Boolean,
+        admitEvidence: (CalendarScope) -> Boolean, denied: T, preparation: Boolean = false,
+        action: suspend (CalendarTimeUpdateSubmissionPort, UpdateLease, UpdateLease) -> T): T =
+        updateOperation(scope, admit, admitEvidence, denied, preparation,
+            { it.timeUpdates }, { it.timeUpdateFormat == timeUpdateFormat }, action)
+
+    /** Common mutex/lease mechanics only; family-specific ports and records stay distinct. */
+    private suspend fun <T, P> updateOperation(scope: CalendarScope, admit: (CalendarScope) -> Boolean,
+        admitEvidence: (CalendarScope) -> Boolean, denied: T, preparation: Boolean,
+        select: (ProtonAuthenticationGraph) -> P?, compatible: (P) -> Boolean,
+        action: suspend (P, UpdateLease, UpdateLease) -> T): T {
         val caller = currentCoroutineContext()
         caller.ensureActive()
-        val lease = TextLease(scope, admit, caller)
-        val evidence = TextLease(scope, admitEvidence, caller)
+        val lease = UpdateLease(scope, admit, caller)
+        val evidence = UpdateLease(scope, admitEvidence, caller)
         try {
             if (!lease.allows(scope)) return denied
             return withContext(dispatcher) {
@@ -279,13 +353,13 @@ internal class SerializedAuthenticationPort(
                     lock.withLock {
                         operation.ensureActive()
                         if (!lease.allows(scope) || !authenticated) return@withLock denied
-                        val runtime = graph?.textUpdates ?: return@withLock denied
-                        if (runtime.textUpdateFormat != textUpdateFormat) return@withLock denied
-                        lease.qualify { authenticated && runtime.textUpdateFormat == textUpdateFormat }
-                        evidence.qualify { authenticated && runtime.textUpdateFormat == textUpdateFormat }
+                        val runtime = graph?.let(select) ?: return@withLock denied
+                        if (!compatible(runtime)) return@withLock denied
+                        lease.qualify { authenticated && compatible(runtime) }
+                        evidence.qualify { authenticated && compatible(runtime) }
                         val result = action(runtime, lease, evidence)
                         operation.ensureActive()
-                        if (!lease.allows(scope) || !authenticated || runtime.textUpdateFormat != textUpdateFormat) denied else result
+                        if (!lease.allows(scope) || !authenticated || !compatible(runtime)) denied else result
                     }
                 } catch (failure: Exception) {
                     // A cancelled dispatcher child can throw an ordinary error while the
@@ -302,7 +376,7 @@ internal class SerializedAuthenticationPort(
           } finally { lease.close(); evidence.close() }
     }
 
-    private class TextLease(private val scope: CalendarScope, private val admit: (CalendarScope) -> Boolean,
+    private class UpdateLease(private val scope: CalendarScope, private val admit: (CalendarScope) -> Boolean,
         private val caller: kotlin.coroutines.CoroutineContext) {
         private val closed = java.util.concurrent.atomic.AtomicBoolean()
         private val operation = java.util.concurrent.atomic.AtomicReference(caller)

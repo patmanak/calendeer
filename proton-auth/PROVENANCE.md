@@ -29,7 +29,12 @@ temporal metadata values before applying the established exact-parts/non-tempora
 comparison, then uses the native decoder for complete mapped contents. It refuses
 all-day requests pending API evidence. Supplied synthetic observations do not qualify
 service recalculation, `IsBreakingChange=0`, current rights or concurrent-write safety.
-Transport and automatic temporal delivery remain disabled.
+The separate guarded temporal submission adapter reuses the existing context,
+transport, one-shot dispatch permit and decoder contracts. It adds typed temporal
+history and response evidence while retaining claim-before-send and UNKNOWN
+inspection-only behavior. The authentication facade shares mutex/lease mechanics
+between distinct text/time ports. Controlled tests qualify those mechanics; temporal
+service acceptance and automatic worker delivery remain unqualified and inactive.
 
 ## Offline shared-title preservation experiment
 

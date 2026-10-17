@@ -26,13 +26,18 @@ import org.json.JSONObject
  * Payload/evidence are opaque protected strings; this store grants no HTTP or Provider capability.
  */
 class TitleUpdateAttemptStore(context: Context, name: String = "calendar-title-update-attempt-v1.db") :
-    SQLiteOpenHelper(context, name, null, 6), TitleUpdateRecoveryJournal, TitleUpdatePreparationJournal {
+    SQLiteOpenHelper(context, name, null, 7), TitleUpdateRecoveryJournal, TitleUpdatePreparationJournal {
     private val lock = Mutex()
     /** Same connection/transaction as title ownership; still not composed into broader sending. */
     internal val textJournal: TextUpdateRecoveryJournal = SqlTextUpdateAttemptJournal(object : TextAttemptDatabase {
         override suspend fun <T> withDatabase(beforeOpen: () -> Unit, action: (SQLiteDatabase) -> T): T =
             withContext(Dispatchers.IO) { lock.withLock { beforeOpen(); action(writableDatabase) } }
     }, ::canTextOwn)
+    /** Temporal history shares the same connection and reciprocal ownership transaction. */
+    internal val timeJournal: TimeUpdateRecoveryJournal = SqlTimeUpdateAttemptJournal(object : TimeAttemptDatabase {
+        override suspend fun <T> withDatabase(beforeOpen: () -> Unit, action: (SQLiteDatabase) -> T): T =
+            withContext(Dispatchers.IO) { lock.withLock { beforeOpen(); action(writableDatabase) } }
+    }, ::canTimeOwn)
     override val completionProtocol = 1
     @Volatile var admitDispatch: (CalendarScope) -> Boolean = { false }
 
@@ -90,6 +95,7 @@ class TitleUpdateAttemptStore(context: Context, name: String = "calendar-title-u
         db.execSQL("CREATE UNIQUE INDEX title_update_unresolved_event ON $TABLE(account,calendar,event) WHERE completion IS NULL")
         createReservationTable(db)
         TextUpdateAttemptSql.createTable(db)
+        TimeUpdateAttemptSql.createTable(db)
     }
 
     private fun createReservationTable(db: SQLiteDatabase) {
@@ -104,11 +110,13 @@ class TitleUpdateAttemptStore(context: Context, name: String = "calendar-title-u
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        check(oldVersion in 1..5 && newVersion == 6) { "Explicit title update journal migration required" }
+        check(oldVersion in 1..6 && newVersion == 7) { "Explicit title update journal migration required" }
         if (oldVersion >= 3) {
             // Existing attempts, protected bytes, results and completions stay untouched.
             if (oldVersion == 3) createReservationTable(db)
-            if (oldVersion == 5) TextUpdateAttemptSql.migrateProofs(db) else TextUpdateAttemptSql.createTable(db)
+            if (oldVersion == 5) TextUpdateAttemptSql.migrateProofs(db)
+            else if (oldVersion < 5) TextUpdateAttemptSql.createTable(db)
+            TimeUpdateAttemptSql.createTable(db)
             return
         }
         // SQLiteOpenHelper owns the migration transaction. Copy opaque bytes without interpreting
@@ -131,7 +139,7 @@ class TitleUpdateAttemptStore(context: Context, name: String = "calendar-title-u
             if (!admit(frozen.scope)) null else transaction(db, beforeCommit = {
                 check(admit(frozen.scope)) { "Title preparation reservation lease is not current" }
             }) {
-                if (textOwns(db, frozen.scope, frozen.eventId, frozen.id) { operation.ensureActive() })
+                if (otherFamilyOwns(db, frozen.scope, frozen.eventId, frozen.id) { operation.ensureActive() })
                     return@transaction null
                 val history = ownershipHistory(db, frozen.scope, frozen.eventId)
                 val owner = history.singleOrNull { !it.completed }
@@ -152,7 +160,7 @@ class TitleUpdateAttemptStore(context: Context, name: String = "calendar-title-u
                     frozen
                 }
                 // A proposal may adopt an earlier title UUID. Qualify that identity separately.
-                if (textOwns(db, canonical.scope, canonical.eventId, canonical.id) { operation.ensureActive() })
+                if (otherFamilyOwns(db, canonical.scope, canonical.eventId, canonical.id) { operation.ensureActive() })
                     return@transaction null
                 if (readReservation(db, canonical.scope, canonical.id) == null) {
                     // Adoption of legacy PREPARED work keeps its ID and first wire intact.
@@ -198,7 +206,7 @@ class TitleUpdateAttemptStore(context: Context, name: String = "calendar-title-u
             if (!admit(frozen.scope)) false else transaction(db, beforeCommit = {
                 check(admit(frozen.scope)) { "Title preparation lease is not current" }
             }) {
-                val blocked = textOwns(db, frozen.scope, frozen.preparation.intent.base.eventId, frozen.id) {
+                val blocked = otherFamilyOwns(db, frozen.scope, frozen.preparation.intent.base.eventId, frozen.id) {
                     operation.ensureActive()
                 }
                 if (guarded && blocked) return@transaction false
@@ -414,7 +422,7 @@ class TitleUpdateAttemptStore(context: Context, name: String = "calendar-title-u
                 operationContext.ensureActive()
                 check(stillAllowed) { "Title update dispatch lease is not current" }
             }) {
-                if (textOwns(db, frozen.scope, frozen.preparation.intent.base.eventId, frozen.id) {
+                if (otherFamilyOwns(db, frozen.scope, frozen.preparation.intent.base.eventId, frozen.id) {
                         operationContext.ensureActive()
                     }) return@transaction false
                 val history = ownershipHistory(db, frozen.scope, frozen.preparation.intent.base.eventId)
@@ -462,10 +470,11 @@ class TitleUpdateAttemptStore(context: Context, name: String = "calendar-title-u
     private data class History(val scope: CalendarScope, val id: MutationId,
         val localIntentId: MutationId, val completed: Boolean)
 
-    /** Cross-family checks are synchronous inside the owning writer transaction. No helper re-entry. */
-    private fun textOwns(db: SQLiteDatabase, scope: CalendarScope, event: EventId, id: MutationId,
+    /** Title, text and time checks are synchronous inside the owning writer transaction. No helper re-entry. */
+    private fun otherFamilyOwns(db: SQLiteDatabase, scope: CalendarScope, event: EventId, id: MutationId,
         checkCancelled: () -> Unit): Boolean = qualifiedOwnership(checkCancelled) {
-        TextUpdateAttemptSql(db, checkCancelled).hasOwner(scope, event, id)
+        TextUpdateAttemptSql(db, checkCancelled).hasOwner(scope, event, id) ||
+            TimeUpdateAttemptSql(db, checkCancelled).hasOwner(scope, event, id)
     }
 
     private fun canTextOwn(db: SQLiteDatabase, work: TextUpdateAttemptRecord, checkCancelled: () -> Unit): Boolean =
@@ -473,7 +482,15 @@ class TitleUpdateAttemptStore(context: Context, name: String = "calendar-title-u
             val history = ownershipHistory(db, work.scope, work.eventId)
             // Even a completed title cannot donate its request UUID to a different family/event.
             val usedIdentity = titleRequestExists(db, work.scope, work.id, checkCancelled)
-            history.all { it.completed } && !usedIdentity
+            history.all { it.completed } && !usedIdentity &&
+                !TimeUpdateAttemptSql(db, checkCancelled).hasOwner(work.scope, work.eventId, work.id)
+        }
+
+    private fun canTimeOwn(db: SQLiteDatabase, work: TimeUpdateAttemptRecord, checkCancelled: () -> Unit): Boolean =
+        qualifiedOwnership(checkCancelled) {
+            val history = ownershipHistory(db, work.scope, work.eventId)
+            history.all { it.completed } && !titleRequestExists(db, work.scope, work.id, checkCancelled) &&
+                !TextUpdateAttemptSql(db, checkCancelled).hasOwner(work.scope, work.eventId, work.id)
         }
 
     private fun titleRequestExists(db: SQLiteDatabase, scope: CalendarScope, id: MutationId,

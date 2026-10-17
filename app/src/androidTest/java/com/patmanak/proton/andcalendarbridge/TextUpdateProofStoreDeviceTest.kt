@@ -182,6 +182,7 @@ class TextUpdateProofStoreDeviceTest {
         val record = work(); assertTrue(store.textJournal.remember(record, allow)); store.close()
         val capsule = TextUpdateAttemptStorageCodec.encode(record)
         SQLiteDatabase.openDatabase(context.getDatabasePath(name).absolutePath, null, SQLiteDatabase.OPEN_READWRITE).use { db ->
+            db.execSQL("DROP TABLE time_update_attempts")
             db.execSQL("DROP TABLE text_update_attempts")
             db.execSQL("CREATE TABLE text_update_attempts(account TEXT NOT NULL,calendar TEXT NOT NULL,generation INTEGER NOT NULL CHECK(generation>=0),mutation TEXT NOT NULL,event TEXT NOT NULL,state TEXT NOT NULL,capsule BLOB NOT NULL,PRIMARY KEY(account,calendar,generation,mutation),UNIQUE(account,calendar,event),UNIQUE(account,calendar,mutation))")
             db.insertOrThrow("text_update_attempts", null, ContentValues().apply {
@@ -190,7 +191,7 @@ class TextUpdateProofStoreDeviceTest {
             }); db.version = 5
         }
         TitleUpdateAttemptStore(context, name).use { migrated ->
-            assertEquals(6, migrated.readableDatabase.version); assertEquals(record, migrated.textJournal.read(scope, record.id, allow))
+            assertEquals(7, migrated.readableDatabase.version); assertEquals(record, migrated.textJournal.read(scope, record.id, allow))
             migrated.readableDatabase.rawQuery("SELECT capsule,result,completion FROM text_update_attempts", null).use {
                 assertTrue(it.moveToFirst()); assertArrayEquals(capsule, it.getBlob(0)); assertTrue(it.isNull(1)); assertTrue(it.isNull(2))
             }
@@ -333,6 +334,7 @@ class TextUpdateProofStoreDeviceTest {
         val capsule = TextUpdateAttemptStorageCodec.encode(record)
         store.readableDatabase; store.close()
         SQLiteDatabase.openDatabase(context.getDatabasePath(name).absolutePath, null, SQLiteDatabase.OPEN_READWRITE).use { db ->
+            db.execSQL("DROP TABLE time_update_attempts")
             db.execSQL("DROP TABLE text_update_attempts")
             createLegacyTextTable(db); insertLegacyText(db, record, capsule)
             // Force CREATE INDEX failure after the migration has renamed and rebuilt the attempt table.
@@ -363,7 +365,7 @@ class TextUpdateProofStoreDeviceTest {
             db.execSQL("DROP TABLE migration_index_collision")
         }
         TitleUpdateAttemptStore(context, name).use { migrated ->
-            assertEquals(6, migrated.readableDatabase.version)
+            assertEquals(7, migrated.readableDatabase.version)
             assertEquals(record, migrated.textJournal.read(scope, record.id, allow))
         }
     }

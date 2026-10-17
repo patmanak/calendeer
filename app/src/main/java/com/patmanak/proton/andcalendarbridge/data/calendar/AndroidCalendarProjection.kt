@@ -48,8 +48,11 @@ import com.patmanak.proton.andcalendarbridge.sync.TitleUpdateAcknowledgementRece
 import com.patmanak.proton.andcalendarbridge.sync.AppliedTitleUpdateAcknowledgement
 import com.patmanak.proton.andcalendarbridge.sync.TextUpdateAcknowledgementReceipt
 import com.patmanak.proton.andcalendarbridge.sync.AppliedTextUpdateAcknowledgement
+import com.patmanak.proton.andcalendarbridge.sync.TimeUpdateAcknowledgementReceipt
+import com.patmanak.proton.andcalendarbridge.sync.AppliedTimeUpdateAcknowledgement
 import com.patmanak.proton.andcalendarbridge.sync.LocalEditIntent
 import com.patmanak.proton.andcalendarbridge.sync.TextUpdateContentPolicy
+import com.patmanak.proton.andcalendarbridge.sync.TimeUpdateContentPolicy
 import com.patmanak.proton.andcalendarbridge.sync.RecurrencePoint
 import com.patmanak.proton.andcalendarbridge.sync.RemoteChange
 import com.patmanak.proton.andcalendarbridge.sync.EventContent
@@ -96,13 +99,32 @@ data class EnsuredCalendar(val id: Long, val created: Boolean)
  * order opaque revisions and never infers deletion from an absent event in a server page.
  */
 class AndroidCalendarProjection(context: Context) : CalendarProjection {
+    override val timeUpdateAcknowledgementProtocol: Int? = 1
+    override suspend fun acknowledgeTimeUpdate(receipt: TimeUpdateAcknowledgementReceipt): AppliedTimeUpdateAcknowledgement? {
+        val caller = currentCoroutineContext()
+        caller.ensureActive()
+        val frozen = receipt.snapshot()
+        val recipe = NativeEditAcknowledgement.time(frozen) { caller.ensureActive() }
+        return nativeEditAcknowledgementOperation(recipe) {
+            if (acknowledgeNativeEdit(recipe)) AppliedTimeUpdateAcknowledgement(frozen) else null
+        }
+    }
+    override suspend fun inspectTimeUpdateAcknowledgement(receipt: TimeUpdateAcknowledgementReceipt): AppliedTimeUpdateAcknowledgement? {
+        val caller = currentCoroutineContext()
+        caller.ensureActive()
+        val frozen = receipt.snapshot()
+        val recipe = NativeEditAcknowledgement.time(frozen) { caller.ensureActive() }
+        return nativeEditAcknowledgementOperation(recipe) {
+            if (inspectNativeEditAcknowledgement(recipe)) AppliedTimeUpdateAcknowledgement(frozen) else null
+        }
+    }
     override val textUpdateAcknowledgementProtocol: Int? = 1
     override suspend fun acknowledgeTextUpdate(receipt: TextUpdateAcknowledgementReceipt): AppliedTextUpdateAcknowledgement? {
         val caller = currentCoroutineContext()
         caller.ensureActive()
         val frozen = receipt.snapshot()
         val recipe = NativeEditAcknowledgement.text(frozen) { caller.ensureActive() }
-        return textAcknowledgementOperation(recipe) {
+        return nativeEditAcknowledgementOperation(recipe) {
             if (acknowledgeNativeEdit(recipe)) AppliedTextUpdateAcknowledgement(frozen) else null
         }
     }
@@ -111,7 +133,7 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
         caller.ensureActive()
         val frozen = receipt.snapshot()
         val recipe = NativeEditAcknowledgement.text(frozen) { caller.ensureActive() }
-        return textAcknowledgementOperation(recipe) {
+        return nativeEditAcknowledgementOperation(recipe) {
             if (inspectNativeEditAcknowledgement(recipe)) AppliedTextUpdateAcknowledgement(frozen) else null
         }
     }
@@ -130,15 +152,12 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
     }
 
     /** Private recipes are constructed only from their separately validated public receipt types.
-     * The title factory always remains metadata-only; only the text factory permits CRLF writes.
+     * Title stays metadata-only. Text and time allow only their verified CRLF/LF text differences;
+     * the time recipe never writes dates, because the exact desired time is already in the row.
      */
     private class NativeEditAcknowledgement private constructor(val intent: LocalEditIntent,
         val projection: ProjectionReceipt, val handoff: CapturedCreateHandoffFrame?,
         private val canonicalText: Boolean, val checkActive: () -> Unit) {
-        init {
-            require(if (canonicalText) TextUpdateContentPolicy.sameSubmittedContent(intent.content, projection.change.content)
-                else intent.content == projection.change.content)
-        }
         fun values(marker: String): ContentValues = ContentValues().apply {
             put(Events.DIRTY, 0)
             put(Events.SYNC_DATA2, digest("revision-v1", projection.change.revision.value))
@@ -152,10 +171,18 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
             }
         }
         companion object {
-            fun title(receipt: TitleUpdateAcknowledgementReceipt) =
-                NativeEditAcknowledgement(receipt.intent, receipt.projection, receipt.handoff, false) {}
-            fun text(receipt: TextUpdateAcknowledgementReceipt, checkActive: () -> Unit) =
-                NativeEditAcknowledgement(receipt.intent, receipt.projection, receipt.handoff, true, checkActive)
+            fun title(receipt: TitleUpdateAcknowledgementReceipt): NativeEditAcknowledgement {
+                require(receipt.intent.content == receipt.projection.change.content)
+                return NativeEditAcknowledgement(receipt.intent, receipt.projection, receipt.handoff, false) {}
+            }
+            fun text(receipt: TextUpdateAcknowledgementReceipt, checkActive: () -> Unit): NativeEditAcknowledgement {
+                require(TextUpdateContentPolicy.sameSubmittedContent(receipt.intent.content, receipt.projection.change.content))
+                return NativeEditAcknowledgement(receipt.intent, receipt.projection, receipt.handoff, true, checkActive)
+            }
+            fun time(receipt: TimeUpdateAcknowledgementReceipt, checkActive: () -> Unit): NativeEditAcknowledgement {
+                require(TimeUpdateContentPolicy.sameSubmittedContent(receipt.intent.content, receipt.projection.change.content))
+                return NativeEditAcknowledgement(receipt.intent, receipt.projection, receipt.handoff, true, checkActive)
+            }
         }
     }
 
@@ -165,7 +192,7 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
         receipt?.checkActive?.invoke()
     }
 
-    private suspend fun <T> textAcknowledgementOperation(receipt: NativeEditAcknowledgement, block: () -> T): T = try {
+    private suspend fun <T> nativeEditAcknowledgementOperation(receipt: NativeEditAcknowledgement, block: () -> T): T = try {
         operation {
             requireEditPermissions(receipt)
             val result = block()
@@ -618,7 +645,7 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
         if (!deleted && content == base.content) return null
         if (acknowledgement != null && content != acknowledgement.intent.content) return null
         // Capture stays assertion-only. ACK asserts the complete raw edit; its typed recipe
-        // adds metadata and, for text receipts only, verified CRLF/LF differences.
+        // adds metadata and, for text/time receipts, verified CRLF/LF differences.
         val checks = arrayListOf(assertion(syncUri(Calendars.CONTENT_URI, account), calendarSelection(scope, account), calendar),
             assertion(uri, identity, row),
             ContentProviderOperation.newAssertQuery(uri).withSelection(identity.sql, identity.args)

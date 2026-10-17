@@ -59,10 +59,12 @@ For a useful bidirectional RC, finish:
 
 1. Date/time edits: [protected preparation](TEMPORAL_UPDATE.md) now covers same-kind,
    same-zone movement/duration through the authenticated facade and real Core.
-   Separate timed request/readback rules bind all temporal API metadata. Suites
-   pass (379 domain, 760 backend, 112 app JVM; six synthetic native crypto cases).
-   Production temporal sending remains disabled. Finish service/readback qualification,
-   durable ownership/delivery, all-day API conventions, timezone changes and kind transitions.
+   Separate timed request/readback rules bind all temporal API metadata. Guarded
+   submission, a shared journal with reciprocal title/text/time ownership and typed
+   Provider ACK are available. Suites pass (418 domain, 785 backend, 116 app JVM;
+   six native crypto and 66 isolated SQL/Provider cases). Automatic temporal sending
+   remains disabled. Finish import-coordinator/worker/consent integration, service
+   qualification, all-day API conventions, timezone changes and kind transitions.
 2. Outgoing DELETE with concurrent changes and interrupted acknowledgement.
 3. Preservation of ordinary reminders/colors during supported edits; current
    send profiles still reject many such events.

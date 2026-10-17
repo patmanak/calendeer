@@ -6,8 +6,10 @@ This document defines the initial bounded profile; it does not enable sending.
 
 The immutable candidate, plaintext patcher, protected cryptographic preparation,
 authenticated preparation port and offline request/readback rules are implemented.
-Transport, durable ownership and native delivery remain unfinished. The installed
-application has no new time-edit option and sends no temporal updates.
+Guarded submission, durable attempt ownership and typed native acknowledgement
+are implemented as separate capabilities. Import-coordinator orchestration,
+worker consent/UI and live service qualification remain unfinished. The installed
+application has no new time-edit option and performs no automatic temporal sending.
 
 ## Initial profile
 
@@ -80,6 +82,34 @@ recalculation. `IsBreakingChange=0` remains an explicit hypothesis for this rest
 no-attendee profile, to qualify before transport activation. No local codec or
 successful reopen is a journal claim, a dispatch permit or a native acknowledgement.
 
+## Guarded delivery capabilities
+
+`TimeUpdateAttemptRecord`, identities, results, cursors, receipts and completion
+are disjoint from text/title contracts. Request identities use temporal domain
+separators and bind full raw original/replacement, scope/generation, timestamp,
+capsule and wire format. Verified readback retains its actual text bytes; CRLF/LF
+equivalence never changes the retained raw intent or exact temporal values.
+
+`ProtonTimeUpdateSubmissionAdapter` and the serialized authentication facade expose
+guarded preparation/submission/inspection through the existing transport. Submission
+requalifies the complete original, source, session and selected context; it requires
+the exact first durable wire and commits UNKNOWN before the sole transport call.
+Response evidence has an independent scoped lease. UNKNOWN inspection never sends.
+The shared facade mutex/lease mechanics retain distinct typed family ports.
+
+The shared update database adds a separate temporal table in schema 7. One writer
+transaction arbitrates title reservations/attempts, text and time across generations,
+including historical request-ID reuse. Temporal capsules/results/completion use
+separate tags. Existing schemas 1–6 migrate without reinterpreting historical
+capsules; corrupt history cannot certify a free event or request identity.
+
+`CalendarProjection` exposes default-deny time ACK/inspection and the Android
+implementation reuses the guarded native CAS with a typed time receipt. It asserts
+the complete raw dirty edit and complete CREATE handoff provenance when applicable.
+ACK retains desired DTSTART/DTEND, clears DIRTY and attaches the verified revision/
+nonce only on an exact current row. Inspection and historical replay preserve newer
+edits. These primitives are not yet composed into the time worker/coordinator flow.
+
 ## Delivery and qualification
 
 1. Immutable project-owned candidate and lossless plaintext patcher; focused JVM
@@ -100,8 +130,8 @@ supplies a remote write lock.
 ## Verification
 
 Candidate/patcher, protected preparation, authenticated access and request/readback
-tests first failed against refusing implementations. All `:sync:test` (379 cases),
-`:proton-auth:testDebugUnitTest` (760 cases) and `:app:testDebugUnitTest` (112 cases)
+tests first failed against refusing implementations. All `:sync:test` (418 cases),
+`:proton-auth:testDebugUnitTest` (785 cases) and `:app:testDebugUnitTest` (116 cases)
 passed without failures or skips; app/test APK builds passed. Existing title/text
 tests retain their unchanged-date/sequence policy. Independent source reviews found
 no functional defect in the preparation or offline request/readback slices.
@@ -115,6 +145,17 @@ real decoder. Altering any temporal API field is rejected before decoding.
 These fixtures use synthetic keys/events, without account, service, journal or
 Provider contents. No temporal service write, worker/native acknowledgement or
 installation/update preservation journey is qualified by these results.
+
+The delivery continuation established RED for domain validation, submission/facade,
+shared SQL ownership and the native ACK entrypoint, then passed the suites above.
+Sixty-six further physical isolated cases passed: 32 journal/arbitration/migration
+cases (including existing title/text histories and schemas 1–6) and 34 Provider ACK
+cases. They qualify exact raw intent, desired timed/all-day dates retained on the
+same row, verified text normalization, concurrent/newer edits, guarded batches,
+interrupted replies, transferred CREATE provenance, receipt history and cancellation.
+Isolated databases/Provider fixtures were cleaned. Independent source review found
+no material defect in domain/journal/submission boundaries. These are controlled
+dependency/SQL/Provider tests, without temporal service or automatic worker delivery.
 
 ## Source evidence
 

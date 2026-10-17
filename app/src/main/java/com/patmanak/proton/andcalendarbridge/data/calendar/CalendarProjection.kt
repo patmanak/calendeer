@@ -27,10 +27,19 @@ import com.patmanak.proton.andcalendarbridge.sync.TitleUpdateAcknowledgementRece
 import com.patmanak.proton.andcalendarbridge.sync.AppliedTitleUpdateAcknowledgement
 import com.patmanak.proton.andcalendarbridge.sync.TextUpdateAcknowledgementReceipt
 import com.patmanak.proton.andcalendarbridge.sync.AppliedTextUpdateAcknowledgement
+import com.patmanak.proton.andcalendarbridge.sync.TimeUpdateAcknowledgementReceipt
+import com.patmanak.proton.andcalendarbridge.sync.AppliedTimeUpdateAcknowledgement
 import com.patmanak.proton.andcalendarbridge.sync.catalog.CalendarSummary
 
 /** Android-layer boundary. A failed apply leaves its durable intent unacknowledged for replay. */
 interface CalendarProjection {
+    val timeUpdateAcknowledgementProtocol: Int? get() = null
+    /** Assert the exact raw native temporal edit and origin before clearing DIRTY on the same row.
+     * Retain the desired time; only verified CRLF/LF text normalization and metadata may change.
+     */
+    suspend fun acknowledgeTimeUpdate(receipt: TimeUpdateAcknowledgementReceipt): AppliedTimeUpdateAcknowledgement? = null
+    /** Historical acknowledgement proof only; preserve later content, deletion and children. */
+    suspend fun inspectTimeUpdateAcknowledgement(receipt: TimeUpdateAcknowledgementReceipt): AppliedTimeUpdateAcknowledgement? = null
     val textUpdateAcknowledgementProtocol: Int? get() = null
     /** Assert the full raw native edit before same-row acknowledgement. Only verified CRLF/LF
      * text differences and acknowledgement metadata may change; CREATE requires explicit origin.
