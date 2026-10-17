@@ -52,8 +52,9 @@ production Provider/worker RUN and active restarted REPLAY for all seven profile
 with immutable history and no new attempt. Exact dates and scope are in the temporal
 contract. Text also has an actual system-editor/production-worker journey,
 interrupted-edit recovery and active restart replay without another attempt.
-The tested editor is
-`foundation.e.calendar`; this is not Samsung qualification.
+Four actual time-editor RUN/restarted REPLAY cases also pass: single/multiple
+all-day dates and Paris autumn/spring durations. The measured time editor is
+`foundation.e.calendar` 1.0.47 on Android API 35; Samsung remains unqualified.
 
 Current host suites pass 418 domain, 798 backend and 133 app JVM cases without
 skips. Physical crypto, SQL/migration, Provider, worker/recovery and option UI
@@ -66,8 +67,8 @@ For a useful bidirectional RC, finish:
    have authenticated cryptography, current-source ownership, guarded requests,
    native completion and worker/UI consent. Listed all-day and zone/DST service
    and production Provider/worker profiles, offline ACK and restarted replay pass.
-   Qualify actual calendar-editor time changes, kind/zone transitions and combined
-   edits; ambiguous local hours
+   Extend editor/OEM qualification beyond the measured all-day and Paris cases,
+   then qualify kind/zone transitions and combined edits; ambiguous local hours
    remain held rather than guessed.
 2. Outgoing DELETE with concurrent changes and interrupted acknowledgement.
 3. Preservation of ordinary reminders/colors during supported edits; current

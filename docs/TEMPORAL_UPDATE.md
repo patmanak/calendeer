@@ -291,6 +291,53 @@ Final app/test APK builds and lint passed (zero errors, 42 warnings). All eight
 language bundles pass UTF-8/XML/key checks and describe the same-kind all-day option.
 An independent bounded source review found no actionable metadata/admission defect.
 
+## Actual calendar editor qualification
+
+`CalendarSystemTimeWorkerLiveDeviceTest` has a separate opt-in `timeEditor=true`
+mode requiring an explicit `editorPackage`. It uses new controlled service fixtures
+and a distinct editor preference namespace; completed Provider-only fixtures cannot
+be reused as fresh editor runs. The package, profile, native row and base revision
+are bound before launch. The fixture opens the enrolled event with ACTION_VIEW;
+an external UI driver opens Edit and changes only the intended date/time fields.
+After launch the fixture only observes production work/proofs. It never writes
+Provider fields or calls preparation, submission, acknowledgement or a manual worker.
+
+An initial audit still rejects local owners, capsules and unfinished outgoing
+history. Editor startup may first let ordinary queues recover interrupted incoming
+receipts/records. The full audit, including those incoming tables, must then pass
+before temporary consent or editor launch. No receipt or pending record is cleared
+by the fixture. Two initial multi-day preflights failed against incoming work before
+this ordering correction; the same unedited fixture then passed the full audit.
+
+The measured editor is `foundation.e.calendar` 1.0.47 on Android API 35. The UI driver
+checks the enrolled synthetic title, calendar, unchanged description/location and
+literal expected date/time fields before Save. The same-row native completion,
+exact signed Proton contents/metadata, immutable history and mode restoration are
+then checked through the existing production pipeline. A fresh-process REPLAY
+checks active workers without relaunching the editor or allocating another attempt.
+The editor displays an inclusive last all-day date; both native and Proton proofs
+must retain the corresponding exclusive end. This is not Samsung qualification.
+
+Four new independent service fixtures passed guarded RUN/offline ACK/REPLAY
+(12 executions), followed by actual editor RUN and fresh-process REPLAY
+(eight executions). No final selected case failed or skipped. UI edits were:
+
+| Profile | Editor values after edit | Verified result |
+| --- | --- | --- |
+| Single all-day date | Start/last day 2026-10-26 | Exclusive end 2026-10-27, one civil day |
+| Multiple all-day dates | Start 2026-10-26, last day 2026-10-29 | Exclusive end 2026-10-30, four civil days |
+| Paris autumn | 2026-10-25 01:00 to 2026-10-26 01:00 | 25 elapsed hours, exact Europe/Paris zone |
+| Paris spring | 2027-03-28 01:00 to 2027-03-29 01:00 | 23 elapsed hours, exact Europe/Paris zone |
+
+The UI automatically moved the end when the start changed; the driver checked
+both bounds and unchanged text before saving. Native identity/revision, full
+signed/decrypted readback and mode restoration passed, as did active restarted
+replay without another attempt. Recognizable synthetic events remain available.
+App test-APK compilation, final lint (zero errors, 42 warnings) and independent
+source review passed. Runtime synchronization code is unchanged by this fixture.
+Other editors/OEMs, ambiguous-hour edits, kind/zone transitions, combined changes
+and transferred-CREATE editor delivery are not established by these cases.
+
 ## Source evidence
 
 The pinned Android source at `83bbd6a15b0aaa135e424fb5ac195c0a52929b4f`

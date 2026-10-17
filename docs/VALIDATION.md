@@ -27,8 +27,23 @@ restoration, same-row acknowledgement and immutable history without another atte
 These fixtures move timed bounds by one hour or all-day dates by one civil day;
 synthetic service events remain available for inspection. Final app/test APK builds,
 eight-language resource checks and lint pass (zero errors, 42 warnings). Kind/zone
-transitions, actual time-editor and OEM behavior remain unqualified. Prior evidence
-below retains its own original scope and limitations.
+transitions and other editor/OEM profiles remain unqualified.
+
+Actual date/time editor qualification uses `timeEditor=true` with explicit
+`editorPackage=foundation.e.calendar`. Version 1.0.47 on Android API 35 passed
+four RUN/fresh REPLAY pairs: single/multiple all-day dates and Paris 25-hour autumn /
+23-hour spring events. Twelve additional guarded source executions use new fixture
+identities, retaining the earlier Provider-only history. Before Save, the UI driver
+checks exact dates/times, calendar and unchanged text. After launch the fixture
+only observes production workers/proofs; there is no direct Provider edit or
+manual outgoing call. Same row, exact signed contents/metadata, restored modes and
+immutable replay without another attempt all passed. See the temporal contract
+for literal dates and all-day inclusive-display/exclusive-storage expectations.
+An initial preflight ordering failure was reproduced and corrected in the fixture:
+ordinary incoming recovery finishes before the full audit, while outgoing uncertainty
+is still rejected immediately. Final test-APK build, lint and independent review pass.
+Runtime synchronization code is unchanged. Prior evidence below retains its own
+original scope and limitations.
 
 
 Use JDK 17 or a compatible newer JDK, Android SDK platform 36 and the checked-in

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 package com.patmanak.proton.andcalendarbridge
 
+import android.content.ContentUris
+import android.content.Intent
 import android.content.ContentValues
 import android.content.Context
 import android.database.sqlite.SQLiteDatabase
@@ -31,7 +33,9 @@ import org.junit.Test
 import org.junit.runner.RunWith
 
 /** Production controller/WorkManager qualification of an ordinary time-only Provider user edit.
- * This does not qualify a calendar editor or OEM. No direct preparation, submission, inspection,
+ * An optional explicit timeEditor mode launches the enrolled event in an external editor.
+ * An external driver edits and saves through that UI; this fixture only observes after launch.
+ * Provider-only mode does not qualify a calendar editor or OEM. No direct preparation, submission, inspection,
  * acknowledgement or manual worker entry point is called. RUN and restarted REPLAY temporarily
  * change only the target's four write modes, retaining exact restoration provenance. Other
  * calendars keep their original consent: shared WorkManager jobs may process their already
@@ -46,6 +50,9 @@ class CalendarSystemTimeWorkerLiveDeviceTest {
         val args = InstrumentationRegistry.getArguments()
         assumeTrue(args.getString("calendarSystemTimeWorker") == "true")
         val phase = args.getString("timeWorkerPhase").orEmpty()
+        val editor = args.getString("timeEditor") == "true"
+        val editorPackage = args.getString("editorPackage").orEmpty()
+        require(!editor || editorPackage.matches(Regex("[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+")))
         val token = args.getString("timeFixtureToken").orEmpty()
         val accountHash = args.getString("timeAccountHash").orEmpty()
         assertTrue("Explicit phase, fixture and account are required", phase in setOf("RUN", "REPLAY") &&
@@ -54,7 +61,7 @@ class CalendarSystemTimeWorkerLiveDeviceTest {
         compose.waitUntil(60_000) { app.imports.state.value.let { it.authenticated && it.selections.isNotEmpty() && !it.busy } }
         assertTrue("Production temporal controllers must be composed", app.systemCreates.state.value.timeSupportAvailable)
         val sourcePrefix = "calendar-time-guarded-v1-$token"
-        val prefix = "calendar-time-worker-v2-$token"
+        val prefix = if (editor) "calendar-time-editor-v1-$token" else "calendar-time-worker-v2-$token"
         val source = app.getSharedPreferences(sourcePrefix, Context.MODE_PRIVATE)
         assertTrue("The independent service journey must already have durable ACK", source.getString("token", null) == token &&
             source.getString("account_hash", null) == accountHash && source.getBoolean("ack_completed", false) &&
@@ -93,6 +100,10 @@ class CalendarSystemTimeWorkerLiveDeviceTest {
                 result.event.content == original && completion.result == result && completion.receipt.matches(result))
         }
         val prefs = app.getSharedPreferences(prefix, Context.MODE_PRIVATE)
+        if (editor) {
+            assertTrue("Keep the exact enrolled editor", !prefs.contains("editor_package") || prefs.getString("editor_package", null) == editorPackage)
+            assertTrue(prefs.edit().putString("editor_package", editorPackage).commit())
+        }
         val restoration = app.getSharedPreferences("$prefix-mode-restoration", Context.MODE_PRIVATE)
         val projection = AndroidCalendarProjection(app)
         assertTrue("Calendar permissions are required", projection.hasPermissions())
@@ -228,8 +239,10 @@ class CalendarSystemTimeWorkerLiveDeviceTest {
                 prefs.getBoolean("modes_restored", false) && prefs.getInt("run_pid", -1) > 0 && prefs.getInt("run_pid", -1) != Process.myPid())
             assertNoOtherHistory(app, target, event)
             emitPreflightCounts()
-            // Reject target local/uncertain work before waiting for shared ordinary queues.
-            for (scope in strictAuditScopes) assertScopeQuiescent(app, projection, scope)
+            // Reject local/uncertain outgoing work before waiting. Editor startup can resume
+            // an ordinary incoming receipt interrupted by process restart; let the usual
+            // queues complete it, then require the full quiescent audit before any mode/edit.
+            for (scope in strictAuditScopes) assertScopeQuiescent(app, projection, scope, allowPendingIncoming = editor)
             status("system_time_initial_queues_waiting")
             idleQueues(false)
             status("system_time_initial_queues_idle")
@@ -319,21 +332,31 @@ class CalendarSystemTimeWorkerLiveDeviceTest {
                 val beforeIds = queue(NETWORK_WORK).map { it.id.toString() }.toSet()
                 assertTrue("Freeze the sole Provider edit before mutation", prefs.edit().putBoolean("provider_edit_requested", true)
                     .putInt("run_pid", Process.myPid()).putStringSet("previous_network_work", beforeIds).commit())
-                // No sync-adapter flag: an ordinary caller writes dates only; Provider marks DIRTY.
-                val changedRows = app.contentResolver.update(Events.CONTENT_URI, ContentValues().apply {
-                    put(Events.DTSTART, prefs.getLong("start", -1)); put(Events.DTEND, prefs.getLong("end", -1))
-                }, "${Events._ID}=? AND ${Events.CALENDAR_ID}=? AND ${Events._SYNC_ID}=? AND ${Events.SYNC_DATA4}=? AND " +
-                    "${Events.DIRTY}=0 AND ${Events.DELETED}=0 AND ${Events.ALL_DAY}=? AND ${Events.DTSTART}=? AND ${Events.DTEND}=? AND " +
-                    "${Events.TITLE}=? AND COALESCE(${Events.DESCRIPTION},'')=? AND COALESCE(${Events.EVENT_LOCATION},'')=? AND " +
-                    "${Events.EVENT_TIMEZONE}=? AND COALESCE(${Events.EVENT_END_TIMEZONE},'')=? AND ${Events.SYNC_DATA2}=?",
-                    arrayOf(prefs.getLong("row", -1).toString(), prefs.getLong("native_calendar", -1).toString(),
-                        checkNotNull(before[Events._SYNC_ID]), checkNotNull(before[Events.SYNC_DATA4]),
-                        checkNotNull(before[Events.ALL_DAY]), checkNotNull(before[Events.DTSTART]), checkNotNull(before[Events.DTEND]), original.title, original.description, original.location,
-                        checkNotNull(before[Events.EVENT_TIMEZONE]), before[Events.EVENT_END_TIMEZONE].orEmpty(), checkNotNull(before[Events.SYNC_DATA2])))
-                assertTrue("The guarded Provider edit changes exactly one enrolled row", changedRows == 1)
-                status("system_time_provider_edit_requested")
+                if (editor) {
+                    app.startActivity(Intent(Intent.ACTION_VIEW).apply {
+                        data = ContentUris.withAppendedId(Events.CONTENT_URI, prefs.getLong("row", -1))
+                        setPackage(editorPackage); addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        putExtra(CalendarContract.EXTRA_EVENT_BEGIN_TIME, TitleJourneyTimeProfile.bounds(original.time).first)
+                        putExtra(CalendarContract.EXTRA_EVENT_END_TIME, TitleJourneyTimeProfile.bounds(original.time).second)
+                    })
+                    status("system_time_editor_launched")
+                } else {
+                    // No sync-adapter flag: an ordinary caller writes dates only; Provider marks DIRTY.
+                    val changedRows = app.contentResolver.update(Events.CONTENT_URI, ContentValues().apply {
+                        put(Events.DTSTART, prefs.getLong("start", -1)); put(Events.DTEND, prefs.getLong("end", -1))
+                    }, "${Events._ID}=? AND ${Events.CALENDAR_ID}=? AND ${Events._SYNC_ID}=? AND ${Events.SYNC_DATA4}=? AND " +
+                        "${Events.DIRTY}=0 AND ${Events.DELETED}=0 AND ${Events.ALL_DAY}=? AND ${Events.DTSTART}=? AND ${Events.DTEND}=? AND " +
+                        "${Events.TITLE}=? AND COALESCE(${Events.DESCRIPTION},'')=? AND COALESCE(${Events.EVENT_LOCATION},'')=? AND " +
+                        "${Events.EVENT_TIMEZONE}=? AND COALESCE(${Events.EVENT_END_TIMEZONE},'')=? AND ${Events.SYNC_DATA2}=?",
+                        arrayOf(prefs.getLong("row", -1).toString(), prefs.getLong("native_calendar", -1).toString(),
+                            checkNotNull(before[Events._SYNC_ID]), checkNotNull(before[Events.SYNC_DATA4]),
+                            checkNotNull(before[Events.ALL_DAY]), checkNotNull(before[Events.DTSTART]), checkNotNull(before[Events.DTEND]), original.title, original.description, original.location,
+                            checkNotNull(before[Events.EVENT_TIMEZONE]), before[Events.EVENT_END_TIMEZONE].orEmpty(), checkNotNull(before[Events.SYNC_DATA2])))
+                    assertTrue("The guarded Provider edit changes exactly one enrolled row", changedRows == 1)
+                    status("system_time_provider_edit_requested")
+                }
                 var completed: ObservedProof? = null
-                withTimeout(300_000) {
+                withTimeout(if (editor) 600_000 else 300_000) {
                     while (true) {
                         assertTrue("Keep exact consent and scope while observing production", accessible() && sameScopes() && temporaryModes())
                         val proof = readProof(app, target, event, factual)
@@ -356,7 +379,7 @@ class CalendarSystemTimeWorkerLiveDeviceTest {
                     .putString("intent", proof.record.preparation.intent.id.value).putString("history_digest", proof.digest)
                     .putBoolean("worker_verified", true).commit())
                 status("system_time_worker_completed"); status("system_time_same_row_acknowledged")
-                status("system_time_provider_worker_pipeline_qualified"); status("system_time_periodic_running_observed", periodicObserved)
+                status(if (editor) "system_time_editor_worker_pipeline_qualified" else "system_time_provider_worker_pipeline_qualified"); status("system_time_periodic_running_observed", periodicObserved)
             } else {
                 val proof = checkNotNull(readProof(app, target, event, factual))
                 assertTrue("The full original history remains immutable after active restart", proof.record.id.value == prefs.getString("attempt", null) &&
@@ -408,7 +431,8 @@ class CalendarSystemTimeWorkerLiveDeviceTest {
         }
     }
 
-    private suspend fun assertScopeQuiescent(app: Context, projection: AndroidCalendarProjection, scope: CalendarScope) {
+    private suspend fun assertScopeQuiescent(app: Context, projection: AndroidCalendarProjection, scope: CalendarScope,
+        allowPendingIncoming: Boolean = false) {
         val scopeArgs = arrayOf(scope.account.value, scope.calendar.value)
         fun empty(db: SQLiteDatabase, sql: String, args: Array<String> = scopeArgs, message: String) {
             db.rawQuery(sql, args).use { assertTrue(message, !it.moveToFirst()) }
@@ -423,10 +447,12 @@ class CalendarSystemTimeWorkerLiveDeviceTest {
                 empty(store.readableDatabase, "SELECT 1 FROM $table WHERE $inCalendar AND state!='RESTORED' LIMIT 1",
                     message = "The calendar retains an unfinished acknowledgement")
             }
-            empty(store.readableDatabase, "SELECT 1 FROM projection_receipts WHERE $inCalendar LIMIT 1",
-                message = "The calendar retains an unfinished projection receipt")
-            empty(store.readableDatabase, "SELECT 1 FROM records WHERE $inCalendar AND pending!=0 LIMIT 1",
-                message = "The calendar retains a pending incoming projection")
+            if (!allowPendingIncoming) {
+                empty(store.readableDatabase, "SELECT 1 FROM projection_receipts WHERE $inCalendar LIMIT 1",
+                    message = "The calendar retains an unfinished projection receipt")
+                empty(store.readableDatabase, "SELECT 1 FROM records WHERE $inCalendar AND pending!=0 LIMIT 1",
+                    message = "The calendar retains a pending incoming projection")
+            }
             empty(store.readableDatabase, "SELECT 1 FROM title_update_acknowledgements WHERE $inCalendar AND state!='RESTORED' LIMIT 1",
                 message = "The calendar retains an unfinished title acknowledgement")
             empty(store.readableDatabase, "SELECT 1 FROM captured_create_handoffs WHERE $inCalendar AND (state!='RELEASED' OR waiting!=0) LIMIT 1",
