@@ -4,9 +4,10 @@ Confirmed target: date/time editing through the Android calendar client, with
 replaceable Proton integration, durable offline work and no bridge event editor.
 This document defines the initial bounded profile; it does not enable sending.
 
-The immutable domain candidate and plaintext patcher are implemented and covered
-by JVM tests. Cryptographic preparation, transport and native delivery below
-remain unfinished. The installed application has no new time-edit option.
+The immutable candidate, plaintext patcher, protected cryptographic preparation,
+authenticated preparation port and offline request/readback rules are implemented.
+Transport, durable ownership and native delivery remain unfinished. The installed
+application has no new time-edit option and sends no temporal updates.
 
 ## Initial profile
 
@@ -40,12 +41,52 @@ its original session key. Plaintext patching alone provides neither authenticity
 nor submission authority. A separate protected preparation must bind the full
 original/replacement, identity, timestamp and adapter format.
 
+## Cryptographic preparation and authenticated access
+
+`CalendarLocalTimePreparationPort` is a separate project-owned capability exposed
+through `ProtonAuthentication.localTimePreparations`. Its runtime uses the existing
+session/address refresh, exact event read and local calendar/member key selection.
+It freezes the entire candidate before suspension, verifies the signed original,
+decodes and compares the complete imported base before patching, then renews only
+changed signatures/ciphertext using the original shared session key. Both changed
+parts must belong to the selected signing address. Personal partitions are refused.
+
+`LocalTimeEditPreparation` and `ProtonTimePreparationCodec` have a distinct protected
+kind/format binding full scope/generation, local identity, original/replacement,
+UID, timestamp and original/replacement fragments. Guarded access closes permanently
+after denial; the serialized facade shares the authentication/logout mutex and
+checks current session, result and format before returning. Cancellation propagates
+even if a callback cancels and then throws an ordinary IO/storage error.
+Structural reopening supplies no fresh cryptographic or authorization proof.
+
+## Offline request and readback profile
+
+`ProtonTimeUpdateRequestCodec` binds a distinct request identity, full preparation
+identity/capsule hash, qualified context and literal request. It reuses the existing
+closed simple-event wire builder without widening text/title protected formats.
+This request profile currently accepts **timed events only**: all-day cryptographic
+preparation is tested, but the API date convention remains unqualified.
+
+`ProtonTimeEventUpdate` binds original StartTime/EndTime/StartTimezone/EndTimezone/
+FullDay to the original time and requires all five readback values to match the
+replacement exactly. All other fields, signed parts, optional-field presence and
+established server-clock rules retain the existing strict comparison. UTC instants
+use the observed API spelling `UTC`; other zone IDs must remain exact.
+`ProtonTimeUpdateReadbackVerifier` then requires real signature/decryption verification
+and complete expected mapped contents with a new computed revision.
+
+Supplied synthetic observations do not establish service acceptance or metadata
+recalculation. `IsBreakingChange=0` remains an explicit hypothesis for this restricted
+no-attendee profile, to qualify before transport activation. No local codec or
+successful reopen is a journal claim, a dispatch permit or a native acknowledgement.
+
 ## Delivery and qualification
 
 1. Immutable project-owned candidate and lossless plaintext patcher; focused JVM
    cases for movement/duration, all-day exclusivity, DST, raw preservation,
    original binding, invalid layouts, no-op and sequence overflow.
-2. Protected preparation and real Core signature/session-key tests, without transport.
+2. Protected preparation and real Core signature/session-key tests, without transport
+   (implemented, including authenticated adapter composition).
 3. Separate guarded request/readback with current context and full temporal API
    metadata validation. Qualify server recalculation of StartTime/EndTime,
    StartTimezone/EndTimezone and FullDay, plus the breaking-change policy.
@@ -58,16 +99,22 @@ supplies a remote write lock.
 
 ## Verification
 
-The new candidate and patcher tests first failed against refusing implementations.
-All tests in `:sync:test` (375 cases) and `:proton-auth:testDebugUnitTest`
-(688 cases) then passed without failures or skips. Sixteen new cases cover
-movement/duration, exclusive all-day end, 23/25-hour DST spans, ambiguous offsets,
-exact no-op identity, original UID/time/stamp binding, raw span preservation,
-folding, metadata/sequence bounds and incompatible structures. Existing title/text
-tests run in the same suites and retain their unchanged-date/sequence policy.
-Independent source review found no functional defect in this offline slice.
-No phone, service write, signature renewal, worker or installation/update journey
-was executed for this slice; those are not implied by the JVM results.
+Candidate/patcher, protected preparation, authenticated access and request/readback
+tests first failed against refusing implementations. All `:sync:test` (379 cases),
+`:proton-auth:testDebugUnitTest` (760 cases) and `:app:testDebugUnitTest` (112 cases)
+passed without failures or skips; app/test APK builds passed. Existing title/text
+tests retain their unchanged-date/sequence policy. Independent source reviews found
+no functional defect in the preparation or offline request/readback slices.
+
+Six physical native cases passed: two temporal cases and four existing local/shared
+text crypto cases. The temporal fixture checks binary/text original signatures,
+timed/all-day preparation, renewed signatures, original-session-key decryption,
+opaque span/JSON preservation, protected reopening, full-base refusals, cancellation,
+actual authenticated adapter composition and supplied timed readback through the
+real decoder. Altering any temporal API field is rejected before decoding.
+These fixtures use synthetic keys/events, without account, service, journal or
+Provider contents. No temporal service write, worker/native acknowledgement or
+installation/update preservation journey is qualified by these results.
 
 ## Source evidence
 

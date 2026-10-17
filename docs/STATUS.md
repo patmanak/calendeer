@@ -57,11 +57,12 @@ Full recipes and limitations are in [validation](VALIDATION.md).
 
 For a useful bidirectional RC, finish:
 
-1. Date/time edits: the [offline candidate and lossless patch](TEMPORAL_UPDATE.md)
-   now cover same-kind, same-zone movement/duration with sequence updates. Their
-   domain/adapter suites pass (375/688 cases); production sending remains disabled.
-   Finish cryptographic preparation, temporal API/readback qualification, durable
-   delivery, timezone changes and timed/all-day transitions.
+1. Date/time edits: [protected preparation](TEMPORAL_UPDATE.md) now covers same-kind,
+   same-zone movement/duration through the authenticated facade and real Core.
+   Separate timed request/readback rules bind all temporal API metadata. Suites
+   pass (379 domain, 760 backend, 112 app JVM; six synthetic native crypto cases).
+   Production temporal sending remains disabled. Finish service/readback qualification,
+   durable ownership/delivery, all-day API conventions, timezone changes and kind transitions.
 2. Outgoing DELETE with concurrent changes and interrupted acknowledgement.
 3. Preservation of ordinary reminders/colors during supported edits; current
    send profiles still reject many such events.

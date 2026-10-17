@@ -15,6 +15,22 @@ and protected formats are unchanged. No new copied source, dependency, signing,
 encryption or transport is added. See [temporal scope](../docs/TEMPORAL_UPDATE.md)
 for the implemented boundary and remaining service/crypto qualification.
 
+The protected temporal continuation reuses the existing `ProtonEventDecryptor`
+shared-fragment verification/signing/encryption path and full-base decoder, with
+the separate temporal patch and protected format. `ProtonLocalTimePreparationAdapter`
+and the serialized authentication facade reuse existing read-only context/session
+ports. No new endpoint, dependency, copied upstream source or cryptographic primitive
+is added. Synthetic native tests verify original binary/text signatures, renewed
+parts and decryption using the retained session key, plus authenticated composition.
+
+The separate offline temporal request codec reuses the existing literal simple-event
+wire builder and context hashes. Its readback policy replaces only the five expected
+temporal metadata values before applying the established exact-parts/non-temporal
+comparison, then uses the native decoder for complete mapped contents. It refuses
+all-day requests pending API evidence. Supplied synthetic observations do not qualify
+service recalculation, `IsBreakingChange=0`, current rights or concurrent-write safety.
+Transport and automatic temporal delivery remain disabled.
+
 ## Offline shared-title preservation experiment
 
 `ProtonSharedTitlePatcher.kt` is the compatibility entry point for an original,
