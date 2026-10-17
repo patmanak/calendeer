@@ -26,9 +26,14 @@ parts and decryption using the retained session key, plus authenticated composit
 The separate offline temporal request codec reuses the existing literal simple-event
 wire builder and context hashes. Its readback policy replaces only the five expected
 temporal metadata values before applying the established exact-parts/non-temporal
-comparison, then uses the native decoder for complete mapped contents. It refuses
-all-day requests pending API evidence. Supplied synthetic observations do not qualify
-service recalculation, `IsBreakingChange=0`, current rights or concurrent-write safety.
+comparison, then uses the native decoder for complete mapped contents. All-day
+requests bind UTC midnight start/exclusive-end epochs, canonical UTC zone fields
+and FullDay=1. Controlled one-day and multi-day authenticated observations establish
+this API convention; iCalendar DATE exclusivity is also present in the pinned
+Android `ICalUtilsImpl` source. This is original adapter policy, with no new copied
+upstream code or cryptography. Existing timed v1 envelope interpretation is unchanged.
+Supplied synthetic observations alone do not qualify service recalculation,
+`IsBreakingChange=0`, current rights or concurrent-write safety.
 The separate guarded temporal submission adapter reuses the existing context,
 transport, one-shot dispatch permit and decoder contracts. It adds typed temporal
 history and response evidence while retaining claim-before-send and UNKNOWN
@@ -36,8 +41,9 @@ inspection-only behavior. The authentication facade shares mutex/lease mechanics
 between distinct text/time ports. A controlled ordinary UTC timed service journey
 and production Provider/worker journey now qualify this measured wire/readback path,
 including offline ACK and immutable restarted replay. Sending requires independent
-per-calendar consent and is timed-only. No all-day API, non-UTC/DST service, actual
-calendar-editor or concurrency guarantee follows from this evidence. See the
+per-calendar consent. Same-kind all-day and non-UTC/DST profiles have separate
+measured qualification recorded in the temporal contract; actual calendar-editor
+and concurrency guarantees do not follow from adapter or Provider tests. See the
 [temporal contract](../docs/TEMPORAL_UPDATE.md) for full scope.
 
 ## Offline shared-title preservation experiment

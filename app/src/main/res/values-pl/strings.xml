@@ -31,6 +31,6 @@
     <string name="system_title_limits_with_text">Do zmiany samego tytułu prostych wydarzeń. Opis i miejsce korzystają z osobnej opcji tekstu. Zmiany samych dat korzystają z osobnej opcji czasu. Połączone zmiany dat i tekstu oraz usunięcia pozostają w Androidzie.</string>
     <string name="calendar_dashboard_text_mode">Zmiany tekstu włączone</string>
     <string name="system_time_mode">Synchronizuj zmiany daty i godziny (eksperymentalne)</string>
-    <string name="system_time_limits">Tylko proste wydarzenia z godziną w tej samej strefie czasowej, bez powtórzeń, przypomnień, gości ani własnych kolorów. Zmieniaj daty lub czas trwania bez jednoczesnej zmiany innych pól. Wydarzenia całodniowe i usunięcia pozostają w Androidzie.</string>
+    <string name="system_time_limits">Tylko proste wydarzenia z godziną lub całodniowe, bez powtórzeń, przypomnień, gości ani własnych kolorów. Zmieniaj daty lub czas trwania, zachowując typ, strefę czasową i pozostałe pola. Usunięcia pozostają w Androidzie.</string>
     <string name="calendar_dashboard_time_mode">Zmiany godzin włączone</string>
 </resources>

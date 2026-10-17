@@ -166,6 +166,41 @@ internal object ProtonLocalTimeCryptoProbe {
             verify(prepare(dayIntent, dayRow), dayRow, dayClear, secret, dates,
                 "DTSTART;VALUE=DATE:20261004\r\nDTEND;VALUE=DATE:20261007")
 
+            stage = "TIME_ALL_DAY_REQUEST_READBACK"
+            val dayWireSource = JsonObject(dayRow - "OpaqueMetadata" + buildJsonObject {
+                put("SharedEvents", JsonArray(partsForWire(dayRow)))
+                put("CreateTime", 1); put("ModifyTime", 2); put("Permissions", 3); put("IsOrganizer", 1)
+                put("IsPersonalSingleEdit", false)
+                put("StartTime", day.start.atStartOfDay(java.time.ZoneOffset.UTC).toEpochSecond())
+                put("EndTime", day.endExclusive.atStartOfDay(java.time.ZoneOffset.UTC).toEpochSecond())
+                put("FullDay", 1); put("StartTimezone", "UTC"); put("EndTimezone", "UTC")
+                put("Attendees", JsonArray(emptyList())); put("Exdates", JsonArray(emptyList()))
+            })
+            val dayWireIntent = intent(base(dayWireSource), dayIntent.content.time)
+            val dayWirePreparation = prepare(dayWireIntent, dayWireSource)
+            val dayCodec = ProtonTimeUpdateRequestCodec(protector())
+            val dayRequest = dayCodec.seal(MutationId("synthetic-all-day-time-request"), dayWirePreparation, wireContext)
+            val dayOpened = dayCodec.open(dayRequest)
+            val nextDay = dayWireIntent.content.time as EventTime.AllDay
+            val dayReadback = JsonObject(dayWireSource + buildJsonObject {
+                put("SharedEvents", JsonArray(listOf(dayOpened.fragments.clearSharedPart, dayOpened.fragments.encryptedSharedPart)))
+                put("ModifyTime", 3)
+                put("StartTime", nextDay.start.atStartOfDay(java.time.ZoneOffset.UTC).toEpochSecond())
+                put("EndTime", nextDay.endExclusive.atStartOfDay(java.time.ZoneOffset.UTC).toEpochSecond())
+            })
+            var dayVerifications = 0
+            val dayReader = ProtonTimeUpdateReadbackVerifier(dayCodec,
+                CreateEventVerifier { observedSession, calendar, observedBootstrap, observedRow, expectedUid, policy ->
+                    dayVerifications++
+                    decoder.decodeCreated(observedSession, calendar, observedBootstrap, observedRow, expectedUid, policy)
+                })
+            val verifiedDay = checkNotNull(dayReader.verify(session, dayRequest, wireContext, bootstrap, dayReadback))
+            check(verifiedDay.content == dayWireIntent.content && verifiedDay.revision == dayReadback.revision(bootstrap))
+            for ((name, wrong) in listOf("EndTime" to JsonPrimitive(nextDay.endExclusive.atStartOfDay(java.time.ZoneOffset.UTC).toEpochSecond() - 1),
+                "FullDay" to JsonPrimitive(0), "StartTimezone" to JsonPrimitive("Europe/Paris")))
+                check(dayReader.verify(session, dayRequest, wireContext, bootstrap, JsonObject(dayReadback + (name to wrong))) == null)
+            check(dayVerifications == 1)
+
             stage = "TIME_ORIGINAL_REFUSALS"
             suspend fun refused(edit: LocalEditIntent = originalIntent, input: JsonObject = candidate) {
                 var seals = 0

@@ -7,13 +7,10 @@ import java.time.Instant
 import java.time.ZoneId
 import java.time.ZoneOffset
 
-/**
- * Offline temporal request/readback experiment. Supplies no dispatch authority.
- * The pinned Android EventEntity DTO documents timed StartTime/EndTime as epoch seconds.
- * Its all-day iCal adjustment does not establish the five API metadata conventions, so
- * all-day request/readback remains refused even though the plaintext patcher supports it.
- * IsBreakingChange=0 is inherited as an unqualified hypothesis for this no-attendee,
- * same-kind/same-zone experiment. No temporal service write or readback is qualified here.
+/** Offline temporal wire/readback rules, without dispatch authority.
+ * Timed metadata retains its original v1 interpretation. All-day dates use measured
+ * UTC-midnight bounds with an exclusive end and FullDay=1; no local-zone conversion.
+ * Other kind/zone transitions remain refused. Service scope is recorded in TEMPORAL_UPDATE.md.
  */
 internal object ProtonTimeEventUpdate {
     fun request(original: JsonObject, clear: JsonObject, encrypted: JsonObject, changed: Boolean,
@@ -34,8 +31,11 @@ internal object ProtonTimeEventUpdate {
     /** Patch exactly the five temporal fields; preserve original clocks and every other field. */
     private fun temporalBaseline(original: JsonObject, clear: JsonObject, encrypted: JsonObject,
         before: EventTime, after: EventTime): JsonObject {
-        require(before is EventTime.Timed && after is EventTime.Timed)
-        require(before != after && before.zone == after.zone)
+        require(before != after)
+        require(when (before) {
+            is EventTime.Timed -> after is EventTime.Timed && before.zone == after.zone
+            is EventTime.AllDay -> after is EventTime.AllDay
+        })
         val oldMetadata = metadata(before)
         val newMetadata = metadata(after)
         ProtonSimpleEventUpdate.qualify(original)
@@ -44,7 +44,19 @@ internal object ProtonTimeEventUpdate {
         return JsonObject(original + newMetadata)
     }
 
-    private fun metadata(time: EventTime.Timed): JsonObject {
+    private fun metadata(time: EventTime): JsonObject = when (time) {
+        is EventTime.Timed -> timedMetadata(time)
+        is EventTime.AllDay -> {
+            require(time.start.year in 1970..9999 && time.endExclusive.year in 1970..9999)
+            buildJsonObject {
+                put("StartTime", time.start.atStartOfDay(ZoneOffset.UTC).toEpochSecond())
+                put("EndTime", time.endExclusive.atStartOfDay(ZoneOffset.UTC).toEpochSecond())
+                put("StartTimezone", "UTC"); put("EndTimezone", "UTC"); put("FullDay", 1)
+            }
+        }
+    }
+
+    private fun timedMetadata(time: EventTime.Timed): JsonObject {
         val zone = time.zone
         require(zone == ZoneOffset.UTC || zone.id in ZoneId.getAvailableZoneIds())
         // A named nonzero fixed-offset zone is no stronger than a literal offset.

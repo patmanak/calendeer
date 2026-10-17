@@ -3,7 +3,7 @@
 ## Temporal preparation and delivery
 
 The current bounded temporal evidence is in [temporal delivery](TEMPORAL_UPDATE.md).
-All host suites pass (418 sync, 785 backend, 133 app; no skips). Physical coverage
+All host suites pass (418 sync, 798 backend, 133 app; no skips). Physical coverage
 includes six real-Core synthetic crypto cases, 66 isolated journal/Provider cases,
 39 isolated import/owner cases, 379 migration/ownership/worker regression cases and
 eight time/text option UI cases. Controlled UTC service RUN/offline ACK/replay and
@@ -15,8 +15,20 @@ scopes' mode flags. It allows ordinary shared background processing under existi
 consent and does not establish global silence, exclusive observer causality or an
 actual calendar-editor/OEM journey. Current native projection nonces may advance
 on an unchanged incoming observation; immutable historical proof is checked in SQL.
-All-day wire metadata, non-UTC/DST service behavior and kind/zone transitions remain
-unqualified. Prior evidence below retains its own original scope and limitations.
+The all-day extension adds eight physical isolated executions: two real-Core time
+cases, four text crypto regressions and two Provider matrix methods containing eleven
+fixtures. Seven guarded live profiles pass RUN/offline ACK/restarted REPLAY (21
+executions), including all-day UTC/exclusive metadata, Paris spring/autumn, New York
+spring, Lord Howe autumn and Kathmandu. Gap/fold refusal and further date-crossing
+zones have separate JVM/native evidence. The exact profile table and capability
+boundaries are in the temporal contract. All seven profiles also pass production
+Provider/worker RUN and fresh-process REPLAY (14 executions), with exact mode
+restoration, same-row acknowledgement and immutable history without another attempt.
+These fixtures move timed bounds by one hour or all-day dates by one civil day;
+synthetic service events remain available for inspection. Final app/test APK builds,
+eight-language resource checks and lint pass (zero errors, 42 warnings). Kind/zone
+transitions, actual time-editor and OEM behavior remain unqualified. Prior evidence
+below retains its own original scope and limitations.
 
 
 Use JDK 17 or a compatible newer JDK, Android SDK platform 36 and the checked-in

@@ -63,15 +63,16 @@ class CalendarSystemTimeWorkerLiveDeviceTest {
         fun sourceValue(key: String) = checkNotNull(source.getString(key, null)) { "Missing enrolled source field" }
         val target = CalendarScope(AccountId(sourceValue("account")), CalendarId(sourceValue("calendar")), source.getLong("generation", -1))
         val event = EventId(sourceValue("event"))
-        val profile = TitleJourneyTimeProfile.create(null, false, false, null)
-        assertTrue("Preserve the exact enrolled timed profile", profile.matchesFrozen(source.getInt("content_profile", -1),
-            source.getString("start", null), source.getString("end", null)))
-        val initialTime = profile.time as EventTime.Timed
-        val original = EventContent(sourceValue("create_title"), initialTime.copy(start = initialTime.start.plusSeconds(7_200),
-            end = initialTime.end.plusSeconds(10_800)), sourceValue("description"), sourceValue("location"), details = EventDetails())
-        val baselineTime = original.time as EventTime.Timed
-        val changed = original.copy(time = baselineTime.copy(start = baselineTime.start.plusSeconds(3_600),
-            end = baselineTime.end.plusSeconds(3_600)))
+        val profile = TemporalJourneyProfile.create(args.getString("timeProfile"))
+        assertTrue("Preserve the exact enrolled time profile", profile.matchesFrozen(source.getInt("content_profile", -1),
+            source.getString("start", null), source.getString("end", null)) &&
+            source.getString("time_profile", "utc") == profile.name && source.getString("time_zone", "Z") == profile.zone)
+        val original = EventContent(sourceValue("create_title"), profile.after,
+            sourceValue("description"), sourceValue("location"), details = EventDetails())
+        val changed = original.copy(time = when (val time = original.time) {
+            is EventTime.Timed -> time.copy(start = time.start.plusSeconds(3_600), end = time.end.plusSeconds(3_600))
+            is EventTime.AllDay -> time.copy(start = time.start.plusDays(1), endExclusive = time.endExclusive.plusDays(1))
+        })
         assertTrue("Require the exact ordinary synthetic source", target.generation == 0L &&
             original.title == "Calendeer QA — time CREATE $token")
         assertTrue("Authorize the enrolled account before any mutation",
@@ -229,7 +230,9 @@ class CalendarSystemTimeWorkerLiveDeviceTest {
             emitPreflightCounts()
             // Reject target local/uncertain work before waiting for shared ordinary queues.
             for (scope in strictAuditScopes) assertScopeQuiescent(app, projection, scope)
+            status("system_time_initial_queues_waiting")
             idleQueues(false)
+            status("system_time_initial_queues_idle")
             // Recheck the target before its temporary consent can resume outgoing work.
             for (scope in strictAuditScopes) assertScopeQuiescent(app, projection, scope)
             if (restoration.all.isEmpty()) {
@@ -250,10 +253,23 @@ class CalendarSystemTimeWorkerLiveDeviceTest {
                 // Ordinary production import only; no outgoing entry point is called by this fixture.
                 app.imports.requestSync()
                 withTimeout(240_000) {
+                    var samples = 0
                     while (true) {
                         assertTrue("Keep source access while importing", accessible() && sameScopes())
                         val base = baseline()
-                        if (base?.content == original && noOwner() && projection.inspectOwnedEvent(target, event, base.revision) != null) break
+                        val free = noOwner()
+                        val owned = base?.let { projection.inspectOwnedEvent(target, event, it.revision) != null } ?: false
+                        if (samples++ % 60 == 0) {
+                            status("system_time_import_base_present", base != null)
+                            status("system_time_import_time_matches", base?.content?.time == original.time)
+                            status("system_time_import_text_matches", base?.content?.let {
+                                it.title == original.title && it.description == original.description && it.location == original.location
+                            } == true)
+                            status("system_time_import_details_match", base?.content?.details == original.details)
+                            status("system_time_import_no_owner", free)
+                            status("system_time_import_native_owned", owned)
+                        }
+                        if (base?.content == original && free && owned) break
                         delay(500)
                     }
                 }
@@ -307,12 +323,12 @@ class CalendarSystemTimeWorkerLiveDeviceTest {
                 val changedRows = app.contentResolver.update(Events.CONTENT_URI, ContentValues().apply {
                     put(Events.DTSTART, prefs.getLong("start", -1)); put(Events.DTEND, prefs.getLong("end", -1))
                 }, "${Events._ID}=? AND ${Events.CALENDAR_ID}=? AND ${Events._SYNC_ID}=? AND ${Events.SYNC_DATA4}=? AND " +
-                    "${Events.DIRTY}=0 AND ${Events.DELETED}=0 AND ${Events.ALL_DAY}=0 AND ${Events.DTSTART}=? AND ${Events.DTEND}=? AND " +
+                    "${Events.DIRTY}=0 AND ${Events.DELETED}=0 AND ${Events.ALL_DAY}=? AND ${Events.DTSTART}=? AND ${Events.DTEND}=? AND " +
                     "${Events.TITLE}=? AND COALESCE(${Events.DESCRIPTION},'')=? AND COALESCE(${Events.EVENT_LOCATION},'')=? AND " +
                     "${Events.EVENT_TIMEZONE}=? AND COALESCE(${Events.EVENT_END_TIMEZONE},'')=? AND ${Events.SYNC_DATA2}=?",
                     arrayOf(prefs.getLong("row", -1).toString(), prefs.getLong("native_calendar", -1).toString(),
                         checkNotNull(before[Events._SYNC_ID]), checkNotNull(before[Events.SYNC_DATA4]),
-                        checkNotNull(before[Events.DTSTART]), checkNotNull(before[Events.DTEND]), original.title, original.description, original.location,
+                        checkNotNull(before[Events.ALL_DAY]), checkNotNull(before[Events.DTSTART]), checkNotNull(before[Events.DTEND]), original.title, original.description, original.location,
                         checkNotNull(before[Events.EVENT_TIMEZONE]), before[Events.EVENT_END_TIMEZONE].orEmpty(), checkNotNull(before[Events.SYNC_DATA2])))
                 assertTrue("The guarded Provider edit changes exactly one enrolled row", changedRows == 1)
                 status("system_time_provider_edit_requested")

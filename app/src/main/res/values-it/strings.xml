@@ -31,6 +31,6 @@
     <string name="system_title_limits_with_text">Per modificare solo il titolo degli eventi semplici. Descrizione e luogo usano l’opzione testo separata. Le sole modifiche alle date usano l’opzione orario separata. Le modifiche combinate di date e testo e le eliminazioni restano su Android.</string>
     <string name="calendar_dashboard_text_mode">Modifiche al testo attivate</string>
     <string name="system_time_mode">Sincronizza modifiche di data e ora (sperimentale)</string>
-    <string name="system_time_limits">Solo eventi semplici con orario e lo stesso fuso orario, senza ripetizioni, promemoria, invitati o colori personalizzati. Modifica le date o la durata senza modificare altri campi contemporaneamente. Gli eventi di tutto il giorno e le eliminazioni restano su Android.</string>
+    <string name="system_time_limits">Solo eventi semplici con orario o di tutto il giorno, senza ripetizioni, promemoria, invitati o colori personalizzati. Modifica le date o la durata mantenendo tipo, fuso orario e altri campi invariati. Le eliminazioni restano su Android.</string>
     <string name="calendar_dashboard_time_mode">Modifiche orario attivate</string>
 </resources>

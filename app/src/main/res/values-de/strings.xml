@@ -31,6 +31,6 @@
     <string name="system_title_limits_with_text">Für reine Titeländerungen einfacher Termine. Beschreibung und Ort nutzen die separate Textoption. Reine Datumsänderungen nutzen die separate Zeitoption. Kombinierte Datums- und Textänderungen sowie Löschungen bleiben auf Android.</string>
     <string name="calendar_dashboard_text_mode">Textänderungen aktiviert</string>
     <string name="system_time_mode">Datums- und Zeitänderungen synchronisieren (experimentell)</string>
-    <string name="system_time_limits">Nur einfache Termine mit Uhrzeit und derselben Zeitzone, ohne Wiederholungen, Erinnerungen, Gäste oder eigene Farben. Datum oder Dauer ändern, ohne andere Felder gleichzeitig zu ändern. Ganztägige Termine und Löschungen bleiben auf Android.</string>
+    <string name="system_time_limits">Nur einfache Termine mit Uhrzeit oder ganztägige Termine, ohne Wiederholungen, Erinnerungen, Gäste oder eigene Farben. Datum oder Dauer ändern, dabei Termintyp, Zeitzone und andere Felder beibehalten. Löschungen bleiben auf Android.</string>
     <string name="calendar_dashboard_time_mode">Zeitänderungen aktiviert</string>
 </resources>

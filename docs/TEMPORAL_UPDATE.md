@@ -7,10 +7,9 @@ This document defines the initial bounded profile.
 Protected cryptographic preparation, guarded submission/readback, durable ownership,
 ImportCoordinator source qualification, native acknowledgement and bounded worker
 recovery are composed. Time changes have their own default-off per-calendar option;
-title or text consent cannot authorize them. Automatic discovery refuses all-day work
-before retaining a capsule. Production wire sending accepts timed
-same-zone changes only. All-day cryptographic preparation remains available behind
-its separate capability but has no qualified outgoing wire profile.
+title or text consent cannot authorize them. Automatic discovery accepts simple timed
+and all-day changes through the same independent time option. Timed changes keep
+the exact zone ID; all-day changes keep civil dates and their exclusive end.
 
 ## Initial profile
 
@@ -67,8 +66,15 @@ Structural reopening supplies no fresh cryptographic or authorization proof.
 `ProtonTimeUpdateRequestCodec` binds a distinct request identity, full preparation
 identity/capsule hash, qualified context and literal request. It reuses the existing
 closed simple-event wire builder without widening text/title protected formats.
-This request profile currently accepts **timed events only**: all-day cryptographic
-preparation is tested, but the API date convention remains unqualified.
+The request accepts same-kind timed and all-day changes. All-day API metadata uses
+`FullDay=1`, `UTC` in both zone fields, and epoch seconds at UTC midnight for the
+start and exclusive end dates. No device-zone conversion or last-second adjustment
+is applied. Original metadata and readback must both match this convention.
+
+The existing v1 envelope is retained: historical timed literal reconstruction and
+interpretation are unchanged. All-day tags were already distinct in the preparation;
+this adds their wire capability without reinterpreting stored timed attempts or
+resetting UNKNOWN work. No database migration is needed.
 
 `ProtonTimeEventUpdate` binds original StartTime/EndTime/StartTimezone/EndTimezone/
 FullDay to the original time and requires all five readback values to match the
@@ -79,9 +85,10 @@ use the observed API spelling `UTC`; other zone IDs must remain exact.
 and complete expected mapped contents with a new computed revision.
 
 Synthetic observations alone do not establish service acceptance or metadata
-recalculation. The measured UTC timed service journey below also passed the
-`IsBreakingChange=0` convention; other profiles need their own qualification. No local codec or
-successful reopen is a journal claim, a dispatch permit or a native acknowledgement.
+recalculation. The measured service profiles below use the
+`IsBreakingChange=0` convention; profiles outside those cases need their own
+qualification. No local codec or successful reopen is a journal claim, a dispatch
+permit or a native acknowledgement.
 
 ## Guarded delivery capabilities
 
@@ -188,9 +195,10 @@ moved its start by two hours and end by three hours, retaining all text. Exact t
 API metadata and signed readback passed through the real ports. Consent loss retained
 proof without native ACK; the next process completed offline, and replay preserved
 immutable attempt/proof/completion without another preparation, send or inspection.
-The recognizable service event is retained. This establishes the measured timed wire
-convention, including IsBreakingChange=0; it does not qualify all-day API metadata,
-other time zones, transferred-CREATE service delivery, or a Samsung editor journey.
+The recognizable service event is retained. This initial fixture establishes the
+UTC timed wire convention, including IsBreakingChange=0; additional measured all-day
+and zone profiles are listed below. It does not qualify transferred-CREATE service
+delivery or a Samsung editor journey.
 
 CalendarSystemTimeWorkerLiveDeviceTest also passed RUN and a fresh-process REPLAY
 through the production application. The fixture changed only the enrolled ordinary
@@ -212,9 +220,76 @@ not require a later native marker to equal the historical time ACK nonce. PENDIN
 ACK inspection still requires its exact nonce; that safety rule is unchanged.
 
 Eight isolated time/text option UI cases passed; all eight resource bundles passed
-structural/encoding checks. Final app/test APK builds and app lint passed. These
-results qualify an ordinary UTC timed Provider/worker journey, not an actual editor,
-Samsung/One UI, all-day wire metadata or non-UTC/DST service behavior.
+structural/encoding checks. Final app/test APK builds and app lint passed. Those initial
+results qualify the ordinary UTC timed Provider/worker journey; they do not by
+themselves establish editor, Samsung/One UI or other temporal-profile compatibility.
+
+## All-day and zone matrix
+
+The additive all-day wire tests first failed against timed-only admission; the
+orchestration case also failed until automatic source admission accepted the existing
+same-kind domain candidate. Current host suites pass 418 sync, 798 backend and
+133 app cases, without failures or skips. Thirteen backend cases add UTC/exclusive
+metadata, every-field readback refusal, protected v1 reopening, decoded-content
+binding and the zone matrix. Existing timed request reconstruction remains unchanged.
+
+The five JVM zone-matrix methods use literal independent UTC/local expectations
+for eleven cases: Paris and New York spring/autumn transitions and distinct
+transition dates, Lord Howe half-hour changes, Kathmandu's 45-minute offset, and
+Kiritimati/Pago Pago date crossings. Source gaps/folds and both possible fold
+instants in replacement endpoints are refused without changing original partitions.
+Crossing a transition with unambiguous endpoints is supported; guessing an ambiguous
+local hour or changing event kind/zone is outside this profile.
+
+Eight physical isolated cases passed: two temporal Core cases, four existing text
+crypto regressions and two Provider matrix methods. The Core cases now include
+all-day protected request reopening and real decrypted readback with API-metadata
+refusals before decoding. The Provider methods exercise eleven fixtures: two
+all-day spring/autumn UTC-exclusive ranges and nine timed zone ranges. They check
+same-row typed time acknowledgement, exact bounds/zone and newer edits before and
+after ACK. Isolated native calendars/accounts are cleaned. These fixtures do not
+use a service account or establish editor/OEM compatibility.
+
+The opt-in guarded live fixture also passed RUN, offline ACK in a new process and
+REPLAY in another process for each of seven controlled profiles (21 executions):
+
+| Profile | Replacement after guarded service update | Expected span |
+| --- | --- | --- |
+| One all-day date | 2026-10-25 to exclusive 2026-10-26 | 1 civil day |
+| All-day move and resize | 2026-10-25 to exclusive 2026-10-29 | 4 civil days |
+| Europe/Paris autumn | Local midnight 2026-10-25 to 2026-10-26 | 25 hours |
+| Europe/Paris spring | Local midnight 2027-03-28 to 2027-03-29 | 23 hours |
+| America/New_York spring | Local midnight 2027-03-14 to 2027-03-15 | 23 hours |
+| Australia/Lord_Howe autumn | Local midnight 2027-04-04 to 2027-04-05 | 24 hours 30 minutes |
+| Asia/Kathmandu | 2026-10-25 local 10:00 to 12:30 | 2 hours 30 minutes, UTC+05:45 |
+
+Each RUN uses real Core signing/decryption, exact temporal API metadata and
+`IsBreakingChange=0`. Proof survives consent revocation; the next process completes
+without a fixture preparation/transport port, and replay retains immutable history
+without another request. The debug-only metadata probe uses authenticated GET under
+the shared session/logout mutex and returns closed relative offsets/zone categories,
+never raw event/account identifiers or payloads. Controlled one-day and multi-day
+GET observations confirmed FullDay=1 and UTC start/exclusive-end midnight epochs.
+Recognizable synthetic service events are retained. These results establish the
+listed service profiles, without granting kind/zone transitions, editor/OEM coverage
+or atomic remote writes.
+
+All seven profiles also passed production Provider/worker RUN and fresh-process
+REPLAY (14 further executions). The fixture changes only the enrolled ordinary
+Provider row: both timed bounds move by one elapsed hour, or both all-day dates
+move by one civil day. Android marks DIRTY; the usual controller/WorkManager path
+prepares, sends, verifies and acknowledges the same row. No direct outgoing or
+manual worker entry point is called. Exact original consent is restored, other
+calendars' mode flags remain unchanged, and restarted replay preserves immutable
+history without another attempt. The retained service events therefore include
+this additional move after the guarded-profile values in the table. Shared jobs
+may process already-authorized work; no exclusive observer or global-traffic claim
+is made. These are ordinary Provider edits, not actual calendar-editor, Samsung/
+One UI, transferred-CREATE or kind/zone-conversion qualification.
+
+Final app/test APK builds and lint passed (zero errors, 42 warnings). All eight
+language bundles pass UTF-8/XML/key checks and describe the same-kind all-day option.
+An independent bounded source review found no actionable metadata/admission defect.
 
 ## Source evidence
 
@@ -223,5 +298,6 @@ The pinned Android source at `83bbd6a15b0aaa135e424fb5ac195c0a52929b4f`
 `40cc08c12c8fbac7f66521186c7297ddf3e17861`
 (`applications/calendar/src/app/containers/calendar/eventActions/{sequence,dtstamp}.ts`) establish shared
 partition placement and sequence policy. Existing adapted serializer attribution
-is in [Proton provenance](../proton-auth/PROVENANCE.md). Readback behavior outside the measured timed journey still needs qualification;
-upstream source alone is not service evidence.
+is in [Proton provenance](../proton-auth/PROVENANCE.md). Readback behavior outside
+the explicitly measured profiles still needs qualification; upstream source alone
+is not service evidence.

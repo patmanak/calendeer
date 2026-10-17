@@ -3,6 +3,7 @@ package com.patmanak.proton.andcalendarbridge.protonauth
 
 import com.patmanak.proton.andcalendarbridge.sync.*
 import java.time.Instant
+import java.time.LocalDate
 import java.time.ZoneOffset
 import java.time.ZoneId
 import kotlinx.coroutines.*
@@ -109,7 +110,33 @@ class ProtonTimeUpdateReadbackVerifierTest {
         }
     }
 
-    private class Fixture {
+    @Test fun allDayActualDecryptedReadbackRetainsExclusiveCivilDates() = runTest {
+        val f = Fixture(true); val record = f.record()
+        val result = f.verify(record)
+        assertEquals(f.decoded, result)
+        assertEquals(EventTime.AllDay(LocalDate.parse("2026-10-25"), LocalDate.parse("2026-10-29")), result!!.content.time)
+        assertEquals(1, f.verifications)
+    }
+
+    @Test fun allDayInclusiveApiEndIsRejectedBeforeDecryption() = runTest {
+        val f = Fixture(true); val record = f.record()
+        for (delta in listOf(1L, 86_400L)) {
+            val end = Instant.parse("2026-10-29T00:00:00Z").epochSecond - delta
+            assertNull(f.verify(record, row = JsonObject(f.row + ("EndTime" to JsonPrimitive(end)))))
+        }
+        assertEquals(0, f.verifications)
+    }
+
+    @Test fun allDayDecoderCannotCollapseExclusiveDateOrChangeKind() = runTest {
+        for (replacement in listOf<EventTime>(EventTime.AllDay(LocalDate.parse("2026-10-25"), LocalDate.parse("2026-10-28")),
+            EventTime.Timed(Instant.parse("2026-10-25T00:00:00Z"), Instant.parse("2026-10-29T00:00:00Z"), ZoneOffset.UTC))) {
+            val f = Fixture(true); val record = f.record()
+            f.decoded = f.decoded!!.copy(content = f.decoded!!.content.copy(time = replacement))
+            assertNull(f.verify(record)); assertEquals(1, f.verifications)
+        }
+    }
+
+    private class Fixture(allDay: Boolean = false) {
         private val seed = TitleSubmissionFixture()
         val session = seed.initial
         val bootstrap = seed.bootstrap
@@ -118,11 +145,21 @@ class ProtonTimeUpdateReadbackVerifierTest {
             for (name in listOf("calendarKey", "signingKey", "calendar")) put(name, ProtonSimpleEventUpdate.hash("synthetic-$name"))
             put("bootstrap", ProtonSimpleEventUpdate.hash(bootstrap.toString()))
         })
-        private val before = EventTime.Timed(Instant.parse("2026-10-04T12:00:00Z"), Instant.parse("2026-10-04T13:00:00Z"), ZoneOffset.UTC)
-        private val after = before.copy(start = before.start.plusSeconds(3600), end = before.end.plusSeconds(7200))
-        private fun metadata(time: EventTime.Timed) = mapOf("StartTime" to JsonPrimitive(time.start.epochSecond),
-            "EndTime" to JsonPrimitive(time.end.epochSecond), "FullDay" to JsonPrimitive(0),
-            "StartTimezone" to JsonPrimitive("UTC"), "EndTimezone" to JsonPrimitive("UTC"))
+        private val before: EventTime = if (allDay) EventTime.AllDay(LocalDate.parse("2026-10-24"), LocalDate.parse("2026-10-27"))
+            else EventTime.Timed(Instant.parse("2026-10-04T12:00:00Z"), Instant.parse("2026-10-04T13:00:00Z"), ZoneOffset.UTC)
+        private val after: EventTime = when (before) {
+            is EventTime.Timed -> before.copy(start = before.start.plusSeconds(3600), end = before.end.plusSeconds(7200))
+            is EventTime.AllDay -> EventTime.AllDay(LocalDate.parse("2026-10-25"), LocalDate.parse("2026-10-29"))
+        }
+        private fun metadata(time: EventTime): Map<String, JsonElement> {
+            val bounds = when (time) {
+                is EventTime.Timed -> time.start.epochSecond to time.end.epochSecond
+                is EventTime.AllDay -> time.start.atStartOfDay(ZoneOffset.UTC).toEpochSecond() to time.endExclusive.atStartOfDay(ZoneOffset.UTC).toEpochSecond()
+            }
+            return mapOf("StartTime" to JsonPrimitive(bounds.first), "EndTime" to JsonPrimitive(bounds.second),
+                "FullDay" to JsonPrimitive(if (time is EventTime.AllDay) 1 else 0),
+                "StartTimezone" to JsonPrimitive("UTC"), "EndTimezone" to JsonPrimitive("UTC"))
+        }
         private val original = JsonObject(seed.row + metadata(before))
         private val content = seed.content.copy(time = before, description = "Notes", location = "Place", details = EventDetails())
         private val intent = seed.intent.copy(base = seed.intent.base.copy(revision = original.revision(bootstrap), content = content),

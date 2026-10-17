@@ -82,18 +82,15 @@ class CoordinatorSystemTimeOperationsTest {
         assertTrue(deletion.calls.isEmpty())
     }
 
-    @Test fun allDayOwnerCannotPrepareOrReserveAutomaticTimeWork() = runBlocking {
-        val f = TimeOperationsFixture()
-        val day = java.time.LocalDate.of(2033, 3, 20)
-        f.observedIntent = f.intent.copy(
-            base = f.intent.base.copy(content = f.base.copy(time = EventTime.AllDay(day, day.plusDays(1)))),
-            content = f.base.copy(time = EventTime.AllDay(day.plusDays(1), day.plusDays(3))))
-        // The broader cryptographic candidate is valid, but its wire convention is unqualified.
-        LocalTimeEditCandidate(f.observedIntent)
-        assertFalse(SystemTimeEditProfile.accepts(f.observedIntent))
-        f.process()
-        assertEquals(listOf("observe"), f.calls)
-        assertNull(f.retained); assertNull(f.saved); assertNull(f.result)
+    @Test fun preparedAllDayWorkKeepsItsExclusiveDateAndIndependentTimeHistory() = runBlocking {
+        val f = TimeOperationsFixture(allDay = true)
+        assertTrue(SystemTimeEditProfile.accepts(f.intent))
+        assertFalse(f.process())
+        assertEquals(f.changed.time, f.saved!!.preparation.intent.content.time)
+        assertEquals(f.changed.time, f.result!!.event.content.time)
+        assertNotNull(f.completion)
+        assertTrue("capsule" in f.calls); assertTrue("submit" in f.calls)
+        assertEquals(TimeUpdateAttemptState.OUTCOME_UNKNOWN, f.saved!!.state)
     }
 
     @Test fun scopedLeaseCannotReopenOrEscapeAfterPreparationReturns() = runBlocking {
@@ -211,12 +208,16 @@ class CoordinatorSystemTimeOperationsTest {
 }
 
 /** Strict single-owner in-memory boundary, deliberately independent of SQL/crypto implementation. */
-internal class TimeOperationsFixture {
+internal class TimeOperationsFixture(allDay: Boolean = false) {
     val scope = CalendarScope(AccountId("fixture-account"), CalendarId("fixture-calendar"), 2)
     val stamp = Instant.parse("2033-03-20T09:00:00Z")
-    val base = EventContent("Original title", EventTime.Timed(stamp.plusSeconds(3600), stamp.plusSeconds(7200),
-        ZoneId.of("Europe/Paris")), "Original\r\nnotes", "Original\r\nroom", details = EventDetails())
-    val changed = base.copy(time = EventTime.Timed(stamp.plusSeconds(10800), stamp.plusSeconds(18000), ZoneId.of("Europe/Paris")))
+    val base = EventContent("Original title", if (allDay)
+        EventTime.AllDay(java.time.LocalDate.of(2033, 3, 20), java.time.LocalDate.of(2033, 3, 21)) else
+        EventTime.Timed(stamp.plusSeconds(3600), stamp.plusSeconds(7200), ZoneId.of("Europe/Paris")), "Original\r\nnotes", "Original\r\nroom", details = EventDetails())
+    val changed = base.copy(time = when (val old = base.time) {
+        is EventTime.AllDay -> EventTime.AllDay(old.start.plusDays(1), old.endExclusive.plusDays(2))
+        is EventTime.Timed -> EventTime.Timed(stamp.plusSeconds(10800), stamp.plusSeconds(18000), ZoneId.of("Europe/Paris"))
+    })
     val intent = LocalEditIntent(MutationId("fixture-owner"), scope, AdapterFormat("fixture-observation", 2),
         RemoteChange.Upsert(EventId("fixture-event"), Revision("fixture-base"), base), changed)
     val preparation = LocalTimeEditPreparation(intent, stamp, AdapterFormat("fixture-capsule", 1), "sealed-capsule")

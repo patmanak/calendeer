@@ -17,6 +17,7 @@ import com.patmanak.proton.andcalendarbridge.data.serialization.TimeUpdateAttemp
 import com.patmanak.proton.andcalendarbridge.data.serialization.TimeUpdateProofStorageCodec
 import com.patmanak.proton.andcalendarbridge.protonauth.ProtonAuthentication
 import com.patmanak.proton.andcalendarbridge.protonauth.ProtonCreateSubmissionProbe
+import com.patmanak.proton.andcalendarbridge.protonauth.ProtonTemporalMetadataProbe
 import com.patmanak.proton.andcalendarbridge.sync.*
 import com.patmanak.proton.andcalendarbridge.sync.catalog.CalendarSummary
 import java.nio.ByteBuffer
@@ -34,12 +35,13 @@ import org.junit.Test
 
 /** Opt-in real temporal service journey, retaining a synthetic event and isolated journals.
  * Explicit composition uses the production owner, preparation, submission and offline recovery
- * boundaries while the application feature gate remains closed. This is an ordinary imported
- * timed controlled-owner fixture, not CREATE handoff, a system editor journey or worker qualification.
+ * boundaries with its independent scoped consent. This is an ordinary imported
+ * timed/all-day controlled-owner fixture, not CREATE handoff, a system editor journey or worker qualification.
  * Recovery's sentinels forbid fixture-path preparation/transport; they do not measure traffic
  * from the independently running application. No account attributes or real user settings change.
- * Service metadata remains unqualified until RUN succeeds through the strict real ports.
+ * Each profile needs its own successful RUN through the strict real ports.
  * Arguments: liveTimeJourney=true, timeFixtureToken (12 lowercase hex), timeAccountHash (SHA-256),
+ * timeProfile selects a closed synthetic profile; timeMetadataProbe=true stops after authenticated GET.
  * timeJourneyPhase=RUN|ACK|REPLAY. Stop the process between each phase; retain the same token.
  */
 class CalendarTimeGuardedJourneyLiveDeviceTest {
@@ -90,7 +92,7 @@ class CalendarTimeGuardedJourneyLiveDeviceTest {
             hash.matches(Regex("[a-f0-9]{64}")) && phase in setOf("RUN", "ACK", "REPLAY"))
         val requestedCalendarName = "Calendeer QA Automatic Worker"
         val prefix = "calendar-time-guarded-v1-$token"
-        val timeProfile = TitleJourneyTimeProfile.create(null, false, false, null)
+        val timeProfile = TemporalJourneyProfile.create(args.getString("timeProfile"))
         val app = compose.activity.application as BridgeApplication
         compose.waitUntil(60_000) { app.imports.state.value.let {
             it.authenticated && it.selections.isNotEmpty() && !it.busy
@@ -128,7 +130,7 @@ class CalendarTimeGuardedJourneyLiveDeviceTest {
                 .putString("account", source.account.value).putString("calendar", source.calendar.value)
                 .putLong("generation", source.generation).putLong("physical_generation", generation)
                 .putString("create_id", UUID.randomUUID().toString()).putString("intent_id", UUID.randomUUID().toString())
-                .putInt("content_profile", timeProfile.contentProfile)
+                .putInt("content_profile", timeProfile.kind).putString("time_profile", timeProfile.name).putString("time_zone", timeProfile.zone)
                 .putString("create_title", "Calendeer QA — time CREATE $token")
                 .putString("start", timeProfile.start).putString("end", timeProfile.end)
                 .putString("description", "Synthetic time journey; retained for inspection.")
@@ -143,15 +145,14 @@ class CalendarTimeGuardedJourneyLiveDeviceTest {
         fun frozen(key: String) = checkNotNull(prefs.getString(key, null))
         assertTrue("Require the exact frozen known-empty time profile", timeProfile.matchesFrozen(
             prefs.getInt("content_profile", -1), frozen("start"), frozen("end")))
-        val content = EventContent(frozen("create_title"), timeProfile.time,
+        val content = EventContent(frozen("create_title"), timeProfile.before,
             frozen("description"), frozen("location"), details = EventDetails())
-        val originalTime = content.time as EventTime.Timed
-        val changed = content.copy(time = originalTime.copy(start = originalTime.start.plusSeconds(7_200),
-            end = originalTime.end.plusSeconds(10_800)))
-        // Move by two hours and extend duration by one hour; text and the exact zone stay unchanged.
-        assertTrue("Use a time-only same-zone timed fixture", changed.title == content.title &&
+        require(prefs.getString("time_profile", "utc") == timeProfile.name && prefs.getString("time_zone", "Z") == timeProfile.zone)
+        val changed = content.copy(time = timeProfile.after)
+        assertTrue("Use an enrolled same-kind time-only fixture", changed.title == content.title &&
             changed.description == content.description && changed.location == content.location &&
-            (changed.time as EventTime.Timed).zone == originalTime.zone)
+            LocalTimeEditCandidate(LocalEditIntent(id("intent_id"), source, ProtonAuthentication.events(app).format,
+                RemoteChange.Upsert(EventId("synthetic-profile-check"), Revision("synthetic-profile-check"), content), changed)).intent.content == changed)
         fun exactResult(record: TimeUpdateAttemptRecord?, result: TimeUpdateVerifiedResult?): Boolean =
             record != null && result != null && record.scope == source &&
                 record.id.value == prefs.getString("attempt_id", null) &&
@@ -177,9 +178,9 @@ class CalendarTimeGuardedJourneyLiveDeviceTest {
                 val event = EventId(checkNotNull(prefs.getString("event", null)))
                 assertTrue("Retain the exact native event ownership", row[Events._SYNC_ID] == native.eventIdentityKey(physical, event) &&
                     row[Events.SYNC_DATA4] == native.eventIdentityKey(physical, event))
-                assertTrue("Retain the timed kind and original native timezone", row[Events.ALL_DAY] == "0" &&
-                    row[Events.EVENT_TIMEZONE] == originalTime.zone.id &&
-                    row[Events.EVENT_END_TIMEZONE] == originalTime.zone.id)
+                assertTrue("Retain the enrolled kind and original native timezone",
+                    row[Events.ALL_DAY] == (if (timeProfile.allDay) "1" else "0") &&
+                    row[Events.EVENT_TIMEZONE] == timeProfile.zone && row[Events.EVENT_END_TIMEZONE] == timeProfile.zone)
             }
         }
         fun textsMatch(row: Map<String, String?>, expected: EventContent) =
@@ -197,12 +198,12 @@ class CalendarTimeGuardedJourneyLiveDeviceTest {
                     put(Events.DIRTY, 1) },
                 "${Events._ID}=? AND ${Events.CALENDAR_ID}=? AND ${Events.TITLE}=? AND " +
                     "COALESCE(${Events.DESCRIPTION},'')=? AND COALESCE(${Events.EVENT_LOCATION},'')=? AND " +
-                    "${Events.DTSTART}=? AND ${Events.DTEND}=? AND ${Events.ALL_DAY}=0 AND " +
+                    "${Events.DTSTART}=? AND ${Events.DTEND}=? AND ${Events.ALL_DAY}=? AND " +
                     "${Events.EVENT_TIMEZONE}=? AND COALESCE(${Events.EVENT_END_TIMEZONE},'')=? AND " +
                     "${Events.DIRTY}=0 AND ${Events.DELETED}=0",
                 arrayOf(prefs.getLong("row", -1).toString(), prefs.getLong("native_calendar", -1).toString(),
                     checkNotNull(from[Events.TITLE]), from[Events.DESCRIPTION].orEmpty(), from[Events.EVENT_LOCATION].orEmpty(),
-                    checkNotNull(from[Events.DTSTART]), checkNotNull(from[Events.DTEND]),
+                    checkNotNull(from[Events.DTSTART]), checkNotNull(from[Events.DTEND]), checkNotNull(from[Events.ALL_DAY]),
                     checkNotNull(from[Events.EVENT_TIMEZONE]), from[Events.EVENT_END_TIMEZONE].orEmpty())) == 1)
         }
         fun witness(vararg names: String) = InstrumentationRegistry.getInstrumentation().sendStatus(0,
@@ -299,6 +300,20 @@ class CalendarTimeGuardedJourneyLiveDeviceTest {
                         }
                         val original = checkNotNull(base)
                         assertTrue("Retained CREATE content is exact", original.content == content)
+                        if (args.getString("timeMetadataProbe") == "true") {
+                            assertTrue("Probe is read-only after an enrolled CREATE", phase == "RUN")
+                            val metadata = checkNotNull(ProtonTemporalMetadataProbe.inspect(app, source,
+                                original.eventId, content.time, hash))
+                            InstrumentationRegistry.getInstrumentation().sendStatus(0, Bundle().apply {
+                                putLong("time_metadata_full_day", metadata.fullDay)
+                                putString("time_metadata_start_delta", metadata.startDeltaSeconds?.toString() ?: "OUT_OF_RANGE")
+                                putString("time_metadata_end_delta", metadata.endDeltaSeconds?.toString() ?: "OUT_OF_RANGE")
+                                putString("time_metadata_start_zone", metadata.startZone.name)
+                                putString("time_metadata_end_zone", metadata.endZone.name)
+                            })
+                            return@runBlocking
+                        }
+
                         native.admitOperation = ::accessible
                         val digest = MessageDigest.getInstance("SHA-256")
                         listOf("calendar-v1", physical.account.value, physical.calendar.value, physical.generation.toString()).forEach {
@@ -474,7 +489,7 @@ class CalendarTimeGuardedJourneyLiveDeviceTest {
                             assertTrue("Freeze the full durable attempt and proof for a separate process",
                                 prefs.edit().putString("attempt_hash", attemptHash(unknown))
                                     .putString("result_hash", resultHash(result)).putBoolean("submit_completed", true).commit())
-                            witness("guarded_time_submit_verified", "guarded_time_exact_timed_readback",
+                            witness("guarded_time_submit_verified", "guarded_time_exact_temporal_readback",
                                 "guarded_time_text_unchanged", "guarded_time_proof_survives_mode_revocation",
                                 "guarded_time_same_row_dirty")
                         } else {

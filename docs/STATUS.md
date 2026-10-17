@@ -8,7 +8,7 @@ contract relevant to the task. Existing detailed evidence is in
 
 Calendeer bridges Proton Calendar and Android's Calendar Provider. Event viewing
 and editing stay in system calendar applications. Read-only is the default;
-creation, title-only, description/location and timed date changes have separate
+creation, title-only, description/location and same-kind date changes have separate
 experimental per-calendar options. See [requirements](SPECIFICATION.md),
 [architecture](ARCHITECTURE.md) and [acceptance](ACCEPTANCE.md).
 
@@ -28,7 +28,7 @@ uncertain writes are retained, never silently discarded or resent.
 | Outgoing CREATE | System editor discovery, immutable offline capture, guarded Proton submission/readback, same-row acknowledgement and durable handoff. | [Local capture](LOCAL_CREATE_CAPTURE.md). Simple events only; reminders, guests, recurrence and custom colors remain outside the send profile. |
 | Outgoing title | Default-off option for title-only edits of qualified ordinary or fully handed-off created timed/all-day events. Durable request ownership, inspection and native/SQL completion. | [Title submission](TITLE_UPDATE_SUBMISSION.md). Known-empty details, no recurrence/color; other fields must stay unchanged. |
 | Outgoing text | Default-off description/location option, optionally with simultaneous title change. Separate capsules, wire/proofs, cursors and consent; raw CRLF intent is distinct from canonical LF readback. | [Text delivery](SHARED_TEXT_PREPARATION.md). Creation mode must be enabled; narrow simple-event profile, unchanged dates and metadata. |
-| Outgoing time | Default-off date/duration option for simple timed events, retaining kind, zone and all other fields. Protected preparation, guarded readback, separate durable history and native completion. | [Temporal delivery](TEMPORAL_UPDATE.md). All-day wire metadata, kind/zone transitions and combined edits remain unsupported. |
+| Outgoing time | Default-off date/duration option for simple timed/all-day events, retaining kind, zone and all other fields. Protected preparation, guarded readback, separate durable history and native completion. | [Temporal delivery](TEMPORAL_UPDATE.md). All-day metadata uses UTC midnight and exclusive end dates. Kind/zone transitions and combined edits remain unsupported. |
 | Recovery/conflicts | UNKNOWN is inspect-only. Native writes are guarded and receipts precede acknowledgement; newer local edits survive. A shared title/text/time journal prevents competing owners across generations. Local conflict dossiers preserve observed variants. | [Capture](LOCAL_EDIT_CAPTURE.md), [conflicts](CONFLICT_ARCHIVE.md). Trustworthy edit timestamps and general conflict resolution remain unfinished. |
 
 A refresh with no checkpoint commits its first staged page before draining queued
@@ -45,26 +45,30 @@ by adopting a native row ID or allocating a new send identity.
 ## Evidence and remaining RC work
 
 Real controlled-account journeys qualify login/import, simple CREATE, title edits,
-ordinary timed text edits and UTC timed date edits through authenticated ports.
-Time has a production
-Provider/worker journey and active restarted replay with immutable history and no
-new attempt. Text also has an actual system-editor/production-worker journey, interrupted-edit recovery and active
-restart replay without another attempt. The tested editor is
+ordinary timed text edits and same-kind timed/all-day date edits through authenticated
+ports. Seven temporal service profiles cover one/multiple civil days, Paris and
+New York DST, Lord Howe half-hour transitions and Kathmandu. Time also has
+production Provider/worker RUN and active restarted REPLAY for all seven profiles,
+with immutable history and no new attempt. Exact dates and scope are in the temporal
+contract. Text also has an actual system-editor/production-worker journey,
+interrupted-edit recovery and active restart replay without another attempt.
+The tested editor is
 `foundation.e.calendar`; this is not Samsung qualification.
 
-Current host suites pass 418 domain, 785 backend and 133 app JVM cases without
+Current host suites pass 418 domain, 798 backend and 133 app JVM cases without
 skips. Physical crypto, SQL/migration, Provider, worker/recovery and option UI
 checks pass; APK builds and app lint pass. Scope-specific evidence and remaining
 qualification are in [validation](VALIDATION.md) and the linked contracts.
 
 For a useful bidirectional RC, finish:
 
-1. Extend [temporal delivery](TEMPORAL_UPDATE.md): same-zone timed changes now have
-   authenticated cryptography, current-source ownership, guarded requests, native
-   completion and worker/UI consent. Controlled UTC service and production Provider/
-   worker delivery, offline ACK and restarted replay pass. Qualify actual calendar-
-   editor time changes, other zones/DST, all-day API conventions, kind/zone transitions
-   and combined edits.
+1. Extend [temporal delivery](TEMPORAL_UPDATE.md): same-kind timed/all-day changes
+   have authenticated cryptography, current-source ownership, guarded requests,
+   native completion and worker/UI consent. Listed all-day and zone/DST service
+   and production Provider/worker profiles, offline ACK and restarted replay pass.
+   Qualify actual calendar-editor time changes, kind/zone transitions and combined
+   edits; ambiguous local hours
+   remain held rather than guessed.
 2. Outgoing DELETE with concurrent changes and interrupted acknowledgement.
 3. Preservation of ordinary reminders/colors during supported edits; current
    send profiles still reject many such events.

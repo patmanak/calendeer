@@ -62,7 +62,8 @@ Core adapter and discovers calendar names and colors through the retained sessio
 Selected calendars mirror supported events into Android with durable offline
 processing and bounded background refresh. Read-only remains the default. Separate
 experimental options enable simple-event creation and title, description/location
-or same-zone timed date changes through the system calendar. Uncertain sends are
+or same-kind date changes (timed or all-day) through the system calendar.
+Timed changes retain the time zone. Uncertain sends are
 inspected instead of resent; unsupported edits and conflicts remain retained.
 Outgoing deletion, time-zone/kind transitions and combined date/text edits are not
 yet supported. See the [current capabilities and RC limits](docs/STATUS.md).

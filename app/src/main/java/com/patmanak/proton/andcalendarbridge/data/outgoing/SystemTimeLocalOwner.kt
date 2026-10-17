@@ -3,11 +3,11 @@ package com.patmanak.proton.andcalendarbridge.data.outgoing
 
 import com.patmanak.proton.andcalendarbridge.sync.*
 
-/** Timed wire discovery only: no all-day preparation reservation or borrowed title/text consent. */
+/** Same-kind date/time discovery only; never borrows title or text consent. */
 object SystemTimeEditProfile {
     fun accepts(intent: LocalEditIntent): Boolean = try {
-        val candidate = LocalTimeEditCandidate(intent)
-        candidate.intent.content.time is EventTime.Timed
+        LocalTimeEditCandidate(intent)
+        true
     } catch (_: Exception) { false }
 }
 

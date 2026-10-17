@@ -31,6 +31,6 @@
     <string name="system_title_limits_with_text">Voor wijzigingen van alleen de titel van eenvoudige afspraken. Beschrijving en locatie gebruiken de aparte tekstoptie. Wijzigingen van alleen datums gebruiken de aparte tijdoptie. Gecombineerde datum- en tekstwijzigingen en verwijderingen blijven op Android.</string>
     <string name="calendar_dashboard_text_mode">Tekstwijzigingen ingeschakeld</string>
     <string name="system_time_mode">Datum- en tijdwijzigingen synchroniseren (experimenteel)</string>
-    <string name="system_time_limits">Alleen eenvoudige afspraken met tijden en dezelfde tijdzone, zonder herhalingen, herinneringen, gasten of aangepaste kleuren. Wijzig datums of de duur zonder tegelijk andere velden te wijzigen. Afspraken die de hele dag duren en verwijderingen blijven op Android.</string>
+    <string name="system_time_limits">Alleen eenvoudige afspraken met tijden of voor de hele dag, zonder herhalingen, herinneringen, gasten of aangepaste kleuren. Wijzig datums of de duur en behoud het type, de tijdzone en de andere velden. Verwijderingen blijven op Android.</string>
     <string name="calendar_dashboard_time_mode">Tijdwijzigingen ingeschakeld</string>
 </resources>

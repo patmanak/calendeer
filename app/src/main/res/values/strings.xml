@@ -32,6 +32,6 @@
     <string name="system_title_limits_with_text">For title-only changes to simple events. Use the separate text option for description and location changes. Date-only changes use the separate time option. Combined date and text changes and deletions stay on Android.</string>
     <string name="calendar_dashboard_text_mode">Text changes enabled</string>
     <string name="system_time_mode">Synchronize date and time changes (experimental)</string>
-    <string name="system_time_limits">Simple timed events only, with the same time zone and no repeats, reminders, guests or custom colors. Change dates or duration without changing other fields at the same time. All-day events and deletions stay on Android.</string>
+    <string name="system_time_limits">Simple timed or all-day events only, without repeats, reminders, guests or custom colors. Change dates or duration while keeping the event type, time zone and other fields unchanged. Deletions stay on Android.</string>
     <string name="calendar_dashboard_time_mode">Time changes enabled</string>
 </resources>

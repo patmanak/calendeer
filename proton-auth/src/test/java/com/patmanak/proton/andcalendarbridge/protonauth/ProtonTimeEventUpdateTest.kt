@@ -105,13 +105,13 @@ class ProtonTimeEventUpdateTest {
         }
     }
 
-    @Test fun allDayConventionIsUnqualifiedAndThereforeRefused() {
+    @Test fun allDayUtcMetadataKeepsExclusiveNextDate() {
         val old = EventTime.AllDay(LocalDate.of(1970, 1, 1), LocalDate.of(1970, 1, 2))
         val next = EventTime.AllDay(LocalDate.of(1970, 1, 3), LocalDate.of(1970, 1, 4))
         val source = original.with("StartTime", 0).with("EndTime", 86400).with("FullDay", 1)
         val result = actual.with("StartTime", 172800).with("EndTime", 259200).with("FullDay", 1)
-        refused { request(source, old, next) }
-        assertFalse(matches(source, result, old, next))
+        assertEquals(request(), request(source, old, next))
+        assertTrue(matches(source, result, old, next))
     }
 
     @Test fun fixedOffsetsFloatingApiMetadataSubsecondsAndBoundsAreRefused() {
