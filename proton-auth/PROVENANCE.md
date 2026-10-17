@@ -1,5 +1,20 @@
 # Proton authentication adapter provenance
 
+## Offline temporal patch
+
+`ProtonSharedTextPatcher.patchTimeAt` is original project integration reusing its
+bounded raw scanner and the existing Proton-adapted `ProtonSimpleEventSerializer`
+only for new DTSTART/DTEND blocks. It does not rebuild original event documents.
+It follows the shared-part placement and metadata policy of Android Calendar at
+`83bbd6a15b0aaa135e424fb5ac195c0a52929b4f`, plus temporal SEQUENCE increment policy
+from WebClients at `40cc08c12c8fbac7f66521186c7297ddf3e17861`,
+`applications/calendar/src/app/containers/calendar/eventActions/sequence.ts`.
+The narrower same-kind/same-zone profile refuses ambiguous local offsets, embedded
+timezone components and unsupported metadata layouts. Historical text/title APIs
+and protected formats are unchanged. No new copied source, dependency, signing,
+encryption or transport is added. See [temporal scope](../docs/TEMPORAL_UPDATE.md)
+for the implemented boundary and remaining service/crypto qualification.
+
 ## Offline shared-title preservation experiment
 
 `ProtonSharedTitlePatcher.kt` is the compatibility entry point for an original,

@@ -57,7 +57,11 @@ Full recipes and limitations are in [validation](VALIDATION.md).
 
 For a useful bidirectional RC, finish:
 
-1. Date/time edits, duration, timezone/DST and all-day transitions.
+1. Date/time edits: the [offline candidate and lossless patch](TEMPORAL_UPDATE.md)
+   now cover same-kind, same-zone movement/duration with sequence updates. Their
+   domain/adapter suites pass (375/688 cases); production sending remains disabled.
+   Finish cryptographic preparation, temporal API/readback qualification, durable
+   delivery, timezone changes and timed/all-day transitions.
 2. Outgoing DELETE with concurrent changes and interrupted acknowledgement.
 3. Preservation of ordinary reminders/colors during supported edits; current
    send profiles still reject many such events.

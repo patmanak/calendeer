@@ -6,11 +6,16 @@ import biweekly.ICalendar
 import biweekly.ICalVersion
 import biweekly.component.VEvent
 import biweekly.io.text.ICalWriter
+import com.patmanak.proton.andcalendarbridge.sync.EventContent
+import com.patmanak.proton.andcalendarbridge.sync.EventDetails
+import com.patmanak.proton.andcalendarbridge.sync.EventTime
 import java.io.StringWriter
 import java.nio.CharBuffer
 import java.nio.charset.CodingErrorAction
 import java.time.Instant
+import java.time.LocalDate
 import java.time.LocalDateTime
+import java.time.ZoneId
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 import java.time.format.ResolverStyle
@@ -21,6 +26,7 @@ internal data class ProtonSharedTextChange(val expected: String?, val replacemen
     override fun toString() = "ProtonSharedTextChange(REDACTED)"
 }
 internal class ProtonTextPatchException : IllegalStateException("Shared text patch unavailable: UNSUPPORTED")
+internal class ProtonTimePatchException : IllegalStateException("Shared time patch unavailable: UNSUPPORTED")
 
 /**
  * Offline plaintext experiment only. Not an authenticated envelope or an UPDATE preparation.
@@ -29,6 +35,139 @@ internal class ProtonTextPatchException : IllegalStateException("Shared text pat
  * Framing, identity and selected text checks do not certify other properties as safe to upload.
  */
 internal object ProtonSharedTextPatcher {
+    /** Separate temporal experiment sharing the bounded raw scanner, never a text-format expansion.
+     * No authenticity, encryption, request identity or dispatch authority is supplied here.
+     */
+    fun patchTimeAt(original: ProtonEventTextParts, expectedUid: String,
+        expected: EventTime, replacement: EventTime, timestamp: Instant): ProtonEventTextParts {
+        try {
+            budget(original.clearShared, original.encryptedShared)
+            require(timestamp.nano == 0 && timestamp >= Instant.EPOCH && timestamp <= LAST_TIMESTAMP)
+            val clearIdentity = inspect(original.clearShared, false, emptySet())
+            val secretIdentity = inspect(original.encryptedShared, true, emptySet())
+            require(clearIdentity.uid == expectedUid && secretIdentity.uid == expectedUid &&
+                clearIdentity.stamp == secretIdentity.stamp)
+            require(when (expected) {
+                is EventTime.AllDay -> replacement is EventTime.AllDay
+                is EventTime.Timed -> replacement is EventTime.Timed && expected.zone == replacement.zone
+            })
+            val sourceDates = temporalBlocks(original.clearShared, true)
+            temporalBlocks(original.encryptedShared, false)
+            require(decodeTime(sourceDates) == expected)
+            val serialized = serializeTime(replacement, timestamp)
+            // Qualify original endpoints too, including whole seconds and unambiguous zone offsets.
+            serializeTime(expected, timestamp)
+            if (expected == replacement) return original
+
+            val clear = metadata(original.clearShared, true)
+            val secret = metadata(original.encryptedShared, false)
+            val oldStamp = metadataDate(clear.getValue("DTSTAMP"))
+            val created = metadataDate(clear.getValue("CREATED"))
+            val lastModified = metadataDate(clear.getValue("LAST-MODIFIED"))
+            require(created <= oldStamp && created <= lastModified && timestamp >= oldStamp && timestamp >= lastModified)
+            require(oldStamp == metadataDate(secret.getValue("DTSTAMP")))
+            val sequence = value(clear.getValue("SEQUENCE"))
+            require(sequence.matches(Regex("[0-9]+")))
+            val number = checkNotNull(sequence.trimStart('0').ifEmpty { "0" }.toLongOrNull())
+            require(number in 0 until Int.MAX_VALUE.toLong())
+            val stamp = STAMP.format(timestamp.atOffset(ZoneOffset.UTC))
+            fun replace(text: String, edits: List<Edit>): String {
+                var result = text
+                for (edit in edits.sortedByDescending { it.start })
+                    result = result.substring(0, edit.start) + edit.replacement + result.substring(edit.end)
+                return result
+            }
+            fun edit(block: Block, next: String) = Edit(block.start, block.end,
+                property(block.logical).second + ":" + next + "\r\n")
+            val nextClear = replace(original.clearShared, sourceDates.map { (name, block) ->
+                Edit(block.start, block.end, serialized.getValue(name))
+            } + listOf(edit(clear.getValue("DTSTAMP"), stamp), edit(clear.getValue("LAST-MODIFIED"), stamp),
+                edit(clear.getValue("SEQUENCE"), (number + 1).toString())))
+            val nextSecret = replace(original.encryptedShared, listOf(edit(secret.getValue("DTSTAMP"), stamp)))
+            budget(nextClear, nextSecret)
+            val checkedClear = inspect(nextClear, false, emptySet())
+            val checkedSecret = inspect(nextSecret, true, emptySet())
+            require(checkedClear.uid == expectedUid && checkedSecret.uid == expectedUid &&
+                checkedClear.stamp == stamp && checkedSecret.stamp == stamp)
+            require(decodeTime(temporalBlocks(nextClear, true)) == replacement)
+            return ProtonEventTextParts(nextClear, nextSecret)
+        } catch (_: Exception) {
+            throw ProtonTimePatchException()
+        }
+    }
+
+    /** Framing has been checked. This profile refuses nested components and temporal ambiguity. */
+    private fun temporalBlocks(text: String, clear: Boolean): Map<String, Block> {
+        val stack = mutableListOf<String>()
+        val dates = mutableMapOf<String, Block>()
+        for (block in blocks(text)) {
+            val (name, _) = property(block.logical)
+            if (name == "BEGIN") {
+                val component = value(block).uppercase(Locale.ROOT)
+                require(component == "VCALENDAR" || component == "VEVENT")
+                stack += component
+                continue
+            }
+            if (name == "END") { stack.removeAt(stack.lastIndex); continue }
+            require(name !in NON_SIMPLE_MARKERS && name != "DURATION")
+            if (name == "DTSTART" || name == "DTEND") {
+                require(clear && stack == listOf("VCALENDAR", "VEVENT") && dates.put(name, block) == null)
+            }
+        }
+        require(dates.keys == if (clear) setOf("DTSTART", "DTEND") else emptySet<String>())
+        return dates
+    }
+
+    private fun decodeTime(dates: Map<String, Block>): EventTime {
+        data class Endpoint(val date: LocalDate?, val instant: Instant?, val zone: ZoneId?)
+        fun decode(name: String): Endpoint {
+            val block = dates.getValue(name)
+            val header = property(block.logical).second
+            val raw = value(block)
+            if (header.equals("$name;VALUE=DATE", true)) {
+                require(raw.matches(Regex("[0-9]{8}")))
+                return Endpoint(LocalDate.parse(raw, DAY).also { require(it.year in 1970..9999) }, null, null)
+            }
+            val zone: ZoneId
+            val local: LocalDateTime
+            if (header.equals(name, true)) {
+                require(raw.matches(Regex("[0-9]{8}T[0-9]{6}Z")))
+                zone = ZoneOffset.UTC
+                local = LocalDateTime.parse(raw, STAMP)
+            } else {
+                val prefix = "$name;TZID="
+                require(header.startsWith(prefix, ignoreCase = true))
+                val id = header.substring(prefix.length)
+                require(id in ZoneId.getAvailableZoneIds())
+                zone = ZoneId.of(id)
+                require(raw.matches(Regex("[0-9]{8}T[0-9]{6}")))
+                local = LocalDateTime.parse(raw, LOCAL_TIME)
+            }
+            require(local.year in 1970..9999)
+            val offset = zone.rules.getValidOffsets(local).single()
+            val instant = local.toInstant(offset)
+            require(instant >= Instant.EPOCH && instant <= LAST_TIMESTAMP)
+            return Endpoint(null, instant, zone)
+        }
+        val start = decode("DTSTART")
+        val end = decode("DTEND")
+        return if (start.date != null) EventTime.AllDay(start.date, checkNotNull(end.date))
+        else {
+            require(start.zone == end.zone)
+            EventTime.Timed(checkNotNull(start.instant), checkNotNull(end.instant), checkNotNull(start.zone))
+        }
+    }
+
+    /** Reuse Proton-adapted serialization only for the two newly constructed properties. */
+    private fun serializeTime(time: EventTime, timestamp: Instant): Map<String, String> {
+        if (time is EventTime.Timed) require(time.start >= Instant.EPOCH && time.end <= LAST_TIMESTAMP)
+        val generated = ProtonSimpleEventSerializer.serialize("temporal-property", timestamp,
+            EventContent("Temporal", time, details = EventDetails())).clearShared
+        val dates = temporalBlocks(generated, true)
+        require(decodeTime(dates) == time)
+        return dates.mapValues { (_, block) -> generated.substring(block.start, block.end) }
+    }
+
     /** Bounded signed-plaintext observation, preserving explicit absence versus an empty property. */
     fun observe(original: ProtonEventTextParts, selected: Set<ProtonSharedTextProperty>,
         expectedUid: String): Map<ProtonSharedTextProperty, String?> {
@@ -349,4 +488,7 @@ internal object ProtonSharedTextPatcher {
     private const val MAX_DEPTH = 16
     private val NON_SIMPLE_MARKERS = setOf("RRULE", "EXRULE", "RDATE", "EXDATE", "RECURRENCE-ID", "ATTENDEE", "ORGANIZER", "STATUS", "METHOD")
     private val STAMP = DateTimeFormatter.ofPattern("uuuuMMdd'T'HHmmss'Z'").withResolverStyle(ResolverStyle.STRICT)
+    private val LOCAL_TIME = DateTimeFormatter.ofPattern("uuuuMMdd'T'HHmmss").withResolverStyle(ResolverStyle.STRICT)
+    private val DAY = DateTimeFormatter.ofPattern("uuuuMMdd").withResolverStyle(ResolverStyle.STRICT)
+    private val LAST_TIMESTAMP = Instant.parse("9999-12-31T23:59:59Z")
 }
