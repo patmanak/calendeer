@@ -71,6 +71,12 @@ Active fresh-process replay retains one attempt and identical request/result/
 completion hashes. All five original modes and network settings are restored.
 This qualifies pre-submission disconnection and process restart, not device reboot
 or power loss.
+An isolated real-service cancellation at response-evidence persistence also keeps
+the original UNKNOWN request without a response capsule or ACK. Repeated local
+restart recovery has no HTTP ports; fresh authenticated inspection proves absence
+before a separate-process native/SQL ACK. This is not a measured network failure
+or production-worker interruption during transport. Final restarted replay keeps
+the identical request/result/completion without a new send or native write.
 
 Current host suites pass 427 domain, 840 backend and 167 app JVM cases without
 skips. Physical crypto, SQL/migration, Provider, worker/recovery and option UI
@@ -90,8 +96,10 @@ For a useful bidirectional RC, finish:
    production-worker and restarted recovery journeys pass, including single-day and
    three-day deletion. A real preclaim conflict and local replay preserve the full
    variant. Offline capture, process restart and reconnection also pass before
-   submission. Extend production-worker conflict and interruption during/after
-   remote claim, device reboot and power loss, then richer events and OEM behavior.
+   submission. Isolated real-service recovery also passes after injected evidence-
+   persistence cancellation. Extend production-worker conflict and actual network/
+   process interruption during/after remote claim, device reboot and power loss,
+   then richer events and OEM behavior.
    Current source checks and permanent incoming barriers remain required; UNKNOWN
    is never reset or resent.
 3. Preservation of ordinary reminders/colors during supported edits; current

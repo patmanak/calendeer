@@ -1,5 +1,47 @@
 # Validation
 
+## Interrupted deletion evidence persistence
+
+PASS: `EVIDENCE_INTERRUPTION` creates a new disposable ordinary timed service
+event and opens its isolated native copy in `foundation.e.calendar` on Android
+API 35. After actual editor deletion, SEND uses the production coordinator and
+authenticated adapter, delegating the real durable claim. A journal decorator
+then injects a unique cancellation at `retainEvidence`, after the transport
+attempt, without saving the supplied response capsule. Only that exact
+cancellation is accepted. Reaching this checkpoint alone does not prove a
+successful remote deletion or a received response.
+
+The original UNKNOWN request, full base/content, PAUSED local owner, reserved
+PENDING receipt and dirty deleted native row remain unchanged. No verified
+result, completion or native write is allowed. Atomic fixture evidence binds
+the first request/native hashes, receipt nonce, adapter format and process.
+New-process UNKNOWN_REPLAY traverses the normal UNKNOWN guard and offline
+recovery, which holds one request without preparing, submitting or inspecting.
+Repeating that phase in another invocation preserves the first process witness
+and the unique history. This composition has no HTTP ports; independent
+application traffic is not claimed to be offline.
+
+PASS: restarted INSPECT validates the original bindings before any GET, then
+retains genuine authenticated absence without another preparation or submission.
+The response capsule remains absent; native ACK stays deferred until proof is
+durable. Inspection proof hashes and its process witness are committed together.
+ACK in a further process restores the exact native/SQL receipt, keeps the row
+deleted and clean, and rejects a staged old upsert through the incoming barrier.
+Final fresh-process REPLAY preserves the identical request, result and completion,
+with no new send, replacement history or native write. All seven physical
+executions pass, including the repeated UNKNOWN_REPLAY. The phone is released
+with Calendeer reopened; runtime calendar options and network settings were not
+changed by this isolated journey.
+
+Debug app/test APK builds and focused independent source review pass. The first
+instrumentation build exposed the JVM method-size limit; moving the existing
+offline ACK assertions into a separate coroutine resolves it. Runtime policy,
+adapter and schema are unchanged. Earlier host-suite/lint results were not rerun
+for this instrumentation-only change. This is controlled cancellation at evidence
+persistence with real-service recovery, not a measured transport disconnection,
+process kill during transport, production-worker fault injection, device reboot,
+power loss or Samsung/One UI qualification.
+
 ## Offline deletion capture and process restart
 
 PASS: a new disposable ordinary timed service event was deleted through
@@ -158,8 +200,9 @@ consent and may run their authorized work; global silence is not claimed.
 Final app JVM cases and debug app/test APK builds pass; lint passes with zero
 errors and 43 warnings. Focused independent reviews and staged-blob confidentiality
 checks pass. All-day and real preflight-conflict evidence is recorded above.
-Interruption during/after remote claim, device reboot, power loss and Samsung/One UI
-qualification remain NOT RUN. Pre-submission offline recovery is recorded above.
+Actual network loss or process kill during/after remote claim, device reboot,
+power loss and Samsung/One UI qualification remain NOT RUN. Pre-submission offline
+recovery and injected evidence-persistence cancellation are recorded above.
 
 ## Guarded deletion request foundation (earlier slice)
 

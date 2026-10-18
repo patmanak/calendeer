@@ -140,8 +140,20 @@ hashes. The five original modes are restored after every active phase. The fixtu
 requires no INTERNET-capable network throughout its offline phases; normal
 constrained network work may remain queued. This qualifies disconnection before submission and
 application-process restart, not interruption during/after claim, device reboot
-or power loss. Qualification also does not cover every production-worker conflict
-path, atomic remote preconditions or Samsung/One UI.
+or power loss.
+A separate isolated real-service journey injects cancellation at evidence
+persistence after the actual transport attempt and durable claim. It retains the
+exact UNKNOWN request without a response capsule, result or native ACK. Repeated
+new-process local recovery holds it without HTTP or resubmission, preserving the
+first process witness. Restarted authenticated inspection then proves absence;
+only its durable result permits subsequent new-process native/SQL ACK and the
+permanent incoming barrier. Final fresh-process replay preserves the same request,
+result and completion without a new send or native write. The checkpoint itself
+is not proof of remote success.
+This qualifies the evidence-persistence boundary, not a measured network loss or
+production-worker interruption during transport. Device reboot, power loss,
+every production-worker conflict path, atomic remote preconditions and Samsung/
+One UI remain outside the measured scope.
 Existing retained synthetic events must not be used as disposable fixtures.
 Detailed measured evidence is recorded in [validation](VALIDATION.md); passing fake
 boundaries alone does not qualify the service, Provider, editor or WorkManager.

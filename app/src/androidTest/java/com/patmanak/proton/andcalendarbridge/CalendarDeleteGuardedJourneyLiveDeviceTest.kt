@@ -39,7 +39,7 @@ import org.junit.Test
 
 /** Opt-in disposable real-service event, isolated native calendar and persistent journals.
  * Arguments: liveDeleteJourney=true, deleteFixtureToken (12 lowercase hex),
- * deleteAccountHash (SHA-256), deleteJourneyScenario=NORMAL|REMOTE_CONFLICT (default NORMAL),
+ * deleteAccountHash (SHA-256), deleteJourneyScenario=NORMAL|REMOTE_CONFLICT|EVIDENCE_INTERRUPTION (default NORMAL),
  * deleteJourneyPhase=PREPARE|SEND|LOCAL|INSPECT|ACK|REPLAY|CONFLICT|CONFLICT_REVIEW|CONFLICT_REPLAY.
  * deleteConflictExpectedZone defaults to Z and is frozen during fresh PREPARE; an
  * official-editor zone change must be declared explicitly. CONFLICT_REVIEW audits an
@@ -50,6 +50,9 @@ import org.junit.Test
  * the operator deletes that native row and changes only its title in official Proton to
  * "Calendeer QA — retained DELETE conflict <token>". CONFLICT is preflight-only;
  * stop the process before CONFLICT_REPLAY. Retain the modified service event afterwards.
+ * EVIDENCE_INTERRUPTION uses PREPARE, SEND, restarted UNKNOWN_REPLAY, restarted INSPECT,
+ * ACK and REPLAY. SEND injects cancellation at evidence persistence after a transport
+ * attempt; this proves neither successful remote deletion nor actual network loss.
  * Offline sentinels cover this fixture composition, not independent application traffic.
  * No production deletion qualification or user preference is changed. Retain the native
  * tombstone and isolated journals for inspection; the service event is explicitly disposable.
@@ -103,10 +106,12 @@ class CalendarDeleteGuardedJourneyLiveDeviceTest {
         val phase = args.getString("deleteJourneyPhase").orEmpty()
         val scenario = args.getString("deleteJourneyScenario") ?: "NORMAL"
         val conflictScenario = scenario == "REMOTE_CONFLICT"
+        val interruptionScenario = scenario == "EVIDENCE_INTERRUPTION"
         val expectedConflictZone = ZoneId.of(args.getString("deleteConflictExpectedZone") ?: "Z")
         assertTrue("Require explicit fixture, account and phase", token.matches(Regex("[a-f0-9]{12}")) &&
-            hash.matches(Regex("[a-f0-9]{64}")) && scenario in setOf("NORMAL", "REMOTE_CONFLICT") &&
+            hash.matches(Regex("[a-f0-9]{64}")) && scenario in setOf("NORMAL", "REMOTE_CONFLICT", "EVIDENCE_INTERRUPTION") &&
             phase in (if (conflictScenario) setOf("PREPARE", "CONFLICT", "CONFLICT_REVIEW", "CONFLICT_REPLAY")
+                else if (interruptionScenario) setOf("PREPARE", "SEND", "UNKNOWN_REPLAY", "INSPECT", "ACK", "REPLAY")
                 else setOf("PREPARE", "SEND", "LOCAL", "INSPECT", "ACK", "REPLAY")))
         val app = compose.activity.application as BridgeApplication
         compose.waitUntil(60_000) { app.imports.state.value.let {
@@ -312,6 +317,7 @@ class CalendarDeleteGuardedJourneyLiveDeviceTest {
                             .setPackage("foundation.e.calendar"))
                     }
                     witness("guarded_delete_prepared", "guarded_delete_dedicated_event_opened")
+                    if (interruptionScenario) witness("guarded_delete_interruption_prepared")
                     return@runBlocking
                 }
                 assertTrue("SEND and recovery require the enrolled PREPARE", prefs.getBoolean("prepared", false))
@@ -319,7 +325,7 @@ class CalendarDeleteGuardedJourneyLiveDeviceTest {
                     val journal = shared.deleteJournal
                     shared.admitDispatch = { error("No title dispatch in deletion fixture") }
                     val factual: (CalendarScope) -> Boolean = { it == source && accessible() }
-                    val consent = AtomicBoolean(phase in setOf("SEND", "INSPECT", "CONFLICT"))
+                    val consent = AtomicBoolean(phase in setOf("SEND", "INSPECT", "CONFLICT", "UNKNOWN_REPLAY"))
                     val coordinator = ImportCoordinator(app, store, remote, projection, jobs, scheduler,
                         systemCreatesEnabled = { it == source && accessible() }, systemTitlesEnabled = { false },
                         systemTextsEnabled = { false }, systemTimesEnabled = { false },
@@ -331,10 +337,13 @@ class CalendarDeleteGuardedJourneyLiveDeviceTest {
                         val actualPort = if (phase in setOf("SEND", "INSPECT", "CONFLICT")) ProtonAuthentication.deletions(app) else null
                         var prepares = 0; var sends = 0; var inspections = 0
                         var claims = 0
+                        var evidenceCheckpoints = 0
+                        val interruption = CancellationException("guarded_delete_interruption_evidence_checkpoint")
                         var conflictReturned: DeleteSubmissionObservation.Conflict? = null
                         var wireReturned = false; var verifiedReturned = false
                         val port = object : CalendarDeleteSubmissionPort {
-                            override val deleteFormat get() = actualPort?.deleteFormat
+                            override val deleteFormat get() = actualPort?.deleteFormat ?: if (interruptionScenario)
+                                AdapterFormat(frozen("interruption_format_id"), prefs.getInt("interruption_format_version", -1)) else null
                             override suspend fun prepareSubmission(id: MutationId, intent: LocalDeleteIntent,
                                 admit: (CalendarScope) -> Boolean): DeleteAttemptRecord? {
                                 prepares++; check(phase == "SEND" && actualPort != null)
@@ -359,6 +368,35 @@ class CalendarDeleteGuardedJourneyLiveDeviceTest {
                                     override suspend fun claim(expected: DeleteAttemptRecord, admit: (CalendarScope) -> Boolean): Boolean {
                                         claims++
                                         error("Conflict fixture forbids claiming or sending DELETE")
+                                    }
+                                } else if (interruptionScenario) object : DeleteAttemptJournal by journal {
+                                    override suspend fun claim(expected: DeleteAttemptRecord, admit: (CalendarScope) -> Boolean): Boolean {
+                                        claims++
+                                        assertTrue("Exactly one real durable claim", claims == 1 && journal.claim(expected, admit))
+                                        assertTrue("Real claim preserves the full UNKNOWN request", journal.read(source, expected.id, factual) ==
+                                            expected.copy(state = DeleteAttemptState.OUTCOME_UNKNOWN))
+                                        return true
+                                    }
+                                    override suspend fun retainEvidence(expectedUnknown: DeleteAttemptRecord, protectedEvidence: String,
+                                        admit: (CalendarScope) -> Boolean): Boolean {
+                                        evidenceCheckpoints++
+                                        val unknown = checkNotNull(journal.read(source, record.id, factual))
+                                        assertTrue("Interrupt only the first evidence checkpoint after claim", claims == 1 &&
+                                            evidenceCheckpoints == 1 && !prefs.contains("interruption_unknown_hash") &&
+                                            unknown == expectedUnknown && unknown == record.copy(state = DeleteAttemptState.OUTCOME_UNKNOWN) &&
+                                            unknown.protectedEvidence == null && protectedEvidence.isNotEmpty() && admit(source))
+                                        val reservation = checkNotNull(store.deleteAcknowledgement(source, event, record.id))
+                                        assertTrue("The original native receipt is reserved before interruption",
+                                            reservation.state == DeleteAcknowledgementState.PENDING &&
+                                                reservation.receipt.attempt == DeleteAttemptIdentity.of(unknown))
+                                        // Deliberately do not delegate persistence of the supplied protected response.
+                                        assertTrue(prefs.edit().putString("interruption_unknown_hash", bytesHash(DeleteAttemptStorageCodec.encode(unknown)))
+                                            .putString("interruption_native_hash", nativeHash(values()))
+                                            .putString("interruption_ack_nonce", reservation.receipt.nonce)
+                                            .putString("interruption_format_id", unknown.format.id)
+                                            .putInt("interruption_format_version", unknown.format.version)
+                                            .putInt("interruption_pid", Process.myPid()).putBoolean("evidence_interrupted", true).commit())
+                                        throw interruption
                                     }
                                 } else journal
                                 return actualPort.submit(record, guarded, admit, qualifySource, admitEvidence).also {
@@ -402,6 +440,13 @@ class CalendarDeleteGuardedJourneyLiveDeviceTest {
                             }
                             return@runBlocking
                         }
+                        if (interruptionScenario && phase == "UNKNOWN_REPLAY") {
+                            runUnknownReplay(prefs, source, event, content, store, journal, coordinator, operations, projection,
+                                factual, ::allowStore, ::values, actualPort == null && actualRemote == null) {
+                                prepares == 0 && sends == 0 && inspections == 0 && claims == 0 && evidenceCheckpoints == 0 && !verifiedReturned
+                            }
+                            return@runBlocking
+                        }
                         if (phase == "LOCAL") {
                             // Local protected evidence only: no preparation, submission,
                             // inspection, native write or result retention is reachable.
@@ -426,6 +471,14 @@ class CalendarDeleteGuardedJourneyLiveDeviceTest {
                                 val retained = checkNotNull(journal.read(source, id("attempt_id"), factual))
                                 assertTrue("INSPECT needs the exact durable UNKNOWN", retained.state == DeleteAttemptState.OUTCOME_UNKNOWN &&
                                     retained.intent.id == id("intent_id") && retained.eventId == event)
+                                if (interruptionScenario) {
+                                    assertTrue("Inspection requires prior offline UNKNOWN replay in a different process",
+                                        prefs.getBoolean("unknown_replayed", false) && prefs.getInt("unknown_replay_pid", -1) > 0 &&
+                                            prefs.getInt("unknown_replay_pid", -1) != Process.myPid() &&
+                                            prefs.getInt("interruption_pid", -1) > 0 && prefs.getInt("interruption_pid", -1) != Process.myPid())
+                                    assertInterruptionState(prefs, source, event, content, store, journal, factual, values())
+                                    assertTrue("Inspection starts with the only original history", deleteHistoryCount(app, prefix, source) == 1)
+                                }
                                 val evidenceShape = ProtonDeleteInspectionProbe.localEvidence(retained)
                                 val shape = ProtonDeleteInspectionProbe.inspect(app, retained, hash)
                                 InstrumentationRegistry.getInstrumentation().sendStatus(0, Bundle().apply {
@@ -443,10 +496,26 @@ class CalendarDeleteGuardedJourneyLiveDeviceTest {
                                 val local = checkNotNull(store.localDelete(source, event))
                                 assertTrue("Require exact known-empty ordinary deletion", local.id == id("intent_id") &&
                                     local.base.content == content && local.content == content && local.state == LocalEditState.PAUSED)
-                                assertTrue("Guarded DELETE orchestration must not fail", !operations.process(source,
-                                    RetainedLocalChangeRef(event, local.id, MutationKind.DELETE, LocalEditState.PAUSED),
-                                    MutationId("unused-traversal-candidate"), timestamp, coordinator.systemDeleteRunAdmission(source)) { wakes++ })
+                                var interrupted = false
+                                try {
+                                    assertTrue("Guarded DELETE orchestration must not fail", !operations.process(source,
+                                        RetainedLocalChangeRef(event, local.id, MutationKind.DELETE, LocalEditState.PAUSED),
+                                        MutationId("unused-traversal-candidate"), timestamp, coordinator.systemDeleteRunAdmission(source)) { wakes++ })
+                                } catch (cancelled: CancellationException) {
+                                    if (!interruptionScenario || cancelled !== interruption) throw cancelled
+                                    interrupted = true
+                                }
                                 assertTrue("Exactly one preparation and submission", prepares == 1 && sends == 1 && inspections == 0)
+                                if (interruptionScenario) {
+                                    assertTrue("Only the injected persistence cancellation escapes; no proof or native ACK", interrupted &&
+                                        claims == 1 && evidenceCheckpoints == 1 && !verifiedReturned && wakes == 0 && projection.writes.get() == 0 && values() == dirty)
+                                    allowStore()
+                                    assertInterruptionState(prefs, source, event, content, store, journal, factual, dirty)
+                                    assertTrue("Retain exactly one immutable history", deleteHistoryCount(app, prefix, source) == 1)
+                                    witness("guarded_delete_interruption_checkpoint", "guarded_delete_interruption_unknown_retained",
+                                        "guarded_delete_interruption_no_proof_or_ack")
+                                    return@runBlocking
+                                }
                             } else {
                                 operations.inspect(TitleUpdateWorkQuery(source), coordinator.systemDeleteRunAdmission(source)) { wakes++ }
                                 assertTrue("An uncertain request is inspect-only", prepares == 0 && sends == 0)
@@ -466,7 +535,10 @@ class CalendarDeleteGuardedJourneyLiveDeviceTest {
                             // bookkeeping. The stop-ACK owner above also covers that window.
                             consent.set(false); coordinator.systemCreatePolicyChanged(source, true)
                             assertTrue("Keep durable UNKNOWN, authenticated absence and frozen content",
-                                record.state == DeleteAttemptState.OUTCOME_UNKNOWN && record.protectedEvidence != null &&
+                                record.state == DeleteAttemptState.OUTCOME_UNKNOWN &&
+                                    (if (interruptionScenario) record.protectedEvidence == null &&
+                                        frozen("interruption_unknown_hash") == bytesHash(DeleteAttemptStorageCodec.encode(record))
+                                     else record.protectedEvidence != null) &&
                                     record.id == DeleteAttemptIdentity.requestId(record.intent, record.format) &&
                                     record.intent.id == id("intent_id") && record.intent.base.eventId == event &&
                                     record.intent.content == content && result.record == record.copy(protectedEvidence = null))
@@ -475,57 +547,23 @@ class CalendarDeleteGuardedJourneyLiveDeviceTest {
                                 projection.writes.get() == 0 && values() == dirty &&
                                 store.deleteAcknowledgement(source, event, attempt)?.state == DeleteAcknowledgementState.PENDING &&
                                 journal.readCompletion(source, attempt, factual) == null)
-                            assertTrue(prefs.edit().putString("attempt_hash", bytesHash(DeleteAttemptStorageCodec.encode(record)))
+                            val proofEdit = prefs.edit().putString("attempt_hash", bytesHash(DeleteAttemptStorageCodec.encode(record)))
                                 .putString("result_hash", bytesHash(DeleteProofStorageCodec.encodeResult(result)))
-                                .putBoolean("submit_completed", true).commit())
+                                .putBoolean("submit_completed", true)
+                            if (interruptionScenario) {
+                                assertTrue("Never replace a successful inspection process witness", !prefs.contains("interruption_inspect_pid"))
+                                proofEdit.putInt("interruption_inspect_pid", Process.myPid())
+                            }
+                            assertTrue(proofEdit.commit())
                             witness("guarded_delete_verified_absence", "guarded_delete_proof_survives_revocation", "guarded_delete_native_ack_deferred")
+                            if (interruptionScenario) {
+                                assertTrue("Inspection retains the only history", deleteHistoryCount(app, prefix, source) == 1)
+                                witness("guarded_delete_interruption_verified_absence", "guarded_delete_interruption_native_ack_deferred")
+                            }
                         } else {
-                            assertTrue("Recovery requires completed SEND in another process", prefs.getBoolean("submit_completed", false) &&
-                                prefs.getInt("submit_pid", -1) > 0 && prefs.getInt("submit_pid", -1) != Process.myPid())
-                            if (phase == "REPLAY") assertTrue("REPLAY requires ACK in another process", prefs.getBoolean("ack_completed", false) &&
-                                prefs.getInt("ack_pid", -1) > 0 && prefs.getInt("ack_pid", -1) != Process.myPid())
-                            val attempt = id("attempt_id")
-                            val original = checkNotNull(journal.read(source, attempt, factual))
-                            val result = checkNotNull(journal.readVerified(source, attempt, factual))
-                            assertTrue("Bind immutable request and proof before recovery",
-                                frozen("attempt_hash") == bytesHash(DeleteAttemptStorageCodec.encode(original)) &&
-                                    frozen("result_hash") == bytesHash(DeleteProofStorageCodec.encodeResult(result)))
-                            val before = values()
-                            val complete = journal.readCompletion(source, attempt, factual) != null
-                            val admission = coordinator.systemDeleteProofAdmission(source)
-                            val progress = operations.recoverOffline(TitleUpdateWorkQuery(source), admission)
-                            assertTrue("Recover the one durable deletion without HTTP", progress ==
-                                if (complete) TitleUpdateOfflineRecoveryProgress() else TitleUpdateOfflineRecoveryProgress(completed = 1))
-                            allowStore()
-                            val receipt = checkNotNull(store.deleteAcknowledgement(source, event, attempt))
-                            val completion = checkNotNull(journal.readCompletion(source, attempt, factual))
-                            val after = values()
-                            assertTrue("Keep deleted row, restore exact ACK and durable completion", after[Events.DELETED] == "1" &&
-                                after[Events.DIRTY] == "0" && receipt.state == DeleteAcknowledgementState.RESTORED &&
-                                receipt.receipt.matches(DeleteSubmissionObservation.Verified(result.record)) &&
-                                completion == DeleteCompletion.of(result, receipt))
-                            assertTrue("Only ACK metadata and Provider-cleared mutator history may change", (before - ACK_FIELDS) == (after - ACK_FIELDS) &&
-                                after[Events.MUTATORS] == null &&
-                                projection.writes.get() == if (complete) 0 else 1)
-                            allowStore()
-                            store.transaction(source) { putRemote(original.intent.base); putProjection(ProjectionIntent(source, original.intent.base)) }
-                            store.requeueAll(source)
-                            assertTrue("A staged old upsert cannot recreate the acknowledged deletion", store.pending(source).isEmpty() &&
-                                store.stabilizedProjection(source, event) == null && values() == after)
-                            assertTrue("Completed deletion is idempotent", operations.recoverOffline(TitleUpdateWorkQuery(source), admission) ==
-                                TitleUpdateOfflineRecoveryProgress() && coordinator.localDeleteOwners.acknowledge(result, journal, admission) &&
-                                coordinator.localDeleteOwners.complete(result, journal, admission))
-                            assertTrue("No offline preparation, inspection, resend or replacement history", prepares == 0 && sends == 0 && inspections == 0 &&
-                                journal.read(source, attempt, factual) == original && journal.readVerified(source, attempt, factual) == result &&
-                                journal.readCompletion(source, attempt, factual) == completion &&
-                                journal.page(DeleteWorkQuery(source), factual)?.entries?.isEmpty() == true)
-                            if (phase == "ACK") {
-                                assertTrue(prefs.edit().putBoolean("ack_completed", true).putInt("ack_pid", Process.myPid()).commit())
-                                witness("guarded_delete_offline_ack_new_process", "guarded_delete_same_row_ack", "guarded_delete_old_upsert_suppressed")
-                            } else {
-                                assertTrue("REPLAY starts completed and performs no native write", complete && projection.writes.get() == 0 && before == after)
-                                assertTrue(prefs.edit().putBoolean("replay_completed", true).commit())
-                                witness("guarded_delete_replay_new_process", "guarded_delete_replay_no_resend", "guarded_delete_history_immutable")
+                            runOfflineAcknowledgement(phase, interruptionScenario, prefs, source, event, store, journal,
+                                coordinator, operations, projection, factual, ::allowStore, ::values) {
+                                actualPort == null && actualRemote == null && prepares == 0 && sends == 0 && inspections == 0
                             }
                         }
                     } finally {
@@ -538,6 +576,148 @@ class CalendarDeleteGuardedJourneyLiveDeviceTest {
             jobs.coroutineContext[Job]!!.cancelAndJoin()
             native.admitOperation = { false }
         }
+    }
+
+    /** Keep offline acknowledgement in a separate coroutine to bound generated method size. */
+    private suspend fun runOfflineAcknowledgement(
+        phase: String, interruptionScenario: Boolean, prefs: android.content.SharedPreferences,
+        source: CalendarScope, event: EventId, store: ImportStore, journal: DeleteRecoveryJournal,
+        coordinator: ImportCoordinator, operations: CoordinatorSystemDeleteOperations,
+        projection: IsolatedProjection, factual: (CalendarScope) -> Boolean,
+        allowStore: () -> Unit, values: () -> Map<String, String?>, noTraffic: () -> Boolean,
+    ) {
+        fun frozen(key: String) = checkNotNull(prefs.getString(key, null))
+        fun id(key: String) = MutationId(frozen(key))
+        fun witness(vararg names: String) = InstrumentationRegistry.getInstrumentation().sendStatus(0,
+            Bundle().apply { names.forEach { putBoolean(it, true) } })
+        val app = compose.activity.application
+        val prefix = "calendar-delete-guarded-v1-${frozen("token")}"
+        assertTrue("Recovery requires completed SEND in another process", prefs.getBoolean("submit_completed", false) &&
+            prefs.getInt("submit_pid", -1) > 0 && prefs.getInt("submit_pid", -1) != Process.myPid())
+        if (interruptionScenario) assertTrue("ACK and replay require successful inspection in another process",
+            prefs.getInt("interruption_inspect_pid", -1) > 0 && prefs.getInt("interruption_inspect_pid", -1) != Process.myPid())
+        if (phase == "REPLAY") assertTrue("REPLAY requires ACK in another process", prefs.getBoolean("ack_completed", false) &&
+            prefs.getInt("ack_pid", -1) > 0 && prefs.getInt("ack_pid", -1) != Process.myPid())
+        val attempt = id("attempt_id")
+        val original = checkNotNull(journal.read(source, attempt, factual))
+        val result = checkNotNull(journal.readVerified(source, attempt, factual))
+        assertTrue("Bind immutable request and proof before recovery",
+            frozen("attempt_hash") == bytesHash(DeleteAttemptStorageCodec.encode(original)) &&
+                frozen("result_hash") == bytesHash(DeleteProofStorageCodec.encodeResult(result)))
+        val before = values()
+        val complete = journal.readCompletion(source, attempt, factual) != null
+        val admission = coordinator.systemDeleteProofAdmission(source)
+        val progress = operations.recoverOffline(TitleUpdateWorkQuery(source), admission)
+        assertTrue("Recover the one durable deletion without HTTP", progress ==
+            if (complete) TitleUpdateOfflineRecoveryProgress() else TitleUpdateOfflineRecoveryProgress(completed = 1))
+        allowStore()
+        val receipt = checkNotNull(store.deleteAcknowledgement(source, event, attempt))
+        val completion = checkNotNull(journal.readCompletion(source, attempt, factual))
+        val after = values()
+        assertTrue("Keep deleted row, restore exact ACK and durable completion", after[Events.DELETED] == "1" &&
+            after[Events.DIRTY] == "0" && receipt.state == DeleteAcknowledgementState.RESTORED &&
+            receipt.receipt.matches(DeleteSubmissionObservation.Verified(result.record)) &&
+            completion == DeleteCompletion.of(result, receipt))
+        assertTrue("Only ACK metadata and Provider-cleared mutator history may change", (before - ACK_FIELDS) == (after - ACK_FIELDS) &&
+            after[Events.MUTATORS] == null &&
+            projection.writes.get() == if (complete) 0 else 1)
+        allowStore()
+        store.transaction(source) { putRemote(original.intent.base); putProjection(ProjectionIntent(source, original.intent.base)) }
+        store.requeueAll(source)
+        assertTrue("A staged old upsert cannot recreate the acknowledged deletion", store.pending(source).isEmpty() &&
+            store.stabilizedProjection(source, event) == null && values() == after)
+        assertTrue("Completed deletion is idempotent", operations.recoverOffline(TitleUpdateWorkQuery(source), admission) ==
+            TitleUpdateOfflineRecoveryProgress() && coordinator.localDeleteOwners.acknowledge(result, journal, admission) &&
+            coordinator.localDeleteOwners.complete(result, journal, admission))
+        assertTrue("No offline preparation, inspection, resend or replacement history", noTraffic() &&
+            journal.read(source, attempt, factual) == original && journal.readVerified(source, attempt, factual) == result &&
+            journal.readCompletion(source, attempt, factual) == completion &&
+            journal.page(DeleteWorkQuery(source), factual)?.entries?.isEmpty() == true)
+        if (interruptionScenario) {
+            assertTrue("Completion preserves the original UNKNOWN history", original.protectedEvidence == null &&
+                frozen("interruption_unknown_hash") == bytesHash(DeleteAttemptStorageCodec.encode(original)) &&
+                deleteHistoryCount(app, prefix, source) == 1)
+            witness(if (phase == "ACK") "guarded_delete_interruption_ack" else "guarded_delete_interruption_replay")
+        }
+        if (phase == "ACK") {
+            assertTrue(prefs.edit().putBoolean("ack_completed", true).putInt("ack_pid", Process.myPid()).commit())
+            witness("guarded_delete_offline_ack_new_process", "guarded_delete_same_row_ack", "guarded_delete_old_upsert_suppressed")
+        } else {
+            assertTrue("REPLAY starts completed and performs no native write", complete && projection.writes.get() == 0 && before == after)
+            assertTrue(prefs.edit().putBoolean("replay_completed", true).commit())
+            witness("guarded_delete_replay_new_process", "guarded_delete_replay_no_resend", "guarded_delete_history_immutable")
+        }
+    }
+
+    private suspend fun assertInterruptionState(
+        prefs: android.content.SharedPreferences, source: CalendarScope, event: EventId, content: EventContent,
+        store: ImportStore, journal: DeleteRecoveryJournal, factual: (CalendarScope) -> Boolean,
+        row: Map<String, String?>,
+    ): DeleteAttemptRecord {
+        fun frozen(key: String) = checkNotNull(prefs.getString(key, null))
+        val attempt = MutationId(frozen("attempt_id"))
+        val record = checkNotNull(journal.read(source, attempt, factual))
+        val reservation = checkNotNull(store.deleteAcknowledgement(source, event, attempt))
+        assertTrue("Bind the original full UNKNOWN request, source, base, owner, native row and pending receipt",
+            prefs.getBoolean("evidence_interrupted", false) && prefs.getBoolean("delete_requested", false) &&
+                !prefs.getBoolean("submit_completed", false) && !prefs.getBoolean("ack_completed", false) &&
+                record.state == DeleteAttemptState.OUTCOME_UNKNOWN && record.protectedEvidence == null &&
+                record.scope == source && record.eventId == event && record.intent.id.value == frozen("intent_id") &&
+                record.id == DeleteAttemptIdentity.requestId(record.intent, record.format) &&
+                record.format == AdapterFormat(frozen("interruption_format_id"), prefs.getInt("interruption_format_version", -1)) &&
+                record.intent.content == content && record.intent.base.content == content &&
+                frozen("interruption_unknown_hash") == bytesHash(DeleteAttemptStorageCodec.encode(record)) &&
+                frozen("interruption_native_hash") == nativeHash(row) && row[Events.DELETED] == "1" && row[Events.DIRTY] == "1" &&
+                store.localDelete(source, event) == record.intent && store.projectedBaseline(source, event) == record.intent.base &&
+                store.transaction(source) { remote(event) } == record.intent.base &&
+                reservation.state == DeleteAcknowledgementState.PENDING && reservation.receipt.intent == record.intent &&
+                reservation.receipt.attempt == DeleteAttemptIdentity.of(record) &&
+                journal.readVerified(source, attempt, factual) == null && journal.readCompletion(source, attempt, factual) == null)
+        assertTrue("Preserve the original reserved receipt", frozen("interruption_ack_nonce") == reservation.receipt.nonce)
+        return record
+    }
+
+    private suspend fun runUnknownReplay(
+        prefs: android.content.SharedPreferences, source: CalendarScope, event: EventId, content: EventContent,
+        store: ImportStore, journal: DeleteRecoveryJournal, coordinator: ImportCoordinator,
+        operations: CoordinatorSystemDeleteOperations, projection: IsolatedProjection,
+        factual: (CalendarScope) -> Boolean, allowStore: () -> Unit, values: () -> Map<String, String?>,
+        offlinePorts: Boolean, noTraffic: () -> Boolean,
+    ) {
+        assertTrue("UNKNOWN replay requires a separate process with no HTTP composition", offlinePorts &&
+            prefs.getInt("interruption_pid", -1) > 0 && prefs.getInt("interruption_pid", -1) != Process.myPid())
+        allowStore()
+        val before = values()
+        val original = assertInterruptionState(prefs, source, event, content, store, journal, factual, before)
+        val reservation = checkNotNull(store.deleteAcknowledgement(source, event, original.id))
+        val prefix = "calendar-delete-guarded-v1-${checkNotNull(prefs.getString("token", null))}"
+        val app = compose.activity.application
+        assertTrue("Replay starts with exactly one history", deleteHistoryCount(app, prefix, source) == 1)
+        assertTrue("Enable the isolated normal process admission so UNKNOWN is exercised",
+            coordinator.systemDeleteRunAdmission(source)(source))
+        var wakes = 0
+        assertTrue("Normal process traverses the UNKNOWN guard without preparation or submission", !operations.process(source,
+            RetainedLocalChangeRef(event, original.intent.id, MutationKind.DELETE, LocalEditState.PAUSED),
+            MutationId("unused-traversal-candidate"), Instant.parse(checkNotNull(prefs.getString("timestamp", null))),
+            coordinator.systemDeleteRunAdmission(source)) { wakes++ })
+        assertTrue("Offline recovery holds the unresolved request", operations.recoverOffline(TitleUpdateWorkQuery(source),
+            coordinator.systemDeleteProofAdmission(source)) == TitleUpdateOfflineRecoveryProgress(held = 1))
+        allowStore()
+        assertTrue("Replay keeps the full owner, receipt, native row and immutable single history", noTraffic() && wakes == 0 &&
+            projection.writes.get() == 0 && values() == before &&
+            assertInterruptionState(prefs, source, event, content, store, journal, factual, values()) == original &&
+            store.deleteAcknowledgement(source, event, original.id) == reservation && deleteHistoryCount(app, prefix, source) == 1)
+        assertTrue("The first replay witness and success must be retained atomically",
+            prefs.getBoolean("unknown_replayed", false) == prefs.contains("unknown_replay_pid") &&
+                (!prefs.contains("unknown_replay_pid") || prefs.getInt("unknown_replay_pid", -1) > 0))
+        val replayEdit = prefs.edit().putBoolean("unknown_replayed", true)
+        if (!prefs.contains("unknown_replay_pid")) replayEdit.putInt("unknown_replay_pid", Process.myPid())
+        assertTrue(replayEdit.commit())
+        InstrumentationRegistry.getInstrumentation().sendStatus(0, Bundle().apply {
+            putBoolean("guarded_delete_interruption_unknown_replay", true)
+            putBoolean("guarded_delete_interruption_no_http_or_ack", true)
+            putBoolean("guarded_delete_interruption_history_immutable", true)
+        })
     }
 
     /** Separate coroutine state machine keeps conflict checks out of the normal journey. */
@@ -678,6 +858,17 @@ class CalendarDeleteGuardedJourneyLiveDeviceTest {
 
     companion object {
         private val ACK_FIELDS = setOf(Events.DIRTY, Events.SYNC_DATA3, Events.MUTATORS)
+        private fun nativeHash(row: Map<String, String?>) = framedHash(*row.toSortedMap().flatMap {
+            listOf(it.key, if (it.value == null) "NULL" else "VALUE", it.value.orEmpty())
+        }.toTypedArray())
+        private fun deleteHistoryCount(context: Context, prefix: String, source: CalendarScope): Int =
+            android.database.sqlite.SQLiteDatabase.openDatabase(context.getDatabasePath("$prefix-shared-attempts.db").path,
+                null, android.database.sqlite.SQLiteDatabase.OPEN_READONLY).use { database ->
+                database.rawQuery("SELECT count(*) FROM delete_attempts WHERE account=? AND calendar=? AND generation=?",
+                    arrayOf(source.account.value, source.calendar.value, source.generation.toString())).use { cursor ->
+                    check(cursor.moveToFirst()); cursor.getInt(0)
+                }
+            }
         private fun bytesHash(bytes: ByteArray) = MessageDigest.getInstance("SHA-256").digest(bytes)
             .joinToString("") { "%02x".format(it.toInt() and 0xff) }
         private fun framedHash(vararg parts: String): String {
