@@ -49,7 +49,8 @@ calendar and event, with membership/context rechecked afterward. A generic HTTP
 404, missing list entry, failed scan, lost access, malformed reply, cancellation or
 network error is not deletion evidence. Absence establishes current convergence,
 not causal attribution, immutable remote history or a server lock. This scoped
-2501 interpretation is qualified on a controlled disposable ordinary timed event.
+2501 interpretation is qualified on controlled disposable ordinary timed and
+all-day events.
 The bounded parser
 accepts only the exact authenticated event route, status 200/400/404/422 and the
 expected structured error fields. Optional `Details` must be an empty object;
@@ -111,14 +112,26 @@ stale replay and stays held; no ordering is invented from opaque revisions.
 
 ## Qualification
 
-Disposable ordinary timed events pass actual `foundation.e.calendar` deletion,
+Disposable ordinary timed, single-day and three-day events pass actual `foundation.e.calendar` deletion,
 production worker RUN and fresh-process REPLAY with one immutable request and
 exact restoration of the five target modes. A separate service journey passes
 restarted inspection without another send, deferred ACK, new-process local
 acknowledgement and replay. Physical isolated tests cover native conflicts,
 lost replies, source/policy loss, SQL rollback and interrupted incoming projection.
-Real remote-conflict, all-day service deletion, further network/power interruption
-profiles and Samsung/One UI remain unqualified.
+All-day worker fixtures freeze the civil-date profile before creation, verify UTC
+midnight and exclusive end bounds before editor deletion and after acknowledgement,
+and retain the exact history through active fresh-process replay. Bounded test
+admission accepts previous completed deletions only with full journal/result/
+completion, exact SQL/native receipts and unchanged clean deleted rows and children;
+unresolved unrelated work is never exempted. Production admission is unchanged.
+A real simple-event preflight conflict also preserves the full authenticated
+variant after an official-editor title save changed the event zone from `Z` to
+`Europe/Paris` without changing its instants. The wire stays PREPARED, the local
+owner becomes CONFLICT, and no DELETE claim, result, completion or native ACK is
+allowed. Local evidence review and fresh-process offline replay preserve the
+complete dossier and request; the modified service event remains available.
+This does not qualify every production-worker conflict path, atomic remote
+preconditions, further network/power interruptions or Samsung/One UI.
 Existing retained synthetic events must not be used as disposable fixtures.
 Detailed measured evidence is recorded in [validation](VALIDATION.md); passing fake
 boundaries alone does not qualify the service, Provider, editor or WorkManager.

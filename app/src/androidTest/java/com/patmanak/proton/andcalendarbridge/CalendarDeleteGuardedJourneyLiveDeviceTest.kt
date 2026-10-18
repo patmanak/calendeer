@@ -16,6 +16,7 @@ import com.patmanak.proton.andcalendarbridge.data.importing.*
 import com.patmanak.proton.andcalendarbridge.data.outgoing.*
 import com.patmanak.proton.andcalendarbridge.data.serialization.DeleteAttemptStorageCodec
 import com.patmanak.proton.andcalendarbridge.data.serialization.DeleteProofStorageCodec
+import com.patmanak.proton.andcalendarbridge.data.serialization.TextUpdateAcknowledgementCodec
 import com.patmanak.proton.andcalendarbridge.protonauth.ProtonDeleteInspectionProbe
 import com.patmanak.proton.andcalendarbridge.protonauth.ProtonAuthentication
 import com.patmanak.proton.andcalendarbridge.protonauth.ProtonCreateSubmissionProbe
@@ -24,6 +25,7 @@ import com.patmanak.proton.andcalendarbridge.sync.catalog.CalendarSummary
 import java.nio.ByteBuffer
 import java.security.MessageDigest
 import java.time.Instant
+import java.time.ZoneId
 import java.time.ZoneOffset
 import java.time.temporal.ChronoUnit
 import java.util.UUID
@@ -37,9 +39,17 @@ import org.junit.Test
 
 /** Opt-in disposable real-service event, isolated native calendar and persistent journals.
  * Arguments: liveDeleteJourney=true, deleteFixtureToken (12 lowercase hex),
- * deleteAccountHash (SHA-256), deleteJourneyPhase=PREPARE|SEND|LOCAL|INSPECT|ACK|REPLAY.
+ * deleteAccountHash (SHA-256), deleteJourneyScenario=NORMAL|REMOTE_CONFLICT (default NORMAL),
+ * deleteJourneyPhase=PREPARE|SEND|LOCAL|INSPECT|ACK|REPLAY|CONFLICT|CONFLICT_REVIEW|CONFLICT_REPLAY.
+ * deleteConflictExpectedZone defaults to Z and is frozen during fresh PREPARE; an
+ * official-editor zone change must be declared explicitly. CONFLICT_REVIEW audits an
+ * already entered preflight locally and can bind a missing legacy expected zone once.
  * PREPARE opens only the dedicated event in foundation.e.calendar. The external operator
  * must delete it there before SEND. Stop the process before ACK and again before REPLAY.
+ * REMOTE_CONFLICT uses a fresh token: PREPARE also seals the genuine DELETE wire before
+ * the operator deletes that native row and changes only its title in official Proton to
+ * "Calendeer QA — retained DELETE conflict <token>". CONFLICT is preflight-only;
+ * stop the process before CONFLICT_REPLAY. Retain the modified service event afterwards.
  * Offline sentinels cover this fixture composition, not independent application traffic.
  * No production deletion qualification or user preference is changed. Retain the native
  * tombstone and isolated journals for inspection; the service event is explicitly disposable.
@@ -91,8 +101,13 @@ class CalendarDeleteGuardedJourneyLiveDeviceTest {
         val token = args.getString("deleteFixtureToken").orEmpty()
         val hash = args.getString("deleteAccountHash").orEmpty()
         val phase = args.getString("deleteJourneyPhase").orEmpty()
+        val scenario = args.getString("deleteJourneyScenario") ?: "NORMAL"
+        val conflictScenario = scenario == "REMOTE_CONFLICT"
+        val expectedConflictZone = ZoneId.of(args.getString("deleteConflictExpectedZone") ?: "Z")
         assertTrue("Require explicit fixture, account and phase", token.matches(Regex("[a-f0-9]{12}")) &&
-            hash.matches(Regex("[a-f0-9]{64}")) && phase in setOf("PREPARE", "SEND", "LOCAL", "INSPECT", "ACK", "REPLAY"))
+            hash.matches(Regex("[a-f0-9]{64}")) && scenario in setOf("NORMAL", "REMOTE_CONFLICT") &&
+            phase in (if (conflictScenario) setOf("PREPARE", "CONFLICT", "CONFLICT_REVIEW", "CONFLICT_REPLAY")
+                else setOf("PREPARE", "SEND", "LOCAL", "INSPECT", "ACK", "REPLAY")))
         val app = compose.activity.application as BridgeApplication
         compose.waitUntil(60_000) { app.imports.state.value.let {
             it.authenticated && it.selections.isNotEmpty() && !it.busy
@@ -115,6 +130,8 @@ class CalendarDeleteGuardedJourneyLiveDeviceTest {
             assertTrue("Only PREPARE can enroll a new disposable fixture", phase == "PREPARE")
             val start = Instant.now().plus(2, ChronoUnit.DAYS).truncatedTo(ChronoUnit.HOURS)
             assertTrue("Freeze fixture identities before CREATE", prefs.edit().putString("token", token)
+                .putString("scenario", scenario)
+                .putString("conflict_expected_zone", expectedConflictZone.id)
                 .putString("account_hash", hash).putString("account", source.account.value)
                 .putString("calendar", source.calendar.value).putLong("generation", source.generation)
                 .putString("source_calendar_name", calendarName)
@@ -126,6 +143,18 @@ class CalendarDeleteGuardedJourneyLiveDeviceTest {
         }
         fun frozen(key: String) = checkNotNull(prefs.getString(key, null))
         fun id(key: String) = MutationId(frozen(key))
+        assertTrue("Never change the frozen scenario; legacy fixtures are NORMAL",
+            (prefs.getString("scenario", null) ?: "NORMAL") == scenario)
+        if (conflictScenario) {
+            val frozenZone = prefs.getString("conflict_expected_zone", null)
+            assertTrue("Never override a frozen expected conflict zone", frozenZone == expectedConflictZone.id ||
+                (frozenZone == null && (expectedConflictZone.id == "Z" || phase == "CONFLICT_REVIEW")))
+            if (phase == "CONFLICT_REVIEW" && frozenZone == null)
+                assertTrue("Legacy review must explicitly declare its expected zone", args.containsKey("deleteConflictExpectedZone"))
+        }
+        if (conflictScenario && phase == "PREPARE") assertTrue("Conflict enrollment cannot replace any existing DELETE history",
+            !prefs.getBoolean("prepared", false) && !prefs.contains("attempt_id") &&
+                !prefs.getBoolean("delete_requested", false) && !prefs.getBoolean("conflict_entered", false))
         assertTrue("Never move or replace an enrolled fixture", frozen("token") == token && frozen("account_hash") == hash &&
             frozen("account") == source.account.value && frozen("calendar") == source.calendar.value &&
             prefs.getLong("generation", -1) == source.generation && frozen("source_calendar_name") == calendarName)
@@ -253,6 +282,29 @@ class CalendarDeleteGuardedJourneyLiveDeviceTest {
                     if (store.projectedBaseline(source, original.eventId) == null)
                         assertTrue(store.acknowledge(ProjectionIntent(source, original)) == 1)
                     assertTrue(store.projectedBaseline(source, original.eventId) == original)
+                    if (conflictScenario) {
+                        assertTrue("Conflict PREPARE is fresh and never replaces DELETE history",
+                            !prefs.getBoolean("prepared", false) && !prefs.contains("attempt_id") &&
+                                store.localDelete(source, original.eventId) == null)
+                        val deletePort = ProtonAuthentication.deletions(app)
+                        val intent = DeleteSubmissionPolicy.freezeIntent(LocalDeleteIntent(id("intent_id"), source,
+                            remote.format, original, content))
+                        val attempt = DeleteAttemptIdentity.requestId(intent, checkNotNull(deletePort.deleteFormat))
+                        TitleUpdateAttemptStore(app, "$prefix-shared-attempts.db").use { shared ->
+                            val admit: (CalendarScope) -> Boolean = { it == source && accessible() }
+                            assertTrue("No earlier DELETE history may be reused",
+                                shared.deleteJournal.page(DeleteWorkQuery(source), admit)?.entries?.isEmpty() == true &&
+                                    shared.deleteJournal.read(source, attempt, admit) == null)
+                            // Preparation needs the unchanged authenticated baseline. The later real
+                            // submit performs the conflict preflight after the external operator edit.
+                            val record = checkNotNull(deletePort.prepareSubmission(attempt, intent, admit))
+                            assertTrue("Freeze the genuine unclaimed wire", record.id == attempt && record.intent == intent &&
+                                record.state == DeleteAttemptState.PREPARED && record.protectedEvidence == null &&
+                                shared.deleteJournal.remember(record, admit))
+                            assertTrue(prefs.edit().putString("attempt_id", attempt.value)
+                                .putString("conflict_wire_hash", bytesHash(DeleteAttemptStorageCodec.encode(record))).commit())
+                        }
+                    }
                     assertTrue(prefs.edit().putBoolean("prepared", true).commit())
                     compose.runOnUiThread {
                         compose.activity.startActivity(Intent(Intent.ACTION_VIEW,
@@ -267,7 +319,7 @@ class CalendarDeleteGuardedJourneyLiveDeviceTest {
                     val journal = shared.deleteJournal
                     shared.admitDispatch = { error("No title dispatch in deletion fixture") }
                     val factual: (CalendarScope) -> Boolean = { it == source && accessible() }
-                    val consent = AtomicBoolean(phase in setOf("SEND", "INSPECT"))
+                    val consent = AtomicBoolean(phase in setOf("SEND", "INSPECT", "CONFLICT"))
                     val coordinator = ImportCoordinator(app, store, remote, projection, jobs, scheduler,
                         systemCreatesEnabled = { it == source && accessible() }, systemTitlesEnabled = { false },
                         systemTextsEnabled = { false }, systemTimesEnabled = { false },
@@ -276,8 +328,10 @@ class CalendarDeleteGuardedJourneyLiveDeviceTest {
                         coordinator.authenticationChanged(true)
                         withTimeout(10_000) { while (schedules.get() == 0) delay(10) }
                         val event = EventId(frozen("event"))
-                        val actualPort = if (phase in setOf("SEND", "INSPECT")) ProtonAuthentication.deletions(app) else null
+                        val actualPort = if (phase in setOf("SEND", "INSPECT", "CONFLICT")) ProtonAuthentication.deletions(app) else null
                         var prepares = 0; var sends = 0; var inspections = 0
+                        var claims = 0
+                        var conflictReturned: DeleteSubmissionObservation.Conflict? = null
                         var wireReturned = false; var verifiedReturned = false
                         val port = object : CalendarDeleteSubmissionPort {
                             override val deleteFormat get() = actualPort?.deleteFormat
@@ -293,11 +347,22 @@ class CalendarDeleteGuardedJourneyLiveDeviceTest {
                             override suspend fun submit(record: DeleteAttemptRecord, journal: DeleteAttemptJournal,
                                 admit: (CalendarScope) -> Boolean, qualifySource: suspend (CalendarScope) -> Boolean,
                                 admitEvidence: (CalendarScope) -> Boolean): DeleteSubmissionObservation {
-                                sends++; check(phase == "SEND" && actualPort != null)
+                                sends++; check(phase in setOf("SEND", "CONFLICT") && actualPort != null)
                                 assertTrue("Never resend a requested DELETE", !prefs.getBoolean("delete_requested", false) &&
                                     record.id.value == frozen("attempt_id"))
-                                assertTrue(prefs.edit().putBoolean("delete_requested", true).putInt("submit_pid", Process.myPid()).commit())
-                                return actualPort.submit(record, journal, admit, qualifySource, admitEvidence).also {
+                                if (phase == "SEND") assertTrue(prefs.edit().putBoolean("delete_requested", true)
+                                    .putInt("submit_pid", Process.myPid()).commit())
+                                else assertTrue("Conflict preflight cannot be entered twice",
+                                    !prefs.getBoolean("conflict_entered", false) &&
+                                        prefs.edit().putBoolean("conflict_entered", true).commit())
+                                val guarded = if (phase == "CONFLICT") object : DeleteAttemptJournal by journal {
+                                    override suspend fun claim(expected: DeleteAttemptRecord, admit: (CalendarScope) -> Boolean): Boolean {
+                                        claims++
+                                        error("Conflict fixture forbids claiming or sending DELETE")
+                                    }
+                                } else journal
+                                return actualPort.submit(record, guarded, admit, qualifySource, admitEvidence).also {
+                                    if (it is DeleteSubmissionObservation.Conflict) conflictReturned = it
                                     if (it is DeleteSubmissionObservation.Verified) {
                                         verifiedReturned = true
                                         consent.set(false); coordinator.systemCreatePolicyChanged(source, true)
@@ -316,13 +381,27 @@ class CalendarDeleteGuardedJourneyLiveDeviceTest {
                             }
                         }
                         val owners = object : SystemDeleteLocalOwner by coordinator.localDeleteOwners {
+                            override suspend fun complete(result: DeleteVerifiedResult, journal: DeleteRecoveryJournal,
+                                admit: (CalendarScope) -> Boolean): Boolean =
+                                if (conflictScenario) error("Conflict fixture forbids completion")
+                                else coordinator.localDeleteOwners.complete(result, journal, admit)
                             override suspend fun acknowledge(result: DeleteVerifiedResult, journal: DeleteRecoveryJournal,
                                 admit: (CalendarScope) -> Boolean): Boolean =
-                                if (phase in setOf("SEND", "INSPECT")) false else coordinator.localDeleteOwners.acknowledge(result, journal, admit)
+                                if (conflictScenario) error("Conflict fixture forbids native ACK")
+                                else if (phase in setOf("SEND", "INSPECT")) false else coordinator.localDeleteOwners.acknowledge(result, journal, admit)
                         }
                         val operations = CoordinatorSystemDeleteOperations(owners, journal, port,
                             discoverLocal = { error("Only the exact enrolled deletion owner may be supplied") },
                             evidenceAdmission = coordinator::systemDeleteEvidenceAdmission)
+                        if (conflictScenario) {
+                            runRemoteConflict(phase, token, expectedConflictZone, prefs, source, event, content, timestamp, store, journal,
+                                coordinator, operations, projection, factual, ::allowStore, ::values,
+                                actualPort == null && actualRemote == null, { conflictReturned }) {
+                                prepares == 0 && inspections == 0 && claims == 0 && !verifiedReturned &&
+                                    sends == (if (phase == "CONFLICT") 1 else 0)
+                            }
+                            return@runBlocking
+                        }
                         if (phase == "LOCAL") {
                             // Local protected evidence only: no preparation, submission,
                             // inspection, native write or result retention is reachable.
@@ -459,6 +538,142 @@ class CalendarDeleteGuardedJourneyLiveDeviceTest {
             jobs.coroutineContext[Job]!!.cancelAndJoin()
             native.admitOperation = { false }
         }
+    }
+
+    /** Separate coroutine state machine keeps conflict checks out of the normal journey. */
+    private suspend fun runRemoteConflict(
+        phase: String, token: String, expectedZone: ZoneId, prefs: android.content.SharedPreferences,
+        source: CalendarScope, event: EventId, content: EventContent, timestamp: Instant,
+        store: ImportStore, journal: DeleteRecoveryJournal, coordinator: ImportCoordinator,
+        operations: CoordinatorSystemDeleteOperations, projection: IsolatedProjection,
+        factual: (CalendarScope) -> Boolean, allowStore: () -> Unit, values: () -> Map<String, String?>,
+        offlinePorts: Boolean, conflictObservation: () -> DeleteSubmissionObservation.Conflict?,
+        trafficIsExpected: () -> Boolean,
+    ) {
+        fun frozen(key: String) = checkNotNull(prefs.getString(key, null))
+        fun id(key: String) = MutationId(frozen(key))
+        fun witness(vararg names: String) = InstrumentationRegistry.getInstrumentation().sendStatus(0,
+            Bundle().apply { names.forEach { putBoolean(it, true) } })
+        val expectedContent = content.copy(title = "Calendeer QA — retained DELETE conflict $token",
+            time = (content.time as EventTime.Timed).copy(zone = expectedZone))
+        assertTrue("Conflict journeys never accept requested or completed deletion history",
+            !prefs.getBoolean("delete_requested", false) && !prefs.getBoolean("submit_completed", false) &&
+                !prefs.getBoolean("ack_completed", false))
+        val attempt = id("attempt_id")
+        val original = checkNotNull(journal.read(source, attempt, factual))
+        assertTrue("Require exact frozen unclaimed preparation", original.state == DeleteAttemptState.PREPARED &&
+            original.protectedEvidence == null && original.intent.id == id("intent_id") &&
+            original.eventId == event && original.intent.content == content && original.intent.base.content == content &&
+            original.id == DeleteAttemptIdentity.requestId(original.intent, original.format) &&
+            frozen("conflict_wire_hash") == bytesHash(DeleteAttemptStorageCodec.encode(original)) &&
+            journal.readVerified(source, attempt, factual) == null &&
+            journal.readCompletion(source, attempt, factual) == null)
+        val before = values()
+        assertTrue("Conflict requires the exact editor tombstone",
+            before[Events.DELETED] == "1" && before[Events.DIRTY] == "1")
+        fun nativeHash(row: Map<String, String?>) = framedHash(*row.toSortedMap().flatMap {
+            listOf(it.key, if (it.value == null) "NULL" else "VALUE", it.value.orEmpty())
+        }.toTypedArray())
+        var wakes = 0
+        if (phase == "CONFLICT") {
+            assertTrue("Conflict is first-preflight-only with no existing local owner",
+                !prefs.getBoolean("conflict_entered", false) && !prefs.getBoolean("conflict_completed", false) &&
+                    store.localDelete(source, event) == null &&
+                    store.deleteAcknowledgement(source, event, attempt) == null &&
+                    store.conflictArchives(ConflictArchiveQuery(source)).entries.isEmpty())
+            assertTrue("Capture only the exact enrolled tombstone",
+                coordinator.captureLocalDelete(source, event, id("intent_id")) == LocalEditCaptureResult.RETAINED)
+            allowStore()
+            assertTrue("Captured owner must match prepared wire", store.localDelete(source, event) == original.intent)
+            assertTrue("Guarded conflict orchestration must succeed", !operations.process(source,
+                RetainedLocalChangeRef(event, id("intent_id"), MutationKind.DELETE, LocalEditState.PAUSED),
+                MutationId("unused-traversal-candidate"), timestamp, coordinator.systemDeleteRunAdmission(source)) { wakes++ })
+            val observed = checkNotNull(conflictObservation())
+            assertTrue("Require typed authenticated title conflict with the declared editor zone before claim",
+                observed.record == original && observed.event.eventId == event &&
+                    observed.event != original.intent.base && observed.event.content ==
+                    expectedContent &&
+                    trafficIsExpected() && wakes == 0)
+        } else if (phase == "CONFLICT_REVIEW") {
+            assertTrue("Local review requires the already entered first preflight and offline ports",
+                prefs.getBoolean("conflict_entered", false) && offlinePorts)
+        } else {
+            assertTrue("Conflict replay requires successful preflight in another process",
+                prefs.getBoolean("conflict_completed", false) &&
+                    prefs.getInt("conflict_pid", -1) > 0 && prefs.getInt("conflict_pid", -1) != Process.myPid() &&
+                    offlinePorts)
+        }
+        allowStore()
+        val owner = checkNotNull(store.localDelete(source, event))
+        val refs = store.conflictArchives(ConflictArchiveQuery(source))
+        assertTrue("Retain one exact conflict owner and dossier", owner == original.intent.copy(state = LocalEditState.CONFLICT) &&
+            refs.next == null && refs.entries.size == 1)
+        val ref = refs.entries.single()
+        assertTrue("Bind archive to exact DELETE owner", ref.eventId == event && ref.mutationId == owner.id && ref.kind == MutationKind.DELETE)
+        val detail = checkNotNull(store.conflictArchive(ref))
+        val observations = store.conflictObservations(ConflictObservationQuery(ref))
+        val received = observations.entries.filter { it.origin == ConflictObservationOrigin.RECEIVED }
+        val retained = received.singleOrNull()?.change as? RemoteChange.Upsert
+        assertTrue("Retain full original and full observed variant with the declared editor zone", detail.base == original.intent.base &&
+            detail.local == content && detail.format == owner.format && observations.next == null &&
+            retained != null && retained.eventId == event && retained.content ==
+            expectedContent &&
+            received.single().kind == ConflictObservationKind.VERIFIED && received.single().format == owner.format &&
+            (phase != "CONFLICT" || retained == conflictObservation()?.event))
+        val archiveHash = framedHash(ref.id.toString(), owner.state.name,
+            TextUpdateAcknowledgementCodec.encodeChange(detail.base).toString(),
+            *observations.entries.flatMap { observation -> listOf(observation.id.toString(), observation.kind.name,
+                observation.origin.name, observation.observedAt?.toString().orEmpty(),
+                observation.format?.id.orEmpty(), observation.format?.version?.toString().orEmpty(),
+                observation.change?.let { TextUpdateAcknowledgementCodec.encodeChange(it).toString() }.orEmpty(),
+                observation.deferredReason?.name.orEmpty()) }.toTypedArray())
+        val reservation = checkNotNull(store.deleteAcknowledgement(source, event, attempt))
+        if (phase == "CONFLICT_REPLAY") {
+            assertTrue("Restart retains immutable native row and full conflict evidence",
+                nativeHash(before) == frozen("conflict_native_hash") && archiveHash == frozen("conflict_archive_hash") &&
+                    reservation.receipt.nonce == frozen("conflict_ack_nonce"))
+            assertTrue("Offline recovery holds the unclaimed conflict without HTTP or ACK",
+                operations.recoverOffline(TitleUpdateWorkQuery(source), coordinator.systemDeleteProofAdmission(source)) ==
+                    TitleUpdateOfflineRecoveryProgress(held = 1))
+        }
+        allowStore()
+        assertTrue("No claim, evidence, completion, ACK or native mutation",
+            trafficIsExpected() && wakes == 0 &&
+                journal.read(source, attempt, factual) == original &&
+                journal.readVerified(source, attempt, factual) == null && journal.readCompletion(source, attempt, factual) == null &&
+                reservation.state == DeleteAcknowledgementState.PENDING && reservation.receipt.intent == original.intent &&
+                store.deleteAcknowledgement(source, event, attempt) == reservation &&
+                store.localDelete(source, event) == owner && projection.writes.get() == 0 && values() == before)
+        val afterRefs = store.conflictArchives(ConflictArchiveQuery(source))
+        val afterDetail = checkNotNull(store.conflictArchive(ref))
+        val afterObservations = store.conflictObservations(ConflictObservationQuery(ref))
+        assertTrue("Offline traversal cannot alter full conflict dossier", afterRefs.entries == refs.entries &&
+            afterRefs.next == refs.next && afterDetail.format == detail.format && afterDetail.base == detail.base &&
+            afterDetail.local == detail.local && afterObservations.next == observations.next &&
+            afterObservations.entries.size == observations.entries.size &&
+            afterObservations.entries.zip(observations.entries).all { (after, beforeObservation) ->
+                after.id == beforeObservation.id && after.kind == beforeObservation.kind &&
+                    after.origin == beforeObservation.origin && after.observedAt == beforeObservation.observedAt &&
+                    after.format == beforeObservation.format && after.change == beforeObservation.change &&
+                    after.deferredReason == beforeObservation.deferredReason
+            })
+        if (phase in setOf("CONFLICT", "CONFLICT_REVIEW")) {
+            assertTrue("Bind a legacy zone only after full immutable local conflict validation",
+                prefs.getString("conflict_expected_zone", null)?.let { it == expectedZone.id } ?: (phase == "CONFLICT_REVIEW"))
+            if (prefs.getBoolean("conflict_completed", false)) {
+                assertTrue("Completed local review never replaces frozen conflict evidence",
+                    phase == "CONFLICT_REVIEW" && nativeHash(before) == frozen("conflict_native_hash") &&
+                        archiveHash == frozen("conflict_archive_hash") && reservation.receipt.nonce == frozen("conflict_ack_nonce"))
+            } else assertTrue(prefs.edit().putBoolean("conflict_completed", true).putInt("conflict_pid", Process.myPid())
+                    .putString("conflict_expected_zone", expectedZone.id)
+                    .putString("conflict_native_hash", nativeHash(before)).putString("conflict_archive_hash", archiveHash)
+                    .putString("conflict_ack_nonce", reservation.receipt.nonce).commit())
+            if (phase == "CONFLICT") witness("guarded_delete_remote_conflict", "guarded_delete_conflict_preclaim",
+                "guarded_delete_conflict_variant_retained")
+            else witness("guarded_delete_conflict_review_local_only", "guarded_delete_conflict_variant_retained",
+                "guarded_delete_conflict_history_immutable")
+        } else witness("guarded_delete_conflict_replay_new_process", "guarded_delete_conflict_history_immutable",
+            "guarded_delete_conflict_replay_no_http_or_ack")
     }
 
     companion object {

@@ -1,5 +1,62 @@
 # Validation
 
+## All-day deletion through the system editor and worker
+
+PASS: six real instrumented phases qualify `ALL_DAY_SINGLE` and
+`ALL_DAY_MULTIPLE`, each using a new disposable service event and independent
+PREPARE, production RUN and active fresh-process REPLAY. The measured editor is
+`foundation.e.calendar` on Android API 35; Samsung/One UI remains NOT RUN.
+
+Each profile freezes its identity and civil dates before CREATE. Single-day
+bounds are [D, D+1); multiple-day bounds are [D, D+3). The fixture checks UTC
+midnight start/end, exclusive end dates, native identity and the same retained
+row before editor deletion and after acknowledgement. RUN uses normal consent
+setters and WorkManager scheduling. Both profiles retain one immutable request,
+result and completion through restarted replay, with no new attempt and exact
+restoration of the five original modes. No runtime policy, schema or adapter
+change was needed for these profiles.
+
+Bounded fixture admission now permits previous completed DELETE histories only
+after checking the exact owner, protected request, verified result, completion,
+RESTORED SQL receipt and native acknowledgement. The native row must still be
+clean and deleted, with exact content/time/metadata and no children. Only these
+validated owner tuples and row IDs are exempt; unrelated pending work, changed
+rows and old generations remain refused. Independent source review passes.
+
+Debug app/test APK builds pass. This slice changes instrumentation fixtures and
+documentation only; the runtime policy, adapter and schema are unchanged. Earlier
+host-suite and lint results below are separate evidence, not repeated runs.
+
+## Real deletion conflict and local restart recovery
+
+PASS: a new disposable ordinary timed service event was prepared and its isolated
+Android copy deleted through `foundation.e.calendar`. The official Proton Calendar
+editor then changed the synthetic title. Its save also changed the event zone from
+`Z` to `Europe/Paris`, with identical start/end instants and other mapped contents.
+The real guarded adapter returned the authenticated different variant before
+claim, and the coordinator retained the full conflict dossier and original owner.
+
+The initial fixture assertion expected a title-only change and failed on that
+zone difference. Read-only SQL inspection found the exact PREPARED request, a
+CONFLICT owner and the VERIFIED RECEIVED variant. No request was claimed, no
+protected response/result/completion was created, and the native acknowledgement
+remained PENDING. The fixture now freezes an explicit expected editor zone for new
+conflict journeys; an existing missing declaration can be bound only by a fully
+validated local review, never by another send or replacement preparation.
+
+PASS: `CONFLICT_REVIEW` validates that existing dossier with the measured zone and
+unchanged instants, full original/local/observed contents, exact wire hash, receipt
+and dirty deleted native row. The original preflight was not repeated. A separate
+fresh-process `CONFLICT_REPLAY` retains the same complete evidence and holds the
+unclaimed request. This fixture composition has no HTTP, preparation, submission,
+inspection or native acknowledgement path during review/replay. Independent app
+traffic is not claimed to be offline. The modified service event is retained.
+
+Debug app/test APK builds and focused independent source reviews pass. This is a
+controlled simple-event preflight conflict and local restart case; it does not
+qualify an atomic remote write precondition, general conflict resolution, every
+production-worker conflict path, further network/power interruptions or Samsung.
+
 ## Deletion worker and Android acknowledgement
 
 The [deletion contract](DELETE_SUBMISSION.md) now has separate production worker
@@ -60,13 +117,13 @@ The five original target modes are durably restored, including initially read-on
 QA activation after full quiescence checks. Before activation, bounded audits reject
 foreign CREATE work, native changes, local owners/preparations, unfinished
 acknowledgements and invalid/unclosed title/text/time history. Only the enrolled
-deletion in its exact generation is exempt. Other calendars retain existing
+deletion and separately validated completed DELETE histories are exempt. Other calendars retain existing
 consent and may run their authorized work; global silence is not claimed.
 
 Final app JVM cases and debug app/test APK builds pass; lint passes with zero
 errors and 43 warnings. Focused independent reviews and staged-blob confidentiality
-checks pass. Real remote-conflict, all-day service deletion, additional network/
-power interruption and Samsung/One UI qualification remain NOT RUN.
+checks pass. All-day and real preflight-conflict evidence is recorded above.
+Additional network/power interruption and Samsung/One UI qualification remain NOT RUN.
 
 ## Guarded deletion request foundation (earlier slice)
 

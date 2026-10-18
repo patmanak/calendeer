@@ -22,6 +22,7 @@ import com.patmanak.proton.andcalendarbridge.protonauth.ProtonCreateSubmissionPr
 import com.patmanak.proton.andcalendarbridge.sync.*
 import java.security.MessageDigest
 import java.time.Instant
+import java.time.LocalDate
 import java.time.ZoneOffset
 import java.time.temporal.ChronoUnit
 import java.util.UUID
@@ -35,7 +36,8 @@ import org.junit.Test
 
 /** Explicit production worker qualification with one new disposable QA service event.
  * calendarSystemDeleteWorker=true, deleteFixtureToken=hex12, deleteAccountHash=SHA256,
- * deleteWorkerPhase=PREPARE|RUN|REPLAY. An initially read-only QA scope additionally
+ * deleteWorkerPhase=PREPARE|RUN|REPLAY, deleteWorkerProfile=TIMED|ALL_DAY_SINGLE|ALL_DAY_MULTIPLE.
+ * An initially read-only QA scope additionally
  * requires allowReadOnlyDeleteWorker=true and the complete quiescence audit.
  * PREPARE opens the ordinary production mirror
  * event in foundation.e.calendar; an external driver deletes it there before RUN.
@@ -55,8 +57,10 @@ class CalendarSystemDeleteWorkerLiveDeviceTest {
         val token = args.getString("deleteFixtureToken").orEmpty()
         val hash = args.getString("deleteAccountHash").orEmpty()
         val allowReadOnly = args.getString("allowReadOnlyDeleteWorker") == "true"
+        val profile = args.getString("deleteWorkerProfile") ?: "TIMED"
         assertTrue("Explicit fixture, controlled account and phase are required", phase in setOf("PREPARE", "RUN", "REPLAY") &&
-            token.matches(Regex("[a-f0-9]{12}")) && hash.matches(Regex("[a-f0-9]{64}")))
+            token.matches(Regex("[a-f0-9]{12}")) && hash.matches(Regex("[a-f0-9]{64}")) &&
+            profile in setOf("TIMED", "ALL_DAY_SINGLE", "ALL_DAY_MULTIPLE"))
         val app = compose.activity.application as BridgeApplication
         compose.waitUntil(60_000) { app.imports.state.value.let { it.authenticated && it.selections.isNotEmpty() && !it.busy } }
         val selected = app.imports.state.value.selections.filter {
@@ -84,12 +88,18 @@ class CalendarSystemDeleteWorkerLiveDeviceTest {
             if (!original[0]) SystemWorkerFixtureAudit.assertQuiescent(app, AndroidCalendarProjection(app), target)
             val start = Instant.now().plus(2, ChronoUnit.DAYS).truncatedTo(ChronoUnit.HOURS)
             val edit = prefs.edit().putString("token", token).putString("account_hash", hash)
+                .putString("profile", profile)
                 .putString("account", target.account.value).putString("calendar", target.calendar.value).putLong("generation", target.generation)
                 .putBoolean("readonly_activation", !original[0])
                 .putString("create_id", UUID.randomUUID().toString())
                 .putString("title", "Calendeer QA — disposable worker DELETE $token")
                 .putString("start", start.toString()).putString("end", start.plus(1, ChronoUnit.HOURS).toString())
                 .putString("timestamp", Instant.now().truncatedTo(ChronoUnit.SECONDS).toString()).putBoolean("modes_restored", true)
+            if (profile != "TIMED") {
+                val date = start.atZone(ZoneOffset.UTC).toLocalDate()
+                edit.putString("civil_start", date.toString())
+                    .putString("civil_end", date.plusDays(if (profile == "ALL_DAY_SINGLE") 1 else 3).toString())
+            }
             original.forEachIndexed { index, value -> edit.putBoolean("original_$index", value).putBoolean("owned_$index", value) }
             assertTrue("Freeze identities and all five modes before CREATE or any setter", edit.commit())
         }
@@ -97,11 +107,14 @@ class CalendarSystemDeleteWorkerLiveDeviceTest {
         val originalModes = (0..4).map { prefs.getBoolean("original_$it", false) }
         fun ownedModes() = (0..4).map { prefs.getBoolean("owned_$it", false) }
         assertTrue("Never move or replace the enrolled fixture", frozen("token") == token && frozen("account_hash") == hash &&
+            (prefs.getString("profile", null) ?: "TIMED") == profile &&
             frozen("account") == target.account.value && frozen("calendar") == target.calendar.value &&
             prefs.getLong("generation", -1) == target.generation && !originalModes[4] && accessible() &&
             (originalModes[0] || (allowReadOnly && originalModes.none { it } && prefs.getBoolean("readonly_activation", false))))
-        val content = EventContent(frozen("title"), EventTime.Timed(Instant.parse(frozen("start")),
-            Instant.parse(frozen("end")), ZoneOffset.UTC), details = EventDetails())
+        val time = if (profile == "TIMED") EventTime.Timed(Instant.parse(frozen("start")),
+            Instant.parse(frozen("end")), ZoneOffset.UTC) else EventTime.AllDay(
+            LocalDate.parse(frozen("civil_start")), LocalDate.parse(frozen("civil_end")))
+        val content = EventContent(frozen("title"), time, details = EventDetails())
         val projection = AndroidCalendarProjection(app)
         projection.admitOperation = ::accessible
         val account = projection.accountFor(target.account)
@@ -115,6 +128,12 @@ class CalendarSystemDeleteWorkerLiveDeviceTest {
                 if (cursor.isNull(index)) null else cursor.getString(index) }.also {
                 val key = projection.eventIdentityKey(target, EventId(frozen("event")))
                 assertTrue("Keep exact ordinary production ownership", it[Events._SYNC_ID] == key && it[Events.SYNC_DATA4] == key)
+                if (time is EventTime.AllDay) {
+                    assertTrue("Preserve civil dates as UTC midnight with exclusive end", it[Events.ALL_DAY] == "1" &&
+                        it[Events.EVENT_TIMEZONE] == "UTC" && it[Events.EVENT_END_TIMEZONE] == "UTC" &&
+                        it[Events.DTSTART]?.toLongOrNull() == time.start.atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli() &&
+                        it[Events.DTEND]?.toLongOrNull() == time.endExclusive.atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli())
+                }
             }
         }
         fun writeMode(position: Int, enabled: Boolean) {
@@ -253,6 +272,7 @@ class CalendarSystemDeleteWorkerLiveDeviceTest {
                         if (baseline == null) assertTrue(store.acknowledge(ProjectionIntent(target, original)) == 1)
                     }
                     assertTrue("No prior DELETE history can belong to a new fixture", historyIds(app, target, original.eventId).isEmpty())
+                    row()
                     assertTrue(prefs.edit().putBoolean("prepared", true).commit())
                     compose.runOnUiThread { compose.activity.startActivity(Intent(Intent.ACTION_VIEW,
                         ContentUris.withAppendedId(Events.CONTENT_URI, prefs.getLong("row", -1))).setPackage("foundation.e.calendar")) }
@@ -284,16 +304,18 @@ class CalendarSystemDeleteWorkerLiveDeviceTest {
                     assertTrue("Bound the retained owner preflight", position == null || count < 20)
                 } while (position != null)
             }
+            val closedDeleteRows = SystemWorkerFixtureAudit.closedDeleteRows(app, projection, target, event)
             var cursor = 0L; var pages = 0
             do {
                 val page = checkNotNull(projection.discoverSystemChanges(target, cursor, 25))
                 assertTrue("No other native change may borrow temporary fixture consent", page.changes.none {
-                    (it.row != prefs.getLong("row", -1) || it.nativeKey != projection.eventIdentityKey(target, event))
+                    it.row !in closedDeleteRows &&
+                        (it.row != prefs.getLong("row", -1) || it.nativeKey != projection.eventIdentityKey(target, event))
                 })
                 cursor = page.afterRow; pages++
                 assertTrue("Bound the target native preflight", !page.more || pages < 20)
             } while (page.more)
-            SystemWorkerFixtureAudit.assertDeleteActivationQuiescent(app, target, event)
+            SystemWorkerFixtureAudit.assertDeleteActivationQuiescent(app, projection, target, event)
             restore = true
             assertTrue(prefs.edit().putBoolean("modes_restored", false).commit())
             compose.runOnUiThread {
