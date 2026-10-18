@@ -130,8 +130,18 @@ variant after an official-editor title save changed the event zone from `Z` to
 owner becomes CONFLICT, and no DELETE claim, result, completion or native ACK is
 allowed. Local evidence review and fresh-process offline replay preserve the
 complete dossier and request; the modified service event remains available.
-This does not qualify every production-worker conflict path, atomic remote
-preconditions, further network/power interruptions or Samsung/One UI.
+An additional disposable timed event passes actual editor deletion while offline,
+production local-worker capture and fresh-process offline replay. Both offline
+phases retain the same PAUSED owner, complete base/content and dirty deleted native
+row, with no DELETE attempt or ACK. After reconnection, production RUN completes
+the original retained owner's deletion and native/SQL acknowledgement. Active
+fresh-process replay preserves the one attempt and exact request/result/completion
+hashes. The five original modes are restored after every active phase. The fixture
+requires no INTERNET-capable network throughout its offline phases; normal
+constrained network work may remain queued. This qualifies disconnection before submission and
+application-process restart, not interruption during/after claim, device reboot
+or power loss. Qualification also does not cover every production-worker conflict
+path, atomic remote preconditions or Samsung/One UI.
 Existing retained synthetic events must not be used as disposable fixtures.
 Detailed measured evidence is recorded in [validation](VALIDATION.md); passing fake
 boundaries alone does not qualify the service, Provider, editor or WorkManager.

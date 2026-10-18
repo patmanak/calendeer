@@ -29,7 +29,7 @@ uncertain writes are retained, never silently discarded or resent.
 | Outgoing title | Default-off option for title-only edits of qualified ordinary or fully handed-off created timed/all-day events. Durable request ownership, inspection and native/SQL completion. | [Title submission](TITLE_UPDATE_SUBMISSION.md). Known-empty details, no recurrence/color; other fields must stay unchanged. |
 | Outgoing text | Default-off description/location option, optionally with simultaneous title change. Separate capsules, wire/proofs, cursors and consent; raw CRLF intent is distinct from canonical LF readback. | [Text delivery](SHARED_TEXT_PREPARATION.md). Creation mode must be enabled; narrow simple-event profile, unchanged dates and metadata. |
 | Outgoing time | Default-off date/duration option for simple timed/all-day events, retaining kind, zone and all other fields. Protected preparation, guarded readback, separate durable history and native completion. | [Temporal delivery](TEMPORAL_UPDATE.md). All-day metadata uses UTC midnight and exclusive end dates. Kind/zone transitions and combined edits remain unsupported. |
-| Outgoing DELETE | Default-off option with separate worker/consent, protected first request, authenticated inspection, durable results/completion and exact native/SQL ACK. Shared schema 9 and import schema 22 retain a permanent incoming barrier. | [Deletion submission](DELETE_SUBMISSION.md). Ordinary timed and one/multiple-day service/editor/production-worker RUN and restarted REPLAY pass. A controlled real preclaim conflict and offline replay retain the full variant. Simple imported events only; uncertain results never trigger another send. |
+| Outgoing DELETE | Default-off option with separate worker/consent, protected first request, authenticated inspection, durable results/completion and exact native/SQL ACK. Shared schema 9 and import schema 22 retain a permanent incoming barrier. | [Deletion submission](DELETE_SUBMISSION.md). Ordinary timed and one/multiple-day service/editor/production-worker RUN and restarted REPLAY pass. Timed offline capture/restart and reconnect completion pass. A controlled real preclaim conflict and offline replay retain the full variant. Simple imported events only; uncertain results never trigger another send. |
 | Recovery/conflicts | UNKNOWN is inspect-only. Native writes are guarded and receipts precede acknowledgement; newer local edits survive. A shared title/text/time/deletion journal prevents competing owners across generations. Local conflict dossiers preserve observed variants. | [Capture](LOCAL_EDIT_CAPTURE.md), [conflicts](CONFLICT_ARCHIVE.md). Trustworthy edit timestamps and general conflict resolution remain unfinished. |
 
 A refresh with no checkpoint commits its first staged page before draining queued
@@ -64,6 +64,13 @@ is retained until native ACK and cannot resurrect the deletion. A controlled rea
 preflight conflict retains the full observed variant, including an official-editor
 zone change with unchanged instants; local review and fresh-process offline
 replay preserve its unclaimed request and complete dossier.
+An additional timed deletion passes actual offline local-worker capture and
+fresh-process offline replay without any DELETE attempt or ACK. Reconnection
+resumes the same retained owner through production submission and native/SQL ACK.
+Active fresh-process replay retains one attempt and identical request/result/
+completion hashes. All five original modes and network settings are restored.
+This qualifies pre-submission disconnection and process restart, not device reboot
+or power loss.
 
 Current host suites pass 427 domain, 840 backend and 167 app JVM cases without
 skips. Physical crypto, SQL/migration, Provider, worker/recovery and option UI
@@ -82,9 +89,11 @@ For a useful bidirectional RC, finish:
 2. Extend [outgoing DELETE](DELETE_SUBMISSION.md): ordinary timed service/editor/
    production-worker and restarted recovery journeys pass, including single-day and
    three-day deletion. A real preclaim conflict and local replay preserve the full
-   variant. Extend production-worker conflict and network/power interruption
-   qualification, then richer events and OEM behavior. Current source checks and permanent incoming
-   barriers remain required; UNKNOWN is never reset or resent.
+   variant. Offline capture, process restart and reconnection also pass before
+   submission. Extend production-worker conflict and interruption during/after
+   remote claim, device reboot and power loss, then richer events and OEM behavior.
+   Current source checks and permanent incoming barriers remain required; UNKNOWN
+   is never reset or resent.
 3. Preservation of ordinary reminders/colors during supported edits; current
    send profiles still reject many such events.
 4. Safe handling of incomplete historical creation associations and actionable

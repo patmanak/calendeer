@@ -4,6 +4,9 @@ package com.patmanak.proton.andcalendarbridge
 import android.content.ContentUris
 import android.content.Context
 import android.content.Intent
+import android.content.SharedPreferences
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.os.Bundle
 import android.os.Process
 import android.provider.CalendarContract
@@ -36,7 +39,9 @@ import org.junit.Test
 
 /** Explicit production worker qualification with one new disposable QA service event.
  * calendarSystemDeleteWorker=true, deleteFixtureToken=hex12, deleteAccountHash=SHA256,
- * deleteWorkerPhase=PREPARE|RUN|REPLAY, deleteWorkerProfile=TIMED|ALL_DAY_SINGLE|ALL_DAY_MULTIPLE.
+ * deleteWorkerPhase=PREPARE|OFFLINE_CAPTURE|OFFLINE_REPLAY|RUN|REPLAY,
+ * deleteWorkerProfile=TIMED|ALL_DAY_SINGLE|ALL_DAY_MULTIPLE. Optional deleteWorkerOffline=true
+ * is frozen at PREPARE; its two offline phases require externally disconnected networking.
  * An initially read-only QA scope additionally
  * requires allowReadOnlyDeleteWorker=true and the complete quiescence audit.
  * PREPARE opens the ordinary production mirror
@@ -58,11 +63,18 @@ class CalendarSystemDeleteWorkerLiveDeviceTest {
         val hash = args.getString("deleteAccountHash").orEmpty()
         val allowReadOnly = args.getString("allowReadOnlyDeleteWorker") == "true"
         val profile = args.getString("deleteWorkerProfile") ?: "TIMED"
-        assertTrue("Explicit fixture, controlled account and phase are required", phase in setOf("PREPARE", "RUN", "REPLAY") &&
+        val offlineJourney = args.getString("deleteWorkerOffline") == "true"
+        val offlinePhase = phase in setOf("OFFLINE_CAPTURE", "OFFLINE_REPLAY")
+        assertTrue("Explicit fixture, controlled account and phase are required", phase in setOf("PREPARE", "OFFLINE_CAPTURE", "OFFLINE_REPLAY", "RUN", "REPLAY") &&
+            (!offlinePhase || offlineJourney) &&
             token.matches(Regex("[a-f0-9]{12}")) && hash.matches(Regex("[a-f0-9]{64}")) &&
             profile in setOf("TIMED", "ALL_DAY_SINGLE", "ALL_DAY_MULTIPLE"))
         val app = compose.activity.application as BridgeApplication
-        compose.waitUntil(60_000) { app.imports.state.value.let { it.authenticated && it.selections.isNotEmpty() && !it.busy } }
+        if (offlinePhase) assertOffline(app)
+        compose.waitUntil(60_000) {
+            if (offlinePhase) assertOffline(app)
+            app.imports.state.value.let { it.authenticated && it.selections.isNotEmpty() && !it.busy }
+        }
         val selected = app.imports.state.value.selections.filter {
             it.enabled && it.available && it.summary.title == "Calendeer QA Automatic Worker"
         }
@@ -89,6 +101,7 @@ class CalendarSystemDeleteWorkerLiveDeviceTest {
             val start = Instant.now().plus(2, ChronoUnit.DAYS).truncatedTo(ChronoUnit.HOURS)
             val edit = prefs.edit().putString("token", token).putString("account_hash", hash)
                 .putString("profile", profile)
+                .putBoolean("offline_journey", offlineJourney)
                 .putString("account", target.account.value).putString("calendar", target.calendar.value).putLong("generation", target.generation)
                 .putBoolean("readonly_activation", !original[0])
                 .putString("create_id", UUID.randomUUID().toString())
@@ -107,6 +120,7 @@ class CalendarSystemDeleteWorkerLiveDeviceTest {
         val originalModes = (0..4).map { prefs.getBoolean("original_$it", false) }
         fun ownedModes() = (0..4).map { prefs.getBoolean("owned_$it", false) }
         assertTrue("Never move or replace the enrolled fixture", frozen("token") == token && frozen("account_hash") == hash &&
+            prefs.getBoolean("offline_journey", false) == offlineJourney &&
             (prefs.getString("profile", null) ?: "TIMED") == profile &&
             frozen("account") == target.account.value && frozen("calendar") == target.calendar.value &&
             prefs.getLong("generation", -1) == target.generation && !originalModes[4] && accessible() &&
@@ -182,9 +196,12 @@ class CalendarSystemDeleteWorkerLiveDeviceTest {
         suspend fun idle() = withTimeout(240_000) {
             var samples = 0
             while (samples < 2) {
+                if (offlinePhase) assertOffline(app)
                 assertTrue("Retain exact fixture consent while waiting", accessible() && flags() == ownedModes())
                 val oneShot = listOf("calendar-import-network", "calendar-import-local").all { name ->
-                    manager.getWorkInfosForUniqueWork(name).get().all { it.state.isFinished }
+                    manager.getWorkInfosForUniqueWork(name).get().all {
+                        it.state.isFinished || (offlinePhase && name == "calendar-import-network" && it.state == WorkInfo.State.ENQUEUED)
+                    }
                 }
                 val periodic = manager.getWorkInfosForUniqueWork("calendar-import-periodic").get().none {
                     it.state == WorkInfo.State.RUNNING || it.state == WorkInfo.State.BLOCKED
@@ -283,6 +300,18 @@ class CalendarSystemDeleteWorkerLiveDeviceTest {
             assertTrue("Require completed PREPARE and production deletion composition", prefs.getBoolean("prepared", false) &&
                 app.systemCreates.state.value.deleteSupportAvailable)
             val event = EventId(frozen("event"))
+            val offlineRowHash = if (offlinePhase) rowHash(row()) else null
+            if (offlinePhase) {
+                assertTrue("Offline phases cannot follow a completed online deletion", !prefs.getBoolean("worker_verified", false))
+                assertTrue("Offline capture starts from the real editor's dirty tombstone",
+                    row()[Events.DELETED] == "1" && row()[Events.DIRTY] == "1")
+                if (phase == "OFFLINE_REPLAY") assertTrue("Offline replay requires completed capture in another process",
+                    prefs.getBoolean("offline_captured", false) && prefs.getBoolean("modes_restored", false) &&
+                        prefs.getInt("offline_pid", -1) > 0 && prefs.getInt("offline_pid", -1) != Process.myPid())
+                offlinePreflight(app, target, event, content, prefs, phase, checkNotNull(offlineRowHash))
+            }
+            if (offlineJourney && phase == "RUN") assertTrue("Online RUN requires completed offline replay and restoration",
+                prefs.getBoolean("offline_replayed", false) && prefs.getBoolean("modes_restored", false))
             if (phase == "REPLAY") assertTrue("REPLAY needs completed RUN in another process", prefs.getBoolean("worker_verified", false) &&
                 prefs.getBoolean("modes_restored", false) && prefs.getInt("run_pid", -1) > 0 && prefs.getInt("run_pid", -1) != Process.myPid())
             else assertTrue("RUN needs a real editor tombstone or its exact already completed history", row()[Events.DELETED] == "1" &&
@@ -322,6 +351,12 @@ class CalendarSystemDeleteWorkerLiveDeviceTest {
                 writeMode(0, true); writeMode(1, false); writeMode(2, false); writeMode(3, false); writeMode(4, true)
             }
             app.systemCreates.request()
+            if (offlinePhase) {
+                verifyOfflineWorker(app, target, event, content, prefs, phase, checkNotNull(offlineRowHash), ::row, ::idle) {
+                    assertTrue("Preserve fixture access and exact active consent", accessible() && flags() == ownedModes())
+                }
+                return@runBlocking
+            }
             val proof = withTimeout(240_000) {
                 var found: Proof? = null
                 while (found == null) {
@@ -337,6 +372,9 @@ class CalendarSystemDeleteWorkerLiveDeviceTest {
                 proof.record.intent.base.content == content && proof.record.intent.content == content &&
                 proof.record.id == DeleteAttemptIdentity.requestId(proof.record.intent, proof.record.format) &&
                 proof.result.record == proof.record.copy(protectedEvidence = null) && proof.completion.result == proof.result)
+            if (offlineJourney) assertTrue("Online proof belongs to the original retained offline owner",
+                prefs.getBoolean("offline_replayed", false) && proof.record.intent.id.value == frozen("offline_owner") &&
+                    DeleteAttemptIdentity.intentFingerprint(proof.record.intent) == frozen("offline_owner_hash"))
             ImportStore(app).use { store ->
                 val receipt = checkNotNull(store.deleteAcknowledgement(target, event, proof.record.id))
                 assertTrue("Native/SQL ACK matches exact durable completion", receipt.state == DeleteAcknowledgementState.RESTORED &&
@@ -369,8 +407,119 @@ class CalendarSystemDeleteWorkerLiveDeviceTest {
                     assertTrue(prefs.edit().putBoolean("modes_restored", true).commit())
                     status("system_delete_five_modes_restored")
                 }
-            } finally { projection.admitOperation = { false } }
+            } finally {
+                projection.admitOperation = { false }
+                if (offlinePhase) assertOffline(app)
+            }
         }
+    }
+
+    private fun assertOffline(app: Context) {
+        val connectivity = app.getSystemService(ConnectivityManager::class.java)
+        assertTrue("Host must keep every INTERNET network disconnected throughout the offline phase",
+            connectivity.allNetworks.none { network ->
+                connectivity.getNetworkCapabilities(network)?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
+            })
+    }
+
+    private fun rowHash(values: Map<String, String?>): String = MessageDigest.getInstance("SHA-256").run {
+        // AOSP's Events view joins this calendar permission. The normal consent setters
+        // switch READ/EDITOR; it is the sole excluded field, not event-row mutation.
+        val access = CalendarContract.Calendars.CALENDAR_ACCESS_LEVEL
+        if (values.containsKey(access)) assertTrue("Joined calendar permission remains READ or EDITOR",
+            values[access] in setOf(CalendarContract.Calendars.CAL_ACCESS_READ.toString(),
+                CalendarContract.Calendars.CAL_ACCESS_EDITOR.toString()))
+        values.filterKeys { it != access }.toSortedMap().forEach { (key, value) ->
+            for (part in listOf(key, value)) {
+                val bytes = part?.toByteArray(Charsets.UTF_8)
+                update(java.nio.ByteBuffer.allocate(4).putInt(bytes?.size ?: -1).array())
+                if (bytes != null) update(bytes)
+            }
+        }
+        digest().joinToString("") { "%02x".format(it.toInt() and 0xff) }
+    }
+
+    private suspend fun offlinePreflight(
+        app: Context, target: CalendarScope, event: EventId, content: EventContent,
+        prefs: SharedPreferences, phase: String, nativeHash: String
+    ) {
+        assertOffline(app)
+        assertTrue("Offline activation starts without any DELETE request", historyIds(app, target, event).isEmpty())
+        val sourceName = "calendar-delete-worker-v1-${checkNotNull(prefs.getString("token", null))}-source.db"
+        val base = ImportStore(app, sourceName).use { source ->
+            checkNotNull(source.transaction(target) { remote(event) as? RemoteChange.Upsert })
+        }
+        assertTrue("Offline preflight retains the complete frozen source", base.content == content)
+        ImportStore(app).use { store ->
+            assertTrue("Offline activation starts without an ACK or a changed baseline/current observation",
+                store.deleteAcknowledgement(target, event) == null && store.projectedBaseline(target, event) == base &&
+                    store.transaction(target) { remote(event) } == base)
+            val owner = store.localDelete(target, event)
+            assertTrue("Existing offline owner must already be the exact PAUSED deletion",
+                owner == null || owner.state == LocalEditState.PAUSED && owner.scope == target && owner.base == base && owner.content == content)
+            if (phase == "OFFLINE_REPLAY" || prefs.getBoolean("offline_captured", false)) {
+                val retained = checkNotNull(owner)
+                assertTrue("Require immutable enrolled owner and native row before temporary consent",
+                    retained.id.value == prefs.getString("offline_owner", null) &&
+                        DeleteAttemptIdentity.intentFingerprint(retained) == prefs.getString("offline_owner_hash", null) &&
+                        nativeHash == prefs.getString("offline_row_hash", null))
+            }
+        }
+    }
+
+    /** Read-only witnesses around normal worker activation; never creates or repairs an owner. */
+    private suspend fun verifyOfflineWorker(
+        app: Context, target: CalendarScope, event: EventId, content: EventContent,
+        prefs: SharedPreferences, phase: String, nativeHash: String,
+        row: () -> Map<String, String?>, idle: suspend () -> Unit, assertOwned: () -> Unit
+    ) {
+        val replay = phase == "OFFLINE_REPLAY"
+        val sourceName = "calendar-delete-worker-v1-${checkNotNull(prefs.getString("token", null))}-source.db"
+        val base = ImportStore(app, sourceName).use { source ->
+            checkNotNull(source.transaction(target) { remote(event) as? RemoteChange.Upsert })
+        }
+        assertTrue("Offline witnesses use the frozen complete source baseline", base.content == content)
+        if (replay || prefs.getBoolean("offline_captured", false)) assertTrue("Retain the complete original native tombstone",
+            prefs.getString("offline_row_hash", null) == nativeHash)
+        suspend fun witness(): LocalDeleteIntent? {
+            assertOffline(app); assertOwned()
+            assertTrue("Offline workers cannot allocate any DELETE request", historyIds(app, target, event).isEmpty())
+            val values = row()
+            assertTrue("Offline workers preserve every event column, other joined metadata and dirty deletion",
+                rowHash(values) == nativeHash && values[Events.DIRTY] == "1" && values[Events.DELETED] == "1")
+            return ImportStore(app).use { store ->
+                assertTrue("No offline DELETE acknowledgement or baseline change is allowed",
+                    store.deleteAcknowledgement(target, event) == null && store.projectedBaseline(target, event) == base &&
+                        store.transaction(target) { remote(event) } == base)
+                store.localDelete(target, event)?.also { owner ->
+                    assertTrue("Production capture retains one exact PAUSED deletion owner",
+                        owner.state == LocalEditState.PAUSED && owner.scope == target && owner.base == base && owner.content == content)
+                    if (replay || prefs.getBoolean("offline_captured", false)) assertTrue("Restart cannot replace or relabel the retained owner",
+                        owner.id.value == prefs.getString("offline_owner", null) &&
+                            DeleteAttemptIdentity.intentFingerprint(owner) == prefs.getString("offline_owner_hash", null))
+                }
+            }
+        }
+        if (replay) checkNotNull(witness())
+        val owner = withTimeout(240_000) {
+            var found = witness()
+            while (found == null) { delay(500); found = witness() }
+            checkNotNull(found)
+        }
+        idle()
+        assertTrue("Settled production workers retain exactly the captured owner", witness() == owner)
+        val edit = prefs.edit()
+        if (replay) {
+            if (!prefs.contains("offline_replay_pid")) edit.putInt("offline_replay_pid", Process.myPid())
+        } else if (!prefs.getBoolean("offline_captured", false)) {
+            edit.putString("offline_owner", owner.id.value)
+                .putString("offline_owner_hash", DeleteAttemptIdentity.intentFingerprint(owner))
+                .putString("offline_row_hash", nativeHash).putInt("offline_pid", Process.myPid())
+        }
+        assertTrue("Atomically persist first immutable offline evidence and success", edit
+            .putBoolean(if (replay) "offline_replayed" else "offline_captured", true).commit())
+        status(if (replay) "system_delete_offline_replay_verified" else "system_delete_offline_capture_verified")
+        status("system_delete_offline_no_attempt"); status("system_delete_offline_native_immutable")
     }
 
     private class Proof(val record: DeleteAttemptRecord, val result: DeleteVerifiedResult, val completion: DeleteCompletion) {

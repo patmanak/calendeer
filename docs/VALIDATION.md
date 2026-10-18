@@ -1,5 +1,40 @@
 # Validation
 
+## Offline deletion capture and process restart
+
+PASS: a new disposable ordinary timed service event was deleted through
+`foundation.e.calendar` on Android API 35 while Wi-Fi was disconnected on a
+phone with no SIM. PREPARE, OFFLINE_CAPTURE and OFFLINE_REPLAY pass in separate
+application processes. The fixture checks that no network has the INTERNET
+capability at entry, during local worker polling and at exit; it does not infer
+offline operation merely from a missing validated connection.
+
+The normal production setters and WorkManager trigger capture one PAUSED local
+deletion. The restarted offline phase retains its original identity, full base
+and content, with no DELETE attempt or acknowledgement. The dirty deleted native
+row remains unchanged. Its digest covers every returned column except the joined
+calendar access level, which the normal consent setters switch between READ and
+EDITOR; that field is checked separately against those two values. All other
+joined metadata remains covered. The first owner, native digest and process
+witnesses are persisted atomically with success and cannot be replaced by replay.
+
+PASS: after restoring the original network settings, production RUN completes
+the same retained owner's guarded deletion and exact native/SQL acknowledgement.
+Active fresh-process REPLAY retains one attempt and identical request/result/
+completion hashes. The native row remains deleted and clean, and the permanent
+incoming barrier prevents reprojection. All five instrumented phases pass. The
+five original target modes are restored after each active phase; original network
+settings are verified before releasing the phone. Fixture admission still refuses
+unrelated pending work before temporary activation.
+
+Debug app/test APK builds and focused independent source review pass. This slice
+changes instrumentation and documentation only; runtime policy, adapter and
+schema are unchanged. Host suites and lint were not rerun for this fixture-only
+change; their earlier results below remain separate evidence. This journey
+qualifies disconnection before submission and application-process restart. It
+does not qualify interruption during/after a remote claim, device reboot or
+power loss, or Samsung/One UI.
+
 ## All-day deletion through the system editor and worker
 
 PASS: six real instrumented phases qualify `ALL_DAY_SINGLE` and
@@ -123,7 +158,8 @@ consent and may run their authorized work; global silence is not claimed.
 Final app JVM cases and debug app/test APK builds pass; lint passes with zero
 errors and 43 warnings. Focused independent reviews and staged-blob confidentiality
 checks pass. All-day and real preflight-conflict evidence is recorded above.
-Additional network/power interruption and Samsung/One UI qualification remain NOT RUN.
+Interruption during/after remote claim, device reboot, power loss and Samsung/One UI
+qualification remain NOT RUN. Pre-submission offline recovery is recorded above.
 
 ## Guarded deletion request foundation (earlier slice)
 
