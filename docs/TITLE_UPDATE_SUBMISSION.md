@@ -66,7 +66,7 @@ attempt and restores the calendar's original write options. Periodic work was
 sampled without observing a running periodic worker; neither periodic delivery
 nor Samsung editing is qualified by these journeys.
 
-`SystemTitleUpdateController` processes independent durable owner and attempt
+`SystemUpdateController` processes independent durable owner and attempt
 indexes in bounded pages. It first inspects unresolved attempts, then discovers
 paused UPDATE owners. A corrupt owner cannot starve the rest of its page. A single
 worker session/policy lease is frozen before suspension and passed through guarded

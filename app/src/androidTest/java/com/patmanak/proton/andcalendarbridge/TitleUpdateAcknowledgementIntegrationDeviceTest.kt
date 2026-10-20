@@ -20,7 +20,7 @@ import com.patmanak.proton.andcalendarbridge.data.outgoing.SystemTitleRecoveryCo
 import com.patmanak.proton.andcalendarbridge.data.outgoing.SystemTitleRecoveryProgress
 import com.patmanak.proton.andcalendarbridge.data.outgoing.AndroidTitleRecoveryCursorStore
 import com.patmanak.proton.andcalendarbridge.data.outgoing.CoordinatorSystemTitleOperations
-import com.patmanak.proton.andcalendarbridge.data.outgoing.SystemTitleUpdateController
+import com.patmanak.proton.andcalendarbridge.data.outgoing.SystemUpdateController
 import com.patmanak.proton.andcalendarbridge.sync.*
 import com.patmanak.proton.andcalendarbridge.sync.catalog.CalendarSummary
 import java.nio.ByteBuffer
@@ -262,7 +262,7 @@ class TitleUpdateAcknowledgementIntegrationDeviceTest {
             val attemptPrefs = "system-title-integration-attempts-$token"
             var wakes = 0
             try {
-                val controller = SystemTitleUpdateController(AndroidTitleRecoveryCursorStore(context, changePrefs),
+                val controller = SystemUpdateController(AndroidTitleRecoveryCursorStore(context, changePrefs),
                     AndroidTitleRecoveryCursorStore(context, attemptPrefs),
                     CoordinatorSystemTitleOperations(coordinator, journal, capsule, port), {
                         assertEquals(target, it); wakes++

@@ -163,7 +163,7 @@ class SystemTimeRecoveryDeviceTest {
                     beforeRecovery(query, active)
                     operations.recoverOffline(query) { requested -> requested == query.scope && active() }.also { reports += it }
                 })
-            val updates = SystemTitleUpdateController(AndroidTitleRecoveryCursorStore(context, "time-changes"),
+            val updates = SystemUpdateController(AndroidTitleRecoveryCursorStore(context, "time-changes"),
                 AndroidTitleRecoveryCursorStore(context, "time-inspection"), operations, { error("Offline recovery never wakes network proof") }, 1)
             // SystemCreateController's Android dependency is never called directly. All native
             // operations go through the controlled CalendarProjection owned by ImportCoordinator.

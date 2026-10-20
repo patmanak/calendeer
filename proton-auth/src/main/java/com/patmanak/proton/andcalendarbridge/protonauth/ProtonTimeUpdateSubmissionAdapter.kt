@@ -4,8 +4,6 @@ package com.patmanak.proton.andcalendarbridge.protonauth
 import com.patmanak.proton.andcalendarbridge.sync.*
 import java.nio.CharBuffer
 import java.nio.charset.CodingErrorAction
-import java.util.concurrent.atomic.AtomicBoolean
-import kotlin.coroutines.CoroutineContext
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
@@ -30,7 +28,7 @@ internal class ProtonTimeUpdateSubmissionAdapter(
         admit: (CalendarScope) -> Boolean): TimeUpdateAttemptRecord? {
         currentCoroutineContext().ensureActive()
         val frozen = freeze(preparation)
-        val lease = Lease(frozen.intent.scope, admit, currentCoroutineContext())
+        val lease = UpdateRequestLease(frozen.intent.scope, admit, currentCoroutineContext())
         return try {
             lease.check()
             val session = session(frozen.intent.scope, lease)
@@ -43,7 +41,7 @@ internal class ProtonTimeUpdateSubmissionAdapter(
             checkpoint()
             TimeUpdateAttemptRecord(protected.id, protected.preparation, protected.format, protected.protectedPayload)
         } catch (cancelled: CancellationException) { throw cancelled }
-          catch (_: Closed) { currentCoroutineContext().ensureActive(); null }
+          catch (_: UpdateRequestLease.Closed) { currentCoroutineContext().ensureActive(); null }
           catch (failure: Exception) { currentCoroutineContext().ensureActive(); preparationFailure(failure) }
           finally { lease.close() }
     }
@@ -54,10 +52,10 @@ internal class ProtonTimeUpdateSubmissionAdapter(
         currentCoroutineContext().ensureActive()
         val frozen = record.frozen()
         val operation = currentCoroutineContext()
-        val lease = Lease(frozen.scope, admit, operation)
+        val lease = UpdateRequestLease(frozen.scope, admit, operation)
         // This lease grants only factual retention in the original account/scope namespace.
         // It is deliberately independent of the edit-mode lease and expires with this call.
-        val evidenceLease = Lease(frozen.scope, admitEvidence, operation)
+        val evidenceLease = UpdateRequestLease(frozen.scope, admitEvidence, operation)
         suspend fun source() {
             lease.check()
             val qualified = try { qualifySource(frozen.scope) }
@@ -130,7 +128,7 @@ internal class ProtonTimeUpdateSubmissionAdapter(
         admit: (CalendarScope) -> Boolean): TimeUpdateSubmissionObservation {
         currentCoroutineContext().ensureActive()
         val frozen = record.frozen()
-        val lease = Lease(frozen.scope, admit, currentCoroutineContext())
+        val lease = UpdateRequestLease(frozen.scope, admit, currentCoroutineContext())
         return try {
             if (frozen.format != timeUpdateFormat || frozen.state != TimeUpdateAttemptState.OUTCOME_UNKNOWN)
                 return TimeUpdateSubmissionObservation.Unknown
@@ -163,7 +161,7 @@ internal class ProtonTimeUpdateSubmissionAdapter(
           finally { lease.close() }
     }
 
-    private suspend fun session(scope: CalendarScope, lease: Lease): CatalogSession {
+    private suspend fun session(scope: CalendarScope, lease: UpdateRequestLease): CatalogSession {
         lease.check()
         val current = sessions.current()
         lease.check()
@@ -172,7 +170,7 @@ internal class ProtonTimeUpdateSubmissionAdapter(
         return current
     }
 
-    private suspend fun checkSessionAndLease(expected: CatalogSession, lease: Lease) {
+    private suspend fun checkSessionAndLease(expected: CatalogSession, lease: UpdateRequestLease) {
         lease.check()
         val current = sessions.current()
         lease.check()
@@ -248,20 +246,4 @@ internal class ProtonTimeUpdateSubmissionAdapter(
         }
     }
 
-    private class Closed : RuntimeException()
-    private class Lease(val scope: CalendarScope, private val admit: (CalendarScope) -> Boolean,
-        private val operation: CoroutineContext) {
-        private val closed = AtomicBoolean()
-        fun allows(requested: CalendarScope): Boolean {
-            if (requested != scope || closed.get()) return false
-            operation.ensureActive()
-            val allowed = try { admit(requested) }
-            catch (failure: Exception) { closed.set(true); operation.ensureActive(); throw failure }
-            if (!allowed) closed.set(true)
-            operation.ensureActive()
-            return allowed && !closed.get()
-        }
-        fun check() { operation.ensureActive(); if (!allows(scope)) throw Closed() }
-        fun close() { closed.set(true) }
-    }
 }

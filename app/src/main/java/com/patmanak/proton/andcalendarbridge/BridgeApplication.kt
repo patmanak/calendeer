@@ -25,7 +25,7 @@ import com.patmanak.proton.andcalendarbridge.data.outgoing.SystemCreateControlle
 import com.patmanak.proton.andcalendarbridge.data.outgoing.TitleUpdateAttemptStore
 import com.patmanak.proton.andcalendarbridge.data.outgoing.AndroidTitleRecoveryCursorStore
 import com.patmanak.proton.andcalendarbridge.data.outgoing.SystemTitleRecoveryController
-import com.patmanak.proton.andcalendarbridge.data.outgoing.SystemTitleUpdateController
+import com.patmanak.proton.andcalendarbridge.data.outgoing.SystemUpdateController
 import com.patmanak.proton.andcalendarbridge.data.outgoing.CoordinatorSystemTitleOperations
 import com.patmanak.proton.andcalendarbridge.data.outgoing.CoordinatorSystemTextOperations
 import com.patmanak.proton.andcalendarbridge.data.outgoing.CoordinatorSystemTimeOperations
@@ -52,7 +52,7 @@ class BridgeApplication : Application() {
             { query -> imports.recoverLocalTitles(query, titleAttempts) })
     }
     private val titleUpdates by lazy {
-        SystemTitleUpdateController(
+        SystemUpdateController(
             AndroidTitleRecoveryCursorStore(this, "calendar-title-owner-cursors"),
             AndroidTitleRecoveryCursorStore(this, "calendar-title-inspection-cursors"),
             CoordinatorSystemTitleOperations(imports, titleAttempts,
@@ -71,7 +71,7 @@ class BridgeApplication : Application() {
             })
     }
     private val textUpdates by lazy {
-        SystemTitleUpdateController(
+        SystemUpdateController(
             AndroidTitleRecoveryCursorStore(this, "calendar-text-owner-cursors"),
             AndroidTitleRecoveryCursorStore(this, "calendar-text-inspection-cursors"),
             textOperations, { target -> textRecovery.reset(target) })
@@ -88,7 +88,7 @@ class BridgeApplication : Application() {
             })
     }
     private val timeUpdates by lazy {
-        SystemTitleUpdateController(
+        SystemUpdateController(
             AndroidTitleRecoveryCursorStore(this, "calendar-time-owner-cursors"),
             AndroidTitleRecoveryCursorStore(this, "calendar-time-inspection-cursors"),
             timeOperations, { target -> timeRecovery.reset(target) })
@@ -105,7 +105,7 @@ class BridgeApplication : Application() {
             })
     }
     private val deleteUpdates by lazy {
-        SystemTitleUpdateController(
+        SystemUpdateController(
             AndroidTitleRecoveryCursorStore(this, "calendar-delete-owner-cursors"),
             AndroidTitleRecoveryCursorStore(this, "calendar-delete-inspection-cursors"),
             deleteOperations, { target -> deleteRecovery.reset(target) }, mutationKind = MutationKind.DELETE)

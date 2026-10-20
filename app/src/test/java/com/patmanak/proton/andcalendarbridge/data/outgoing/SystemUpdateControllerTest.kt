@@ -12,7 +12,7 @@ import org.junit.Test
 /** Scheduling and scope admission only. These operations do not stand in for Proton crypto,
  * durable claim, canonical reservation recovery, native ownership or service compatibility.
  */
-class SystemTitleUpdateControllerTest {
+class SystemUpdateControllerTest {
     private val target = CalendarScope(AccountId("synthetic-account"), CalendarId("synthetic-calendar"), 0)
     private fun ref(event: String, kind: MutationKind = MutationKind.UPDATE, state: LocalEditState = LocalEditState.PAUSED) =
         RetainedLocalChangeRef(EventId(event), MutationId("intent-$event"), kind, state)
@@ -62,7 +62,7 @@ class SystemTitleUpdateControllerTest {
         val changes = Cursors(); val attempts = Cursors(); val operations = Operations(); var wakes = 0
         val cursor = TitleUpdateWorkCursor(target, EventId("partial"))
         changes.positions[target] = cursor; attempts.positions[target] = cursor
-        val controller = SystemTitleUpdateController(changes, attempts, operations, { wakes++ })
+        val controller = SystemUpdateController(changes, attempts, operations, { wakes++ })
         assertEquals(SystemTitleRecoveryProgress(), controller.run(target, network = false) { true })
         assertTrue(operations.calls.isEmpty()); assertEquals(0, wakes)
         assertEquals(SystemTitleRecoveryProgress(), controller.run(target, network = true) { false })
@@ -79,7 +79,7 @@ class SystemTitleUpdateControllerTest {
             assertTrue(admission(scope)); retainedLease = admission; false
         }
         var wakes = 0
-        val controller = SystemTitleUpdateController(Cursors(), Cursors(), operations, { wakes++ })
+        val controller = SystemUpdateController(Cursors(), Cursors(), operations, { wakes++ })
         assertEquals(SystemTitleRecoveryProgress(), controller.run(target, network = true) { true })
         assertEquals(listOf("inspect", "discover", "process"), operations.calls)
         assertEquals(listOf(update), operations.processed)
@@ -91,7 +91,7 @@ class SystemTitleUpdateControllerTest {
 
     @Test fun eachPausedOwnerGetsADistinctCanonicalProposalWithAWholeSecondTimestamp() = runBlocking {
         val operations = Operations(); operations.discoverBlock = { page(it, ref("a"), ref("b")) }
-        val controller = SystemTitleUpdateController(Cursors(), Cursors(), operations, { error("No proof") })
+        val controller = SystemUpdateController(Cursors(), Cursors(), operations, { error("No proof") })
         controller.run(target, network = true) { true }
         assertEquals(2, operations.proposals.size)
         assertEquals(2, operations.proposals.map { it.first }.toSet().size)
@@ -108,7 +108,7 @@ class SystemTitleUpdateControllerTest {
             assertTrue(admit(requested)); retainedLease = admit; proof(); false
         }
         var wakes = 0
-        val controller = SystemTitleUpdateController(Cursors(), Cursors(), operations, { wakes++ },
+        val controller = SystemUpdateController(Cursors(), Cursors(), operations, { wakes++ },
             mutationKind = MutationKind.DELETE)
         assertEquals(SystemTitleRecoveryProgress(), controller.run(target, network = false) { true })
         assertTrue(operations.calls.isEmpty())
@@ -125,7 +125,7 @@ class SystemTitleUpdateControllerTest {
             else page(query, ref("b", MutationKind.DELETE))
         }
         var allowed = true
-        val first = SystemTitleUpdateController(changes, attempts, operations, { error("No proof") },
+        val first = SystemUpdateController(changes, attempts, operations, { error("No proof") },
             pageSize = 1, mutationKind = MutationKind.DELETE)
         assertTrue(first.run(target, network = true) { allowed }.more)
         assertEquals(listOf(ref("a", MutationKind.DELETE)), operations.processed)
@@ -133,7 +133,7 @@ class SystemTitleUpdateControllerTest {
             allowed = false; assertFalse(admit(requested))
             allowed = true; assertFalse(admit(requested)); false
         }
-        val restarted = SystemTitleUpdateController(changes, attempts, operations, { error("No proof") },
+        val restarted = SystemUpdateController(changes, attempts, operations, { error("No proof") },
             pageSize = 1, mutationKind = MutationKind.DELETE)
         assertFalse(restarted.run(target, network = true, fresh = false) { allowed }.more)
         assertEquals(RetainedLocalChangeCursor(target, EventId("a")), operations.discovered.last().cursor)
@@ -147,7 +147,7 @@ class SystemTitleUpdateControllerTest {
         operations.inspectBlock = { _, _, proof -> proof(); proof(); TitleUpdateOfflineRecoveryProgress(completed = 1) }
         operations.processBlock = { _, _, _, proof -> proof(); false }
         val wakes = mutableListOf<CalendarScope>()
-        val controller = SystemTitleUpdateController(changes, attempts, operations, { wakes += it; offline.write(it, null) })
+        val controller = SystemUpdateController(changes, attempts, operations, { wakes += it; offline.write(it, null) })
         assertEquals(SystemTitleRecoveryProgress(more = true), controller.run(target, network = true) { true })
         assertEquals(listOf(target), wakes); assertFalse(offline.exhausted(target))
         assertTrue(changes.exhausted(target)); assertTrue(attempts.exhausted(target))
@@ -161,7 +161,7 @@ class SystemTitleUpdateControllerTest {
         operations.inspectBlock = { _, _, _ -> TitleUpdateOfflineRecoveryProgress(held = 1, failed = 1) }
         operations.processBlock = { _, _, _, _ -> true }
         var wakes = 0
-        val controller = SystemTitleUpdateController(Cursors(), Cursors(), operations, { wakes++ })
+        val controller = SystemUpdateController(Cursors(), Cursors(), operations, { wakes++ })
         assertEquals(SystemTitleRecoveryProgress(failed = true), controller.run(target, network = true) { true })
         assertEquals(0, wakes); assertEquals(1, operations.processed.size)
         val before = operations.calls.toList()
@@ -181,10 +181,10 @@ class SystemTitleUpdateControllerTest {
             if (query.scope == other && query.cursor == null) page(query, ref("a"), ref("b"))
             else if (query.scope == other) page(query, ref("b")) else page(query)
         }
-        val controller = SystemTitleUpdateController(changes, attempts, operations, { error("No proof") }, pageSize = 1)
+        val controller = SystemUpdateController(changes, attempts, operations, { error("No proof") }, pageSize = 1)
         assertTrue(controller.run(target, network = true, fresh = true) { true }.more)
         assertTrue(controller.run(other, network = true, fresh = true) { true }.more)
-        val reopened = SystemTitleUpdateController(changes, attempts, operations, { error("No proof") }, pageSize = 1)
+        val reopened = SystemUpdateController(changes, attempts, operations, { error("No proof") }, pageSize = 1)
         assertFalse(reopened.run(target, network = true, fresh = false) { true }.more)
         assertFalse(reopened.run(other, network = true, fresh = false) { true }.more)
         assertEquals(listOf(target, other, target), operations.inspected.map { it.scope })
@@ -202,7 +202,7 @@ class SystemTitleUpdateControllerTest {
     @Test fun revocationDuringInspectionStopsBeforeOwnerDiscovery() = runBlocking {
         val operations = Operations(); var allowed = true; var wakes = 0
         operations.inspectBlock = { _, _, _ -> allowed = false; TitleUpdateOfflineRecoveryProgress() }
-        val controller = SystemTitleUpdateController(Cursors(), Cursors(), operations, { wakes++ })
+        val controller = SystemUpdateController(Cursors(), Cursors(), operations, { wakes++ })
         assertEquals(SystemTitleRecoveryProgress(), controller.run(target, network = true) { allowed })
         assertEquals(listOf("inspect"), operations.calls); assertEquals(0, wakes)
     }
@@ -214,7 +214,7 @@ class SystemTitleUpdateControllerTest {
             assertTrue(admit(scope)); allowed = false; assertFalse(admit(scope))
             allowed = true; assertFalse(admit(scope)); false
         }
-        val controller = SystemTitleUpdateController(Cursors(), Cursors(), operations, { error("No proof") })
+        val controller = SystemUpdateController(Cursors(), Cursors(), operations, { error("No proof") })
         assertEquals(SystemTitleRecoveryProgress(), controller.run(target, network = true) { allowed })
         assertEquals(listOf(ref("a")), operations.processed)
     }
@@ -226,7 +226,7 @@ class SystemTitleUpdateControllerTest {
                 val forged = if (foreign) query.copy(scope = target.copy(generation = 1)) else query.copy(limit = 2)
                 if (foreign) page(forged, ref("a")) else page(forged, ref("a"), ref("b"))
             }
-            val controller = SystemTitleUpdateController(Cursors(), Cursors(), operations, { error("No proof") }, pageSize = 1)
+            val controller = SystemUpdateController(Cursors(), Cursors(), operations, { error("No proof") }, pageSize = 1)
             assertEquals(SystemTitleRecoveryProgress(failed = true), controller.run(target, network = true) { true })
             assertTrue(operations.processed.isEmpty())
         }
@@ -236,14 +236,14 @@ class SystemTitleUpdateControllerTest {
         val changes = Cursors(); changes.positions[target] = TitleUpdateWorkCursor(target, EventId("partial"), protocol = 2)
         val attempts = Cursors(); attempts.done += target
         val operations = Operations()
-        val controller = SystemTitleUpdateController(changes, attempts, operations, { error("No proof") })
+        val controller = SystemUpdateController(changes, attempts, operations, { error("No proof") })
         assertEquals(SystemTitleRecoveryProgress(failed = true), controller.run(target, network = true, fresh = false) { true })
         assertTrue(operations.calls.isEmpty())
     }
 
     @Test fun unavailableDiscoveryFailsBoundedlyWithoutImmediateRetry() = runBlocking {
         val operations = Operations(); operations.discoverBlock = { RetainedLocalChangeListing.Unavailable }
-        val controller = SystemTitleUpdateController(Cursors(), Cursors(), operations, { error("No proof") })
+        val controller = SystemUpdateController(Cursors(), Cursors(), operations, { error("No proof") })
         assertEquals(SystemTitleRecoveryProgress(failed = true), controller.run(target, network = true) { true })
         assertEquals(listOf("inspect", "discover"), operations.calls)
         assertEquals(SystemTitleRecoveryProgress(), controller.run(target, network = true, fresh = false) { true })
@@ -257,7 +257,7 @@ class SystemTitleUpdateControllerTest {
             if (entry.eventId == EventId("a")) error("Synthetic corrupt entry")
             false
         }
-        val controller = SystemTitleUpdateController(Cursors(), Cursors(), operations, { error("No proof") }, pageSize = 2)
+        val controller = SystemUpdateController(Cursors(), Cursors(), operations, { error("No proof") }, pageSize = 2)
         assertEquals(SystemTitleRecoveryProgress(more = true, failed = true), controller.run(target, network = true) { true })
         assertEquals(listOf(ref("a"), ref("b")), operations.processed)
     }
@@ -278,7 +278,7 @@ class SystemTitleUpdateControllerTest {
                 if (stage == "wake") proof()
                 false
             }
-            val controller = SystemTitleUpdateController(Cursors(), Cursors(), operations, {
+            val controller = SystemUpdateController(Cursors(), Cursors(), operations, {
                 wakes++; currentCoroutineContext().cancel()
             })
             supervisorScope {
@@ -297,7 +297,7 @@ class SystemTitleUpdateControllerTest {
         val entered = CompletableDeferred<Unit>(); val release = CompletableDeferred<Unit>()
         val operations = Operations()
         operations.inspectBlock = { _, _, _ -> entered.complete(Unit); release.await(); TitleUpdateOfflineRecoveryProgress() }
-        val controller = SystemTitleUpdateController(Cursors(), Cursors(), operations, { error("No proof") })
+        val controller = SystemUpdateController(Cursors(), Cursors(), operations, { error("No proof") })
         withTimeout(5_000) {
             val first = async { controller.run(target, network = true) { true } }
             entered.await()
@@ -318,7 +318,7 @@ class SystemTitleUpdateControllerTest {
                 RetainedLocalChangeListing.Available(RetainedLocalChangePage.fromOrderedMetadata(query, rows))
             }
             operations.processBlock = { _, reference, _, _ -> owners.remove(reference.eventId.value); false }
-            val controller = SystemTitleUpdateController(changes, attempts, operations, { error("No proof") },
+            val controller = SystemUpdateController(changes, attempts, operations, { error("No proof") },
                 mutationKind = kind)
             suspend fun capture(event: String) {
                 controller.localOwnerWillBeCaptured(target)
@@ -328,7 +328,7 @@ class SystemTitleUpdateControllerTest {
             assertFalse(controller.run(target, network = true) { true }.more)
             assertTrue(changes.exhausted(target)); assertEquals(25, operations.processed.size)
             capture("event-25")
-            val restarted = SystemTitleUpdateController(changes, attempts, operations, { error("No proof") },
+            val restarted = SystemUpdateController(changes, attempts, operations, { error("No proof") },
                 mutationKind = kind)
             assertFalse(restarted.run(target, network = true, fresh = false) { true }.more)
             assertEquals(26, operations.processed.size)
@@ -347,7 +347,7 @@ class SystemTitleUpdateControllerTest {
             val rows = owners.filterKeys { after == null || it > after }.values.take(query.limit + 1)
             RetainedLocalChangeListing.Available(RetainedLocalChangePage.fromOrderedMetadata(query, rows))
         }
-        val controller = SystemTitleUpdateController(changes, attempts, operations, { error("No proof") }, pageSize = 1)
+        val controller = SystemUpdateController(changes, attempts, operations, { error("No proof") }, pageSize = 1)
         assertTrue(controller.run(target, network = true) { true }.more)
         assertEquals(EventId("b"), changes.positions[target]?.afterEvent)
         controller.localOwnerWillBeCaptured(target); owners["a"] = ref("a")
@@ -364,7 +364,7 @@ class SystemTitleUpdateControllerTest {
     @Test fun captureInvalidationCannotRenewARevokedRunOrResetInspection() = runBlocking {
         val changes = Cursors(); val attempts = Cursors(); attempts.done += target
         val operations = Operations(); operations.discoverBlock = { page(it, ref("new")) }
-        val controller = SystemTitleUpdateController(changes, attempts, operations, { error("No proof") })
+        val controller = SystemUpdateController(changes, attempts, operations, { error("No proof") })
         controller.localOwnerWillBeCaptured(target)
         assertTrue(attempts.exhausted(target))
         assertEquals(SystemTitleRecoveryProgress(), controller.run(target, network = true, fresh = false) { false })
@@ -377,7 +377,7 @@ class SystemTitleUpdateControllerTest {
         changes.positions[other] = TitleUpdateWorkCursor(other, EventId("changes"))
         attempts.positions[other] = TitleUpdateWorkCursor(other, EventId("attempts"))
         val operations = Operations()
-        val controller = SystemTitleUpdateController(changes, attempts, operations, { error("No proof") })
+        val controller = SystemUpdateController(changes, attempts, operations, { error("No proof") })
         controller.reset(target)
         assertFalse(changes.exhausted(target)); assertFalse(attempts.exhausted(target))
         assertNotNull(changes.positions[other]); assertNotNull(attempts.positions[other]); assertTrue(operations.calls.isEmpty())

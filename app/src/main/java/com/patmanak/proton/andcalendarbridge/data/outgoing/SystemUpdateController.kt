@@ -22,7 +22,7 @@ interface SystemTitleUpdateOperations {
 }
 
 /** Two bounded local indexes. Network work requires explicit opt-in and the original worker epoch. */
-class SystemTitleUpdateController(
+class SystemUpdateController(
     private val changes: TitleRecoveryCursorStore,
     private val attempts: TitleRecoveryCursorStore,
     private val operations: SystemTitleUpdateOperations,

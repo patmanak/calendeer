@@ -63,13 +63,13 @@ class SystemCreateController(
     private val scope: CoroutineScope,
     private val scheduler: ImportScheduler = WorkManagerImportScheduler(context),
     private val titleRecovery: SystemTitleRecoveryController? = null,
-    private val titleUpdates: SystemTitleUpdateController? = null,
+    private val titleUpdates: SystemUpdateController? = null,
     private val textRecovery: SystemTitleRecoveryController? = null,
-    private val textUpdates: SystemTitleUpdateController? = null,
+    private val textUpdates: SystemUpdateController? = null,
     private val timeRecovery: SystemTitleRecoveryController? = null,
-    private val timeUpdates: SystemTitleUpdateController? = null,
+    private val timeUpdates: SystemUpdateController? = null,
     private val deleteRecovery: SystemTitleRecoveryController? = null,
-    private val deleteUpdates: SystemTitleUpdateController? = null,
+    private val deleteUpdates: SystemUpdateController? = null,
 ) {
     private val context = context.applicationContext
     private val textSupportAvailable = textRecovery != null && textUpdates != null
