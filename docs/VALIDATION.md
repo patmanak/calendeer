@@ -1,5 +1,79 @@
 # Validation
 
+## Audit stabilization and build assurance
+
+The backend text/time adapters now share `UpdateRequestLease`, the identical
+admission lifetime previously copied inside each adapter. Mechanical comparison
+reconstructs both complete adapters and the original lease body. Independent
+review confirms unchanged cancellation, refusal, separation of factual evidence and
+closure; typed payload, session, claim and readback paths remain separate. Four
+new regressions cover foreign namespaces, irreversible refusal, admission failure
+and swallowed/replaced cancellation. The shared multi-operation controller is now
+named `SystemUpdateController`; reversing that symbol change reconstructs all
+eight affected source/documentation files.
+
+PASS: all 1,483 host cases (427 domain, 20 authentication, 844 backend, 192 app),
+without failures, errors or skips. All 131 selected physical Android cases pass,
+without failures or skips, including the localized warning/independent consent
+assertion and seven native crypto/parser checks. These use synthetic keys/events,
+isolated SQL/Provider fixtures and controlled remote ports, not live-service or
+additional OEM/reboot qualification. After the final tooling-only fixes, installation
+and 11 consent/native-crypto cases pass again against the final debug app/test APKs,
+without skips. These are repeated checks, not 11 additional distinct cases.
+Eight dependency-audit tooling cases pass,
+including missing module/plugin locks, incomplete/error envelopes, malformed
+results and paginated advisory lookup. Workflow validation and CI YAML parsing
+pass; the configured GitHub workflow has not been run remotely.
+
+PASS: the final full Gradle task graph builds debug app/test and unsigned release
+APKs and runs host suites/lint offline with strict dependency verification, without
+lock/checksum update flags. An init script isolated local build destinations while
+using the normal production sources and task list. Final offline lint reports
+zero errors and 12 warnings (one API target, one version-gated locale attribute,
+one dependency-age hint and nine synchronous `commit()` suggestions whose boolean
+results remain required). An online pass also reports version-availability hints;
+these counts are not a vulnerability score. The rebuilt release manifest retains
+backup/cleartext exclusions and system permission gates for exported services and
+diagnostic receivers.
+
+The final Maven inventory contains 553 distinct name/version pairs, including
+the root plugin classpath. OSV retains exactly one finding:
+`GHSA-r937-wjx7-w2jp` on Kotlin Gradle plugin 2.2.10 (`buildscript:classpath`),
+so the advisory command correctly exits 1. No other matches were returned for
+the resolved inventory; this is not complete vulnerability coverage. The upstream
+fix concerns KAPT's incremental-cache deserialization. KAPT is not used; all four
+attempts to activate its canonical/legacy plugin identifiers at the root or a JVM
+module fail through the explicit guard before tasks execute. The finding is not
+suppressed. See the [applicability boundary](BUILD_SECURITY.md#retained-kotlin-tooling-advisory).
+
+Targeted fixes cover Jackson Core (Android runtime), Netty 4.1, Commons Lang,
+HttpClient, Bouncy Castle, jose4j and JDOM (the other findings were in tooling/test
+dependencies). All 19 updated JAR hashes match Maven Central HTTPS checksum
+sidecars or fresh artifact downloads. This supplements the initial trust-on-first-use
+inventory; it does not authenticate the entire dependency graph. An intentionally
+wrong AGP JAR checksum is rejected by strict verification, and the final metadata
+is restored byte for byte before normal validation.
+
+The production options and retained panel display the concurrent-write warning in
+all eight languages before write consent. Counter labels preserve every format
+argument while avoiding singular/plural ambiguity. Unused fallback strings and an
+unused icon are removed, launcher XML is moved unchanged, and UI preference/style
+calls are simplified. Synchronous boolean `commit()` results used as persistence
+proofs remain unchanged; no lint suppression is added. Resource XML, duplicate
+qualifier keys, localized argument formats and launcher byte identity pass checks.
+README, architecture and permission documentation now match the implemented
+restricted DELETE, Provider/storage/scheduling and foreground-service removal.
+
+| Audit area | Result and boundary |
+| --- | --- |
+| Independent incoming progress | Unsupported dirty events remain held while other events/pages progress; native flags and evidence are preserved. |
+| Lifetime capacity | Completed text/time/deletion history is retained outside active staging capacity; no proof purge is introduced. |
+| Later native pages | New durable owners rearm outgoing discovery only; held/UNKNOWN owners do not receive new send or inspection authority. |
+| Duplication and large classes | Existing transaction, journal, conflict, owner, acknowledgement and source/admission boundaries have focused shared implementations. Operation-specific profiles, payloads and security fences stay typed; no generic synchronization framework is added. |
+| Cross-path regression maintenance | `tools/device-regressions.txt` records the bounded progress/capacity/capture/recovery/consent/native-crypto selection. Controlled fixtures do not qualify live transport, OEM, reboot or power loss. |
+| Automated assurance | Windows CI, root/module version locks, SHA-256 verification and scoped Maven inventory/advisory tooling are checked in. See [build security](BUILD_SECURITY.md) for updates and trust limits. |
+| Remote concurrency and release | Explicitly open: atomic server preconditions or accepted-risk policy, signing/license distribution decisions and remaining device/transport qualification. The warning does not close the race between GET and the write. See [release gates](BUILD_SECURITY.md#remaining-release-gates). |
+
 ## Shared text/time submission callbacks
 
 `EditSubmissionLease` groups one invocation's lifetime, source refusal and factual

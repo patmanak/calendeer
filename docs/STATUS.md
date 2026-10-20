@@ -22,7 +22,7 @@ uncertain writes are retained, never silently discarded or resent.
 | Area | Current behavior | Boundary/reference |
 | --- | --- | --- |
 | Connection | Real Proton login and session restoration, cleanup/cancellation gates, supported second-factor/mailbox unlock and hosted verification. Settings show the local connected username, with email fallback. | [Authentication](research/AUTH_INTEGRATION.md); security-key-only login and all account variants are not qualified. |
-| Interface | Violet deer identity; separate calendar/settings/login screens; eight languages and light/dark/system themes. Calendar options expose pending work, conflicts and independent write consent. The bridge has no event editor or reminder notifications. | [Design](DESIGN.md), [permissions](PERMISSIONS.md). System calendar apps deliver local reminders. |
+| Interface | Violet deer identity; separate calendar/settings/login screens; eight languages and light/dark/system themes. Calendar options expose pending work, conflicts, independent write consent and the concurrent-write warning. The bridge has no event editor or reminder notifications. | [Design](DESIGN.md), [permissions](PERMISSIONS.md). System calendar apps deliver local reminders. |
 | Incoming sync | Scoped mirrors; paginated sealed staging, offline decode with retained keys, durable coverage and change-feed reconciliation. Near-term dates load first, then the wider horizon; compatible scans extend newly entered dates. | [Import](READ_ONLY_IMPORT.md), [behavior](SYNCHRONIZATION_BEHAVIOR.md). Gaps/deferred content stay visible; missing records are not deletion evidence. |
 | Incoming contents | Supported timed/all-day events, exclusive all-day end, text, event colors with calendar fallback, supported personal display reminders and read-only participants. Supported recurrence projection and exceptions have dedicated mapping rules. | [Recurrence](research/ANDROID_RECURRENCE.md), [projection](PROJECTION_REPRESENTATION.md). Unsupported/untrusted content is deferred. |
 | Outgoing CREATE | System editor discovery, immutable offline capture, guarded Proton submission/readback, same-row acknowledgement and durable handoff. | [Local capture](LOCAL_CREATE_CAPTURE.md). Simple events only; reminders, guests, recurrence and custom colors remain outside the send profile. |
@@ -86,10 +86,15 @@ before a separate-process native/SQL ACK. This is not a measured network failure
 or production-worker interruption during transport. Final restarted replay keeps
 the identical request/result/completion without a new send or native write.
 
-Current host suites pass 427 domain, 20 authentication, 840 backend and 192 app JVM cases without
+Current host suites pass 427 domain, 20 authentication, 844 backend and 192 app JVM cases without
 skips. Physical crypto, SQL/migration, Provider, worker/recovery and option UI
 checks pass; APK builds and app lint pass. Scope-specific evidence and remaining
 qualification are in [validation](VALIDATION.md) and the linked contracts.
+
+Resolved Maven versions and SHA-256 checksums are locked, with a Windows CI
+baseline and advisory inventory. The Kotlin/KAPT tooling advisory remains visible;
+KAPT is unused and its activation is blocked. See [build security](BUILD_SECURITY.md)
+for applicability, trust limits and the required toolchain qualification.
 
 For a useful bidirectional RC, finish:
 
@@ -130,6 +135,7 @@ recurrence editing are not implied by the current profile.
 - [Working method](WORKFLOW.md): bounded assignments, roles and evidence.
 - [Proton source audit](research/PROTON.md) and [FOSS reuse](research/FOSS_SYNC_REUSE.md): source-backed integration choices.
 - [Licensing](LICENSING.md) and [workflow provenance](WORKFLOW_SOURCES.md).
+- [Build security](BUILD_SECURITY.md): dependency locks/checksums, CI, advisory review and release gates.
 
 Do not append chronological test/commit reports here. Update the affected current
 capability, limitation or next step; keep detailed contracts in their own documents.

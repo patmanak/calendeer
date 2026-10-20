@@ -39,8 +39,10 @@ def validate(root: Path) -> list[str]:
 
     config = tomllib.loads((root / ".codex/config.toml").read_text(encoding="utf-8"))
     require(config.get("agents", {}).get("enabled") is True, "Agents are not enabled")
-    require(config["agents"].get("max_concurrent_threads_per_session") == 3,
-            "Expected the documented limit of three children")
+    require(config["agents"].get("max_concurrent_threads_per_session") == 2,
+            "Expected the documented limit of two children")
+    require(config["agents"].get("default_subagent_reasoning_effort") == "medium",
+            "Expected the documented medium reasoning default")
 
     agent_files = sorted((root / ".codex/agents").glob("*.toml"))
     names: set[str] = set()
@@ -56,8 +58,10 @@ def validate(root: Path) -> list[str]:
         for ref in re.findall(r"\.agents/skills/[a-z-]+/SKILL\.md",
                               agent.get("developer_instructions", "")):
             require((root / ref).is_file(), f"{path.name}: missing skill {ref}")
-        require("model" not in agent and "model_reasoning_effort" not in agent,
+        require("model" not in agent,
                 f"{path.name}: unexpected model override")
+        require(agent.get("model_reasoning_effort") == "medium" and agent.get("model_verbosity") == "low",
+                f"{path.name}: reasoning/verbosity differs from the documented defaults")
     require(names == {"calendar_specifier", "calendar_planner",
                       "calendar_proton_researcher", "calendar_developer",
                       "calendar_tester", "calendar_reviewer"},

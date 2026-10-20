@@ -21,6 +21,7 @@ the integration boundary rather than spread through the application.
 - [Architecture](docs/ARCHITECTURE.md): module boundaries and incremental delivery.
 - [Synchronization behavior](docs/SYNCHRONIZATION_BEHAVIOR.md): proposed read-only and editing capability gates.
 - [Build and validation](docs/VALIDATION.md): repeatable checks and qualification scope.
+- [Build security](docs/BUILD_SECURITY.md): dependency checks, CI and remaining release gates.
 - [Licensing and source reuse](docs/LICENSING.md): imported components and notices.
 - [Agent instructions](AGENTS.md): project rules and task routing.
 - [Working method](docs/WORKFLOW.md): roles, handoffs and verification.
@@ -62,10 +63,10 @@ Core adapter and discovers calendar names and colors through the retained sessio
 Selected calendars mirror supported events into Android with durable offline
 processing and bounded background refresh. Read-only remains the default. Separate
 experimental options enable simple-event creation and title, description/location
-or same-kind date changes (timed or all-day) through the system calendar.
-Timed changes retain the time zone. Uncertain sends are
-inspected instead of resent; unsupported edits and conflicts remain retained.
-Outgoing deletion, time-zone/kind transitions and combined date/text edits are not
+or same-kind date changes (timed or all-day), plus deletion of supported simple
+imported events, through the system calendar. Timed changes retain the time zone.
+Uncertain sends are inspected instead of resent; unsupported edits and conflicts
+remain retained. Time-zone/kind transitions and combined date/text edits are not
 yet supported. See the [current capabilities and RC limits](docs/STATUS.md).
 Upstream workflow frameworks are selectively adapted; no installer/hook is required.
 
@@ -81,6 +82,8 @@ in ignored `local.properties` or `ANDROID_HOME`, then run from the project root:
 Use `gradlew.bat` on Windows. Initial setup downloads dependencies. The debug APK
 is generated under `app/build/outputs/apk/debug/`; do not commit build outputs.
 See [validation](docs/VALIDATION.md) for the scope of these checks.
+Resolved dependencies and checksums are locked; follow the
+[reviewed update procedure](docs/BUILD_SECURITY.md) when changing them.
 
 ## Workflow validation
 

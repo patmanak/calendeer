@@ -1,0 +1,22 @@
+# Bounded controlled-fixture regression suite. Requires an authorized enrolled physical device.
+# Run with providerFixture=true; this does not qualify live Proton transport or OEM/reboot behavior.
+com.patmanak.proton.andcalendarbridge.DirtyProjectionRefreshDeviceTest
+com.patmanak.proton.andcalendarbridge.ImportActiveCapacityDeviceTest
+com.patmanak.proton.andcalendarbridge.LocalEditCaptureCoordinatorDeviceTest
+com.patmanak.proton.andcalendarbridge.LocalDeleteCaptureCoordinatorDeviceTest
+com.patmanak.proton.andcalendarbridge.SystemTextOwnerGatewayDeviceTest
+com.patmanak.proton.andcalendarbridge.SystemTimeOwnerGatewayDeviceTest
+com.patmanak.proton.andcalendarbridge.SystemDeleteOwnerGatewayDeviceTest
+com.patmanak.proton.andcalendarbridge.SystemTextRecoveryDeviceTest
+com.patmanak.proton.andcalendarbridge.SystemTimeRecoveryDeviceTest
+com.patmanak.proton.andcalendarbridge.CalendarDashboardUiDeviceTest
+com.patmanak.proton.andcalendarbridge.SystemTextModeUiDeviceTest
+com.patmanak.proton.andcalendarbridge.SystemTimeModeUiDeviceTest
+com.patmanak.proton.andcalendarbridge.SystemTitleModeUiDeviceTest
+com.patmanak.proton.andcalendarbridge.PreferencesDeviceTest
+com.patmanak.proton.andcalendarbridge.CapturedHandoffIntegrationDeviceTest#permissionLossAfterWriteCannotAdvanceSqlUntilHistoricalRecovery
+# Native crypto/parser checks use fresh synthetic packets, never a live account.
+com.patmanak.proton.andcalendarbridge.ProtonEventCryptoDeviceTest
+com.patmanak.proton.andcalendarbridge.ProtonSharedTextCryptoDeviceTest
+com.patmanak.proton.andcalendarbridge.ProtonLocalTimeCryptoDeviceTest
+com.patmanak.proton.andcalendarbridge.LocalEditPreparationCryptoDeviceTest
