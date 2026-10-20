@@ -37,6 +37,14 @@ projections, so a dirty native edit cannot prevent its own capture indefinitely.
 That page counts toward the four-page budget. Offline bootstrap consumes only an
 already retained page. A different remote observation still preserves a conflict.
 
+An unsupported dirty native event holds only its own incoming projection and
+affected recurrence dependencies. Other events/pages continue; held work stays
+visible as incomplete and is reobserved on a fresh refresh without clearing
+native flags or historical receipts. Completed text/time/deletion proofs remain
+retained outside the active staging budget. New local owners rearm only outgoing
+discovery before capture, including later native pages and restarted continuations;
+existing/uncertain owners never gain a new send or inspection attempt from this wake.
+
 Synchronization attention offers Retry through the existing workers and expandable
 explanations; it does not change consent or reset requests. Closed `CalendeerSync`
 stage codes identify the reporting branch without event/account contents.
@@ -78,7 +86,7 @@ before a separate-process native/SQL ACK. This is not a measured network failure
 or production-worker interruption during transport. Final restarted replay keeps
 the identical request/result/completion without a new send or native write.
 
-Current host suites pass 427 domain, 840 backend and 167 app JVM cases without
+Current host suites pass 427 domain, 20 authentication, 840 backend and 182 app JVM cases without
 skips. Physical crypto, SQL/migration, Provider, worker/recovery and option UI
 checks pass; APK builds and app lint pass. Scope-specific evidence and remaining
 qualification are in [validation](VALIDATION.md) and the linked contracts.

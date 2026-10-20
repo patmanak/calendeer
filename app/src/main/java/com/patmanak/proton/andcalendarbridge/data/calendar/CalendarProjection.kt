@@ -87,6 +87,9 @@ interface CalendarProjection {
     /** Existing owned mirror only; closing access must never create a calendar or account. */
     suspend fun makeCalendarReadOnly(scope: CalendarScope) { error("Access restriction unavailable") }
     suspend fun apply(intent: ProjectionIntent, seriesUid: String? = null)
+    /** Assertion-only observation of dirty/deleted owned rows affected by this projection,
+     * including recurrence dependencies. Never grants ownership, a write lease or acknowledgement. */
+    suspend fun hasOwnedLocalChanges(intent: ProjectionIntent, deletedSeriesUid: String? = null): Boolean = false
     /** Null ports use ordinary projection; they cannot qualify recovery of a retained receipt. */
     val projectionReceiptProtocol: Int? get() = null
     /** Write the exact receipt marker and event atomically. Failure leaves preparation unresolved,

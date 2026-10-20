@@ -298,8 +298,10 @@ class SystemCreateController(
                             else {
                                 if (imports.reconcileReservedDeleteChange(target, event, change.deleted, change.dirty)) continue
                                 val result = if (change.deleted) imports.captureLocalDelete(target, event,
-                                    mutation(target, "imported-local-change", event.value))
-                                    else imports.captureSystemLocalEdit(target, event)
+                                    mutation(target, "imported-local-change", event.value),
+                                    beforeNewOwner = { rearmLocalOwnerDiscovery(target, deleted = true) })
+                                    else imports.captureSystemLocalEdit(target, event,
+                                        beforeNewOwner = { rearmLocalOwnerDiscovery(target, deleted = false) })
                                 if (result == LocalEditCaptureResult.UNAVAILABLE) retry = true
                                 if (result == LocalEditCaptureResult.UNQUALIFIED)
                                     reportAttention(AttentionStage.IMPORTED_CAPTURE_UNQUALIFIED)
@@ -311,7 +313,8 @@ class SystemCreateController(
                             if (retained == null) reportAttention(AttentionStage.CAPTURED_IDENTITY_UNRESOLVED)
                             else if (retained.status == SystemCreateWorkStatus.COMPLETE) {
                                 val result = imports.reconcileHandoffLocalCreate(target, retained.localId,
-                                    retained.captureId, retained.attempt)
+                                    retained.captureId, retained.attempt,
+                                    beforeNewOwner = { rearmLocalOwnerDiscovery(target) })
                                 if (result != CapturedCreateReconciliationResult.UNCHANGED)
                                     work.status(retained, if (result == CapturedCreateReconciliationResult.UNSUPPORTED)
                                         SystemCreateWorkStatus.UNSUPPORTED else SystemCreateWorkStatus.WAITING)
@@ -378,6 +381,18 @@ class SystemCreateController(
         mutableState.update { it.copy(failed = true) }
     }
 
+    /** The coordinator invokes this only for a qualified new owner, before its durable insert.
+     * A crash can leave an extra discovery pass, never an inserted owner behind exhaustion.
+     */
+    private suspend fun rearmLocalOwnerDiscovery(target: CalendarScope, deleted: Boolean? = null) {
+        if (deleted != true) {
+            titleUpdates?.localOwnerWillBeCaptured(target)
+            textUpdates?.localOwnerWillBeCaptured(target)
+            timeUpdates?.localOwnerWillBeCaptured(target)
+        }
+        if (deleted != false) deleteUpdates?.localOwnerWillBeCaptured(target)
+    }
+
     /** True requests backoff only for a known transient failure, never for UNKNOWN alone. */
     private suspend fun process(retained: SystemCreateWork, network: Boolean, epoch: Long): Boolean {
         val target = retained.scope
@@ -386,7 +401,8 @@ class SystemCreateController(
         val mutation = mutation(target, "captured-local-change", retained.captureId.value)
         if (priorAttempt?.state == CreateAttemptState.OUTCOME_UNKNOWN) {
             // Recover a completed handoff whose final queue status was lost, or preserve later edits.
-            when (imports.reconcileHandoffLocalCreate(target, retained.localId, retained.captureId, retained.attempt)) {
+            when (imports.reconcileHandoffLocalCreate(target, retained.localId, retained.captureId, retained.attempt,
+                beforeNewOwner = { rearmLocalOwnerDiscovery(target) })) {
                 CapturedCreateReconciliationResult.UNCHANGED -> {
                     work.status(retained, SystemCreateWorkStatus.COMPLETE); return false
                 }

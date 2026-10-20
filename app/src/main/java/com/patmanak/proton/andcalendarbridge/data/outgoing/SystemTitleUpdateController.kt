@@ -44,6 +44,16 @@ class SystemTitleUpdateController(
         currentCoroutineContext().ensureActive()
     }
 
+    /** Rearm only local discovery before insertion, including identities preceding its cursor.
+     * Existing held owners must not call this: their native DIRTY rows are scanned again.
+     * Inspection exhaustion and durable request ownership remain unchanged.
+     */
+    suspend fun localOwnerWillBeCaptured(target: CalendarScope) = mutex.withLock {
+        currentCoroutineContext().ensureActive()
+        changes.write(target, null)
+        currentCoroutineContext().ensureActive()
+    }
+
     suspend fun run(target: CalendarScope, network: Boolean, fresh: Boolean = true,
         admission: () -> Boolean): SystemTitleRecoveryProgress = mutex.withLock {
         currentCoroutineContext().ensureActive()

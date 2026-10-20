@@ -30,6 +30,44 @@ class ImportStoreDeviceTest {
         } finally { store.close(); context.deleteDatabase(name) }
     }
 
+    @Test fun localHoldSurvivesReopenAndFreshRefreshRearmsWithoutConsumingWork() = fixture { store, name ->
+        val intent = ProjectionIntent(scope, change())
+        store.setEnabled(scope, true)
+        store.transaction(scope) {
+            putRemote(intent.change); putProjection(intent)
+            checkpoint = PageCheckpoint(scope, format, traversalComplete = true)
+        }
+        assertTrue(store.holdLocalProjection(intent))
+        assertTrue(store.pending(scope).isEmpty())
+        assertEquals(1, store.selections(scope.account).single().pendingProjectionCount)
+        store.close()
+        val reopened = ImportStore(ApplicationProvider.getApplicationContext(), name)
+        try {
+            assertEquals(1, reopened.heldProjectionCount(scope)); assertTrue(reopened.pending(scope).isEmpty())
+            reopened.beginRefresh(scope)
+            assertEquals(listOf(intent), reopened.pending(scope))
+            assertEquals(0, reopened.heldProjectionCount(scope))
+            val newer = ProjectionIntent(scope, change("newer"))
+            reopened.transaction(scope) { putRemote(newer.change); putProjection(newer) }
+            assertFalse(reopened.holdLocalProjection(intent))
+            assertEquals(listOf(newer), reopened.pending(scope))
+        } finally { reopened.close() }
+    }
+
+    @Test fun moreThanOneBatchOfHeldRowsStillAllowsLaterIndependentWork() = fixture { store, _ ->
+        val held = (0..100).map { index -> ProjectionIntent(scope, change().copy(eventId = EventId("held-$index"))) }
+        val independent = ProjectionIntent(scope, change().copy(eventId = EventId("independent")))
+        store.transaction(scope) {
+            for (intent in held + independent) { putRemote(intent.change); putProjection(intent) }
+        }
+        for (intent in store.pending(scope)) assertTrue(store.holdLocalProjection(intent))
+        assertEquals(100, store.heldProjectionCount(scope))
+        assertEquals(listOf(held.last(), independent), store.pending(scope))
+        assertTrue(store.holdLocalProjection(held.last()))
+        assertEquals(listOf(independent), store.pending(scope))
+        assertEquals(102, store.selections(scope.account).single().pendingProjectionCount)
+    }
+
     @Test fun pageAndCheckpointRollBackTogether() = fixture { store, _ ->
         try {
             store.transaction(scope) {

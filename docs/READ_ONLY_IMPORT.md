@@ -215,8 +215,14 @@ or deleted flags. Exceptions retain their original slot separately when display
 changes between timed and all-day dates. Newer pending remote evidence is not consumed by an older receipt.
 See [local capture](LOCAL_EDIT_CAPTURE.md) for the subset and refusal rules.
 Rebuilding a missing mirror requeues cached records. A fresh traversal reprojects
-known supported clean records; dirty/deleted local rows remain protected and can
-block the import. A newer deferred version prevents an older queued version from
+known supported clean records. Dirty/deleted owned rows, including affected
+recurrence parents and children, retain their exact incoming intent in a durable
+local hold. Other events and incoming pages continue. Held rows remain visible as
+pending work, prevent a new success timestamp and report incomplete import after
+the runnable work drains. Continuations do not repeatedly retry them; a fresh
+refresh rearms their observation without clearing native flags or receipts.
+Historical receipt recovery remains separate from current native cleanliness.
+A newer deferred version prevents an older queued version from
 being reprojected.
 
 Explicit refresh arms a durable local retry of retained events before scheduling
@@ -228,7 +234,13 @@ its pending local work has drained; the completion time survives a split drain.
 
 Sealed receipts are limited to four MiB of encoded characters each; combined
 receipt/deferred/delta evidence storage, including notice and coverage metadata,
-has a 32 MiB UTF-8 admission budget. Each versioned coverage payload is limited
+has a 32 MiB UTF-8 admission budget. Pending outgoing receipts/preparations also
+consume this active-work budget. Immutable completed text/time acknowledgement
+history and current RESTORED text/time/deletion receipts do not. Their contents,
+identity fences and permanent deletion barriers remain retained for replay;
+no proof is purged to free working capacity. Historical disk usage and history
+lookup cost can still grow and require a separate safe compaction design.
+Each versioned coverage payload is limited
 to 256 KiB and each plan to 128 disjoint periods in one timezone. This is not
 a limit on the physical SQLite file or supported-event cache. Decoded content is
 limited independently to one MiB UTF-8 per event and eight MiB accepted per page.
@@ -268,8 +280,8 @@ the store is unavailable; it is refreshed after a successful worker run.
 
 Incoming event replacement/deletion now asserts that existing rows are clean and
 non-deleted, including recurrence children removed with a master. An unexpected
-dirty or locally deleted row is preserved and its import remains blocked, rather
-than overwriting data. Explicit internal simple UPDATE capture can retain the
+dirty or locally deleted row is preserved and its own incoming projection stays
+held, while independent work continues. Explicit internal simple UPDATE capture can retain the
 local variant with its original projected base and latest remote evidence, but
 does not enable editing or send an upload. Unsupported edits and user-facing
 resolution remain future work; see [local capture](LOCAL_EDIT_CAPTURE.md).

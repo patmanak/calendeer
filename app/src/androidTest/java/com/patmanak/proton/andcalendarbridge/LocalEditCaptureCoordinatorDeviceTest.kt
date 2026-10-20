@@ -195,9 +195,12 @@ class LocalEditCaptureCoordinatorDeviceTest {
         assertEquals(LocalEditCaptureResult.INACTIVE, observe())
         assertEquals(0, reads); assertNull(retained())
         currentAccount = target.account; systemMode = false
+        // Observing the returned account invalidates this invocation's captured policy.
+        assertEquals(LocalEditCaptureResult.INACTIVE, capture())
+        assertEquals(0, reads); assertNull(retained())
         // Existing explicit callers retain their original contract, independent of observer opt-in.
         assertEquals(LocalEditCaptureResult.RETAINED, capture())
-        assertEquals(id, retained()!!.id)
+        assertEquals(id, retained()!!.id); assertEquals(1, reads)
     }
 
     @Test fun disablingSystemModeDuringObserverSnapshotCannotPersistANewOwner() = fixture {

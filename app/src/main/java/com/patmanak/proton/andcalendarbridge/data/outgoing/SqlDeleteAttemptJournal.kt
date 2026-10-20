@@ -12,9 +12,7 @@ import java.nio.charset.CodingErrorAction
 import kotlinx.coroutines.*
 
 /** The helper owns its mutex and connection. Neither callback may suspend or re-enter a helper. */
-internal interface DeleteAttemptDatabase {
-    suspend fun <T> withDatabase(beforeOpen: () -> Unit, action: (SQLiteDatabase) -> T): T
-}
+internal typealias DeleteAttemptDatabase = AttemptJournalDatabase
 
 /** Local persistence, not dispatch authority. Cross-family admission executes in the same transaction. */
 internal class SqlDeleteAttemptJournal(
@@ -107,37 +105,8 @@ internal class SqlDeleteAttemptJournal(
                 4096)
         }
     }
-    private class Denied : RuntimeException()
     private suspend fun <T> access(scope: CalendarScope, admit: (CalendarScope) -> Boolean, denied: T,
-        action: (SQLiteDatabase, () -> Unit) -> T): T = withContext(Dispatchers.IO) {
-        val operation = currentCoroutineContext()
-        var closed = false
-        fun active() {
-            operation.ensureActive()
-            if (closed) throw Denied()
-            val allowed = admit(scope)
-            if (!allowed) closed = true
-            operation.ensureActive()
-            if (!allowed || closed) throw Denied()
-        }
-        try {
-            database.withDatabase(::active) { db ->
-                db.beginTransaction()
-                val result = try {
-                    operation.ensureActive()
-                    val value = action(db) { operation.ensureActive() }
-                    active()
-                    db.setTransactionSuccessful()
-                    value
-                } finally { db.endTransaction() }
-                // A cancelled return cannot roll back the already durable UNKNOWN commit.
-                operation.ensureActive()
-                result
-            }
-        } catch (cancelled: CancellationException) { throw cancelled }
-          catch (_: Denied) { operation.ensureActive(); denied }
-          catch (_: Exception) { operation.ensureActive(); throw IllegalStateException("Invalid delete journal") }
-          finally { closed = true }
-    }
+        action: (SQLiteDatabase, () -> Unit) -> T): T =
+        attemptJournalTransaction(database, scope, admit, denied, "Invalid delete journal", action)
     override fun toString() = "SqlDeleteAttemptJournal(redacted)"
 }

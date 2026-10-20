@@ -1,6 +1,7 @@
 # Local/private evidence and workstation files
 /AGENTS.local.md
 .local/
+.device-coordination/
 .research/
 local.properties
 *.jks

@@ -308,6 +308,69 @@ class SystemTitleUpdateControllerTest {
         assertEquals(listOf("inspect", "discover"), operations.calls)
     }
 
+    @Test fun twentySixNativeCapturesReachDiscoveryOnTheContinuationAfterExhaustion() = runBlocking {
+        for (kind in listOf(MutationKind.UPDATE, MutationKind.DELETE)) {
+            val changes = Cursors(); val attempts = Cursors(); val operations = Operations()
+            val owners = sortedMapOf<String, RetainedLocalChangeRef>()
+            operations.discoverBlock = { query ->
+                val after = query.cursor?.afterEvent?.value
+                val rows = owners.filterKeys { after == null || it > after }.values.take(query.limit + 1)
+                RetainedLocalChangeListing.Available(RetainedLocalChangePage.fromOrderedMetadata(query, rows))
+            }
+            operations.processBlock = { _, reference, _, _ -> owners.remove(reference.eventId.value); false }
+            val controller = SystemTitleUpdateController(changes, attempts, operations, { error("No proof") },
+                mutationKind = kind)
+            suspend fun capture(event: String) {
+                controller.localOwnerWillBeCaptured(target)
+                owners[event] = ref(event, kind)
+            }
+            repeat(25) { capture("event-${it.toString().padStart(2, '0')}") }
+            assertFalse(controller.run(target, network = true) { true }.more)
+            assertTrue(changes.exhausted(target)); assertEquals(25, operations.processed.size)
+            capture("event-25")
+            val restarted = SystemTitleUpdateController(changes, attempts, operations, { error("No proof") },
+                mutationKind = kind)
+            assertFalse(restarted.run(target, network = true, fresh = false) { true }.more)
+            assertEquals(26, operations.processed.size)
+            assertEquals(1, operations.inspected.size)
+            val calls = operations.calls.toList()
+            repeat(3) { assertFalse(restarted.run(target, network = true, fresh = false) { true }.more) }
+            assertEquals(calls, operations.calls)
+        }
+    }
+
+    @Test fun newOwnersBeforeAndAfterAnIncompleteCursorAreNotSkippedOrRetriedEndlessly() = runBlocking {
+        val changes = Cursors(); val attempts = Cursors(); val operations = Operations()
+        val owners = sortedMapOf("b" to ref("b"), "d" to ref("d"))
+        operations.discoverBlock = { query ->
+            val after = query.cursor?.afterEvent?.value
+            val rows = owners.filterKeys { after == null || it > after }.values.take(query.limit + 1)
+            RetainedLocalChangeListing.Available(RetainedLocalChangePage.fromOrderedMetadata(query, rows))
+        }
+        val controller = SystemTitleUpdateController(changes, attempts, operations, { error("No proof") }, pageSize = 1)
+        assertTrue(controller.run(target, network = true) { true }.more)
+        assertEquals(EventId("b"), changes.positions[target]?.afterEvent)
+        controller.localOwnerWillBeCaptured(target); owners["a"] = ref("a")
+        controller.localOwnerWillBeCaptured(target); owners["z"] = ref("z")
+        repeat(4) { controller.run(target, network = true, fresh = false) { true } }
+        assertEquals(setOf("a", "b", "d", "z"), operations.processed.map { it.eventId.value }.toSet())
+        assertTrue(operations.discovered.all { it.limit == 1 })
+        assertEquals(1, operations.inspected.size)
+        val calls = operations.calls.toList()
+        repeat(3) { assertFalse(controller.run(target, network = true, fresh = false) { true }.more) }
+        assertEquals(calls, operations.calls)
+    }
+
+    @Test fun captureInvalidationCannotRenewARevokedRunOrResetInspection() = runBlocking {
+        val changes = Cursors(); val attempts = Cursors(); attempts.done += target
+        val operations = Operations(); operations.discoverBlock = { page(it, ref("new")) }
+        val controller = SystemTitleUpdateController(changes, attempts, operations, { error("No proof") })
+        controller.localOwnerWillBeCaptured(target)
+        assertTrue(attempts.exhausted(target))
+        assertEquals(SystemTitleRecoveryProgress(), controller.run(target, network = true, fresh = false) { false })
+        assertTrue(operations.calls.isEmpty())
+    }
+
     @Test fun resetClearsBothIndexesOnlyForItsTarget() = runBlocking {
         val changes = Cursors(); val attempts = Cursors(); val other = target.copy(generation = 1)
         changes.done += target; attempts.done += target

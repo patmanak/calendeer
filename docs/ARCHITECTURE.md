@@ -75,6 +75,83 @@ restore the last known metadata offline. Names/colors do not prove write permiss
 See [read-only import](READ_ONLY_IMPORT.md) for the connected durable pipeline,
 provider identities, scheduling and current supported fields.
 
+`ImportSchema` contains the import database's SQL definitions and explicit version
+migrations. `SQLiteOpenHelper` still owns migration transactions; evidence backfill
+uses the store's existing capacity check. Runtime admission, locks and commit
+checks remain in `ImportStore`. Text, time and deletion owner operations reuse the
+coordinator's scoped access guard with their own sending-consent predicate; typed
+source checks and completion policies remain separate.
+
+`SystemEditAdmission` shares the identical text/time worker admission predicates
+and factual-evidence admission. Its live local readers capture the original epoch,
+account and authentication at each invocation, before any worker suspension. A
+rejected callback stays closed. Proof recovery requires CREATE access without
+reading edit-sending consent; factual evidence survives editing-policy loss but
+cannot follow logout or account replacement. Deletion retains its additional
+consent latch over the shared proof admission.
+
+`LocalChangeCapture` retains imported-event UPDATE/DELETE snapshots, sharing
+selection/session checks and admission setup/cleanup. The coordinator retains the
+mutex, original epoch and distinct initial gates, plus incoming hold/baseline
+qualification. Native snapshots and owner checks stay typed. `beforeNewOwner`
+still runs between the qualified native snapshot and first SQL retention, with
+access rechecked afterward; retained owners do not trigger that notification.
+Capture never writes/acknowledges native rows or submits an outgoing request.
+
+`LocalChangeHistory` groups retained-change listing, local edit/delete inspection
+and conflict-archive reads. The coordinator retains the mutex and original
+generation/policy capture; the reader shares account/access checks and admission
+setup/cleanup. Known paused or unavailable selections remain readable. The typed
+results and archive-specific cancellation/error rules stay distinct; reading
+history cannot acknowledge native rows or renew sending authority.
+
+`CapturedCreateRestoration` handles remote identity binding, original-row attachment,
+baseline retention, acknowledgement, clean inspection and later local-change
+reconciliation. `ImportCoordinator` still owns the mutex, lifecycle initialization
+and original generation/policy capture. The collaborator reuses those fixed checks
+around suspensions, reads the current adapter format and clears each operation's
+admission callbacks. It cannot submit CREATE or release the incoming hold; only a
+fresh ACK reservation permits a native acknowledgement write.
+
+`LocalTitleOwnerQualification` isolates the exact current title owner, retained
+preparation and native-source checks shared by wire preparation, retention and
+submission. The coordinator retains the mutex, captures generation/policy and
+supplies the original admission predicates. Fresh account observation remains
+separate from the cached account check used inside guarded submission, avoiding
+authentication lock re-entry. Both source paths share the released-handoff match
+and title-only profile; source provenance and pending projection checks retain
+their original order. This collaborator never claims, sends or acknowledges work.
+
+`LocalTitleCompletion` owns title acknowledgement and durable completion only.
+The coordinator retains the recovery loop and mutex, passing the original
+generation/policy into this collaborator. Both phases share the same availability
+check; historical proof recovery does not acquire title-sending consent or renew
+a revoked operation's epoch.
+
+`LocalCreateStaging` groups local CREATE capture and protected preparation,
+including durable submission staging. The coordinator retains the mutex, initial
+account/permission checks, lifecycle initialization and dispatch-lease registry.
+The three phases share admission installation/cleanup without merging their
+qualification rules. Only newly retained staging notifies the coordinator to record
+the original epoch's send lease; historical reads never do so.
+
+`CapturedCreateHandoff` groups transfer of a proven captured CREATE to incoming
+synchronization and reconciliation of subsequent local changes. Both phases share
+availability and admission setup/cleanup. The coordinator retains the mutex,
+original epoch and distinct consent predicates; source qualification stays shared
+with other owner paths. Historical projection recovery only inspects native proof.
+An exact waiting-to-settled echo can schedule one offline continuation; neither
+phase submits CREATE or grants a new sending lease.
+
+The import run's suspending diagnostic finalization has a private coordinator
+method. It preserves the original failure over a secondary refresh failure,
+always clears `busy`, and schedules local follow-up only after a successful
+authenticated network run. Cleanup remains under the existing mutex.
+The run delegates each calendar pass to a private method containing its existing
+staging, projection, progress and error handling. An inactive pass still stops the
+entire run; retry keeps precedence over continuation across calendars. This keeps
+the calendar suspensions outside the run's diagnostic `finally` state machine.
+
 ## Synchronization invariants
 
 Incoming pages are committed with their checkpoint and projection intents in a

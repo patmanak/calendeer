@@ -36,6 +36,13 @@ calendar scope removes its archive through a database cascade.
 
 ## Bounds and isolation
 
+`ImportStore` retains admission, locking and transaction ownership. Its synchronous
+`ConflictArchiveSql` collaborator reads and appends evidence only inside the
+caller's database operation, using the existing capacity check. It cannot open or
+commit a transaction, schedule work or acknowledge an event. `ImportPayloadCodec`
+retains the historical cache/checkpoint representation; bounded SQL values remain
+separate from decoding and domain policy.
+
 Archive discovery is metadata-only. Dossier details and observations are read
 separately, with at most 50 entries per page and one observation payload at a time
 in a bounded SQL cursor window. Cursors bind their protocol and exact scope or

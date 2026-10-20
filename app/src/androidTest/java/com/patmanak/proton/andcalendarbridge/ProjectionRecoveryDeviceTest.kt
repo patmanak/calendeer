@@ -378,10 +378,9 @@ class ProjectionRecoveryDeviceTest {
             f.queue(newer); f.edit("Later local series edit")
             val applies = f.applies.get(); f.reopen(); f.coordinator.run(false)
             assertEquals(candidate, f.store.projectedBaseline(f.target, f.base.eventId))
-            assertEquals(listOf(ProjectionIntent(f.target, newer)), f.store.pending(f.target))
-            val newerReceipt = f.store.projectionReceipt(f.target, f.base.eventId)!!
-            assertEquals(newer, newerReceipt.change); assertEquals(candidate, newerReceipt.previousBase)
-            assertNull(f.native.inspectProjectionReceipt(newerReceipt)); assertEquals(applies + 1, f.applies.get())
+            assertHeldImport(f, newer)
+            assertNull(f.store.projectionReceipt(f.target, f.base.eventId))
+            assertEquals("A known dirty series must not reach a new Provider write", applies, f.applies.get())
             assertEquals("Later local series edit", f.field(Events.TITLE)); assertEquals("1", f.field(Events.DIRTY))
         }
     }
@@ -402,7 +401,7 @@ class ProjectionRecoveryDeviceTest {
             f.reopen(); f.coordinator.run(false)
             assertEquals(f.base, f.store.projectedBaseline(f.target, f.base.eventId))
             assertEquals(receipt, f.store.projectionReceipt(f.target, f.base.eventId))
-            assertEquals(listOf(ProjectionIntent(f.target, candidate)), f.store.pending(f.target)); assertEquals("1", f.field(Events.DIRTY))
+            assertHeldImport(f, candidate); assertEquals("1", f.field(Events.DIRTY))
         }
     }
 
@@ -555,17 +554,16 @@ class ProjectionRecoveryDeviceTest {
         for (allDay in listOf(false, true)) for (changeType in listOf(false, true)) withFixture(nonAmbiguousStart = true, allDay = allDay) { f ->
             f.coordinator.run(false); f.importMaster()
             val candidate = f.exception(changeType = changeType); f.projectWithoutAcknowledgement(candidate)
-            val historical = f.store.projectionReceipt(f.target, f.base.eventId)!!; val applies = f.applies.get()
+            assertNotNull(f.store.projectionReceipt(f.target, f.base.eventId)); val applies = f.applies.get()
             val newer = candidate.copy(revision = Revision("v3"), content = candidate.content.copy(title = "Newer remote occurrence"))
             f.queue(newer); f.edit("Local occurrence edit")
             val parent = f.parent()
             f.reopen(); f.coordinator.run(false)
             assertEquals(candidate, f.store.projectedBaseline(f.target, f.base.eventId))
-            assertEquals(listOf(ProjectionIntent(f.target, newer)), f.store.pending(f.target))
+            assertHeldImport(f, newer)
             assertEquals(newer, f.store.transaction(f.target) { remote(f.base.eventId) })
-            val prepared = f.store.projectionReceipt(f.target, f.base.eventId)!!
-            assertEquals(newer, prepared.change); assertEquals(candidate, prepared.previousBase); assertNotEquals(historical.nonce, prepared.nonce)
-            assertNull(f.native.inspectProjectionReceipt(prepared)); assertEquals(applies + 1, f.applies.get())
+            assertNull(f.store.projectionReceipt(f.target, f.base.eventId))
+            assertEquals("The recovered historical receipt cannot authorize a newer write", applies, f.applies.get())
             f.assertExceptionDates(candidate)
             assertEquals("Local occurrence edit", f.field(Events.TITLE)); assertEquals("1", f.field(Events.DIRTY)); assertEquals(parent, f.parent())
         }
@@ -582,7 +580,7 @@ class ProjectionRecoveryDeviceTest {
             assertNull(f.native.inspectProjectionReceipt(receipt))
             f.reopen(); f.coordinator.run(false)
             assertEquals(f.base, f.store.projectedBaseline(f.target, f.base.eventId))
-            assertEquals(listOf(ProjectionIntent(f.target, candidate)), f.store.pending(f.target))
+            assertHeldImport(f, candidate)
             assertEquals(receipt, f.store.projectionReceipt(f.target, f.base.eventId)); assertEquals(parent, f.parent())
             assertEquals("Local occurrence without proof", f.field(Events.TITLE)); assertEquals("1", f.field(Events.DIRTY))
         }
@@ -728,7 +726,7 @@ class ProjectionRecoveryDeviceTest {
             val people = f.attendees()
             f.reopen(); f.coordinator.run(false)
             assertEquals(f.latest, f.store.projectedBaseline(f.target, f.base.eventId))
-            assertEquals(listOf(ProjectionIntent(f.target, newer)), f.store.pending(f.target))
+            assertHeldImport(f, newer)
             assertEquals(newer, f.store.transaction(f.target) { remote(f.base.eventId) })
             assertEquals(people, f.attendees()); assertEquals("1", f.field(Events.DIRTY))
             assertEquals("local-organizer@example.test", f.field(Events.ORGANIZER))
@@ -744,7 +742,7 @@ class ProjectionRecoveryDeviceTest {
                 assertNull(f.native.inspectProjectionReceipt(receipt))
                 f.reopen(); f.coordinator.run(false)
                 assertEquals(f.base, f.store.projectedBaseline(f.target, f.base.eventId))
-                assertEquals(listOf(ProjectionIntent(f.target, f.latest)), f.store.pending(f.target))
+                assertHeldImport(f, f.latest)
                 assertEquals(receipt, f.store.projectionReceipt(f.target, f.base.eventId))
                 assertEquals(people, f.attendees()); assertEquals("1", f.field(Events.DIRTY)); assertEquals(1, f.rowCount())
             }
@@ -862,7 +860,7 @@ class ProjectionRecoveryDeviceTest {
                 assertNull(f.native.inspectProjectionReceipt(receipt))
                 f.reopen(); f.coordinator.run(false)
                 assertEquals(f.base, f.store.projectedBaseline(f.target, f.base.eventId))
-                assertEquals(listOf(ProjectionIntent(f.target, f.latest)), f.store.pending(f.target))
+                assertHeldImport(f, f.latest)
                 assertEquals(receipt, f.store.projectionReceipt(f.target, f.base.eventId))
                 assertEquals(rows, f.reminders()); assertEquals("1", f.field(Events.DIRTY)); assertEquals(1, f.rowCount())
             }
@@ -895,13 +893,17 @@ class ProjectionRecoveryDeviceTest {
             f.coordinator.run(false)
             val rows = f.reminders(); val marker = f.field(Events.SYNC_DATA3)
             f.editReminder(99); val dirtyRows = f.reminders()
-            f.queue(f.latest); f.coordinator.run(false)
+            f.queue(f.latest)
+            // Seed an actually interrupted preparation, rather than requiring the owner to
+            // prepare a new write after it has already observed unsupported native changes.
+            f.store.prepareProjection(ProjectionIntent(f.target, f.latest), f.format)
+            f.coordinator.run(false)
             val receipt = f.store.projectionReceipt(f.target, f.base.eventId)!!
             assertNull(f.native.inspectProjectionReceipt(receipt))
             assertEquals(marker, f.field(Events.SYNC_DATA3)); assertNotEquals(rows, dirtyRows)
             f.reopen(); f.coordinator.run(false)
             assertEquals(f.base, f.store.projectedBaseline(f.target, f.base.eventId))
-            assertEquals(listOf(ProjectionIntent(f.target, f.latest)), f.store.pending(f.target))
+            assertHeldImport(f, f.latest, expectedStatus = "INCOMPLETE")
             assertEquals(dirtyRows, f.reminders()); assertEquals("1", f.field(Events.DIRTY))
         }
     }
@@ -975,6 +977,7 @@ class ProjectionRecoveryDeviceTest {
             val row = f.row()
             f.edit("Recovery edit before projection")
             f.queue(f.latest)
+            f.store.prepareProjection(ProjectionIntent(f.target, f.latest), f.format)
             f.coordinator.run(false)
             val unapplied = f.store.projectionReceipt(f.target, f.base.eventId)!!
             assertNull(f.native.inspectProjectionReceipt(unapplied))
@@ -1198,6 +1201,15 @@ class ProjectionRecoveryDeviceTest {
         try { AndroidCalendarProjection(wrappedContext).applyTracked(receipt); fail("Injected assertion must reject the batch") }
         catch (_: com.patmanak.proton.andcalendarbridge.data.calendar.CalendarProjectionException) { }
         assertTrue(injected)
+    }
+
+    private suspend fun assertHeldImport(f: Fixture, change: RemoteChange, expectedStatus: String = "ERROR") {
+        assertTrue("Locally held work must not be runnable on a continuation", f.store.pending(f.target).isEmpty())
+        assertEquals(1, f.store.heldProjectionCount(f.target))
+        assertEquals(1, f.store.selections(f.target.account).single().pendingProjectionCount)
+        assertEquals(change, f.store.transaction(f.target) { remote(change.eventId) })
+        // An offline drain retains a prior injected ACK error; local holding cannot erase it.
+        assertEquals(expectedStatus, f.store.selections(f.target.account).single().status)
     }
 
     private class Fixture(val context: Context, reminders: Boolean = false, allDay: Boolean = false, participants: Boolean = false,

@@ -85,6 +85,7 @@ import kotlinx.coroutines.withContext
 
 enum class CalendarProjectionFailure {
     PERMISSION_REQUIRED, ACCOUNT_UNAVAILABLE, CALENDAR_MISSING, IDENTITY_CONFLICT, PROVIDER_UNAVAILABLE, PROVIDER_REJECTED,
+    LOCAL_CHANGE_PENDING,
 }
 
 /** Contains no provider exception, account identity or event content. Failed intents remain queued. */
@@ -422,6 +423,43 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
             requirePermissions()
             AppliedProjectionWitness(frozen)
         }
+    }
+
+    override suspend fun hasOwnedLocalChanges(intent: ProjectionIntent, deletedSeriesUid: String?): Boolean = operation {
+        val account = accountFor(intent.scope.account)
+        val calendar = calendarRow(intent.scope, account) ?: fail(CalendarProjectionFailure.CALENDAR_MISSING)
+        val uri = syncUri(Events.CONTENT_URI, account)
+        val remoteId = digest("event-v1", calendarSyncId(intent.scope), intent.change.eventId.value)
+        val identity = Selection("${Events.CALENDAR_ID}=? AND (${Events.SYNC_DATA4}=? OR " +
+            "(${Events.SYNC_DATA4} IS NULL AND ${Events._SYNC_ID}=?))", arrayOf(calendar.toString(), remoteId, remoteId))
+        val existing = ownedRow(uri, identity, Events.SYNC_DATA1)
+        val series = mutableSetOf<String>()
+        if (existing != null) {
+            resolver.query(uri, arrayOf(Events.DIRTY, Events.DELETED, Events._SYNC_ID, Events.ORIGINAL_SYNC_ID),
+                identity.sql, identity.args, null)?.use { rows ->
+                if (rows.count != 1 || !rows.moveToFirst()) fail(CalendarProjectionFailure.IDENTITY_CONFLICT)
+                if (rows.getInt(0) != 0 || rows.getInt(1) != 0) return@operation true
+                if (!rows.isNull(2)) series += rows.getString(2)
+                if (!rows.isNull(3)) series += rows.getString(3)
+            } ?: fail(CalendarProjectionFailure.PROVIDER_UNAVAILABLE)
+        }
+        (intent.change as? RemoteChange.Upsert)?.content?.recurrence?.let {
+            series += digest("series-v1", calendarSyncId(intent.scope), it.uid)
+        }
+        if (intent.change is RemoteChange.Deleted && deletedSeriesUid != null)
+            series += digest("series-v1", calendarSyncId(intent.scope), deletedSeriesUid)
+        // A dirty child can block master deletion/conversion; a dirty parent can block an
+        // exception's geometry checks. Observe the whole affected owned family without editing it.
+        for (syncId in series) {
+            val changed = resolver.query(uri, arrayOf(Events._ID),
+                "${Events.CALENDAR_ID}=? AND ${Events.SYNC_DATA1}=? AND " +
+                    "(${Events._SYNC_ID}=? OR ${Events.ORIGINAL_SYNC_ID}=?) AND (${Events.DIRTY}<>0 OR ${Events.DELETED}<>0)",
+                arrayOf(calendar.toString(), OWNER_MARKER, syncId, syncId), null)?.use { it.moveToFirst() }
+                ?: fail(CalendarProjectionFailure.PROVIDER_UNAVAILABLE)
+            if (changed) return@operation true
+        }
+        requirePermissions()
+        false
     }
 
     private fun applyInternal(intent: ProjectionIntent, seriesUid: String?, receipt: ProjectionReceipt?, firstFiniteInsertion: Boolean = false) {

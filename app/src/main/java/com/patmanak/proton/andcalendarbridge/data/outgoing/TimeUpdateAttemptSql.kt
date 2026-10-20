@@ -7,7 +7,6 @@ import android.database.sqlite.SQLiteDatabase
 import com.patmanak.proton.andcalendarbridge.data.serialization.TimeUpdateAttemptStorageCodec
 import com.patmanak.proton.andcalendarbridge.data.serialization.TimeUpdateProofStorageCodec
 import com.patmanak.proton.andcalendarbridge.sync.*
-import java.io.ByteArrayOutputStream
 import java.nio.ByteBuffer
 import java.nio.charset.CodingErrorAction
 
@@ -15,6 +14,8 @@ import java.nio.charset.CodingErrorAction
  * Index discovery is never proof: every discovered record is fully decoded and qualified.
  */
 internal class TimeUpdateAttemptSql(private val db: SQLiteDatabase, private val checkCancelled: () -> Unit) {
+    private val blobs = BoundedAttemptBlobReader(db, TABLE, checkCancelled)
+
     fun hasOwner(scope: CalendarScope, event: EventId, id: MutationId): Boolean =
         owners(scope, event, id).any { !it.completed || it.id == id }
     fun read(scope: CalendarScope, id: MutationId): TimeUpdateAttemptRecord? = readStored(db, scope, id)?.record
@@ -138,23 +139,8 @@ internal class TimeUpdateAttemptSql(private val db: SQLiteDatabase, private val 
             require(!row.moveToNext())
             value
         }
-        val bytes = ByteArrayOutputStream(metadata.length)
-        var offset = 0
-        while (offset < metadata.length) {
-            checkCancelled()
-            val count = minOf(CHUNK_BYTES, metadata.length - offset)
-            db.rawQuery("SELECT substr(capsule,?,?) FROM $TABLE WHERE rowid=?",
-                arrayOf((offset + 1).toString(), count.toString(), metadata.rowId.toString())).use { chunk ->
-                require(chunk.moveToFirst() && chunk.getType(0) == Cursor.FIELD_TYPE_BLOB)
-                val part = chunk.getBlob(0)
-                require(part.size == count && !chunk.moveToNext())
-                bytes.write(part)
-            }
-            offset += count
-        }
-        checkCancelled()
-        require(bytes.size() == metadata.length)
-        val record = TimeUpdateAttemptStorageCodec.decode(bytes.toByteArray())
+        val bytes = blobs.capsule(metadata.rowId, metadata.length)
+        val record = TimeUpdateAttemptStorageCodec.decode(bytes)
         require(record.scope == metadata.scope && record.id == metadata.id && record.eventId == metadata.event &&
             record.state.name == metadata.state)
         return Stored(metadata.rowId, record)
@@ -162,39 +148,10 @@ internal class TimeUpdateAttemptSql(private val db: SQLiteDatabase, private val 
     private data class Metadata(val rowId: Long, val scope: CalendarScope, val id: MutationId,
         val event: EventId, val state: String, val length: Int)
 
-    /** Fixed internal column names only; metadata is bounded before materializing any BLOB. */
-    private fun proofBlob(rowId: Long, column: String): ByteArray? {
-        require(column == "result" || column == "completion")
-        checkCancelled()
-        val length = db.rawQuery("SELECT CASE WHEN $column IS NULL THEN -1 " +
-            "WHEN typeof($column)='blob' AND length($column) BETWEEN 1 AND 16777216 THEN length($column) END " +
-            "FROM $TABLE WHERE rowid=?", arrayOf(rowId.toString())).use { row ->
-            require(row.moveToFirst() && row.getType(0) == Cursor.FIELD_TYPE_INTEGER)
-            row.getInt(0).also { require(!row.moveToNext()) }
-        }
-        if (length == -1) return null
-        require(length in 1..16777216)
-        val bytes = ByteArray(length)
-        var offset = 0
-        while (offset < length) {
-            checkCancelled()
-            val count = minOf(CHUNK_BYTES, length - offset)
-            db.rawQuery("SELECT substr($column,?,?) FROM $TABLE WHERE rowid=?",
-                arrayOf((offset + 1).toString(), count.toString(), rowId.toString())).use { row ->
-                require(row.moveToFirst() && row.getType(0) == Cursor.FIELD_TYPE_BLOB)
-                val part = row.getBlob(0)
-                require(part.size == count && !row.moveToNext())
-                part.copyInto(bytes, offset)
-            }
-            offset += count
-        }
-        checkCancelled()
-        return bytes
-    }
+    private fun proofBlob(rowId: Long, column: String): ByteArray? = blobs.proof(rowId, column)
 
     companion object {
         private const val TABLE = "time_update_attempts"
-        private const val CHUNK_BYTES = 64 * 1024
         fun createTable(db: SQLiteDatabase) {
             db.execSQL("""CREATE TABLE time_update_attempts (
                 account TEXT NOT NULL, calendar TEXT NOT NULL,

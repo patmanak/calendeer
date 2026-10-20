@@ -35,6 +35,10 @@ class DirtyProjectionRefreshDeviceTest {
         override val projectionReceiptProtocol = 1
         override val textUpdateAcknowledgementProtocol = 1
         var dirty = true
+        var unsupportedCapture = false
+        var priorWriteWitness = false
+        var changeDuringApply = false
+        val independentWrites = mutableListOf<EventId>()
         var content = fixture.edited
         var revision = fixture.base.revision
         var incomingAttempts = 0
@@ -49,10 +53,19 @@ class DirtyProjectionRefreshDeviceTest {
         override suspend fun ensureCalendarState(scope: CalendarScope, summary: CalendarSummary, systemCreates: Boolean) = EnsuredCalendar(1, false)
         override suspend fun makeCalendarReadOnly(scope: CalendarScope) = Unit
         override suspend fun apply(intent: ProjectionIntent, seriesUid: String?) = error("Tracked projection is required")
+        override suspend fun hasOwnedLocalChanges(intent: ProjectionIntent, deletedSeriesUid: String?): Boolean {
+            check(admitOperation())
+            return unsupportedCapture && dirty && intent.change.eventId == fixture.base.eventId
+        }
         override suspend fun applyTracked(receipt: ProjectionReceipt): AppliedProjectionWitness {
             check(admitOperation())
+            if (receipt.change.eventId != fixture.base.eventId) {
+                independentWrites += receipt.change.eventId
+                return AppliedProjectionWitness(receipt)
+            }
             if (incomingAttempts == 0) checkpointAtFirstAttempt = fixture.store.transaction(fixture.target) { checkpoint }
             incomingAttempts++; fixture.order += "native"
+            if (changeDuringApply) unsupportedCapture = true
             if (dirty) throw CalendarProjectionException(CalendarProjectionFailure.PROVIDER_REJECTED)
             incomingWrites++; content = receipt.change.content; revision = receipt.change.revision
             incomingReceipt = receipt
@@ -60,10 +73,11 @@ class DirtyProjectionRefreshDeviceTest {
         }
         override suspend fun inspectProjectionReceipt(receipt: ProjectionReceipt): AppliedProjectionWitness? {
             check(admitOperation())
-            return if (incomingReceipt == receipt) AppliedProjectionWitness(receipt) else null
+            return if (incomingReceipt == receipt || priorWriteWitness) AppliedProjectionWitness(receipt) else null
         }
         override suspend fun captureOwnedSimpleEdit(scope: CalendarScope, base: RemoteChange.Upsert): OwnedLocalEditSnapshot? {
             check(admitOperation())
+            if (unsupportedCapture) return null
             return if (scope == fixture.target && dirty && revision == base.revision) OwnedLocalEditSnapshot(1, 1, content) else null
         }
         override suspend fun acknowledgeTextUpdate(receipt: TextUpdateAcknowledgementReceipt): AppliedTextUpdateAcknowledgement? {
@@ -103,6 +117,7 @@ class DirtyProjectionRefreshDeviceTest {
         var pages = 1
         var incoming = base
         var emptyFirstPage = false
+        var extraIncoming = emptyList<RemoteChange>()
         var receiveHook: suspend () -> Unit = {}
         var decodeHook: suspend () -> Unit = {}
         private val uncaught = AtomicReference<Throwable?>()
@@ -128,7 +143,7 @@ class DirtyProjectionRefreshDeviceTest {
                 order += "decode"; decodeHook()
                 val number = received.request.checkpoint.cursor?.value?.toInt() ?: 0
                 val complete = number + 1 >= pages
-                return DecodedCalendarPage(RemotePage(target, format, if (number == 0 && !emptyFirstPage) listOf(incoming) else emptyList(),
+                return DecodedCalendarPage(RemotePage(target, format, if (number == 0 && !emptyFirstPage) listOf(incoming) + extraIncoming else emptyList(),
                     if (complete) null else OpaqueCursor(format, (number + 1).toString()), complete))
             }
             override suspend fun retryDeferred(scope: CalendarScope, event: DeferredCalendarEvent): RemoteChange.Upsert? = null
@@ -239,6 +254,64 @@ class DirtyProjectionRefreshDeviceTest {
         assertEquals(ImportRunResult.COMPLETE, coordinator.run(network = false, fresh = false))
         assertEquals(nativeAfterAck, projection.content); assertFalse(projection.dirty)
         assertEquals(0, projection.incomingWrites); assertEquals(1, projection.acknowledgements); assertEquals(1, requests.size)
+    }
+
+    @Test fun unsupportedDirtyEventDoesNotStarveIndependentIncomingAndDoesNotBusyRetry() = fixture {
+        projection.unsupportedCapture = true
+        pages = 3
+        val independent = base.copy(eventId = EventId("independent"), revision = Revision("independent-v1"))
+        extraIncoming = listOf(independent)
+        assertEquals(ImportRunResult.COMPLETE, coordinator.run(network = true))
+        assertEquals("All bounded incoming pages must progress despite the held row", 3, requests.size)
+        assertEquals(listOf(independent.eventId), projection.independentWrites)
+        assertTrue(projection.dirty); assertEquals(edited, projection.content)
+        assertEquals(0, projection.incomingWrites); assertEquals(0, projection.acknowledgements)
+        allowSql()
+        assertNull(store.localEdit(target, base.eventId))
+        assertEquals(preparedIncoming, store.projectionReceipt(target, base.eventId))
+        val state = store.selections(target.account).single()
+        assertEquals("INCOMPLETE", state.status)
+        assertNull(state.completedAt)
+        assertEquals(ImportRunResult.COMPLETE, coordinator.run(network = false, fresh = false))
+        assertEquals(3, requests.size)
+        assertEquals(listOf(independent.eventId), projection.independentWrites)
+        assertTrue(projection.dirty); assertEquals(edited, projection.content)
+    }
+
+    @Test fun historicalWriteRecoveryStillReportsAndHoldsANewerUnsupportedLocalChange() = fixture {
+        projection.unsupportedCapture = true; projection.priorWriteWitness = true
+        assertEquals(ImportRunResult.COMPLETE, coordinator.run(network = true))
+        allowSql()
+        assertNull(store.projectionReceipt(target, base.eventId))
+        assertEquals(base, store.projectedBaseline(target, base.eventId))
+        assertEquals(1, store.heldProjectionCount(target))
+        assertEquals("INCOMPLETE", store.selections(target.account).single().status)
+        assertTrue(projection.dirty); assertEquals(edited, projection.content)
+        assertEquals(0, projection.incomingWrites); assertEquals(0, projection.acknowledgements)
+    }
+
+    @Test fun localChangeBetweenObservationAndAtomicWriteDoesNotStarveOtherEvents() = fixture {
+        projection.changeDuringApply = true
+        val independent = base.copy(eventId = EventId("independent-race"))
+        extraIncoming = listOf(independent)
+        assertEquals(ImportRunResult.COMPLETE, coordinator.run(network = true))
+        assertEquals(listOf(independent.eventId), projection.independentWrites)
+        allowSql(); assertEquals(1, store.heldProjectionCount(target))
+        assertEquals(preparedIncoming, store.projectionReceipt(target, base.eventId))
+        assertTrue(projection.dirty); assertEquals(edited, projection.content)
+    }
+
+    @Test fun newOwnerInvalidationPrecedesCaptureAndIsNotRepeatedForAnExistingOwner() = fixture {
+        coordinator.run(network = true)
+        var wakes = 0
+        try {
+            coordinator.captureSystemLocalEdit(target, base.eventId) { wakes++; throw CancellationException("Synthetic capture interruption") }
+            fail("Cancellation must propagate")
+        } catch (_: CancellationException) { }
+        allowSql(); assertNull(store.localEdit(target, base.eventId))
+        assertEquals(LocalEditCaptureResult.RETAINED, coordinator.captureSystemLocalEdit(target, base.eventId) { wakes++ })
+        assertEquals(LocalEditCaptureResult.RETAINED, coordinator.captureSystemLocalEdit(target, base.eventId) { error("Existing owner cannot wake discovery again") })
+        assertEquals(2, wakes)
     }
 
     @Test fun initialPageConsumesOneOfTheFourPageBudgetInsteadOfAddingAFifth() = fixture {

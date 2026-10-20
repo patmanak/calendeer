@@ -3,34 +3,41 @@ package com.patmanak.proton.andcalendarbridge.data.importing
 import android.content.ContentValues
 import android.content.Context
 import android.database.Cursor
-import android.database.CursorWindow
-import android.database.sqlite.SQLiteCursor
 import android.database.sqlite.SQLiteDatabase
-import android.database.sqlite.SQLiteOpenHelper
 import android.database.sqlite.SQLiteException
-import com.patmanak.proton.andcalendarbridge.sync.*
-import com.patmanak.proton.andcalendarbridge.data.serialization.TitleUpdateAcknowledgementCodec
+import android.database.sqlite.SQLiteOpenHelper
+import com.patmanak.proton.andcalendarbridge.data.importing.ImportPayloadCodec.decodeChange
+import com.patmanak.proton.andcalendarbridge.data.importing.ImportPayloadCodec.decodeCheckpoint
+import com.patmanak.proton.andcalendarbridge.data.importing.ImportPayloadCodec.encodeChange
+import com.patmanak.proton.andcalendarbridge.data.importing.ImportPayloadCodec.encodeCheckpoint
+import com.patmanak.proton.andcalendarbridge.data.importing.ImportPayloadCodec.key
+import com.patmanak.proton.andcalendarbridge.data.importing.ImportPayloadCodec.requirePreparationSnapshotBudget
+import com.patmanak.proton.andcalendarbridge.data.importing.ImportSqlValues.COVERAGE_MAX_BYTES
+import com.patmanak.proton.andcalendarbridge.data.importing.ImportSqlValues.archiveString
+import com.patmanak.proton.andcalendarbridge.data.importing.ImportSqlValues.archiveText
+import com.patmanak.proton.andcalendarbridge.data.importing.ImportSqlValues.stagedQuery
+import com.patmanak.proton.andcalendarbridge.data.serialization.DeleteAcknowledgementCodec
 import com.patmanak.proton.andcalendarbridge.data.serialization.TextUpdateAcknowledgementCodec
 import com.patmanak.proton.andcalendarbridge.data.serialization.TimeUpdateAcknowledgementCodec
-import com.patmanak.proton.andcalendarbridge.data.serialization.DeleteAcknowledgementCodec
+import com.patmanak.proton.andcalendarbridge.data.serialization.TitleUpdateAcknowledgementCodec
+import com.patmanak.proton.andcalendarbridge.sync.*
 import com.patmanak.proton.andcalendarbridge.sync.catalog.CalendarSummary
+import java.nio.charset.CodingErrorAction
+import java.time.DateTimeException
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
-import java.time.DateTimeException
 import java.util.UUID
-import java.nio.CharBuffer
-import java.nio.charset.CodingErrorAction
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import org.json.JSONObject
 import org.json.JSONArray
 import org.json.JSONException
+import org.json.JSONObject
 
 /** App-private, backup-excluded durable import queue. Every page and checkpoint commits together. */
 enum class LocalTitlePreparationAdmission { ELIGIBLE, STORED, HISTORICAL, INACTIVE, UNQUALIFIED, CONFLICT }
@@ -45,494 +52,20 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
     override fun onConfigure(db: SQLiteDatabase) {
         db.execSQL("PRAGMA synchronous=FULL")
     }
-    override fun onCreate(db: SQLiteDatabase) {
-        db.execSQL("CREATE TABLE calendars (scope TEXT PRIMARY KEY, account TEXT NOT NULL, calendar TEXT NOT NULL, generation INTEGER NOT NULL, title TEXT NOT NULL, color INTEGER, enabled INTEGER NOT NULL DEFAULT 0, checkpoint TEXT, status TEXT NOT NULL DEFAULT 'PAUSED', completed_at INTEGER, next_attempt INTEGER NOT NULL DEFAULT 0)")
-        db.execSQL("CREATE TABLE records (scope TEXT NOT NULL, event TEXT NOT NULL, payload TEXT NOT NULL, pending INTEGER NOT NULL, PRIMARY KEY(scope,event))")
-        createStaging(db)
-        createDelta(db)
-        createReconciliation(db)
-        createCoverage(db)
-        createSeries(db)
-        createMappingProfiles(db)
-        createLocalEdits(db)
-        createProjectionReceipts(db)
-        createCapturedBases(db)
-        createCapturedAcknowledgements(db)
-        createCapturedHandoffs(db)
-        createLocalEditPreparations(db)
-        createProjectionRepresentations(db)
-        createTitleUpdateAcknowledgements(db)
-        createTitleUpdateAcknowledgementHistory(db)
-        createTextPreparationAndAcknowledgements(db)
-        createTimePreparationAndAcknowledgements(db)
-        createConflictArchives(db)
-        createDeleteAcknowledgements(db)
-    }
-    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        check(oldVersion in 1..21 && newVersion == 22) { "Explicit import schema migration required" }
-        createDeleteAcknowledgements(db)
-        if (oldVersion == 21) return
-        createTimePreparationAndAcknowledgements(db)
-        if (oldVersion == 20) return
-        // Add these before every legacy branch, including the schema-18 observation rebuild.
-        createTextPreparationAndAcknowledgements(db)
-        if (oldVersion == 19) return
-        if (oldVersion == 18) {
-            migrateConflictObservationsFrom18(db)
-            return
-        }
-        if (oldVersion < 2) createStaging(db)
-        if (oldVersion < 3) createDelta(db)
-        if (oldVersion < 4) createReconciliation(db)
-        if (oldVersion < 5) createCoverage(db)
-        if (oldVersion < 6) createSeries(db)
-        if (oldVersion < 7) createMappingProfiles(db)
-        if (oldVersion < 8) {
-            createLocalEdits(db)
-            // Legacy clean cache is only a baseline candidate; capture still qualifies the live owner row.
-            db.rawQuery("SELECT r.scope,r.event,r.payload FROM records r WHERE r.pending=0 AND NOT EXISTS " +
-                "(SELECT 1 FROM deferred_events d WHERE d.scope=r.scope AND d.event=r.event)", null).use { cursor ->
-                while (cursor.moveToNext()) {
-                    if (decodeChange(cursor.getString(2)) is RemoteChange.Upsert) db.insertOrThrow("projection_bases", null,
-                        ContentValues().apply {
-                            put("scope", cursor.getString(0)); put("event", cursor.getString(1)); put("payload", cursor.getString(2))
-                        })
-                }
-            }
-        }
-        if (oldVersion < 9) createProjectionReceipts(db)
-        if (oldVersion in 8..9) db.execSQL("ALTER TABLE local_edits ADD COLUMN kind TEXT NOT NULL DEFAULT 'UPDATE' CHECK(kind IN ('UPDATE','DELETE'))")
-        if (oldVersion < 11) createCapturedBases(db)
-        if (oldVersion < 12) createCapturedAcknowledgements(db)
-        if (oldVersion < 13) createCapturedHandoffs(db)
-        if (oldVersion < 14) createLocalEditPreparations(db)
-        if (oldVersion < 15) createProjectionRepresentations(db)
-        if (oldVersion < 16) createTitleUpdateAcknowledgements(db)
-        if (oldVersion < 17) createTitleUpdateAcknowledgementHistory(db)
-        createConflictArchives(db)
-        // Only currently retained evidence is available. Never reconstruct discarded observations.
-        var after = 0L
-        while (true) {
-            val row = db.rawQuery("SELECT rowid,${archiveText("scope", 32768)},${archiveText("event", 4096)} FROM local_edits WHERE state='CONFLICT' AND rowid>? ORDER BY rowid LIMIT 1",
-                arrayOf(after.toString())).use { cursor ->
-                if (!cursor.moveToFirst()) null else Triple(cursor.getLong(0), archiveString(cursor, 1), archiveString(cursor, 2))
-            } ?: break
-            after = row.first
-            val encodedScope = JSONArray(row.second)
-            check(encodedScope.length() == 3) { "Invalid conflict scope" }
-            val scope = CalendarScope(AccountId(encodedScope.getString(0)), CalendarId(encodedScope.getString(1)), encodedScope.getLong(2))
-            check(key(scope) == row.second) { "Invalid conflict scope" }
-            ensureConflictArchive(db, scope, EventId(row.third))
-        }
-        checkStagingCapacity(db)
-    }
-    private fun createConflictArchives(db: SQLiteDatabase) {
-        db.execSQL("""CREATE TABLE conflict_archives (
-            id INTEGER PRIMARY KEY AUTOINCREMENT, scope TEXT NOT NULL, event TEXT NOT NULL,
-            mutation TEXT NOT NULL, kind TEXT NOT NULL CHECK(kind IN ('UPDATE','DELETE')),
-            adapter TEXT NOT NULL, version INTEGER NOT NULL CHECK(version>0),
-            base TEXT NOT NULL, local TEXT NOT NULL, UNIQUE(scope,mutation)
-        )""".trimIndent())
-        db.execSQL("CREATE INDEX conflict_archive_scope ON conflict_archives(scope,id)")
-        createConflictObservations(db)
-        createConflictArchiveCleanup(db)
-    }
-    private fun createConflictObservations(db: SQLiteDatabase) {
-        db.execSQL("""CREATE TABLE conflict_observations (
-            id INTEGER PRIMARY KEY AUTOINCREMENT, archive_id INTEGER NOT NULL,
-            kind TEXT NOT NULL CHECK(kind IN ('VERIFIED','DEFERRED','UNOBSERVED','UNREADABLE')),
-            origin TEXT NOT NULL CHECK(origin IN ('CACHED','RECEIVED')), observed_at TEXT,
-            adapter TEXT, version INTEGER, revision TEXT, reason TEXT, payload TEXT
-        )""".trimIndent())
-        db.execSQL("CREATE INDEX conflict_observation_archive ON conflict_observations(archive_id,id)")
-    }
-    private fun createConflictArchiveCleanup(db: SQLiteDatabase) {
-        db.execSQL("""CREATE TRIGGER conflict_archive_scope_delete AFTER DELETE ON calendars BEGIN
-            DELETE FROM conflict_observations WHERE archive_id IN (SELECT id FROM conflict_archives WHERE scope=OLD.scope);
-            DELETE FROM conflict_archives WHERE scope=OLD.scope;
-        END""".trimIndent())
-    }
-    /** Expand the observation kind constraint without renumbering evidence or changing any bytes. */
-    private fun migrateConflictObservationsFrom18(db: SQLiteDatabase) {
-        val sequence = db.rawQuery("SELECT CASE WHEN typeof(seq)='integer' AND seq>=0 THEN seq END FROM sqlite_sequence WHERE name='conflict_observations'", null).use { row ->
-            if (!row.moveToFirst()) null else {
-                check(row.getType(0) == Cursor.FIELD_TYPE_INTEGER && row.getLong(0) >= 0) { "Invalid conflict sequence" }
-                row.getLong(0).also { check(!row.moveToNext()) { "Invalid conflict sequence" } }
-            }
-        }
-        db.execSQL("DROP TRIGGER conflict_archive_scope_delete")
-        db.execSQL("DROP INDEX conflict_observation_archive")
-        db.execSQL("ALTER TABLE conflict_observations RENAME TO conflict_observations_v18")
-        createConflictObservations(db)
-        db.execSQL("INSERT INTO conflict_observations(id,archive_id,kind,origin,observed_at,adapter,version,revision,reason,payload) " +
-            "SELECT id,archive_id,kind,origin,observed_at,adapter,version,revision,reason,payload FROM conflict_observations_v18")
-        db.execSQL("DROP TABLE conflict_observations_v18")
-        sequence?.let { previous ->
-            // AUTOINCREMENT may be ahead of MAX(id) after deletion; retain that historical bound too.
-            val maximum = db.rawQuery("SELECT COALESCE(MAX(id),0) FROM conflict_observations", null).use { row -> check(row.moveToFirst()); row.getLong(0) }
-            check(previous >= maximum) { "Invalid conflict sequence" }
-            val updated = db.update("sqlite_sequence", ContentValues().apply { put("seq", previous) },
-                "name='conflict_observations'", null)
-            if (updated == 0) db.insertOrThrow("sqlite_sequence", null, ContentValues().apply { put("name", "conflict_observations"); put("seq", previous) })
-        }
-        createConflictArchiveCleanup(db)
-    }
-    /** Read-only evidence pages do not check global staging capacity or decode preparation capsules. */
+    override fun onCreate(db: SQLiteDatabase) = ImportSchema.create(db)
+    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) =
+        ImportSchema.upgrade(db, oldVersion, newVersion, ::checkStagingCapacity)
+    private fun conflicts(db: SQLiteDatabase) = ConflictArchiveSql(db) { checkStagingCapacity(db) }
+
+    /** The store retains admission/transaction ownership for historical reads. */
     suspend fun conflictArchives(query: ConflictArchiveQuery): ConflictArchivePage = stagingMutation(query.scope) { db ->
-        archiveRead {
-            val refs = db.rawQuery("SELECT id,${archiveText("event", 4096)},${archiveText("mutation", 4096)},${archiveText("kind", 8)} " +
-                "FROM conflict_archives WHERE scope=? AND id>? ORDER BY id LIMIT ?",
-                arrayOf(key(query.scope), (query.cursor?.afterId ?: 0).toString(), (query.limit + 1).toString())).use { rows ->
-                buildList { while (rows.moveToNext()) add(archiveRef(query.scope, rows)) }
-            }
-            val visible = refs.take(query.limit)
-            ConflictArchivePage(query.scope, visible, if (refs.size > query.limit) ConflictArchiveCursor(query.scope, visible.last().id) else null)
-        }
+        conflicts(db).archives(query)
     }
     suspend fun conflictArchive(ref: ConflictArchiveRef): ConflictArchiveDetail? = stagingMutation(ref.scope) { db ->
-        archiveRead { readConflictArchive(db, ref) }
+        conflicts(db).archive(ref)
     }
     suspend fun conflictObservations(query: ConflictObservationQuery): ConflictObservationPage = stagingMutation(query.ref.scope) { db ->
-        archiveRead {
-            check(readConflictArchive(db, query.ref) != null) { "Conflict archive is absent" }
-            // Select bounded metadata first. At most one payload enters a CursorWindow at a time.
-            val ids = db.rawQuery("SELECT id FROM conflict_observations WHERE archive_id=? AND id>? ORDER BY id LIMIT ?",
-                arrayOf(query.ref.id.toString(), (query.cursor?.afterId ?: 0).toString(), (query.limit + 1).toString())).use { rows ->
-                buildList { while (rows.moveToNext()) { check(rows.getType(0) == Cursor.FIELD_TYPE_INTEGER); add(rows.getLong(0)) } }
-            }
-            val entries = ids.take(query.limit).map { readConflictObservation(db, query.ref, it) }
-            ConflictObservationPage(query.ref, entries, if (ids.size > query.limit) ConflictObservationCursor(query.ref, entries.last().id) else null)
-        }
-    }
-    private inline fun <T> archiveRead(block: () -> T): T = try { block() }
-        catch (cancelled: CancellationException) { throw cancelled }
-        catch (capacity: ImportCapacityException) { throw capacity }
-        catch (failure: SQLiteException) { throw failure }
-        catch (_: Exception) { throw IllegalStateException("Invalid conflict archive evidence") }
-
-    private fun archiveText(column: String, limit: Int = LocalEditPreparation.MAX_PAYLOAD_BYTES) =
-        // CursorWindow TEXT includes a terminator in getBlob(); select actual UTF-8 bytes.
-        "CASE WHEN typeof($column)='text' AND length(CAST($column AS BLOB))<=$limit THEN CAST($column AS BLOB) END"
-    private fun archiveVersion() = "CASE WHEN typeof(version)='integer' AND version BETWEEN 1 AND 2147483647 THEN version END"
-    private fun archiveString(row: Cursor, column: Int): String {
-        check(row.getType(column) == Cursor.FIELD_TYPE_BLOB) { "Invalid conflict text" }
-        return Charsets.UTF_8.newDecoder().onMalformedInput(CodingErrorAction.REPORT)
-            .onUnmappableCharacter(CodingErrorAction.REPORT).decode(java.nio.ByteBuffer.wrap(row.getBlob(column))).toString()
-    }
-    private fun archiveRef(scope: CalendarScope, row: Cursor): ConflictArchiveRef {
-        check(row.getType(0) == Cursor.FIELD_TYPE_INTEGER) { "Invalid conflict identity" }
-        return ConflictArchiveRef(scope, row.getLong(0), EventId(archiveString(row, 1)), MutationId(archiveString(row, 2)),
-            MutationKind.valueOf(archiveString(row, 3)))
-    }
-    private fun readConflictArchive(db: SQLiteDatabase, ref: ConflictArchiveRef): ConflictArchiveDetail? = stagedQuery(db,
-        "SELECT id,${archiveText("event", 4096)},${archiveText("mutation", 4096)},${archiveText("kind", 8)}," +
-            "${archiveText("adapter", 4096)},${archiveVersion()},${archiveText("base")},${archiveText("local")} FROM conflict_archives WHERE scope=? AND id=?",
-        arrayOf(key(ref.scope), ref.id.toString())).use { row ->
-        if (!row.moveToFirst()) null else {
-            if (archiveRef(ref.scope, row) != ref) return@use null
-            check(row.getType(5) == Cursor.FIELD_TYPE_INTEGER && row.getLong(5) in 1..Int.MAX_VALUE) { "Invalid conflict format" }
-            val format = AdapterFormat(archiveString(row, 4), row.getInt(5))
-            val base = decodeChange(archiveString(row, 6)) as? RemoteChange.Upsert ?: error("Invalid conflict base")
-            val local = decodeChange(archiveString(row, 7)) as? RemoteChange.Upsert ?: error("Invalid conflict capture")
-            check(base.eventId == ref.eventId && local.eventId == ref.eventId && local.revision == base.revision) { "Invalid conflict binding" }
-            validateConflictCapture(ref, format, base, local.content)
-            ConflictArchiveDetail(ref, format, base, local.content)
-        }
-    }
-    private fun validateConflictCapture(ref: ConflictArchiveRef, format: AdapterFormat, base: RemoteChange.Upsert, local: EventContent) {
-        if (ref.kind == MutationKind.UPDATE) LocalEditIntent(ref.mutationId, ref.scope, format, base, local, LocalEditState.CONFLICT)
-        else LocalDeleteIntent(ref.mutationId, ref.scope, format, base, local, LocalEditState.CONFLICT)
-    }
-    private fun readConflictObservation(db: SQLiteDatabase, ref: ConflictArchiveRef, id: Long): ConflictObservation = stagedQuery(db,
-        "SELECT ${archiveText("kind", 16)},${archiveText("origin", 16)},${archiveText("observed_at", 64)}," +
-            "${archiveText("adapter", 4096)},${archiveVersion()},${archiveText("revision", 4096)},${archiveText("reason", 64)},${archiveText("payload")}," +
-            "observed_at IS NULL,adapter IS NULL,version IS NULL,revision IS NULL,reason IS NULL,payload IS NULL " +
-            "FROM conflict_observations WHERE archive_id=? AND id=?", arrayOf(ref.id.toString(), id.toString())).use { row ->
-        check(row.moveToFirst()) { "Missing conflict observation" }
-        fun optional(column: Int, absence: Int) = if (row.getInt(absence) == 1) null else archiveString(row, column)
-        val kind = ConflictObservationKind.valueOf(archiveString(row, 0))
-        val origin = ConflictObservationOrigin.valueOf(archiveString(row, 1))
-        val observed = optional(2, 8)?.let(Instant::parse)
-        val adapter = optional(3, 9)
-        val format = if (adapter == null) { check(row.getInt(10) == 1); null } else {
-            check(row.getType(4) == Cursor.FIELD_TYPE_INTEGER && row.getLong(4) in 1..Int.MAX_VALUE)
-            AdapterFormat(adapter, row.getInt(4))
-        }
-        val revision = optional(5, 11)?.let(::Revision)
-        val reason = optional(6, 12)?.let(DeferredEventReason::valueOf)
-        val payload = optional(7, 13)
-        val change = when (kind) {
-            ConflictObservationKind.VERIFIED -> decodeChange(checkNotNull(payload)).also {
-                check(it.eventId == ref.eventId && it.revision == revision && reason == null)
-            }
-            ConflictObservationKind.DEFERRED -> {
-                DeferredCalendarEvent(ref.eventId, checkNotNull(revision), checkNotNull(format), checkNotNull(reason), checkNotNull(payload)); null
-            }
-            ConflictObservationKind.UNOBSERVED -> { check(payload == null && revision == null && reason == null); null }
-            ConflictObservationKind.UNREADABLE -> { check(payload != null && revision == null && reason == null); null }
-        }
-        ConflictObservation(id, kind, origin, observed, format, change, reason)
-    }
-    /** Called before replacing cache/deferred evidence. B/L is copied once and never updated. */
-    private fun ensureConflictArchive(db: SQLiteDatabase, scope: CalendarScope, event: EventId, force: Boolean = false): Long? = archiveRead {
-        val owner = stagedQuery(db, "SELECT ${archiveText("mutation", 4096)},${archiveText("kind", 8)},${archiveText("adapter", 4096)},${archiveVersion()}," +
-            "${archiveText("base")},${archiveText("local")},${archiveText("state", 8)} FROM local_edits WHERE scope=? AND event=?",
-            arrayOf(key(scope), event.value)).use { row ->
-            if (!row.moveToFirst()) null else {
-                val state = LocalEditState.valueOf(archiveString(row, 6))
-                if (!force && state != LocalEditState.CONFLICT) return@use null
-                check(row.getType(3) == Cursor.FIELD_TYPE_INTEGER && row.getLong(3) in 1..Int.MAX_VALUE)
-                val ref = ConflictArchiveRef(scope, 1, event, MutationId(archiveString(row, 0)), MutationKind.valueOf(archiveString(row, 1)))
-                val format = AdapterFormat(archiveString(row, 2), row.getInt(3))
-                val base = decodeChange(archiveString(row, 4)) as? RemoteChange.Upsert ?: error("Invalid conflict base")
-                val local = decodeChange(archiveString(row, 5)) as? RemoteChange.Upsert ?: error("Invalid conflict capture")
-                check(base.eventId == event && local.eventId == event && local.revision == base.revision)
-                validateConflictCapture(ref, format, base, local.content)
-                ConflictArchiveDetail(ref, format, base, local.content)
-            }
-        } ?: return@archiveRead null
-        val existing = db.rawQuery("SELECT id FROM conflict_archives WHERE scope=? AND mutation=?", arrayOf(key(scope), owner.ref.mutationId.value))
-            .use { if (it.moveToFirst()) it.getLong(0) else null }
-        if (existing != null) {
-            val retained = checkNotNull(readConflictArchive(db, owner.ref.copy(id = existing)))
-            check(retained.format == owner.format && retained.base == owner.base && retained.local == owner.local) { "Conflict archive is immutable" }
-            return@archiveRead existing
-        }
-        val base = encodeChange(owner.base).also(::requirePreparationSnapshotBudget)
-        val local = encodeChange(owner.base.copy(content = owner.local)).also(::requirePreparationSnapshotBudget)
-        val id = db.insertOrThrow("conflict_archives", null, ContentValues().apply {
-            put("scope", key(scope)); put("event", event.value); put("mutation", owner.ref.mutationId.value); put("kind", owner.ref.kind.name)
-            put("adapter", owner.format.id); put("version", owner.format.version); put("base", base); put("local", local)
-        })
-        var observed = false
-        stagedQuery(db, "SELECT ${archiveText("payload")} FROM records WHERE scope=? AND event=?", arrayOf(key(scope), event.value)).use { row ->
-            if (row.moveToFirst()) {
-                // Bounds/storage type/UTF-8 failures still abort. Only malformed supported cache content
-                // becomes a display marker; its exact raw text stays private and is never a revision.
-                val raw = archiveString(row, 0)
-                val change = decodeConflictCachedChange(raw, event)
-                appendConflictObservation(db, id,
-                    if (change == null) ConflictObservationKind.UNREADABLE else ConflictObservationKind.VERIFIED,
-                    ConflictObservationOrigin.CACHED, archiveCurrentFormat(db, scope), change?.revision, null,
-                    if (change == null) raw else encodeChange(change)); observed = true
-            }
-        }
-        stagedQuery(db, "SELECT ${archiveText("revision", 4096)},${archiveText("adapter", 4096)},${archiveVersion()},${archiveText("reason", 64)},${archiveText("payload")} " +
-            "FROM deferred_events WHERE scope=? AND event=?", arrayOf(key(scope), event.value)).use { row ->
-            if (row.moveToFirst()) {
-                check(row.getType(2) == Cursor.FIELD_TYPE_INTEGER && row.getLong(2) in 1..Int.MAX_VALUE)
-                val deferred = DeferredCalendarEvent(event, Revision(archiveString(row, 0)), AdapterFormat(archiveString(row, 1), row.getInt(2)),
-                    DeferredEventReason.valueOf(archiveString(row, 3)), archiveString(row, 4))
-                appendConflictObservation(db, id, ConflictObservationKind.DEFERRED, ConflictObservationOrigin.CACHED,
-                    deferred.format, deferred.revision, deferred.reason, deferred.protectedPayload); observed = true
-            }
-        }
-        if (!observed) appendConflictObservation(db, id, ConflictObservationKind.UNOBSERVED, ConflictObservationOrigin.CACHED, null, null, null, null)
-        checkStagingCapacity(db)
-        id
-    }
-    private fun decodeConflictCachedChange(raw: String, event: EventId): RemoteChange? = try {
-        decodeChange(raw).also { require(it.eventId == event) { "Invalid cached event binding" } }
-    } catch (cancelled: CancellationException) { throw cancelled }
-      catch (capacity: ImportCapacityException) { throw capacity }
-      catch (failure: SQLiteException) { throw failure }
-      catch (_: JSONException) { null }
-      catch (_: DateTimeException) { null }
-      catch (_: IllegalArgumentException) { null }
-      catch (_: IllegalStateException) { null }
-    private fun archiveCurrentFormat(db: SQLiteDatabase, scope: CalendarScope): AdapterFormat? = db.rawQuery(
-        "SELECT ${archiveText("checkpoint", 65536)},checkpoint IS NULL FROM calendars WHERE scope=?", arrayOf(key(scope))).use { row ->
-        check(row.moveToFirst()); if (row.getInt(1) == 1) null else decodeCheckpoint(scope, archiveString(row, 0)).format
-    }
-    private fun appendConflictObservation(db: SQLiteDatabase, archive: Long, kind: ConflictObservationKind, origin: ConflictObservationOrigin,
-        format: AdapterFormat?, revision: Revision?, reason: DeferredEventReason?, payload: String?) {
-        listOfNotNull(format?.id, revision?.value).forEach { value ->
-            check(value.isNotBlank() && value.length <= 4096 && value.none { it.isISOControl() } &&
-                Charsets.UTF_8.newEncoder().canEncode(value) && value.toByteArray(Charsets.UTF_8).size <= 4096) { "Invalid conflict observation identity" }
-        }
-        payload?.let(::requirePreparationSnapshotBudget)
-        // Compare all evidence bytes, never just the opaque remote revision. Collection time is not identity.
-        // Android rawQuery binds selection arguments as strings and cannot bind null.
-        // These column names are fixed locally; only non-null evidence becomes an argument.
-        val arguments = mutableListOf(archive.toString(), kind.name, origin.name)
-        val evidence = listOf("adapter" to format?.id, "version" to format?.version?.toString(),
-            "revision" to revision?.value, "reason" to reason?.name, "payload" to payload)
-        val predicates = evidence.joinToString(" AND ") { (column, value) ->
-            if (value == null) "$column IS NULL" else { arguments.add(value); "$column=?" }
-        }
-        val exists = db.rawQuery("SELECT 1 FROM conflict_observations WHERE archive_id=? AND kind=? AND origin=? AND $predicates LIMIT 1",
-            arguments.toTypedArray()).use { it.moveToFirst() }
-        if (exists) return
-        db.insertOrThrow("conflict_observations", null, ContentValues().apply {
-            put("archive_id", archive); put("kind", kind.name); put("origin", origin.name)
-            if (origin == ConflictObservationOrigin.RECEIVED) put("observed_at", Instant.now().toString()) else putNull("observed_at")
-            put("adapter", format?.id); if (format == null) putNull("version") else put("version", format.version)
-            put("revision", revision?.value); put("reason", reason?.name); put("payload", payload)
-        })
-        checkStagingCapacity(db)
-    }
-
-    private fun createTextPreparationAndAcknowledgements(db: SQLiteDatabase) {
-        createLocalTextEditPreparations(db)
-        createTextUpdateAcknowledgements(db)
-        createTextUpdateAcknowledgementHistory(db)
-    }
-    private fun createTextUpdateAcknowledgements(db: SQLiteDatabase) {
-        db.execSQL("""CREATE TABLE text_update_acknowledgements (
-            scope TEXT NOT NULL, event TEXT NOT NULL, nonce TEXT NOT NULL UNIQUE,
-            receipt TEXT NOT NULL, state TEXT NOT NULL CHECK(state IN ('PENDING','RESTORED')),
-            PRIMARY KEY(scope,event)
-        )""".trimIndent())
-    }
-    private fun createTextUpdateAcknowledgementHistory(db: SQLiteDatabase) {
-        db.execSQL("""CREATE TABLE text_update_acknowledgement_history (
-            scope TEXT NOT NULL, event TEXT NOT NULL, attempt TEXT NOT NULL,
-            nonce TEXT NOT NULL UNIQUE, receipt TEXT NOT NULL,
-            PRIMARY KEY(scope,event,attempt), UNIQUE(scope,attempt)
-        )""".trimIndent())
-    }
-    private fun createLocalTextEditPreparations(db: SQLiteDatabase) {
-        db.execSQL("""CREATE TABLE local_text_edit_preparations (
-            scope TEXT NOT NULL, mutation TEXT NOT NULL, event TEXT NOT NULL,
-            adapter TEXT NOT NULL, version INTEGER NOT NULL CHECK(version > 0),
-            base TEXT NOT NULL, local TEXT NOT NULL, state TEXT NOT NULL CHECK(state = 'PAUSED'),
-            timestamp TEXT NOT NULL, prep_adapter TEXT NOT NULL,
-            prep_version INTEGER NOT NULL CHECK(prep_version > 0), payload TEXT NOT NULL,
-            PRIMARY KEY(scope,mutation), UNIQUE(scope,event)
-        )""".trimIndent())
-    }
-    private fun createTimePreparationAndAcknowledgements(db: SQLiteDatabase) {
-        createLocalTimeEditPreparations(db)
-        createTimeUpdateAcknowledgements(db)
-        createTimeUpdateAcknowledgementHistory(db)
-    }
-    private fun createTimeUpdateAcknowledgements(db: SQLiteDatabase) {
-        db.execSQL("""CREATE TABLE time_update_acknowledgements (
-            scope TEXT NOT NULL, event TEXT NOT NULL, nonce TEXT NOT NULL UNIQUE,
-            receipt TEXT NOT NULL, state TEXT NOT NULL CHECK(state IN ('PENDING','RESTORED')),
-            PRIMARY KEY(scope,event)
-        )""".trimIndent())
-    }
-    private fun createTimeUpdateAcknowledgementHistory(db: SQLiteDatabase) {
-        db.execSQL("""CREATE TABLE time_update_acknowledgement_history (
-            scope TEXT NOT NULL, event TEXT NOT NULL, attempt TEXT NOT NULL,
-            nonce TEXT NOT NULL UNIQUE, receipt TEXT NOT NULL,
-            PRIMARY KEY(scope,event,attempt), UNIQUE(scope,attempt)
-        )""".trimIndent())
-    }
-    private fun createLocalTimeEditPreparations(db: SQLiteDatabase) {
-        db.execSQL("""CREATE TABLE local_time_edit_preparations (
-            scope TEXT NOT NULL, mutation TEXT NOT NULL, event TEXT NOT NULL,
-            adapter TEXT NOT NULL, version INTEGER NOT NULL CHECK(version > 0),
-            base TEXT NOT NULL, local TEXT NOT NULL, state TEXT NOT NULL CHECK(state = 'PAUSED'),
-            timestamp TEXT NOT NULL, prep_adapter TEXT NOT NULL,
-            prep_version INTEGER NOT NULL CHECK(prep_version > 0), payload TEXT NOT NULL,
-            PRIMARY KEY(scope,mutation), UNIQUE(scope,event)
-        )""".trimIndent())
-    }
-    private fun createTitleUpdateAcknowledgements(db: SQLiteDatabase) {
-        db.execSQL("""CREATE TABLE title_update_acknowledgements (
-            scope TEXT NOT NULL, event TEXT NOT NULL, nonce TEXT NOT NULL UNIQUE,
-            receipt TEXT NOT NULL, state TEXT NOT NULL CHECK(state IN ('PENDING','RESTORED')),
-            PRIMARY KEY(scope,event)
-        )""".trimIndent())
-    }
-    private fun createTitleUpdateAcknowledgementHistory(db: SQLiteDatabase) {
-        db.execSQL("""CREATE TABLE title_update_acknowledgement_history (
-            scope TEXT NOT NULL, event TEXT NOT NULL, attempt TEXT NOT NULL,
-            nonce TEXT NOT NULL UNIQUE, receipt TEXT NOT NULL,
-            PRIMARY KEY(scope,event,attempt), UNIQUE(scope,attempt)
-        )""".trimIndent())
-    }
-    private fun createProjectionRepresentations(db: SQLiteDatabase) {
-        // Historical table helpers are shared by fresh creation and older upgrades.
-        // Synthetic legacy fixtures may already contain a known nullable column.
-        for ((table, column) in listOf("projection_bases" to "representation",
-            "projection_receipts" to "representation", "projection_receipts" to "previous_representation")) {
-            val exists = db.rawQuery("PRAGMA table_info($table)", null).use { rows ->
-                var found = false
-                while (rows.moveToNext()) if (rows.getString(1) == column) {
-                    check(rows.getString(2) == "TEXT" && rows.getInt(3) == 0 && rows.isNull(4) && rows.getInt(5) == 0) {
-                        "Incompatible projection representation column"
-                    }
-                    found = true
-                }
-                found
-            }
-            if (!exists) db.execSQL("ALTER TABLE $table ADD COLUMN $column TEXT")
-        }
-    }
-    private fun createLocalEditPreparations(db: SQLiteDatabase) {
-        db.execSQL("""CREATE TABLE local_edit_preparations (
-            scope TEXT NOT NULL, mutation TEXT NOT NULL, event TEXT NOT NULL,
-            adapter TEXT NOT NULL, version INTEGER NOT NULL CHECK(version > 0),
-            base TEXT NOT NULL, local TEXT NOT NULL, state TEXT NOT NULL CHECK(state = 'PAUSED'),
-            timestamp TEXT NOT NULL, prep_adapter TEXT NOT NULL,
-            prep_version INTEGER NOT NULL CHECK(prep_version > 0), payload TEXT NOT NULL,
-            PRIMARY KEY(scope,mutation), UNIQUE(scope,event)
-        )""".trimIndent())
-    }
-    private fun createCapturedHandoffs(db: SQLiteDatabase) {
-        db.execSQL("""CREATE TABLE captured_create_handoffs (
-            scope TEXT NOT NULL, event TEXT NOT NULL, nonce TEXT NOT NULL UNIQUE,
-            protocol INTEGER NOT NULL CHECK(protocol = 1), ack_nonce TEXT NOT NULL,
-            ack_fingerprint TEXT NOT NULL, fingerprint TEXT NOT NULL,
-            state TEXT NOT NULL CHECK(state IN ('PENDING','RELEASED')),
-            waiting INTEGER NOT NULL DEFAULT 0 CHECK(waiting IN (0,1)), last_projection TEXT,
-            PRIMARY KEY(scope,event)
-        )""".trimIndent())
-    }
-    private fun createCapturedAcknowledgements(db: SQLiteDatabase) {
-        db.execSQL("""CREATE TABLE captured_create_acknowledgements (
-            scope TEXT NOT NULL, event TEXT NOT NULL, nonce TEXT NOT NULL UNIQUE,
-            protocol INTEGER NOT NULL CHECK(protocol = 1), fingerprint TEXT NOT NULL,
-            state TEXT NOT NULL CHECK(state IN ('UNKNOWN','PROVEN')), PRIMARY KEY(scope,event)
-        )""".trimIndent())
-    }
-    private fun createCapturedBases(db: SQLiteDatabase) {
-        db.execSQL("""CREATE TABLE captured_create_bases (
-            scope TEXT NOT NULL, event TEXT NOT NULL,
-            account TEXT NOT NULL, calendar TEXT NOT NULL, generation INTEGER NOT NULL CHECK(generation >= 0),
-            attempt TEXT NOT NULL, adapter TEXT NOT NULL, version INTEGER NOT NULL CHECK(version > 0),
-            payload_fingerprint TEXT NOT NULL, local_id TEXT NOT NULL, capture_id TEXT NOT NULL,
-            capture_adapter TEXT NOT NULL, capture_version INTEGER NOT NULL CHECK(capture_version > 0),
-            timestamp INTEGER NOT NULL, content_fingerprint TEXT NOT NULL,
-            fingerprint_version INTEGER NOT NULL CHECK(fingerprint_version = 1),
-            verified_revision TEXT NOT NULL, nonce TEXT NOT NULL UNIQUE,
-            protocol INTEGER NOT NULL CHECK(protocol = 1), payload TEXT NOT NULL,
-            PRIMARY KEY(scope,event), UNIQUE(scope,attempt), UNIQUE(scope,local_id), UNIQUE(scope,capture_id)
-        )""".trimIndent())
-    }
-    private fun createProjectionReceipts(db: SQLiteDatabase) {
-        db.execSQL("CREATE TABLE projection_receipts (scope TEXT NOT NULL, event TEXT NOT NULL, nonce TEXT NOT NULL UNIQUE, payload TEXT NOT NULL, adapter TEXT NOT NULL, version INTEGER NOT NULL, previous_base TEXT, protocol INTEGER NOT NULL CHECK(protocol=1), PRIMARY KEY(scope,event))")
-    }
-    private fun createLocalEdits(db: SQLiteDatabase) {
-        db.execSQL("CREATE TABLE projection_bases (scope TEXT NOT NULL, event TEXT NOT NULL, payload TEXT NOT NULL, PRIMARY KEY(scope,event))")
-        db.execSQL("CREATE TABLE local_edits (scope TEXT NOT NULL, mutation TEXT NOT NULL, event TEXT NOT NULL, adapter TEXT NOT NULL, version INTEGER NOT NULL, base TEXT NOT NULL, local TEXT NOT NULL, state TEXT NOT NULL CHECK(state IN ('PAUSED','CONFLICT')), kind TEXT NOT NULL DEFAULT 'UPDATE' CHECK(kind IN ('UPDATE','DELETE')), PRIMARY KEY(scope,mutation), UNIQUE(scope,event))")
-    }
-    private fun createMappingProfiles(db: SQLiteDatabase) {
-        db.execSQL("CREATE TABLE mapping_profiles (scope TEXT PRIMARY KEY, adapter TEXT NOT NULL, version INTEGER NOT NULL, rescan_pending INTEGER NOT NULL DEFAULT 1)")
-    }
-    private fun createSeries(db: SQLiteDatabase) {
-        db.execSQL("CREATE TABLE series_members (scope TEXT NOT NULL, event TEXT NOT NULL, uid TEXT NOT NULL, role TEXT NOT NULL CHECK(role IN ('master','exception')), PRIMARY KEY(scope,event))")
-        db.execSQL("CREATE INDEX series_members_uid ON series_members(scope,uid,role)")
-    }
-    private fun createStaging(db: SQLiteDatabase) {
-        db.execSQL("CREATE TABLE inbox (scope TEXT PRIMARY KEY, request_checkpoint TEXT NOT NULL, request_limit INTEGER NOT NULL, payload TEXT NOT NULL)")
-        db.execSQL("CREATE TABLE deferred_events (scope TEXT NOT NULL, event TEXT NOT NULL, revision TEXT NOT NULL, adapter TEXT NOT NULL, version INTEGER NOT NULL, reason TEXT NOT NULL, payload TEXT NOT NULL, retry_pending INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(scope,event))")
-    }
-    private fun createDelta(db: SQLiteDatabase) {
-        db.execSQL("ALTER TABLE calendars ADD COLUMN available INTEGER NOT NULL DEFAULT 1")
-        db.execSQL("CREATE TABLE delta_state (scope TEXT PRIMARY KEY, cursor_adapter TEXT, cursor_version INTEGER, cursor_value TEXT, received_adapter TEXT, received_version INTEGER, received_after TEXT, received_payload TEXT, more INTEGER NOT NULL DEFAULT 0)")
-        db.execSQL("CREATE TABLE delta_jobs (scope TEXT NOT NULL, notice_id TEXT NOT NULL, event TEXT, notice TEXT NOT NULL, received TEXT, blocked INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(scope,notice_id))")
-    }
-    private fun createReconciliation(db: SQLiteDatabase) {
-        db.execSQL("CREATE TABLE delta_reconciliation (id INTEGER PRIMARY KEY, scope TEXT NOT NULL, adapter TEXT NOT NULL, version INTEGER NOT NULL, after_cursor TEXT NOT NULL, payload TEXT NOT NULL)")
-        db.execSQL("CREATE INDEX delta_reconciliation_scope ON delta_reconciliation(scope)")
-    }
-    private fun createCoverage(db: SQLiteDatabase) {
-        db.execSQL("CREATE TABLE coverage_state (scope TEXT PRIMARY KEY, payload TEXT NOT NULL)")
-        db.execSQL("ALTER TABLE inbox ADD COLUMN coverage TEXT")
+        conflicts(db).observations(query)
     }
 
     data class Selection(val scope: CalendarScope, val summary: CalendarSummary, val enabled: Boolean,
@@ -739,6 +272,21 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
     suspend fun complete(scope: CalendarScope) = access { db ->
         db.query("calendars", arrayOf("checkpoint"), "scope=?", arrayOf(key(scope)), null, null, null).use {
             it.moveToFirst() && !it.isNull(0) && decodeCheckpoint(scope, it.getString(0)).traversalComplete
+        }
+    }
+    /** Preserve an exact pending intent while a local Provider edit prevents application.
+     * State 2 is still durable pending work, not an acknowledgement. Fresh refresh rearms it;
+     * continuations skip it so an unsupported edit cannot starve other events or busy-loop. */
+    suspend fun holdLocalProjection(intent: ProjectionIntent): Boolean = stagingMutation(intent.scope) { db ->
+        db.update("records", ContentValues().apply { put("pending", 2) },
+            "scope=? AND event=? AND payload=? AND pending IN (0,1) AND NOT EXISTS " +
+                "(SELECT 1 FROM local_edits l WHERE l.scope=records.scope AND l.event=records.event)",
+            arrayOf(key(intent.scope), intent.change.eventId.value, encodeChange(intent.change))) == 1
+    }
+    suspend fun heldProjectionCount(scope: CalendarScope): Int = access { db ->
+        requireKnown(db, scope)
+        db.rawQuery("SELECT COUNT(*) FROM records WHERE scope=? AND pending=2", arrayOf(key(scope))).use {
+            check(it.moveToFirst()); it.getInt(0)
         }
     }
     /** Excluded identities remain pending. Filter before the batch limit to avoid starvation. */
@@ -1094,7 +642,7 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
                     put("base", basePayload); put("local", localPayload); put("state", state.name); put("kind", kind)
                 })
             }
-            ensureConflictArchive(db, scope, event)
+            conflicts(db).ensure(scope, event)
             state
         }
 
@@ -1333,7 +881,7 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
             })
             check(db.update("captured_create_handoffs", ContentValues().apply { put("waiting", 1) },
                 "scope=? AND event=? AND nonce=?", arrayOf(key(scope), event.value, frame.receipt.nonce)) == 1)
-            ensureConflictArchive(db, scope, event)
+            conflicts(db).ensure(scope, event)
             state
         }
 
@@ -1491,7 +1039,7 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
                 put("representation", ProjectionRepresentationCodec.encode(receipt.representation))
             }, SQLiteDatabase.CONFLICT_REPLACE).also { check(it != -1L) }
             db.update("records", ContentValues().apply { put("pending", 0) },
-                "scope=? AND event=? AND payload=? AND pending=1",
+                "scope=? AND event=? AND payload=? AND pending IN (1,2)",
                 arrayOf(key(receipt.scope), receipt.change.eventId.value, encodeChange(receipt.change)))
             check(db.delete("projection_receipts", "scope=? AND event=? AND nonce=? AND payload=? AND adapter=? AND version=? AND previous_base IS ? AND protocol=? AND representation IS ? AND previous_representation IS ?",
                 arrayOf(key(receipt.scope), receipt.change.eventId.value, receipt.nonce, encodeChange(receipt.change),
@@ -1655,7 +1203,7 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
             check(db.update("local_edits", ContentValues().apply { put("state", LocalEditState.CONFLICT.name) },
                 "scope=? AND event=? AND mutation=? AND kind='UPDATE'",
                 arrayOf(key(intent.scope), intent.base.eventId.value, intent.id.value)) == 1)
-            ensureConflictArchive(db, intent.scope, intent.base.eventId)
+            conflicts(db).ensure(intent.scope, intent.base.eventId)
             LocalTextPreparationAdmission.CONFLICT
         }
     }
@@ -2090,7 +1638,7 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
             check(db.update("local_edits", ContentValues().apply { put("state", LocalEditState.CONFLICT.name) },
                 "scope=? AND event=? AND mutation=? AND kind='UPDATE'",
                 arrayOf(key(intent.scope), intent.base.eventId.value, intent.id.value)) == 1)
-            ensureConflictArchive(db, intent.scope, intent.base.eventId)
+            conflicts(db).ensure(intent.scope, intent.base.eventId)
             LocalTimePreparationAdmission.CONFLICT
         }
     }
@@ -2589,7 +2137,7 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
             check(db.update("local_edits", ContentValues().apply { put("state", LocalEditState.CONFLICT.name) },
                 "scope=? AND event=? AND mutation=? AND kind='UPDATE'",
                 arrayOf(key(intent.scope), intent.base.eventId.value, intent.id.value)) == 1)
-            ensureConflictArchive(db, intent.scope, intent.base.eventId)
+            conflicts(db).ensure(intent.scope, intent.base.eventId)
             LocalTitlePreparationAdmission.CONFLICT
         }
     private fun localTitlePreparationAdmission(db: SQLiteDatabase, intent: LocalEditIntent): LocalTitlePreparationAdmission {
@@ -2944,12 +2492,6 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
     suspend fun localEditPreparation(scope: CalendarScope, eventId: EventId): LocalEditPreparation? =
         stagingMutation(scope) { db -> readLocalEditPreparation(db, scope, eventId) }
 
-    private fun requirePreparationSnapshotBudget(value: String) {
-        require(value.length <= LocalEditPreparation.MAX_PAYLOAD_BYTES) { "Local preparation observation is too large" }
-        val bytes = Charsets.UTF_8.newEncoder().onMalformedInput(CodingErrorAction.REPORT)
-            .onUnmappableCharacter(CodingErrorAction.REPORT).encode(CharBuffer.wrap(value)).remaining()
-        require(bytes <= LocalEditPreparation.MAX_PAYLOAD_BYTES) { "Local preparation observation is too large" }
-    }
     private fun preparationVersion(cursor: Cursor, column: Int): Int {
         require(cursor.getType(column) == Cursor.FIELD_TYPE_INTEGER && cursor.getLong(column) in 1..Int.MAX_VALUE.toLong())
         return cursor.getInt(column)
@@ -2998,10 +2540,6 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
         } catch (failure: CancellationException) { throw failure }
         catch (failure: SQLiteException) { throw failure }
         catch (_: Exception) { throw IllegalStateException("Invalid retained edit preparation") }
-    private fun createDeleteAcknowledgements(db: SQLiteDatabase) {
-        db.execSQL("CREATE TABLE delete_acknowledgements (scope TEXT NOT NULL, event TEXT NOT NULL, mutation TEXT NOT NULL, attempt TEXT NOT NULL, payload TEXT NOT NULL, state TEXT NOT NULL CHECK(state IN ('PENDING','RESTORED')), PRIMARY KEY(scope,event), UNIQUE(scope,mutation), UNIQUE(scope,attempt))")
-    }
-
     /** Decode the complete immutable binding before using even its completion state. */
     private fun readDeleteAcknowledgement(db: SQLiteDatabase, scope: CalendarScope, event: EventId): DeleteAcknowledgementRecord? = try {
         stagedQuery(db, "SELECT ${archiveText("mutation",4096)},${archiveText("attempt",4096)},${archiveText("payload",1048576)},${archiveText("state",16)} FROM delete_acknowledgements WHERE scope=? AND event=?",
@@ -3026,7 +2564,7 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
     private fun matchingDeleteReservation(db: SQLiteDatabase, scope: CalendarScope, event: EventId): Boolean {
         val record = readDeleteAcknowledgement(db,scope,event) ?: return false
         val owner = readInspectionDeleteOwner(db,scope,event) ?: return false
-        return owner.copy(state = LocalEditState.PAUSED) == record.receipt.intent && archiveCurrentFormat(db,scope) == owner.format
+        return owner.copy(state = LocalEditState.PAUSED) == record.receipt.intent && conflicts(db).currentFormat(scope) == owner.format
     }
 
     private fun completedDeleteEvents(db: SQLiteDatabase, scope: CalendarScope): Set<EventId> {
@@ -3053,7 +2591,7 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
             hasRawEventRow(db,"deferred_events",scope,event)) return false
         val pendingProjection = readProjectionReceipt(db,scope,event)
         if (pendingProjection != null && !redundantDeleteProjection(pendingProjection,intent)) return false
-        if (archiveCurrentFormat(db,scope) != intent.format || readInspectionDeleteOwner(db,scope,event) != intent ||
+        if (conflicts(db).currentFormat(scope) != intent.format || readInspectionDeleteOwner(db,scope,event) != intent ||
             readProjectionBase(db,scope,event)?.let { it.change != intent.base ||
                 it.representation?.representation?.let { value -> value != ProjectionRepresentation.DIRECT_V1 } == true } != false) return false
         val current = stagedQuery(db,"SELECT payload FROM records WHERE scope=? AND event=?",arrayOf(key(scope),event.value)).use {
@@ -3117,9 +2655,9 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
         val scope = intent.scope; val event = intent.base.eventId
         val owner = readInspectionDeleteOwner(db,scope,event) ?: return@stagingMutation false
         if (owner.copy(state = LocalEditState.PAUSED) != intent || observed.eventId != event || observed == intent.base ||
-            archiveCurrentFormat(db,scope) != intent.format) return@stagingMutation false
-        val archive = checkNotNull(ensureConflictArchive(db,scope,event,true))
-        appendConflictObservation(db,archive,ConflictObservationKind.VERIFIED,ConflictObservationOrigin.RECEIVED,
+            conflicts(db).currentFormat(scope) != intent.format) return@stagingMutation false
+        val archive = checkNotNull(conflicts(db).ensure(scope,event,true))
+        conflicts(db).append(archive,ConflictObservationKind.VERIFIED,ConflictObservationOrigin.RECEIVED,
             intent.format,observed.revision,null,encodeChange(observed))
         db.update("local_edits",ContentValues().apply { put("state","CONFLICT") },"scope=? AND event=? AND mutation=? AND kind='DELETE'",
             arrayOf(key(scope),event.value,intent.id.value)) == 1
@@ -3131,7 +2669,7 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
         val retained = readDeleteAcknowledgement(db,scope,event) ?: return@stagingMutation false
         val owner = readInspectionDeleteOwner(db,scope,event) ?: return@stagingMutation false
         if (retained.receipt.intent != intent || owner.copy(state=LocalEditState.PAUSED) != intent) return@stagingMutation false
-        ensureConflictArchive(db,scope,event,true)
+        conflicts(db).ensure(scope,event,true)
         db.update("local_edits",ContentValues().apply { put("state","CONFLICT") },"scope=? AND event=? AND mutation=? AND kind='DELETE'",
             arrayOf(key(scope),event.value,intent.id.value)) == 1
     }
@@ -3168,7 +2706,7 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
         })
         db.update("records", ContentValues().apply { put("pending", 0) }, "scope=? AND event=?",
             arrayOf(key(intent.scope), intent.base.eventId.value))
-        ensureConflictArchive(db, intent.scope, intent.base.eventId)
+        conflicts(db).ensure(intent.scope, intent.base.eventId)
         captured
     }
     /** Retain a qualified Android tombstone snapshot without consuming its flags or sending DELETE. */
@@ -3195,7 +2733,7 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
         })
         db.update("records", ContentValues().apply { put("pending", 0) }, "scope=? AND event=?",
             arrayOf(key(intent.scope), intent.base.eventId.value))
-        ensureConflictArchive(db, intent.scope, intent.base.eventId)
+        conflicts(db).ensure(intent.scope, intent.base.eventId)
         captured
     }
     private data class ProjectionBase(val change: RemoteChange.Upsert, val representation: ProjectedEventReference?) {
@@ -3294,7 +2832,7 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
         "SELECT COUNT(*) FROM deferred_events WHERE scope=?", arrayOf(key(scope)),
     ).use { check(it.moveToFirst()); it.getInt(0) }
     private fun countPending(db: SQLiteDatabase, scope: CalendarScope): Int = db.rawQuery(
-        "SELECT COUNT(*) FROM records r WHERE scope=? AND pending=1 AND NOT EXISTS (SELECT 1 FROM local_edits l WHERE l.scope=r.scope AND l.event=r.event)", arrayOf(key(scope)),
+        "SELECT COUNT(*) FROM records r WHERE scope=? AND pending IN (1,2) AND NOT EXISTS (SELECT 1 FROM local_edits l WHERE l.scope=r.scope AND l.event=r.event)", arrayOf(key(scope)),
     ).use { check(it.moveToFirst()); it.getInt(0) }
     private data class SeriesMember(val uid: String, val role: String)
     private enum class MasterState {
@@ -3365,7 +2903,7 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
                 val recurrence = (decodeChange(cursor.getString(1)) as? RemoteChange.Upsert)?.content?.recurrence
                 if (recurrence != null && !recurrence.isMaster)
                     db.update("records", ContentValues().apply { put("pending", if (state != MasterState.INACTIVE) 1 else 0) },
-                        "scope=? AND event=?", arrayOf(key(scope), cursor.getString(0)))
+                        "scope=? AND event=? AND pending<>2", arrayOf(key(scope), cursor.getString(0)))
             }
         }
     }
@@ -3373,13 +2911,6 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
         "SELECT COUNT(*) FROM deferred_events WHERE scope=? AND reason=?",
         arrayOf(key(scope), DeferredEventReason.UNVERIFIED_CONTENT.name),
     ).use { check(it.moveToFirst()); it.getInt(0) }
-
-    // The default CursorWindow is smaller than an admitted sealed page. Bound it explicitly;
-    // four UTF-8 bytes per allowed character also accommodates non-ASCII adapter envelopes.
-    private fun stagedQuery(db: SQLiteDatabase, sql: String, args: Array<String>): SQLiteCursor =
-        (db.rawQuery(sql, args) as SQLiteCursor).apply {
-            window = CursorWindow("Calendar sealed import", ReceivedCalendarPage.MAX_PAYLOAD_CHARS.toLong() * 4 + COVERAGE_MAX_BYTES + 64 * 1024)
-        }
 
     private fun readReceived(db: SQLiteDatabase, scope: CalendarScope): ReceivedCalendarPage? = stagedQuery(db,
         "SELECT request_checkpoint,request_limit,payload,coverage FROM inbox WHERE scope=?", arrayOf(key(scope)),
@@ -3521,14 +3052,14 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
     }
 
     private fun checkStagingCapacity(db: SQLiteDatabase) {
+        // Bound active obligations. Completed immutable proofs and RESTORED deletion barriers
+        // stay on disk for replay/identity protection but cannot exhaust this working budget.
         val bytes = db.rawQuery("SELECT COALESCE((SELECT SUM(length(CAST(payload AS BLOB))+COALESCE(length(CAST(coverage AS BLOB)),0)) FROM inbox),0) + COALESCE((SELECT SUM(length(CAST(payload AS BLOB))) FROM coverage_state),0) + COALESCE((SELECT SUM(length(CAST(payload AS BLOB))) FROM deferred_events),0) + COALESCE((SELECT SUM(length(CAST(received_payload AS BLOB))) FROM delta_state),0) + COALESCE((SELECT SUM(length(CAST(notice AS BLOB))+COALESCE(length(CAST(received AS BLOB)),0)) FROM delta_jobs),0) + COALESCE((SELECT SUM(length(CAST(payload AS BLOB))) FROM delta_reconciliation),0) + COALESCE((SELECT SUM(length(CAST(payload AS BLOB))+length(CAST(base AS BLOB))+length(CAST(local AS BLOB))) FROM local_edit_preparations),0)" +
             " + COALESCE((SELECT SUM(length(CAST(payload AS BLOB))+length(CAST(base AS BLOB))+length(CAST(local AS BLOB))+16384) FROM local_text_edit_preparations),0)" +
-            " + COALESCE((SELECT SUM(length(CAST(receipt AS BLOB))+16384) FROM text_update_acknowledgements),0)" +
-            " + COALESCE((SELECT SUM(length(CAST(receipt AS BLOB))+16384) FROM text_update_acknowledgement_history),0)" +
+            " + COALESCE((SELECT SUM(length(CAST(receipt AS BLOB))+16384) FROM text_update_acknowledgements WHERE state='PENDING'),0)" +
             " + COALESCE((SELECT SUM(length(CAST(payload AS BLOB))+length(CAST(base AS BLOB))+length(CAST(local AS BLOB))+16384) FROM local_time_edit_preparations),0)" +
-            " + COALESCE((SELECT SUM(length(CAST(receipt AS BLOB))+16384) FROM time_update_acknowledgements),0)" +
-            " + COALESCE((SELECT SUM(length(CAST(receipt AS BLOB))+16384) FROM time_update_acknowledgement_history),0)" +
-            " + COALESCE((SELECT SUM(length(CAST(payload AS BLOB))+16384) FROM delete_acknowledgements),0)" +
+            " + COALESCE((SELECT SUM(length(CAST(receipt AS BLOB))+16384) FROM time_update_acknowledgements WHERE state='PENDING'),0)" +
+            " + COALESCE((SELECT SUM(length(CAST(payload AS BLOB))+16384) FROM delete_acknowledgements WHERE state='PENDING'),0)" +
             " + COALESCE((SELECT SUM(length(CAST(scope AS BLOB))+length(CAST(event AS BLOB))+length(CAST(mutation AS BLOB))+length(CAST(adapter AS BLOB))+length(CAST(base AS BLOB))+length(CAST(local AS BLOB))+64) FROM conflict_archives),0)" +
             " + COALESCE((SELECT SUM(COALESCE(length(CAST(payload AS BLOB)),0)+COALESCE(length(CAST(adapter AS BLOB)),0)+COALESCE(length(CAST(revision AS BLOB)),0)+128) FROM conflict_observations),0)", null).use {
             check(it.moveToFirst()); it.getLong(0)
@@ -3648,7 +3179,7 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
                         }
                     }
                 override fun defer(event: DeferredCalendarEvent) {
-                    val archive = ensureConflictArchive(db, scope, event.eventId, force = true)
+                    val archive = conflicts(db).ensure(scope, event.eventId, force = true)
                     db.insertWithOnConflict("deferred_events", null, ContentValues().apply {
                         put("scope", key(scope)); put("event", event.eventId.value); put("revision", event.revision.value)
                         put("adapter", event.format.id); put("version", event.format.version); put("reason", event.reason.name)
@@ -3656,7 +3187,7 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
                     }, SQLiteDatabase.CONFLICT_REPLACE).also { check(it != -1L) { "Could not retain deferred event" } }
                     db.update("local_edits", ContentValues().apply { put("state", LocalEditState.CONFLICT.name) },
                         "scope=? AND event=?", arrayOf(key(scope), event.eventId.value))
-                    archive?.let { appendConflictObservation(db, it, ConflictObservationKind.DEFERRED, ConflictObservationOrigin.RECEIVED,
+                    archive?.let { conflicts(db).append(it, ConflictObservationKind.DEFERRED, ConflictObservationOrigin.RECEIVED,
                         event.format, event.revision, event.reason, event.protectedPayload) }
                 }
                 override fun clearDeferred(eventId: EventId) {
@@ -3690,7 +3221,7 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
                 override fun putRemote(change: RemoteChange) {
                     val ownerBase = localMutationBase(db, scope, change.eventId)
                     val deletionEcho = change is RemoteChange.Deleted && matchingDeleteReservation(db,scope,change.eventId)
-                    val archive = ensureConflictArchive(db, scope, change.eventId, force = ownerBase != null && change != ownerBase && !deletionEcho)
+                    val archive = conflicts(db).ensure(scope, change.eventId, force = ownerBase != null && change != ownerBase && !deletionEcho)
                     updateSeries(db, scope, change)
                     db.insertWithOnConflict("records", null, ContentValues().apply {
                         put("scope", key(scope)); put("event", change.eventId.value)
@@ -3701,8 +3232,8 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
                             put("state", LocalEditState.CONFLICT.name)
                         }, "scope=? AND event=?", arrayOf(key(scope), change.eventId.value))
                     }
-                    archive?.let { appendConflictObservation(db, it, ConflictObservationKind.VERIFIED, ConflictObservationOrigin.RECEIVED,
-                        archiveCurrentFormat(db, scope), change.revision, null, encodeChange(change)) }
+                    archive?.let { conflicts(db).append(it, ConflictObservationKind.VERIFIED, ConflictObservationOrigin.RECEIVED,
+                        conflicts(db).currentFormat(scope), change.revision, null, encodeChange(change)) }
                     seriesMember(db, scope, change.eventId)?.takeIf { it.role == "master" }?.let {
                         requeueSeriesChildren(db, scope, it.uid)
                     }
@@ -3743,101 +3274,7 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
     private fun isAvailable(db: SQLiteDatabase, scope: CalendarScope): Boolean = db.rawQuery(
         "SELECT available FROM calendars WHERE scope=?", arrayOf(key(scope)),
     ).use { it.moveToFirst() && it.getInt(0) != 0 }
-    private fun key(scope: CalendarScope) = org.json.JSONArray()
-        .put(scope.account.value).put(scope.calendar.value).put(scope.generation).toString()
-
-    private fun encodeCheckpoint(value: PageCheckpoint) = JSONObject().apply {
-        put("adapter", value.format.id); put("version", value.format.version)
-        put("cursor", value.cursor?.value ?: JSONObject.NULL); put("complete", value.traversalComplete)
-    }.toString()
-    private fun decodeCheckpoint(scope: CalendarScope, payload: String): PageCheckpoint = JSONObject(payload).let {
-        val format = AdapterFormat(it.getString("adapter"), it.getInt("version"))
-        PageCheckpoint(scope, format, if (it.isNull("cursor")) null else OpaqueCursor(format, it.getString("cursor")), it.getBoolean("complete"))
-    }
-    private fun encodeChange(value: RemoteChange) = JSONObject().apply {
-        put("id", value.eventId.value); put("revision", value.revision.value)
-        put("deleted", value is RemoteChange.Deleted)
-        if (value is RemoteChange.Upsert) {
-            val content = value.content
-            put("title", content.title); put("description", content.description); put("location", content.location)
-            // Omit null to preserve legacy payload encoding and pending acknowledgement equality.
-            content.colorRgb?.let { put("colorRgb", it) }
-            content.recurrence?.let { put("recurrence", encodeRecurrence(it)) }
-            content.details?.let { put("details", encodeDetails(it)) }
-            when (val time = content.time) {
-                is EventTime.AllDay -> { put("allDay", true); put("start", time.start.toString()); put("end", time.endExclusive.toString()) }
-                is EventTime.Timed -> { put("allDay", false); put("start", time.start.toString()); put("end", time.end.toString()); put("zone", time.zone.id) }
-            }
-        }
-    }.toString()
-    private fun decodeChange(payload: String): RemoteChange = JSONObject(payload).let {
-        val id = EventId(it.getString("id")); val revision = Revision(it.getString("revision"))
-        if (it.getBoolean("deleted")) RemoteChange.Deleted(id, revision) else {
-            val time = if (it.getBoolean("allDay")) EventTime.AllDay(LocalDate.parse(it.getString("start")), LocalDate.parse(it.getString("end")))
-            else EventTime.Timed(Instant.parse(it.getString("start")), Instant.parse(it.getString("end")), ZoneId.of(it.getString("zone")))
-            RemoteChange.Upsert(id, revision, EventContent(it.getString("title"), time, it.getString("description"),
-                it.getString("location"), if (it.isNull("colorRgb")) null else it.getInt("colorRgb"),
-                if (it.isNull("recurrence")) null else decodeRecurrence(it.getJSONObject("recurrence")),
-                if (it.isNull("details")) null else decodeDetails(it.getJSONObject("details"))))
-        }
-    }
-    private fun encodePerson(value: EventPerson) = JSONObject().apply {
-        put("email", value.email); put("name", value.name)
-    }
-    private fun decodePerson(value: JSONObject) = EventPerson(value.getString("email"), value.getString("name"))
-    private fun encodeDetails(value: EventDetails) = JSONObject().apply {
-        put("schema", 1)
-        put("reminders", JSONArray().apply { value.reminders.forEach { put(it.minutesBefore) } })
-        value.organizer?.let { put("organizer", encodePerson(it)) }
-        put("attendees", JSONArray().apply { value.attendees.forEach { attendee ->
-            put(JSONObject().apply {
-                put("person", encodePerson(attendee.person)); put("role", attendee.role.name); put("status", attendee.status.name)
-            })
-        } })
-    }
-    private fun decodeDetails(value: JSONObject): EventDetails {
-        require(value.getInt("schema") == 1) { "Unsupported event details schema" }
-        val reminders = value.getJSONArray("reminders")
-        val attendees = value.getJSONArray("attendees")
-        require(reminders.length() <= 5 && attendees.length() <= 100)
-        return EventDetails(List(reminders.length()) { EventReminder(reminders.getInt(it)) },
-            if (value.isNull("organizer")) null else decodePerson(value.getJSONObject("organizer")),
-            List(attendees.length()) { index -> attendees.getJSONObject(index).let {
-                EventAttendee(decodePerson(it.getJSONObject("person")), AttendanceRole.valueOf(it.getString("role")),
-                    AttendanceStatus.valueOf(it.getString("status")))
-            } })
-    }
-    private fun encodeRecurrence(value: EventRecurrence) = JSONObject().apply {
-        put("schema", 1); put("uid", value.uid)
-        value.rule?.let { put("rule", it) }
-        put("additional", JSONArray().apply { value.additionalDates.forEach { put(encodePoint(it)) } })
-        put("excluded", JSONArray().apply { value.excludedDates.forEach { put(encodePoint(it)) } })
-        value.original?.let { put("original", encodePoint(it)) }
-        put("cancelled", value.cancelled)
-    }
-    private fun encodePoint(value: RecurrencePoint) = JSONObject().apply {
-        when (value) {
-            is RecurrencePoint.AllDay -> { put("type", "date"); put("value", value.date.toString()) }
-            is RecurrencePoint.Timed -> { put("type", "instant"); put("value", value.instant.toString()) }
-        }
-    }
-    private fun decodePoint(value: JSONObject): RecurrencePoint = when (value.getString("type")) {
-        "date" -> RecurrencePoint.AllDay(LocalDate.parse(value.getString("value")))
-        "instant" -> RecurrencePoint.Timed(Instant.parse(value.getString("value")))
-        else -> error("Unsupported recurrence date type")
-    }
-    private fun decodeRecurrence(value: JSONObject): EventRecurrence {
-        require(value.getInt("schema") == 1) { "Unsupported recurrence schema" }
-        fun points(name: String): List<RecurrencePoint> = value.getJSONArray(name).let { array ->
-            require(array.length() <= 512)
-            List(array.length()) { decodePoint(array.getJSONObject(it)) }
-        }
-        return EventRecurrence(value.getString("uid"), if (value.isNull("rule")) null else value.getString("rule"),
-            points("additional"), points("excluded"), if (value.isNull("original")) null else decodePoint(value.getJSONObject("original")),
-            value.getBoolean("cancelled"))
-    }
     companion object {
         const val STAGING_BUDGET_BYTES: Long = 32L * 1024 * 1024
-        private const val COVERAGE_MAX_BYTES = 256 * 1024
     }
 }

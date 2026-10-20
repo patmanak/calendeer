@@ -216,14 +216,18 @@ class DeltaImportCoordinatorDeviceTest {
         assertEquals("LOCAL_KEYS", selection().status)
         val pending = delta { deltaJobs() }.single()
         assertNotNull(pending.received)
-        assertEquals("Calendar Bridge fixture original",
-            (store.pending(target).single().change as RemoteChange.Upsert).content.title)
+        // Bootstrap projects the saved baseline before the later delta needs local keys.
+        assertTrue(store.pending(target).isEmpty())
+        assertEquals("Calendar Bridge fixture original", store.projectedBaseline(target, remote.eventId)?.content?.title)
+        val originalRow = rows().single()
+        assertEquals("Calendar Bridge fixture original", originalRow.second)
         val callsBefore = remote.calls.toList()
         remote.localKeysAvailable = true
         remote.networkAvailable = false
         coordinator.run(false, fresh = false)
         assertEquals(callsBefore, remote.calls)
         assertTrue(delta { deltaJobs() }.isEmpty())
+        assertEquals(originalRow.first, rows().single().first)
         assertEquals("Calendar Bridge fixture updated", rows().single().second)
         assertEquals("IMPORTED", selection().status)
     }

@@ -1,5 +1,327 @@
 # Validation
 
+## Title owner and source qualification
+
+`LocalTitleOwnerQualification` is extracted from the coordinator's existing inner
+class. Preparation, retention and guarded submission share the same collaborator;
+the title-only profile and released-handoff match each have one definition. The
+coordinator retains the mutex, original generation/policy capture, admission
+installation/cleanup and irreversible refusal latches.
+
+PASS: mechanical comparison of the complete extracted qualification body and
+profile, plus independent review of the complete retained coordinator delta,
+preserves check order, short-circuiting and cancellation. Current adapter formats
+remain live reads. Normal account observation retains the original epoch; guarded
+submission uses only the separate cached account path and cannot re-enter the
+adapter's authentication lock. Exact SQL owner/preparation, native contents,
+incoming holds and transferred-CREATE provenance remain rechecked around
+suspensions. No new claim, submission, acknowledgement or recovery right is added;
+journal, schema and payload formats are unchanged.
+
+PASS: all 95 selected physical Android cases across seven classes, without
+failures or skips. Four coordinator suites cover wire preparation, retention,
+guarded submission and durable results; focused Provider integration covers
+ordinary and transferred owners, revoked/restored access, incomplete provenance,
+later native edits, UNKNOWN and cancellation. Existing captured-handoff permission
+loss and import decode-cancellation regressions also pass. Controlled fixture
+ports do not extend live Proton, OEM or power-loss qualification.
+
+All 1,469 host cases pass (427 domain, 20 authentication, 840 backend and 182 app),
+without failures or skips. Debug app/test APK builds and app lint pass (zero
+errors, 43 warnings).
+
+## Shared local UPDATE/DELETE capture
+
+`LocalChangeCapture` groups imported-event UPDATE and DELETE snapshots, sharing
+selection/current-account checks and admission setup/cleanup. The coordinator
+retains its mutex, original generation/policy and distinct initial guards. Incoming
+CREATE holds and historical baseline qualification still use the existing paths
+with that same epoch; native snapshots and stored intents remain typed.
+
+PASS: independent comparison of the complete retained coordinator and mechanical
+comparison of both extracted bodies preserve check order, retained-owner identity,
+opposing-owner refusal, live format reads and cancellation. `beforeNewOwner` remains
+after the native snapshot and before first retention, with account/access rechecked
+afterward. Existing owners do not notify it again. Capture never sends, acknowledges
+the Provider or renews dispatch authority; schema and payload formats are unchanged.
+
+An old account-return fixture expectation reproduced identically before extraction:
+observing the returned account advances policy and invalidates that invocation.
+The strengthened test requires `INACTIVE`, no native read and no retained owner,
+then preserves successful explicit capture with observer mode off, the requested
+identity and exactly one native read. No production guard was relaxed.
+
+PASS: 79 other physical cases plus all 12 final edit-capture coordinator cases
+validate 91 unique selected cases across ten classes, without skips on the same
+production APK. Coordinator/native integration, title preparation, dirty-row
+recovery, DELETE ownership and captured-CREATE holds preserve unsupported content,
+immutable owners, cancellation and discovery notification order. Controlled ports
+do not extend live Proton, OEM or power-loss qualification.
+
+All 1,469 host cases pass (427 domain, 20 authentication, 840 backend and 182 app),
+without failures or skips. Debug app/test APK builds and app lint pass (zero
+errors, 43 warnings).
+
+## Local history reader boundary
+
+`LocalChangeHistory` isolates retained-change listing, local edit/delete inspection
+and conflict-archive reads. The coordinator retains the mutex and captures the
+original generation/policy before delegation. The reader shares the current-account
+predicate and admission installation/cleanup, without adding sending consent or
+requiring known historical calendars to remain enabled/available.
+
+PASS: mechanical comparison preserves all four operation bodies after explicit
+delegation substitutions. Independent comparison of the complete retained
+coordinator confirms the same snapshot timing, predicate short-circuit order,
+typed early `Unqualified` results, archive-specific cancellation/error rules and
+cleanup order. No Provider content read, native acknowledgement, journal/schema
+change or renewed send authority is introduced.
+
+PASS: all 67 selected physical Android cases across six classes, without failures
+or skips. The 65 history cases cover scoped SQL reads, paging, paused/unavailable
+calendars, account/permission loss, malformed evidence, cancellation and sanitized
+session failures. Both existing import cancellation/permission-loss recovery
+regressions pass as well. Controlled fixture ports do not extend live Proton,
+OEM or power-loss qualification.
+
+All 1,469 host cases pass (427 domain, 20 authentication, 840 backend and 182 app),
+without failures or skips. Debug app/test APK builds and app lint pass (zero
+errors, 43 warnings).
+
+## Shared worker edit admission and calendar passes
+
+`SystemEditAdmission` replaces the identical text/time worker predicates and
+factual-evidence admission bodies. Each invocation still captures generation,
+policy, account and authentication in the original order. Sending consent remains
+operation-specific; historical proof does not read it. Factual evidence can survive
+editing-policy loss, but never observed logout or account replacement. Deletion
+keeps its existing second consent latch over the common proof predicate.
+
+PASS: mechanical comparison confirms exact shared bodies after local-reader
+substitution. Independent source review confirms the retained predicates,
+short-circuit order, final generation/policy fence and irreversible rejection,
+with no eager snapshot at helper construction or authenticated-adapter call.
+Eight added host regressions cover captured epochs, permanent refusal, calendar
+scope, independent consent, policy changes during selection and factual evidence.
+
+The first admission APK exposed a native ART abort during the existing decode-
+cancellation fixture, without an assertion failure. It reproduced in isolation;
+the exact previously validated APK passed that same case. `runLocked` was unchanged
+but still produced a very large coroutine state machine. Its calendar pass is now
+a private method, preserving the four global inactive exits, status/catch order
+and cross-calendar retry precedence. Independent source comparison confirms those
+semantics. `runLocked` falls from 192 to 35 source lines, and its DEX disassembly
+from 112,278 to 3,313 lines (285 to 37 registers). Both decode cancellation and the
+previous captured-handoff permission-loss regression pass unchanged after this
+split. The underlying runtime/compiler cause is not established by these tests.
+
+PASS: 78 physical cases in the expanded selection, followed by all seven final
+delta coordinator cases, validate 85 selected cases without skips on the same
+production APK. They cover edit admission, retained evidence, dirty projections,
+staged pages, delta/recovery, rolling windows, coverage and recurrence. An old
+delta fixture expectation also failed on the exact pre-extraction APK: bootstrap
+had already projected its baseline. Its correction verifies SQL/native original
+content, an empty projection queue and the same native row after offline delta
+recovery, retaining the no-network and final-status assertions. Independent review
+confirms the stronger expectations. Controlled fixture ports do not extend live
+Proton, OEM or power-loss qualification.
+
+All 1,469 host cases pass (427 domain, 20 authentication, 840 backend and 182 app),
+without failures or skips. Debug app/test APK builds and app lint pass (zero
+errors, 43 warnings).
+
+## Captured CREATE handoff and import finalization boundaries
+
+`CapturedCreateHandoff` isolates proven CREATE transfer and later local-change
+reconciliation. Identical availability and admission setup/cleanup are shared;
+the coordinator retains its mutex, original epoch and phase-specific consent.
+Source qualification remains shared with other owner paths. Historical native
+proof recovery never writes or reconstructs sending authority.
+
+PASS: independent source comparison preserves both operation bodies, historical
+recovery and the retained coordinator outside the factory/delegations. A second
+comparison confirms that moving diagnostic finalization into `finishImportRun`
+preserves its exact body and the rest of the coordinator. Original exceptions,
+including cancellation, retain priority over secondary refresh failures; `busy`
+cleanup and successful-network-only scheduling keep their order and conditions.
+
+The permission-loss-after-Provider-write fixture reproduced a native ART abort
+(`Unexpected instruction: unused-f8`) on both the initial extraction and an exact
+clean pre-extraction build. Resetting compiled package artifacts and rebuilding
+the extraction cleanly did not resolve it. The same unmodified test passes after
+isolating suspending finalization. DEX inspection confirms a large pre-existing
+coroutine state machine; the runtime/compiler cause remains undetermined.
+
+PASS: all 190 selected physical Android cases across seven classes, without
+failures or skips. Handoff SQL/Provider/integration, production CREATE pipeline,
+incoming holds and 19 transferred-title follow-ups preserve provenance, later
+edits, historical recovery, cancellation and exact offline echo continuation.
+These fixtures use controlled remote ports; they do not extend live Proton,
+OEM or power-loss qualification.
+
+All 1,461 host cases pass (427 domain, 20 authentication, 840 backend and 174 app),
+without failures or skips. Final debug app/test APK builds and app lint pass (zero
+errors, 43 warnings).
+
+## Local CREATE capture and staging boundary
+
+`LocalCreateStaging` isolates capture, protected read-only preparation and durable
+submission staging. Their identical admission installation/cleanup is shared;
+phase-specific qualification remains separate. The coordinator retains its mutex,
+initial account/permission gates, lifecycle initialization and send-lease registry.
+Only fresh durable staging records the original epoch's lease; cache reads never
+reconstruct that authority.
+
+PASS: independent comparison preserves all three operation bodies and the retained
+coordinator outside the factory/delegations, including orphan marker inspection,
+frozen identities/content, live format reads, cancellation and cleanup order.
+
+Two legacy fixture expectations reproduced identically before extraction. Observing
+a return to the original account invalidates that invocation's policy snapshot.
+The fixtures now explicitly require `INACTIVE` for that observation before retaining
+their original fresh-invocation capability/reservation assertions. Preparation,
+inspection and retained-payload assertions remain enforced; no production guard
+was relaxed.
+
+PASS: the final physical selection passes all 115 tests across ten classes,
+without failures or skips. Capture, preparation, staging, native markers, guarded
+dispatch and production CREATE pipeline fixtures preserve immutable reservations,
+unsupported data and cancellation; historical staging cannot rearm a send.
+All 1,461 host cases are green (427 domain, 20 authentication, 840 backend and 174
+app). Final debug app/test APK builds and app lint pass (zero errors, 43 warnings).
+These device fixtures use controlled remote ports and do not extend live Proton,
+OEM or power-loss qualification.
+
+## Local title acknowledgement and completion boundary
+
+`LocalTitleCompletion` isolates native acknowledgement and durable closure of an
+already verified title result. Both phases share their availability check; the
+coordinator retains the mutex and recovery traversal, explicitly passing the
+original generation/policy rather than capturing a fresh epoch between phases.
+
+PASS: independent source comparison preserves the complete retained coordinator
+outside the factory/delegations, both extracted operation bodies, active-first
+short-circuit order, live format reads, cancellation and phase-specific cleanup.
+Fresh receipts alone authorize an ACK write; retained receipts inspect historical
+proof and completion retains exact durable evidence. Schema, formats and consent
+requirements remain unchanged.
+
+PASS: 276 selected physical Android tests across nine classes, without failures
+or skips, cover coordinator admission, end-to-end fixture recovery, receipt/history
+storage, native acknowledgement and completion journals, including transferred
+CREATE events. They preserve later edits, recover lost replies without another ACK
+write, reject mismatched identities/proofs and retain the original epoch across
+revocation/restoration. Fixture ports are controlled; this does not extend live
+Proton, OEM or power-loss qualification.
+
+All 1,461 host cases are green (427 domain, 20 authentication, 840 backend and 174
+app), without failures or skips. Debug app/test APK builds and app lint pass (zero
+errors, 43 warnings).
+
+## Captured CREATE restoration boundary
+
+Six captured-CREATE restoration operations have one concrete collaborator:
+binding, original-row attachment, baseline retention, acknowledgement, clean
+inspection and later local-change reconciliation. The coordinator retains its
+mutex, lifecycle initialization and original generation/policy capture. Identical
+availability checks share one implementation; adapter format remains a live read.
+
+PASS: independent source comparison against the complete pre-extraction coordinator
+preserves all six operation bodies, including cancellation distinctions, exact
+identity/content checks, fresh-only ACK writes, historical inspection and admission
+cleanup. No schema, persistent format or submission policy changes.
+
+PASS: 305 selected physical Android tests across 13 classes, without failures or
+skips, exercise restoration through the existing coordinator entry points and
+subsequent handoff/import holds. They cover access and format loss, interruption,
+reopening, immutable original identities, fresh versus historical ACK, preservation
+of later native edits/unsupported data and refusal of generic projection adoption.
+These fixtures use controlled remote ports; no new live Proton, OEM or power-loss
+qualification is implied.
+
+All 1,461 host cases are green (427 domain, 20 authentication, 840 backend and 174
+app), without failures or skips. Debug app/test APK builds and app lint pass (zero
+errors, 43 warnings).
+
+## Import schema isolation and shared scoped owner guard
+
+PASS: 279 selected physical Android tests across 19 classes, without failures or
+skips, cover fresh import databases, legacy migrations, conflict evidence backfill,
+sequence preservation, migration rollback, retained receipts and text/time/deletion
+owner gateways. The text fixtures leave time consent disabled; successful text
+operations and proof recovery after text consent is disabled remain qualified.
+Revocation while waiting for the import lock cannot renew an operation's epoch;
+retained callbacks expire and UNKNOWN work cannot submit again. Cancellation and
+newer native changes remain protected.
+
+`ImportSchema` isolates the existing SQL definitions and migration branches without
+changing schema version 22. `SQLiteOpenHelper` retains transaction/rollback ownership,
+and backfill uses the existing store capacity check. Six text operations reuse the
+existing scoped edit guard with explicit text consent. Independent source review
+compares the complete retained classes and all extracted migration methods against
+their pre-refactor source; SQL, migration order and time/deletion guard behavior
+remain unchanged.
+
+All 1,461 host cases are green (427 domain, 20 authentication, 840 backend and 174
+app), without failures or skips. Debug app/test APK builds and app lint pass (zero
+errors, 43 warnings). Device fixtures use controlled remote ports; no new live
+Proton, OEM or power-loss qualification is implied.
+
+## Import archive extraction and bounded journal reads
+
+PASS: four host fixtures cover the historical cache/checkpoint representation,
+including timed CRLF text, omitted optional fields, all-day recurrence and people,
+tombstones, opaque scope/checkpoint values and rejection of an unsupported details
+schema. Extraction preserves the writer's field insertion order and encoding.
+
+PASS: 197 selected physical Android tests, without failures or skips, cover conflict
+archive paging/isolation, import/projection receipts, local preparation, active
+capacity, dirty projection isolation and text/time/deletion journal persistence.
+Large capsules/proofs still use bounded chunks; malformed, wrong-typed, truncated
+or misbound evidence fails closed, and cancellation remains propagated.
+
+`ImportStore` retains admission, locks and transaction boundaries while synchronous
+archive SQL, historical payload encoding and bounded SQL values have separate
+internal helpers. The three typed attempt stores share only bounded BLOB reading;
+their ownership checks, codecs, claims and proof semantics remain distinct.
+Focused independent source review finds no behavior or persistent-format change.
+All 1,461 host cases pass (427 domain, 20 authentication, 840 backend and 174 app),
+without failures or skips. Debug app/test APK builds and app lint pass (zero errors,
+43 warnings). These fixtures use controlled remote ports and do not extend live
+Proton or OEM qualification.
+
+## Local projection isolation and active journal capacity
+
+PASS: isolated Android regressions retain unsupported dirty rows and their
+recurrence dependencies while independent projections and bounded page ingestion
+continue. They cover current dirtiness after historical receipt recovery, changes
+between observation and native assertion, missing native masters with dirty
+exceptions, held-state reopening and more than one batch of held rows. No held
+intent, receipt or native edit is consumed to free the queue.
+
+PASS: real SQLite capacity transactions admit completed text/time histories and
+RESTORED deletion barriers without charging the active-work budget; 2,100 rows in
+each retained table survive unchanged. PENDING receipts still enforce the limit
+and roll back new work. This verifies accounting, not cryptographic validity of
+the synthetic accounting-only capsules.
+
+PASS: host pagination regressions cover 25+1 captured owners, restarted
+continuations, insertions before/after the cursor, held-work termination and
+revocation. Production capture invalidates discovery before insertion; existing
+owners and the separate UNKNOWN inspection cursors are not rearmed by this wake.
+
+The relevant host suites contain 427 domain, 20 authentication, 840 backend and
+170 app cases, with no failures or skips. A focused physical selection of 279
+SQL, Provider, recovery, journal and owner-gateway cases passes without skips;
+nine historical recovery expectations now distinguish durable held work from
+runnable work, preserve prior offline diagnostics and assert no extra native
+write after known dirtiness. Debug app/test APK builds and app lint pass (zero
+errors, 43 warnings). Independent source review covers the changes and the shared
+text/time/deletion transaction helper. Typed ownership, payload formats and
+claim/evidence rules remain separate. These fixtures use controlled remote ports;
+they do not qualify new live Proton, OEM, reboot, power-loss or transport-failure
+behavior. Completed history still occupies disk; no safe compaction is claimed.
+
 ## Interrupted deletion evidence persistence
 
 PASS: `EVIDENCE_INTERRUPTION` creates a new disposable ordinary timed service

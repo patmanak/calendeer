@@ -133,6 +133,13 @@ class ImportCoordinator(
     @Volatile private var pendingPermissionPause = false
     private val providerIds = context.getSharedPreferences("calendar-provider-mappings", Context.MODE_PRIVATE)
 
+    private val editAdmission = SystemEditAdmission(
+        generation = { generation }, policyRevision = { createPolicyRevision.get() },
+        currentAccount = { createAccount.get() }, authenticated = { authenticated },
+        hasPermissions = ::hasCalendarPermissions, createsEnabled = systemCreatesEnabled,
+        selected = { target -> state.value.selections.any { it.scope == target && it.enabled && it.available } },
+    )
+
     init {
         creates?.admitDispatch = { false }
         localCreates?.admitCapture = { false }
@@ -162,55 +169,26 @@ class ImportCoordinator(
     }
 
     /** Capture the original worker epoch; the authenticated facade is never called by this lease. */
-    fun systemTextRunAdmission(target: CalendarScope): (CalendarScope) -> Boolean = textRunAdmission(target, true)
+    fun systemTextRunAdmission(target: CalendarScope): (CalendarScope) -> Boolean = editAdmission.captureRun(target, true, systemTextsEnabled)
 
     /** Historical proof recovery needs CREATE access, but never borrows text sending consent. */
-    fun systemTextProofAdmission(target: CalendarScope): (CalendarScope) -> Boolean = textRunAdmission(target, false)
+    fun systemTextProofAdmission(target: CalendarScope): (CalendarScope) -> Boolean = editAdmission.captureRun(target, false, systemTextsEnabled)
 
     /** Factual response retention survives editing-policy loss, never logout or account replacement.
      * The caller additionally bounds this lease to its exact invocation and UNKNOWN record.
      */
-    fun systemTextEvidenceAdmission(target: CalendarScope): (CalendarScope) -> Boolean {
-        val expected = generation
-        val account = createAccount.get()
-        val initiallyAuthenticated = authenticated
-        val closed = AtomicBoolean(false)
-        return { requested ->
-            val allowed = !closed.get() && requested == target && initiallyAuthenticated && authenticated &&
-                account == target.account && generation == expected && createAccount.get() == account
-            if (!allowed) closed.set(true)
-            allowed && !closed.get()
-        }
-    }
-
-    private fun textRunAdmission(target: CalendarScope, consent: Boolean): (CalendarScope) -> Boolean {
-        val expected = generation
-        val policy = createPolicyRevision.get()
-        val account = createAccount.get()
-        val initiallyAuthenticated = authenticated
-        val closed = AtomicBoolean(false)
-        return { requested ->
-            val allowed = !closed.get() && requested == target && initiallyAuthenticated && authenticated &&
-                generation == expected && createPolicyRevision.get() == policy &&
-                account == target.account && createAccount.get() == account &&
-                hasCalendarPermissions() && systemCreatesEnabled(target) && (!consent || systemTextsEnabled(target)) &&
-                state.value.selections.any { it.scope == target && it.enabled && it.available } &&
-                generation == expected && createPolicyRevision.get() == policy
-            if (!allowed) closed.set(true)
-            allowed && !closed.get()
-        }
-    }
+    fun systemTextEvidenceAdmission(target: CalendarScope): (CalendarScope) -> Boolean = editAdmission.captureEvidence(target)
 
     /** Local-only gateway: callbacks can run while the Proton session mutex is already held. */
     internal val localTextOwners: SystemTextLocalOwner = object : SystemTextLocalOwner {
         override suspend fun observe(scope: CalendarScope, event: EventId, owner: MutationId,
             admit: (CalendarScope) -> Boolean): TextLocalOwnerSnapshot? =
-            withTextOwner(scope, admit, consent = true, denied = null) { access ->
-                val intent = access.read { store.localEdit(scope, event) } ?: return@withTextOwner null
-                if (intent.id != owner || !SystemTextEditProfile.accepts(intent)) return@withTextOwner null
+            withScopedEditOwner(scope, admit, consent = true, sendingEnabled = systemTextsEnabled, denied = null) { access ->
+                val intent = access.read { store.localEdit(scope, event) } ?: return@withScopedEditOwner null
+                if (intent.id != owner || !SystemTextEditProfile.accepts(intent)) return@withScopedEditOwner null
                 val frozen = LocalTextEditPreparation.freezeIntent(intent)
                 val preparation = access.read { store.localTextEditPreparation(scope, event) }
-                if (!textSource(frozen, preparation, access)) return@withTextOwner null
+                if (!textSource(frozen, preparation, access)) return@withScopedEditOwner null
                 TextLocalOwnerSnapshot(frozen, preparation)
             }
 
@@ -218,16 +196,16 @@ class ImportCoordinator(
             admit: (CalendarScope) -> Boolean): LocalTextEditPreparation? {
             currentCoroutineContext().ensureActive()
             val frozen = freezeTextPreparation(preparation)
-            return withTextOwner(frozen.intent.scope, admit, consent = true, denied = null) { access ->
+            return withScopedEditOwner(frozen.intent.scope, admit, consent = true, sendingEnabled = systemTextsEnabled, denied = null) { access ->
                 val retained = access.read { store.localTextEditPreparation(frozen.intent.scope, frozen.intent.base.eventId) }
-                if (retained != null && !sameTextPreparation(retained, frozen)) return@withTextOwner null
-                if (!textSource(frozen.intent, retained, access)) return@withTextOwner null
+                if (retained != null && !sameTextPreparation(retained, frozen)) return@withScopedEditOwner null
+                if (!textSource(frozen.intent, retained, access)) return@withScopedEditOwner null
                 val outcome = access.read { store.retainCurrentLocalTextPreparation(frozen) }
                 if (outcome !in listOf(LocalTextPreparationAdmission.STORED, LocalTextPreparationAdmission.HISTORICAL))
-                    return@withTextOwner null
+                    return@withScopedEditOwner null
                 val durable = access.read { store.localTextEditPreparation(frozen.intent.scope, frozen.intent.base.eventId) }
                 if (!sameTextPreparation(durable, frozen) || !textSource(frozen.intent, frozen, access))
-                    return@withTextOwner null
+                    return@withScopedEditOwner null
                 freezeTextPreparation(requireNotNull(durable))
             }
         }
@@ -235,7 +213,7 @@ class ImportCoordinator(
         override suspend fun qualify(preparation: LocalTextEditPreparation, admit: (CalendarScope) -> Boolean): Boolean {
             currentCoroutineContext().ensureActive()
             val frozen = freezeTextPreparation(preparation)
-            return withTextOwner(frozen.intent.scope, admit, consent = true, denied = false) { access ->
+            return withScopedEditOwner(frozen.intent.scope, admit, consent = true, sendingEnabled = systemTextsEnabled, denied = false) { access ->
                 textSource(frozen.intent, frozen, access)
             }
         }
@@ -264,7 +242,7 @@ class ImportCoordinator(
                     port.textUpdateFormat != frozen.format ||
                     frozen.id != TextUpdateAttemptIdentity.requestId(frozen.preparation, frozen.format))
                     return TextUpdateSubmissionObservation.Unknown
-                return withTextOwner(target, admit, consent = true, denied = TextUpdateSubmissionObservation.Unknown,
+                return withScopedEditOwner(target, admit, consent = true, sendingEnabled = systemTextsEnabled, denied = TextUpdateSubmissionObservation.Unknown,
                     finalAccessRequired = false) { access ->
                     val sending: (CalendarScope) -> Boolean = { requested ->
                         operation.ensureActive()
@@ -285,18 +263,18 @@ class ImportCoordinator(
                           catch (_: Exception) { operation.ensureActive(); sourceClosed.set(true); false }
                     }
                     if (!sending(target) || access.read { journal.read(target, frozen.id, sending) } != frozen ||
-                        !source(target)) return@withTextOwner TextUpdateSubmissionObservation.Unknown
+                        !source(target)) return@withScopedEditOwner TextUpdateSubmissionObservation.Unknown
                     // Lock order is import then authenticated adapter. The callback never retakes the import lock.
                     val observation = port.submit(frozen, journal, sending, ::source, evidence)
                     operation.ensureActive()
                     if (observation !is TextUpdateSubmissionObservation.Verified || !evidence(target) ||
                         observation.record.copy(state = TextUpdateAttemptState.PREPARED, protectedEvidence = null) != frozen ||
-                        observation.record.protectedEvidence == null) return@withTextOwner TextUpdateSubmissionObservation.Unknown
+                        observation.record.protectedEvidence == null) return@withScopedEditOwner TextUpdateSubmissionObservation.Unknown
                     // Response facts survive editing-policy revocation. No ACK authority is derived here.
                     val durable = journal.read(target, frozen.id, evidence)
                     operation.ensureActive()
                     if (!evidence(target) || durable == null || durable != observation.record)
-                        return@withTextOwner TextUpdateSubmissionObservation.Unknown
+                        return@withScopedEditOwner TextUpdateSubmissionObservation.Unknown
                     TextUpdateSubmissionObservation.Verified(durable, observation.event)
                 }
             } finally {
@@ -308,7 +286,7 @@ class ImportCoordinator(
             admit: (CalendarScope) -> Boolean): Boolean {
             currentCoroutineContext().ensureActive()
             val frozen = result.snapshot()
-            return withTextOwner(frozen.record.scope, admit, consent = false, denied = false) { access ->
+            return withScopedEditOwner(frozen.record.scope, admit, consent = false, sendingEnabled = systemTextsEnabled, denied = false) { access ->
                 acknowledgeText(frozen, journal, access)
             }
         }
@@ -317,73 +295,9 @@ class ImportCoordinator(
             admit: (CalendarScope) -> Boolean): Boolean {
             currentCoroutineContext().ensureActive()
             val frozen = result.snapshot()
-            return withTextOwner(frozen.record.scope, admit, consent = false, denied = false) { access ->
+            return withScopedEditOwner(frozen.record.scope, admit, consent = false, sendingEnabled = systemTextsEnabled, denied = false) { access ->
                 completeText(frozen, journal, access)
             }
-        }
-    }
-
-    private class TextOwnerDenied : IllegalStateException("Text owner access is inactive")
-
-    private inner class TextOwnerAccess(val target: CalendarScope, private val expected: Long,
-        private val policy: Long, private val consent: Boolean, private val admission: (CalendarScope) -> Boolean,
-        private val operation: kotlin.coroutines.CoroutineContext) {
-        private val closed = AtomicBoolean(false)
-        fun close() { closed.set(true) }
-        fun active(): Boolean {
-            operation.ensureActive()
-            if (closed.get()) return false
-            val allowed = authenticated && generation == expected && createPolicyRevision.get() == policy &&
-                createAccount.get() == target.account && hasCalendarPermissions() && systemCreatesEnabled(target) &&
-                (!consent || systemTextsEnabled(target)) &&
-                state.value.selections.any { it.scope == target && it.enabled && it.available } && admission(target)
-            operation.ensureActive()
-            if (!allowed || generation != expected || createPolicyRevision.get() != policy ||
-                createAccount.get() != target.account) closed.set(true)
-            return !closed.get()
-        }
-        val admit: (CalendarScope) -> Boolean = { requested -> requested == target && active() }
-        suspend fun requireAvailable() {
-            operation.ensureActive()
-            if (!active()) throw TextOwnerDenied()
-            val selected = store.selections(target.account).singleOrNull { it.scope == target }
-            operation.ensureActive()
-            if (!active() || selected == null || !selected.enabled || !selected.available) {
-                close(); throw TextOwnerDenied()
-            }
-        }
-        suspend fun <T> read(action: suspend () -> T): T {
-            requireAvailable()
-            val value = action()
-            operation.ensureActive()
-            requireAvailable()
-            return value
-        }
-    }
-
-    private suspend fun <T> withTextOwner(target: CalendarScope, admit: (CalendarScope) -> Boolean,
-        consent: Boolean, denied: T, finalAccessRequired: Boolean = true, action: suspend (TextOwnerAccess) -> T): T {
-        currentCoroutineContext().ensureActive()
-        val expected = generation
-        val policy = createPolicyRevision.get()
-        return mutex.withLock {
-            val access = TextOwnerAccess(target, expected, policy, consent, admit, currentCoroutineContext())
-            try {
-                access.requireAvailable()
-                store.admitTransaction = access.admit
-                projection.admitOperation = access::active
-                val result = action(access)
-                currentCoroutineContext().ensureActive()
-                if (finalAccessRequired) access.requireAvailable()
-                result
-            } catch (cancelled: CancellationException) { throw cancelled }
-              catch (_: TextOwnerDenied) { currentCoroutineContext().ensureActive(); denied }
-              catch (_: Exception) { currentCoroutineContext().ensureActive(); denied }
-              finally {
-                  access.close()
-                  store.admitTransaction = { false }
-                  projection.admitOperation = { false }
-              }
         }
     }
 
@@ -397,7 +311,7 @@ class ImportCoordinator(
 
     /** Exact SQL and native source, including complete immutable origin for a handed-off CREATE. */
     private suspend fun textSource(intent: LocalEditIntent, preparation: LocalTextEditPreparation?,
-        access: TextOwnerAccess): Boolean {
+        access: ScopedEditOwnerAccess): Boolean {
         val target = access.target
         val event = intent.base.eventId
         if (intent.scope != target || !SystemTextEditProfile.accepts(intent) || intent.format != remote.format) return false
@@ -429,7 +343,7 @@ class ImportCoordinator(
     }
 
     private suspend fun currentTextResult(result: TextUpdateVerifiedResult, journal: TextUpdateRecoveryJournal,
-        access: TextOwnerAccess): Boolean {
+        access: ScopedEditOwnerAccess): Boolean {
         val record = result.record
         if (record.scope != access.target || record.state != TextUpdateAttemptState.OUTCOME_UNKNOWN ||
             record.preparation.intent.format != remote.format ||
@@ -443,7 +357,7 @@ class ImportCoordinator(
     }
 
     private suspend fun acknowledgeText(result: TextUpdateVerifiedResult, journal: TextUpdateRecoveryJournal,
-        access: TextOwnerAccess): Boolean {
+        access: ScopedEditOwnerAccess): Boolean {
         if (projection.textUpdateAcknowledgementProtocol != 1 || !currentTextResult(result, journal, access)) return false
         val target = access.target
         val attempt = result.record.id
@@ -501,7 +415,7 @@ class ImportCoordinator(
     }
 
     private suspend fun completeText(result: TextUpdateVerifiedResult, journal: TextUpdateRecoveryJournal,
-        access: TextOwnerAccess): Boolean {
+        access: ScopedEditOwnerAccess): Boolean {
         if (journal.completionProtocol != 1 || !currentTextResult(result, journal, access)) return false
         val target = access.target
         val event = result.event.eventId
@@ -520,44 +434,15 @@ class ImportCoordinator(
     }
 
     /** Capture the original worker epoch; the authenticated facade is never called by this lease. */
-    fun systemTimeRunAdmission(target: CalendarScope): (CalendarScope) -> Boolean = timeRunAdmission(target, true)
+    fun systemTimeRunAdmission(target: CalendarScope): (CalendarScope) -> Boolean = editAdmission.captureRun(target, true, systemTimesEnabled)
 
-    /** Historical proof recovery needs CREATE access, but never borrows text sending consent. */
-    fun systemTimeProofAdmission(target: CalendarScope): (CalendarScope) -> Boolean = timeRunAdmission(target, false)
+    /** Historical proof recovery needs CREATE access, but never borrows time sending consent. */
+    fun systemTimeProofAdmission(target: CalendarScope): (CalendarScope) -> Boolean = editAdmission.captureRun(target, false, systemTimesEnabled)
 
     /** Factual response retention survives editing-policy loss, never logout or account replacement.
      * The caller additionally bounds this lease to its exact invocation and UNKNOWN record.
      */
-    fun systemTimeEvidenceAdmission(target: CalendarScope): (CalendarScope) -> Boolean {
-        val expected = generation
-        val account = createAccount.get()
-        val initiallyAuthenticated = authenticated
-        val closed = AtomicBoolean(false)
-        return { requested ->
-            val allowed = !closed.get() && requested == target && initiallyAuthenticated && authenticated &&
-                account == target.account && generation == expected && createAccount.get() == account
-            if (!allowed) closed.set(true)
-            allowed && !closed.get()
-        }
-    }
-
-    private fun timeRunAdmission(target: CalendarScope, consent: Boolean): (CalendarScope) -> Boolean {
-        val expected = generation
-        val policy = createPolicyRevision.get()
-        val account = createAccount.get()
-        val initiallyAuthenticated = authenticated
-        val closed = AtomicBoolean(false)
-        return { requested ->
-            val allowed = !closed.get() && requested == target && initiallyAuthenticated && authenticated &&
-                generation == expected && createPolicyRevision.get() == policy &&
-                account == target.account && createAccount.get() == account &&
-                hasCalendarPermissions() && systemCreatesEnabled(target) && (!consent || systemTimesEnabled(target)) &&
-                state.value.selections.any { it.scope == target && it.enabled && it.available } &&
-                generation == expected && createPolicyRevision.get() == policy
-            if (!allowed) closed.set(true)
-            allowed && !closed.get()
-        }
-    }
+    fun systemTimeEvidenceAdmission(target: CalendarScope): (CalendarScope) -> Boolean = editAdmission.captureEvidence(target)
 
     /** Local-only gateway: callbacks can run while the Proton session mutex is already held. */
     internal val localTimeOwners: SystemTimeLocalOwner = object : SystemTimeLocalOwner {
@@ -686,7 +571,7 @@ class ImportCoordinator(
     fun systemDeleteEvidenceAdmission(target: CalendarScope): (CalendarScope) -> Boolean = systemTimeEvidenceAdmission(target)
 
     private fun deleteAdmission(target: CalendarScope, consent: Boolean): (CalendarScope) -> Boolean {
-        val base = timeRunAdmission(target, false)
+        val base = editAdmission.captureRun(target, false, systemTimesEnabled)
         val closed = AtomicBoolean(false)
         return { requested ->
             val allowed = !closed.get() && base(requested) && (!consent || systemDeletesEnabled(target))
@@ -1491,7 +1376,7 @@ class ImportCoordinator(
                         if (!available()) return false
                         if (networkAdmission == null) return true
                         if (!systemTitlesEnabled(target) || !networkAdmission(target) ||
-                            !systemTitleProfile(record.preparation.intent)) return false
+                            !LocalTitleOwnerQualification.systemTitleProfile(record.preparation.intent)) return false
                         val role = store.capturedHandoff(target, reference.eventId)
                         if (!available()) return false
                         val hold = capturedRawHold(target)
@@ -1560,6 +1445,14 @@ class ImportCoordinator(
           }
     }
 
+    /** Recovery passes its original epoch; constructing a helper must never renew admission. */
+    private fun localTitleCompletion(target: CalendarScope, expected: Long, policy: Long) =
+        LocalTitleCompletion(target, store, projection,
+            currentFormat = { remote.format },
+            active = { authenticated && generation == expected && createPolicyRevision.get() == policy &&
+                systemCreatesEnabled(target) && hasCalendarPermissions() },
+            currentAccount = { isCurrent(expected, target.account) })
+
     /** Internal simple title acknowledgement only. Reads an already durable verified result;
      * never prepares, inspects the service or dispatches UPDATE. A fresh reservation permits one
      * conditional native metadata write. Reopening only inspects the retained nonce.
@@ -1571,90 +1464,7 @@ class ImportCoordinator(
 
     private suspend fun acknowledgeLocalTitleLocked(target: CalendarScope, eventId: EventId, attempt: MutationId,
         journal: TitleUpdateResultJournal, expected: Long, policy: Long): TitleUpdateAcknowledgementResult {
-        val active = { authenticated && generation == expected && createPolicyRevision.get() == policy &&
-            systemCreatesEnabled(target) && hasCalendarPermissions() }
-        suspend fun available(): Boolean {
-            if (!active() || !isCurrent(expected, target.account)) return false
-            val selected = store.selections(target.account).singleOrNull { it.scope == target }
-            return selected?.enabled == true && selected.available && active()
-        }
-        return try {
-            if (!available()) return TitleUpdateAcknowledgementResult.INACTIVE
-            store.admitTransaction = { it == target && active() }
-            projection.admitOperation = active
-            if (projection.titleUpdateAcknowledgementProtocol != 1)
-                return TitleUpdateAcknowledgementResult.UNRESOLVED
-            val result = journal.readVerified(target, attempt)
-                ?: return TitleUpdateAcknowledgementResult.UNRESOLVED
-            if (!available()) return TitleUpdateAcknowledgementResult.INACTIVE
-            val intent = result.record.preparation.intent
-            if (result.record.scope != target || result.record.id != attempt || result.event.eventId != eventId ||
-                intent.format != remote.format || store.transaction(target) { checkpoint?.format } != intent.format)
-                return TitleUpdateAcknowledgementResult.UNRESOLVED
-            val existing = store.titleUpdateAcknowledgement(target, eventId, attempt)
-            if (existing != null && !existing.receipt.matches(result))
-                return TitleUpdateAcknowledgementResult.UNRESOLVED
-            if (existing?.state == TitleUpdateAcknowledgementState.RESTORED)
-                return TitleUpdateAcknowledgementResult.ACKNOWLEDGED
-            val reservation = if (existing != null) TitleUpdateAcknowledgementReservation(existing, false) else {
-                val transfer = store.capturedHandoff(target, eventId)
-                val frame = transfer?.frame
-                val content = if (frame == null) {
-                    projection.captureOwnedSimpleEdit(target, intent.base)?.content
-                } else {
-                    if (transfer.state != CapturedCreateHandoffState.RELEASED || !transfer.waiting ||
-                        frame.base != intent.base || frame.format != intent.format)
-                        return TitleUpdateAcknowledgementResult.UNRESOLVED
-                    val observed = projection.captureCapturedHandoffCurrent(frame) as? CapturedHandoffCurrentObservation.Supported
-                    observed?.snapshot?.takeIf { it.frame == frame && !it.deleted }?.content
-                } ?: return TitleUpdateAcknowledgementResult.UNRESOLVED
-                if (!available()) return TitleUpdateAcknowledgementResult.INACTIVE
-                if (content != intent.content || journal.readVerified(target, attempt) != result)
-                    return TitleUpdateAcknowledgementResult.UNRESOLVED
-                store.prepareTitleUpdateAcknowledgement(result, frame)
-                    ?: return TitleUpdateAcknowledgementResult.UNRESOLVED
-            }
-            val retained = reservation.record
-            if (!available()) return TitleUpdateAcknowledgementResult.INACTIVE
-            if (!retained.receipt.matches(result) || store.titleUpdateAcknowledgement(target, eventId, attempt) != retained ||
-                journal.readVerified(target, attempt) != result)
-                return TitleUpdateAcknowledgementResult.UNRESOLVED
-            if (reservation.fresh) {
-                val owner = store.localEdit(target, eventId)
-                // The SQL receipt already qualified this owner before the native write.
-                // An echo or later observation may change only its conflict marker;
-                // identity and all snapshots must stay exact.
-                val echoedOwner = owner?.state == LocalEditState.CONFLICT &&
-                    owner.copy(state = LocalEditState.PAUSED) == intent
-                if ((owner != intent && !echoedOwner) ||
-                    store.localEditPreparation(target, eventId) != result.record.preparation)
-                    return TitleUpdateAcknowledgementResult.UNRESOLVED
-            }
-            if (reservation.fresh && retained.receipt.handoff?.let { frame ->
-                    store.capturedHandoff(target, eventId) != CapturedCreateHandoffRecord(frame,
-                        CapturedCreateHandoffState.RELEASED, waiting = true)
-                } == true) return TitleUpdateAcknowledgementResult.UNRESOLVED
-            // The final journal/source reads can suspend. Recheck selection and account after
-            // them as well as the synchronous epoch/mode/permission lease in the Provider.
-            if (!available()) return TitleUpdateAcknowledgementResult.INACTIVE
-            // No fallback from historical inspection to another native write. The first receipt
-            // stays pending even when an interruption happened before the batch actually executed.
-            val witness = if (reservation.fresh) projection.acknowledgeTitleUpdate(retained.receipt)
-                else projection.inspectTitleUpdateAcknowledgement(retained.receipt)
-            if (!available()) return TitleUpdateAcknowledgementResult.INACTIVE
-            if (witness?.receipt?.snapshot() != retained.receipt || journal.readVerified(target, attempt) != result ||
-                store.titleUpdateAcknowledgement(target, eventId, attempt) != retained)
-                return TitleUpdateAcknowledgementResult.UNRESOLVED
-            if (!store.restoreTitleUpdateAcknowledgement(witness))
-                return TitleUpdateAcknowledgementResult.UNRESOLVED
-            TitleUpdateAcknowledgementResult.ACKNOWLEDGED
-        } catch (cancelled: CancellationException) { throw cancelled }
-          catch (_: Exception) {
-              if (!active()) TitleUpdateAcknowledgementResult.INACTIVE else TitleUpdateAcknowledgementResult.UNRESOLVED
-          } finally {
-              store.admitTransaction = { false }
-              projection.admitOperation = { false }
-          }
+        return localTitleCompletion(target, expected, policy).acknowledge(eventId, attempt, journal)
     }
 
     /** Internal durable closure only; no Provider write or service request. The two journals
@@ -1668,50 +1478,15 @@ class ImportCoordinator(
 
     private suspend fun completeLocalTitleLocked(target: CalendarScope, eventId: EventId, attempt: MutationId,
         journal: TitleUpdateCompletionJournal, expected: Long, policy: Long): TitleUpdateCompletionResult {
-        val active = { authenticated && generation == expected && createPolicyRevision.get() == policy &&
-            systemCreatesEnabled(target) && hasCalendarPermissions() }
-        suspend fun available(): Boolean {
-            if (!active() || !isCurrent(expected, target.account)) return false
-            val selected = store.selections(target.account).singleOrNull { it.scope == target }
-            return selected?.enabled == true && selected.available && active()
-        }
-        return try {
-            if (!available()) return TitleUpdateCompletionResult.INACTIVE
-            store.admitTransaction = { it == target && active() }
-            if (journal.completionProtocol != 1) return TitleUpdateCompletionResult.UNRESOLVED
-            val result = journal.readVerified(target, attempt) ?: return TitleUpdateCompletionResult.UNRESOLVED
-            if (!available()) return TitleUpdateCompletionResult.INACTIVE
-            val intent = result.record.preparation.intent
-            if (result.record.scope != target || result.record.id != attempt || result.event.eventId != eventId ||
-                intent.format != remote.format || store.transaction(target) { checkpoint?.format } != intent.format)
-                return TitleUpdateCompletionResult.UNRESOLVED
-            val acknowledgement = store.titleUpdateAcknowledgement(target, eventId, attempt)
-                ?: return TitleUpdateCompletionResult.UNRESOLVED
-            if (acknowledgement.state != TitleUpdateAcknowledgementState.RESTORED || !acknowledgement.receipt.matches(result))
-                return TitleUpdateCompletionResult.UNRESOLVED
-            val completion = TitleUpdateCompletion.of(result, acknowledgement)
-            val retained = journal.readCompletion(target, attempt)
-            if (retained != null && retained != completion) return TitleUpdateCompletionResult.UNRESOLVED
-            if (journal.readVerified(target, attempt) != result ||
-                store.titleUpdateAcknowledgement(target, eventId, attempt) != acknowledgement)
-                return TitleUpdateCompletionResult.UNRESOLVED
-            // Repeat the selected-calendar/account check after the historical reads suspend.
-            if (!available()) return TitleUpdateCompletionResult.INACTIVE
-            if (retained == null && !journal.retainCompletion(completion) { it == target && active() })
-                return TitleUpdateCompletionResult.UNRESOLVED
-            if (!available()) return TitleUpdateCompletionResult.INACTIVE
-            if (journal.readCompletion(target, attempt) != completion)
-                return TitleUpdateCompletionResult.UNRESOLVED
-            if (!available()) return TitleUpdateCompletionResult.INACTIVE
-            TitleUpdateCompletionResult.COMPLETED
-        } catch (cancelled: CancellationException) { throw cancelled }
-          catch (_: Exception) {
-              if (!active()) TitleUpdateCompletionResult.INACTIVE else TitleUpdateCompletionResult.UNRESOLVED
-          } finally {
-              store.admitTransaction = { false }
-              projection.admitOperation = { false }
-          }
+        return localTitleCompletion(target, expected, policy).complete(eventId, attempt, journal)
     }
+
+    private fun localChangeCapture(target: CalendarScope, expected: Long, active: () -> Boolean) =
+        LocalChangeCapture(target, store, projection,
+            currentFormat = { remote.format }, active = active,
+            currentAccount = { isCurrent(expected, target.account) },
+            requireUnheld = { event -> if (capturedRawHold(target).holds(event)) throw CapturedProjectionPending() },
+            baseline = { event -> captureBaseline(expected, target, event) })
 
     /** Explicit internal UPDATE snapshot only. The dirty Provider row is never acknowledged. */
     suspend fun captureLocalEdit(target: CalendarScope, eventId: EventId, id: MutationId): LocalEditCaptureResult = mutex.withLock {
@@ -1721,71 +1496,32 @@ class ImportCoordinator(
     /** Offline observer capture. Reuse the durable owner until it is closed; a later cycle
      * receives a new identity, never the event's fixed identity from a previous upload.
      */
-    suspend fun captureSystemLocalEdit(target: CalendarScope, eventId: EventId): LocalEditCaptureResult = mutex.withLock {
-        captureLocalEditLocked(target, eventId, null, generation, createPolicyRevision.get(), requireSystemMode = true)
+    suspend fun captureSystemLocalEdit(target: CalendarScope, eventId: EventId,
+        beforeNewOwner: suspend () -> Unit = {}): LocalEditCaptureResult = mutex.withLock {
+        captureLocalEditLocked(target, eventId, null, generation, createPolicyRevision.get(), requireSystemMode = true,
+            beforeNewOwner = beforeNewOwner)
     }
 
     private suspend fun captureLocalEditLocked(target: CalendarScope, eventId: EventId, id: MutationId?,
-        expected: Long, policy: Long, requireSystemMode: Boolean = false): LocalEditCaptureResult {
+        expected: Long, policy: Long, requireSystemMode: Boolean = false,
+        beforeNewOwner: suspend () -> Unit = {}): LocalEditCaptureResult {
         val active = { authenticated && generation == expected && createPolicyRevision.get() == policy && hasCalendarPermissions() &&
             (!requireSystemMode || systemCreatesEnabled(target)) }
         if (!isCurrent(expected, target.account) || !active()) return LocalEditCaptureResult.INACTIVE
-        store.admitTransaction = { it == target && active() }
-        projection.admitOperation = active
-        return try {
-            val selected = store.selections(target.account).singleOrNull { it.scope == target }
-            if (selected?.enabled != true || !selected.available) return LocalEditCaptureResult.INACTIVE
-            if (capturedRawHold(target).holds(eventId)) throw CapturedProjectionPending()
-            val format = store.transaction(target) { checkpoint?.format }
-            if (format != remote.format) return LocalEditCaptureResult.UNQUALIFIED
-            if (store.localDelete(target, eventId) != null) return LocalEditCaptureResult.UNQUALIFIED
-            val retained = store.localEdit(target, eventId)
-            val mutation = id ?: retained?.id ?: MutationId(java.util.UUID.randomUUID().toString())
-            if (retained != null) {
-                if (retained.id != mutation || retained.format != format) return LocalEditCaptureResult.UNQUALIFIED
-                return if (retained.state == LocalEditState.CONFLICT) LocalEditCaptureResult.CONFLICT else LocalEditCaptureResult.RETAINED
-            }
-            val base = captureBaseline(expected, target, eventId) ?: return LocalEditCaptureResult.UNQUALIFIED
-            val snapshot = projection.captureOwnedSimpleEdit(target, base) ?: return LocalEditCaptureResult.UNQUALIFIED
-            if (!isCurrent(expected, target.account) || !active()) return LocalEditCaptureResult.INACTIVE
-            val captured = store.captureLocalEdit(LocalEditIntent(mutation, target, format, base, snapshot.content))
-            if (captured.state == LocalEditState.CONFLICT) LocalEditCaptureResult.CONFLICT else LocalEditCaptureResult.RETAINED
-        } catch (cancelled: CancellationException) { throw cancelled }
-          catch (_: Exception) { LocalEditCaptureResult.UNAVAILABLE }
-          finally {
-              store.admitTransaction = { false }
-              projection.admitOperation = { false }
-          }
+        return localChangeCapture(target, expected, active).edit(eventId, id, beforeNewOwner)
     }
+
+    private fun localChangeHistory(target: CalendarScope, expected: Long, policy: Long) =
+        LocalChangeHistory(target, store, projection,
+            active = { authenticated && generation == expected && createPolicyRevision.get() == policy && hasCalendarPermissions() },
+            currentAccount = { isCurrent(expected, target.account) })
 
     /** Local SQL history only. A missing dossier still passes the final session/cancellation gate. */
     private suspend fun <T : Any> readConflictArchive(target: CalendarScope,
         read: suspend () -> T?): ConflictArchiveRead<T> = mutex.withLock {
         val expected = generation
         val policy = createPolicyRevision.get()
-        val active = { authenticated && generation == expected && createPolicyRevision.get() == policy && hasCalendarPermissions() }
-        try {
-            currentCoroutineContext().ensureActive()
-            val currentBefore = isCurrent(expected, target.account)
-            currentCoroutineContext().ensureActive()
-            if (!currentBefore || !active()) return@withLock ConflictArchiveRead.Inactive
-            store.admitTransaction = { it == target && active() }
-            val known = store.selections(target.account).any { it.scope == target }
-            val value = if (known) read() else null
-            currentCoroutineContext().ensureActive()
-            val currentAfter = isCurrent(expected, target.account)
-            currentCoroutineContext().ensureActive()
-            if (!currentAfter || !active()) return@withLock ConflictArchiveRead.Inactive
-            if (value == null) ConflictArchiveRead.Unqualified else ConflictArchiveRead.Available(value)
-        } catch (cancelled: CancellationException) { throw cancelled }
-          catch (_: Exception) {
-              currentCoroutineContext().ensureActive()
-              if (active()) ConflictArchiveRead.Unavailable else ConflictArchiveRead.Inactive
-          }
-          finally {
-              store.admitTransaction = { false }
-              projection.admitOperation = { false }
-          }
+        localChangeHistory(target, expected, policy).readArchive(read)
     }
 
     /** Explicit metadata discovery. Each page requires a fresh historical account/permission gate. */
@@ -1793,64 +1529,21 @@ class ImportCoordinator(
         val target = query.scope
         val expected = generation
         val policy = createPolicyRevision.get()
-        val active = { authenticated && generation == expected && createPolicyRevision.get() == policy && hasCalendarPermissions() }
-        try {
-            if (!isCurrent(expected, target.account) || !active()) return@withLock RetainedLocalChangeListing.Inactive
-            store.admitTransaction = { it == target && active() }
-            if (store.selections(target.account).none { it.scope == target }) return@withLock RetainedLocalChangeListing.Unqualified
-            val page = store.retainedLocalChanges(query)
-            currentCoroutineContext().ensureActive()
-            if (!isCurrent(expected, target.account) || !active()) return@withLock RetainedLocalChangeListing.Inactive
-            RetainedLocalChangeListing.Available(page)
-        } catch (cancelled: CancellationException) { throw cancelled }
-          catch (_: Exception) { RetainedLocalChangeListing.Unavailable }
-          finally {
-              store.admitTransaction = { false }
-              projection.admitOperation = { false }
-          }
+        localChangeHistory(target, expected, policy).list(query)
     }
 
     /** Explicit local history inspection. Never reads Provider contents or renews remote rights. */
     suspend fun inspectLocalEdit(target: CalendarScope, eventId: EventId, id: MutationId): LocalEditInspection = mutex.withLock {
         val expected = generation
         val policy = createPolicyRevision.get()
-        val active = { authenticated && generation == expected && createPolicyRevision.get() == policy && hasCalendarPermissions() }
-        try {
-            if (!isCurrent(expected, target.account) || !active()) return@withLock LocalEditInspection.Inactive
-            store.admitTransaction = { it == target && active() }
-            // Historical owners remain inspectable after a calendar is paused or disappears from discovery.
-            if (store.selections(target.account).none { it.scope == target }) return@withLock LocalEditInspection.Unqualified
-            val review = store.inspectLocalEdit(target, eventId, id) ?: return@withLock LocalEditInspection.Unqualified
-            currentCoroutineContext().ensureActive()
-            if (!isCurrent(expected, target.account) || !active()) return@withLock LocalEditInspection.Inactive
-            LocalEditInspection.Available(review)
-        } catch (cancelled: CancellationException) { throw cancelled }
-          catch (_: Exception) { LocalEditInspection.Unavailable }
-          finally {
-              store.admitTransaction = { false }
-              projection.admitOperation = { false }
-          }
+        localChangeHistory(target, expected, policy).inspectEdit(eventId, id)
     }
 
     /** Explicit DELETE history only; never acknowledges a deletion or supplies an undo image. */
     suspend fun inspectLocalDelete(target: CalendarScope, eventId: EventId, id: MutationId): LocalDeleteInspection = mutex.withLock {
         val expected = generation
         val policy = createPolicyRevision.get()
-        val active = { authenticated && generation == expected && createPolicyRevision.get() == policy && hasCalendarPermissions() }
-        try {
-            if (!isCurrent(expected, target.account) || !active()) return@withLock LocalDeleteInspection.Inactive
-            store.admitTransaction = { it == target && active() }
-            if (store.selections(target.account).none { it.scope == target }) return@withLock LocalDeleteInspection.Unqualified
-            val review = store.inspectLocalDelete(target, eventId, id) ?: return@withLock LocalDeleteInspection.Unqualified
-            currentCoroutineContext().ensureActive()
-            if (!isCurrent(expected, target.account) || !active()) return@withLock LocalDeleteInspection.Inactive
-            LocalDeleteInspection.Available(review)
-        } catch (cancelled: CancellationException) { throw cancelled }
-          catch (_: Exception) { LocalDeleteInspection.Unavailable }
-          finally {
-              store.admitTransaction = { false }
-              projection.admitOperation = { false }
-          }
+        localChangeHistory(target, expected, policy).inspectDelete(eventId, id)
     }
 
     /** Internal submission followed by guarded result retention under the same original epoch. */
@@ -1883,7 +1576,7 @@ class ImportCoordinator(
             return unresolved
         return mutex.withLock {
             val target = frozen.scope
-            val qualification = LocalTitleOwnerQualification(frozen.preparation, frozen.format, port,
+            val qualification = localTitleOwnerQualification(frozen.preparation, frozen.format, port,
                 generation, createPolicyRevision.get(), systemTitle, admission)
             var closed = false
             val lease = { scope: CalendarScope ->
@@ -1953,16 +1646,10 @@ class ImportCoordinator(
         }
     }
 
-    private fun systemTitleProfile(intent: LocalEditIntent): Boolean =
-        intent.state == LocalEditState.PAUSED &&
-            intent.base.content.details == EventDetails() && intent.base.content.recurrence == null &&
-            intent.base.content.colorRgb == null && intent.content != intent.base.content &&
-            intent.content == intent.base.content.copy(title = intent.content.title)
-
     /** Current source, with complete provenance required for a transferred CREATE. */
     private suspend fun systemTitleSource(intent: LocalEditIntent, active: () -> Boolean): Boolean {
         currentCoroutineContext().ensureActive()
-        if (!active() || !systemTitleProfile(intent)) return false
+        if (!active() || !LocalTitleOwnerQualification.systemTitleProfile(intent)) return false
         val target = intent.scope
         val event = intent.base.eventId
         if (store.localEdit(target, event) != intent || !active()) return false
@@ -1987,8 +1674,7 @@ class ImportCoordinator(
 
     private suspend fun currentSystemTitleHandoff(role: CapturedCreateHandoffRecord, intent: LocalEditIntent,
         active: () -> Boolean): Boolean {
-        if (!active() || role.state != CapturedCreateHandoffState.RELEASED || !role.waiting ||
-            role.frame.base != intent.base || role.frame.format != intent.format) return false
+        if (!active() || !LocalTitleOwnerQualification.matchesReleasedHandoff(role, intent)) return false
         val pending = store.capturedHandoffProjection(role.frame)
         currentCoroutineContext().ensureActive()
         if (!active() || pending != null) return false
@@ -2053,105 +1739,20 @@ class ImportCoordinator(
         submitLocalTitleAttemptGuarded(record, journal, port, true, journal, systemTitle = true,
             admission = admission).verifiedResult
 
-    /** Shared current owner observation; callers retain one epoch under the coordinator mutex. */
-    private inner class LocalTitleOwnerQualification(private val preparation: LocalEditPreparation,
-        private val format: AdapterFormat, private val port: CalendarTitleUpdateSubmissionPort,
-        private val expected: Long, private val policy: Long, private val systemTitle: Boolean = false,
-        private val admission: (CalendarScope) -> Boolean = { true }) {
-        private val target = preparation.intent.scope
-        private val intent = preparation.intent
-        private val event = intent.base.eventId
-        val baseActive = { authenticated && generation == expected && createPolicyRevision.get() == policy &&
-            systemCreatesEnabled(target) && hasCalendarPermissions() && admission(target) &&
-            (!systemTitle || systemTitlesEnabled(target)) }
-        val active = { baseActive() && remote.format == intent.format && port.titleUpdateFormat == format }
-        suspend fun available(formats: Boolean = true): Boolean = availableWithAccount(formats) {
-            isCurrent(expected, target.account)
-        }
-        /** Only cached epoch/account and local selection reads; safe inside guarded submit. */
-        private suspend fun availableLocal(): Boolean = availableWithAccount(true) {
-            createAccount.get() == target.account
-        }
-        private suspend fun availableWithAccount(formats: Boolean, accountMatches: suspend () -> Boolean): Boolean {
-            currentCoroutineContext().ensureActive()
-            fun admitted() = if (formats) active() else baseActive()
-            if (!admitted()) return false
-            val current = accountMatches()
-            currentCoroutineContext().ensureActive()
-            if (!current || !admitted()) return false
-            val selected = store.selections(target.account).singleOrNull { it.scope == target }
-            currentCoroutineContext().ensureActive()
-            return selected?.enabled == true && selected.available && admitted()
-        }
-        private suspend fun sqlQualification(available: suspend () -> Boolean): LocalTitleAttemptRetentionResult? {
-            if (!available()) return LocalTitleAttemptRetentionResult.INACTIVE
-            val owner = store.localEdit(target, event)
-            if (!available()) return LocalTitleAttemptRetentionResult.INACTIVE
-            if (owner?.state == LocalEditState.CONFLICT && owner.copy(state = LocalEditState.PAUSED) == intent)
-                return LocalTitleAttemptRetentionResult.CONFLICT
-            if (owner != intent) return LocalTitleAttemptRetentionResult.UNQUALIFIED
-            val admission = store.assessLocalTitlePreparation(intent)
-            if (!available()) return LocalTitleAttemptRetentionResult.INACTIVE
-            when (admission) {
-                LocalTitlePreparationAdmission.CONFLICT -> return LocalTitleAttemptRetentionResult.CONFLICT
-                LocalTitlePreparationAdmission.INACTIVE -> return LocalTitleAttemptRetentionResult.INACTIVE
-                LocalTitlePreparationAdmission.HISTORICAL -> Unit
-                else -> return LocalTitleAttemptRetentionResult.UNQUALIFIED
-            }
-            val retainedPreparation = store.localEditPreparation(target, event)
-            if (!available()) return LocalTitleAttemptRetentionResult.INACTIVE
-            return if (retainedPreparation == preparation) null else LocalTitleAttemptRetentionResult.UNQUALIFIED
-        }
-        suspend fun sourceQualification(): LocalTitleAttemptRetentionResult? = qualifySource { available() }
-        suspend fun localSourceQualification(): LocalTitleAttemptRetentionResult? = qualifySource { availableLocal() }
-        private suspend fun qualifySource(available: suspend () -> Boolean): LocalTitleAttemptRetentionResult? {
-            sqlQualification(available)?.let { return it }
-            val hold = capturedRawHold(target)
-            if (!available()) return LocalTitleAttemptRetentionResult.INACTIVE
-            if (hold.scopeBlocked) return LocalTitleAttemptRetentionResult.UNRESOLVED
-            val role = store.capturedHandoff(target, event)
-            if (!available()) return LocalTitleAttemptRetentionResult.INACTIVE
-            if (systemTitle && !systemTitleProfile(intent))
-                return LocalTitleAttemptRetentionResult.UNSUPPORTED
-            val content = if (role == null) {
-                if (hold.holds(event)) return LocalTitleAttemptRetentionResult.UNRESOLVED
-                projection.captureOwnedSimpleEdit(target, intent.base)?.content
-            } else {
-                if (role.state != CapturedCreateHandoffState.RELEASED || !role.waiting ||
-                    role.frame.base != intent.base || role.frame.format != intent.format)
-                    return LocalTitleAttemptRetentionResult.UNRESOLVED
-                val pending = store.capturedHandoffProjection(role.frame)
-                if (!available()) return LocalTitleAttemptRetentionResult.INACTIVE
-                if (pending != null) return LocalTitleAttemptRetentionResult.UNRESOLVED
-                val qualified = handoffSource(role.frame, active)
-                if (!available()) return LocalTitleAttemptRetentionResult.INACTIVE
-                if (!qualified) return LocalTitleAttemptRetentionResult.UNRESOLVED
-                val observed = projection.captureCapturedHandoffCurrent(role.frame) as? CapturedHandoffCurrentObservation.Supported
-                observed?.snapshot?.takeIf { it.frame == role.frame && !it.deleted }?.content
-            }
-            // Check access/cancellation even when a dependency returned null.
-            if (!available()) return LocalTitleAttemptRetentionResult.INACTIVE
-            if (content != intent.content) return LocalTitleAttemptRetentionResult.UNRESOLVED
-            val currentRole = store.capturedHandoff(target, event)
-            if (!available()) return LocalTitleAttemptRetentionResult.INACTIVE
-            if (currentRole != role) return LocalTitleAttemptRetentionResult.UNRESOLVED
-            if (role != null) {
-                val qualified = handoffSource(role.frame, active)
-                if (!available()) return LocalTitleAttemptRetentionResult.INACTIVE
-                if (!qualified) return LocalTitleAttemptRetentionResult.UNRESOLVED
-                val pending = store.capturedHandoffProjection(role.frame)
-                if (!available()) return LocalTitleAttemptRetentionResult.INACTIVE
-                if (pending != null) return LocalTitleAttemptRetentionResult.UNRESOLVED
-            }
-            val currentHold = capturedRawHold(target)
-            if (!available()) return LocalTitleAttemptRetentionResult.INACTIVE
-            if (currentHold.scopeBlocked || (role == null && currentHold.holds(event)))
-                return LocalTitleAttemptRetentionResult.UNRESOLVED
-            val finalRole = store.capturedHandoff(target, event)
-            if (!available()) return LocalTitleAttemptRetentionResult.INACTIVE
-            if (finalRole != role) return LocalTitleAttemptRetentionResult.UNRESOLVED
-            return sqlQualification(available)
-        }
+    private fun localTitleOwnerQualification(preparation: LocalEditPreparation, format: AdapterFormat,
+        port: CalendarTitleUpdateSubmissionPort, expected: Long, policy: Long,
+        systemTitle: Boolean = false, admission: (CalendarScope) -> Boolean = { true }): LocalTitleOwnerQualification {
+        val target = preparation.intent.scope
+        return LocalTitleOwnerQualification(preparation, format, port, store, projection,
+            currentFormat = { remote.format },
+            baseActive = { authenticated && generation == expected && createPolicyRevision.get() == policy &&
+                systemCreatesEnabled(target) && hasCalendarPermissions() && admission(target) &&
+                (!systemTitle || systemTitlesEnabled(target)) },
+            currentAccount = { isCurrent(expected, target.account) },
+            cachedAccount = { createAccount.get() == target.account },
+            systemTitle = systemTitle,
+            capturedHold = { capturedRawHold(target) },
+            handoffSource = { frame, active -> handoffSource(frame, active) })
     }
 
     /** Prepare or recover reserved wire for the exact current native edit. Offline by default;
@@ -2164,7 +1765,7 @@ class ImportCoordinator(
         val frozen = candidate.frozen()
         return mutex.withLock {
             val target = frozen.scope
-            val qualification = LocalTitleOwnerQualification(frozen.preparation, frozen.format, port,
+            val qualification = localTitleOwnerQualification(frozen.preparation, frozen.format, port,
                 generation, createPolicyRevision.get(), systemTitle, admission)
             var refusal: LocalTitleAttemptRetentionResult? = null
             val lease = { scope: CalendarScope -> scope == target && refusal == null && qualification.active() }
@@ -2225,7 +1826,7 @@ class ImportCoordinator(
         return mutex.withLock {
             val target = frozen.scope
             val intent = frozen.preparation.intent
-            val qualification = LocalTitleOwnerQualification(frozen.preparation, frozen.format, port,
+            val qualification = localTitleOwnerQualification(frozen.preparation, frozen.format, port,
                 generation, createPolicyRevision.get())
             val active = qualification.active
             suspend fun available(formats: Boolean = true) = qualification.available(formats)
@@ -2348,38 +1949,26 @@ class ImportCoordinator(
     }
 
     /** Explicit internal DELETE snapshot. No observation, upload, or Android acknowledgement. */
-    suspend fun captureLocalDelete(target: CalendarScope, eventId: EventId, id: MutationId): LocalEditCaptureResult = mutex.withLock {
+    suspend fun captureLocalDelete(target: CalendarScope, eventId: EventId, id: MutationId,
+        beforeNewOwner: suspend () -> Unit = {}): LocalEditCaptureResult = mutex.withLock {
         val expected = generation
         val policy = createPolicyRevision.get()
         if (!isCurrent(expected, target.account) || !hasCalendarPermissions())
             return@withLock LocalEditCaptureResult.INACTIVE
         val active = { authenticated && generation == expected && createPolicyRevision.get() == policy && hasCalendarPermissions() }
-        store.admitTransaction = { it == target && active() }
-        projection.admitOperation = active
-        try {
-            val selected = store.selections(target.account).singleOrNull { it.scope == target }
-            if (selected?.enabled != true || !selected.available) return@withLock LocalEditCaptureResult.INACTIVE
-            if (capturedRawHold(target).holds(eventId)) throw CapturedProjectionPending()
-            val format = store.transaction(target) { checkpoint?.format }
-            if (format != remote.format) return@withLock LocalEditCaptureResult.UNQUALIFIED
-            if (store.localEdit(target, eventId) != null) return@withLock LocalEditCaptureResult.UNQUALIFIED
-            val retained = store.localDelete(target, eventId)
-            if (retained != null) {
-                if (retained.id != id || retained.format != format) return@withLock LocalEditCaptureResult.UNQUALIFIED
-                return@withLock if (retained.state == LocalEditState.CONFLICT) LocalEditCaptureResult.CONFLICT else LocalEditCaptureResult.RETAINED
-            }
-            val base = captureBaseline(expected, target, eventId) ?: return@withLock LocalEditCaptureResult.UNQUALIFIED
-            val snapshot = projection.captureOwnedSimpleDelete(target, base) ?: return@withLock LocalEditCaptureResult.UNQUALIFIED
-            if (!isCurrent(expected, target.account) || !active()) return@withLock LocalEditCaptureResult.INACTIVE
-            val captured = store.captureLocalDelete(LocalDeleteIntent(id, target, format, base, snapshot.content))
-            if (captured.state == LocalEditState.CONFLICT) LocalEditCaptureResult.CONFLICT else LocalEditCaptureResult.RETAINED
-        } catch (cancelled: CancellationException) { throw cancelled }
-          catch (_: Exception) { LocalEditCaptureResult.UNAVAILABLE }
-          finally {
-              store.admitTransaction = { false }
-              projection.admitOperation = { false }
-          }
+        localChangeCapture(target, expected, active).delete(eventId, id, beforeNewOwner)
     }
+
+    /** Preparation never renews its original epoch; only fresh durable staging records a send lease. */
+    private fun localCreateStaging(target: CalendarScope, journal: LocalCreateStore, expected: Long, policy: Long) =
+        LocalCreateStaging(target, store, projection, journal,
+            currentFormat = { remote.format },
+            active = { authenticated && generation == expected && createPolicyRevision.get() == policy && hasCalendarPermissions() },
+            currentAccount = { isCurrent(expected, target.account) },
+            recordFreshSubmission = { attempt, retained ->
+                if (creates != null) freshCapturedSubmissions[target to attempt] =
+                    CapturedSubmissionLease(CapturedCreateDispatchIdentity.of(retained), expected, policy)
+            })
 
     /** Explicit internal capture only; no preparation, submission or Android acknowledgement. */
     suspend fun captureLocalCreate(target: CalendarScope, eventRow: Long, localId: LocalEventId,
@@ -2389,46 +1978,7 @@ class ImportCoordinator(
         val policy = createPolicyRevision.get()
         if (!isCurrent(expected, target.account) || !hasCalendarPermissions())
             return@withLock LocalEditCaptureResult.INACTIVE
-        val active = { authenticated && generation == expected && createPolicyRevision.get() == policy && hasCalendarPermissions() }
-        store.admitTransaction = { it == target && active() }
-        projection.admitOperation = active
-        journal.admitCapture = { it == target && active() }
-        try {
-            val selected = store.selections(target.account).singleOrNull { it.scope == target }
-            if (selected?.enabled != true || !selected.available) return@withLock LocalEditCaptureResult.INACTIVE
-            val format = store.transaction(target) { checkpoint?.format }
-            if (format != remote.format) return@withLock LocalEditCaptureResult.UNQUALIFIED
-            val previous = journal.readReservation(target, localId)
-            if (previous != null && (previous.id != id || previous.format != format || previous.markerProtocol != 1))
-                return@withLock LocalEditCaptureResult.UNQUALIFIED
-            // A retained intention is historical work, not a witness of the current Android row.
-            val retained = journal.readIntent(target, localId)
-            if (retained != null) {
-                val identity = retained.reservation
-                if (identity.id != id || identity.localId != localId || identity.scope != target ||
-                    identity.format != format || identity.markerProtocol != 1 ||
-                    (previous != null && identity != previous)) return@withLock LocalEditCaptureResult.UNQUALIFIED
-                return@withLock LocalEditCaptureResult.RETAINED
-            }
-            if (previous == null && (eventRow <= 0 || timestamp.nano != 0)) return@withLock LocalEditCaptureResult.UNQUALIFIED
-            val reservation = previous ?: LocalCreateReservation(id, localId, target, format, timestamp)
-            val firstClaim = journal.reserve(reservation)
-            val snapshot = if (firstClaim) projection.captureAndStampSimpleCreate(target, eventRow, localId)
-                else projection.inspectStampedSimpleCreate(target, localId)
-            if (snapshot == null) return@withLock LocalEditCaptureResult.UNQUALIFIED
-            if (!isCurrent(expected, target.account) || !active()) return@withLock LocalEditCaptureResult.INACTIVE
-            val currentSelection = store.selections(target.account).singleOrNull { it.scope == target }
-            if (currentSelection?.enabled != true || !currentSelection.available) return@withLock LocalEditCaptureResult.INACTIVE
-            if (store.transaction(target) { checkpoint?.format } != format) return@withLock LocalEditCaptureResult.UNQUALIFIED
-            journal.retain(LocalCreateIntent(reservation, snapshot.content))
-            LocalEditCaptureResult.RETAINED
-        } catch (cancelled: CancellationException) { throw cancelled }
-          catch (_: Exception) { LocalEditCaptureResult.UNAVAILABLE }
-          finally {
-              store.admitTransaction = { false }
-              projection.admitOperation = { false }
-              journal.admitCapture = { false }
-          }
+        localCreateStaging(target, journal, expected, policy).capture(eventRow, localId, id, timestamp)
     }
 
     /** Explicit read-only preparation; no outgoing journal, dispatch, or Provider acknowledgement. */
@@ -2439,55 +1989,7 @@ class ImportCoordinator(
         val policy = createPolicyRevision.get()
         if (!isCurrent(expected, target.account) || !hasCalendarPermissions())
             return@withLock LocalCreatePreparationResult.INACTIVE
-        val active = { authenticated && generation == expected && createPolicyRevision.get() == policy && hasCalendarPermissions() }
-        store.admitTransaction = { it == target && active() }
-        projection.admitOperation = active
-        journal.admitCapture = { it == target && active() }
-        try {
-            val selected = store.selections(target.account).singleOrNull { it.scope == target }
-            if (selected?.enabled != true || !selected.available) return@withLock LocalCreatePreparationResult.INACTIVE
-            val format = store.transaction(target) { checkpoint?.format }
-            if (format != remote.format) return@withLock LocalCreatePreparationResult.UNQUALIFIED
-            val intent = journal.readIntent(target, localId) ?: return@withLock LocalCreatePreparationResult.UNQUALIFIED
-            val reservation = intent.reservation
-            if (reservation.scope != target || reservation.localId != localId || reservation.id != id ||
-                reservation.format != format || reservation.markerProtocol != 1) return@withLock LocalCreatePreparationResult.UNQUALIFIED
-            val preparationFormat = port.localCreateFormat ?: return@withLock LocalCreatePreparationResult.UNSUPPORTED
-            val observed = projection.inspectStampedSimpleCreate(target, localId)
-                ?: return@withLock LocalCreatePreparationResult.UNQUALIFIED
-            if (observed.content != intent.content) return@withLock LocalCreatePreparationResult.UNQUALIFIED
-            val retained = journal.readPreparation(target, localId)
-            if (retained != null) {
-                if (retained.intent != intent || retained.format != preparationFormat)
-                    return@withLock LocalCreatePreparationResult.UNQUALIFIED
-                if (!isCurrent(expected, target.account) || !active()) return@withLock LocalCreatePreparationResult.INACTIVE
-                return@withLock LocalCreatePreparationResult.RETAINED
-            }
-            val prepared = port.prepareCreate(CalendarCreateDraft(target, reservation.id, reservation.timestamp, intent.content))
-            if (prepared.scope != target || prepared.format != preparationFormat || port.localCreateFormat != preparationFormat ||
-                prepared.protectedPayload.isBlank()) return@withLock LocalCreatePreparationResult.UNQUALIFIED
-            if (!isCurrent(expected, target.account) || !active()) return@withLock LocalCreatePreparationResult.INACTIVE
-            val currentSelection = store.selections(target.account).singleOrNull { it.scope == target }
-            if (currentSelection?.enabled != true || !currentSelection.available) return@withLock LocalCreatePreparationResult.INACTIVE
-            if (store.transaction(target) { checkpoint?.format } != format) return@withLock LocalCreatePreparationResult.UNQUALIFIED
-            val current = projection.inspectStampedSimpleCreate(target, localId)
-                ?: return@withLock LocalCreatePreparationResult.UNQUALIFIED
-            if (current.content != intent.content) return@withLock LocalCreatePreparationResult.UNQUALIFIED
-            journal.retainPreparation(LocalCreatePreparation(intent, preparationFormat, prepared.protectedPayload))
-            LocalCreatePreparationResult.RETAINED
-        } catch (cancelled: CancellationException) { throw cancelled }
-          catch (failure: CreatePreparationException) {
-              when (failure.reason) {
-                  CreatePreparationFailure.UNSUPPORTED -> LocalCreatePreparationResult.UNSUPPORTED
-                  CreatePreparationFailure.AUTHENTICATION, CreatePreparationFailure.PERMISSION -> LocalCreatePreparationResult.INACTIVE
-                  else -> LocalCreatePreparationResult.UNAVAILABLE
-              }
-          } catch (_: Exception) { LocalCreatePreparationResult.UNAVAILABLE }
-          finally {
-              store.admitTransaction = { false }
-              projection.admitOperation = { false }
-              journal.admitCapture = { false }
-          }
+        localCreateStaging(target, journal, expected, policy).prepare(localId, id, port)
     }
 
     /** Explicit read-only staging only; no dispatch journal, upload or Provider acknowledgement. */
@@ -2498,80 +2000,7 @@ class ImportCoordinator(
         val expected = generation
         val policy = createPolicyRevision.get()
         if (!isCurrent(expected, target.account) || !hasCalendarPermissions()) return@withLock LocalCreateSubmissionResult.INACTIVE
-        val active = { authenticated && generation == expected && createPolicyRevision.get() == policy && hasCalendarPermissions() }
-        store.admitTransaction = { it == target && active() }
-        projection.admitOperation = active
-        journal.admitCapture = { it == target && active() }
-        try {
-            suspend fun admission(): LocalCreateSubmissionResult? {
-                if (!isCurrent(expected, target.account) || !active()) return LocalCreateSubmissionResult.INACTIVE
-                val selection = store.selections(target.account).singleOrNull { it.scope == target }
-                if (selection?.enabled != true || !selection.available) return LocalCreateSubmissionResult.INACTIVE
-                return null
-            }
-            admission()?.let { return@withLock it }
-            val importFormat = store.transaction(target) { checkpoint?.format }
-            if (importFormat != remote.format) return@withLock LocalCreateSubmissionResult.UNQUALIFIED
-            val intent = journal.readIntent(target, localId) ?: return@withLock LocalCreateSubmissionResult.UNQUALIFIED
-            val captured = intent.reservation
-            if (captured.scope != target || captured.localId != localId || captured.id != id ||
-                captured.format != importFormat || captured.markerProtocol != 1) return@withLock LocalCreateSubmissionResult.UNQUALIFIED
-            val submissionFormat = port.knownEmptySubmissionFormat ?: return@withLock LocalCreateSubmissionResult.UNSUPPORTED
-            val reservation = try { LocalCreateSubmissionReservation(intent, attempt, submissionFormat) }
-                catch (_: IllegalArgumentException) { return@withLock LocalCreateSubmissionResult.UNQUALIFIED }
-
-            suspend fun qualify(): LocalCreateSubmissionResult? {
-                admission()?.let { return it }
-                if (port.knownEmptySubmissionFormat != submissionFormat || remote.format != importFormat ||
-                    store.transaction(target) { checkpoint?.format } != importFormat) return LocalCreateSubmissionResult.UNQUALIFIED
-                val observed = projection.inspectStampedSimpleCreate(target, localId)
-                if (observed?.content != intent.content) return LocalCreateSubmissionResult.UNQUALIFIED
-                // Provider inspection and SQLite are separate. Recheck app state after every external await.
-                admission()?.let { return it }
-                if (port.knownEmptySubmissionFormat != submissionFormat || remote.format != importFormat ||
-                    store.transaction(target) { checkpoint?.format } != importFormat) return LocalCreateSubmissionResult.UNQUALIFIED
-                if (!active()) return LocalCreateSubmissionResult.INACTIVE
-                return null
-            }
-            qualify()?.let { return@withLock it }
-            val existing = journal.readSubmissionReservation(target, localId)
-            if (existing != null && existing != reservation) return@withLock LocalCreateSubmissionResult.UNQUALIFIED
-            if (existing != null) {
-                val retained = journal.readSubmission(target, localId)
-                qualify()?.let { return@withLock it }
-                return@withLock if (retained != null) LocalCreateSubmissionResult.RETAINED else LocalCreateSubmissionResult.UNRESOLVED
-            }
-            val permit = journal.reserveSubmission(reservation)
-            if (permit == null) {
-                // Another helper won. Never acquire its preparation right or regenerate a blob.
-                val retained = journal.readSubmission(target, localId)
-                qualify()?.let { return@withLock it }
-                return@withLock if (retained != null) LocalCreateSubmissionResult.RETAINED else LocalCreateSubmissionResult.UNRESOLVED
-            }
-            qualify()?.let { return@withLock it }
-            val prepared = port.prepareSubmission(reservation.draft)
-            if (prepared.scope != target || prepared.format != submissionFormat || prepared.protectedPayload.isBlank())
-                return@withLock LocalCreateSubmissionResult.UNQUALIFIED
-            qualify()?.let { return@withLock it }
-            val retained = journal.retainSubmission(permit, LocalCreateSubmission(reservation, prepared.protectedPayload))
-            qualify()?.let { return@withLock it }
-            currentCoroutineContext().ensureActive()
-            if (creates != null) freshCapturedSubmissions[target to attempt] =
-                CapturedSubmissionLease(CapturedCreateDispatchIdentity.of(retained), expected, policy)
-            LocalCreateSubmissionResult.RETAINED
-        } catch (cancelled: CancellationException) { throw cancelled }
-          catch (failure: CreatePreparationException) {
-              when (failure.reason) {
-                  CreatePreparationFailure.UNSUPPORTED -> LocalCreateSubmissionResult.UNSUPPORTED
-                  CreatePreparationFailure.AUTHENTICATION, CreatePreparationFailure.PERMISSION -> LocalCreateSubmissionResult.INACTIVE
-                  else -> LocalCreateSubmissionResult.UNAVAILABLE
-              }
-          } catch (_: Exception) { LocalCreateSubmissionResult.UNAVAILABLE }
-          finally {
-              store.admitTransaction = { false }
-              projection.admitOperation = { false }
-              journal.admitCapture = { false }
-          }
+        localCreateStaging(target, journal, expected, policy).stageSubmission(localId, id, attempt, port)
     }
 
     /** Opt-in automatic path requalifies the same unsent payload; UNKNOWN remains inspect-only. */
@@ -2725,61 +2154,24 @@ class ImportCoordinator(
           }
     }
 
+    /** Created under the import mutex after lifecycle admission; never renews an operation's epoch. */
+    private fun capturedCreateRestoration(target: CalendarScope, captures: LocalCreateStore,
+        journal: CreateAttemptStore): CapturedCreateRestoration {
+        val expected = generation
+        val policy = createPolicyRevision.get()
+        return CapturedCreateRestoration(target, store, projection, captures, journal,
+            currentFormat = { remote.format },
+            active = { authenticated && generation == expected && createPolicyRevision.get() == policy && hasCalendarPermissions() },
+            currentAccount = { isCurrent(expected, target.account) })
+    }
+
     /** Retain only the first authenticated captured identity. No original-row ACK or projection. */
     suspend fun bindLocalCreateObservation(target: CalendarScope, localId: LocalEventId, id: MutationId,
         attempt: MutationId, port: CalendarCreateSubmissionPort? = null): CapturedCreateBindingResult = mutex.withLock {
         val captures = localCreates ?: return@withLock CapturedCreateBindingResult.UNRESOLVED
         val journal = creates ?: return@withLock CapturedCreateBindingResult.UNRESOLVED
         ensureCreateLifecycle()
-        val expected = generation
-        val policy = createPolicyRevision.get()
-        val active = { authenticated && generation == expected && createPolicyRevision.get() == policy && hasCalendarPermissions() }
-        suspend fun available(): Boolean {
-            if (!isCurrent(expected, target.account) || !active()) return false
-            val selected = store.selections(target.account).singleOrNull { it.scope == target }
-            return selected?.enabled == true && selected.available && active()
-        }
-        try {
-            if (!available()) return@withLock CapturedCreateBindingResult.INACTIVE
-            store.admitTransaction = { it == target && active() }
-            captures.admitCapture = { it == target && active() }
-            journal.admitAssociation = { it == target && active() }
-            val submission = captures.readSubmission(target, localId) ?: return@withLock CapturedCreateBindingResult.UNRESOLVED
-            val reserved = submission.reservation
-            val captured = reserved.intent.reservation
-            if (captured.scope != target || captured.localId != localId || captured.id != id || reserved.attempt != attempt ||
-                captured.format != remote.format || store.transaction(target) { checkpoint?.format } != captured.format)
-                return@withLock CapturedCreateBindingResult.UNRESOLVED
-            val identity = CapturedCreateDispatchIdentity.of(submission)
-            val unknown = journal.read(target, attempt) ?: return@withLock CapturedCreateBindingResult.UNRESOLVED
-            if (unknown.state != CreateAttemptState.OUTCOME_UNKNOWN || journal.capturedIdentity(target, attempt) != identity)
-                return@withLock CapturedCreateBindingResult.UNRESOLVED
-            val cached = journal.capturedBinding(identity)
-            if (cached == null) {
-                val inspections = port ?: return@withLock CapturedCreateBindingResult.UNRESOLVED
-                if (inspections.knownEmptySubmissionFormat != reserved.format) return@withLock CapturedCreateBindingResult.UNRESOLVED
-                val observed = inspections.inspectCaptured(unknown, reserved.draft) as? CreateSubmissionObservation.Verified
-                    ?: return@withLock CapturedCreateBindingResult.UNRESOLVED
-                if (!available()) return@withLock CapturedCreateBindingResult.INACTIVE
-                if (observed.attempt != identity.attempt || observed.event.content != reserved.draft.content ||
-                    inspections.knownEmptySubmissionFormat != reserved.format || remote.format != captured.format ||
-                    store.transaction(target) { checkpoint?.format } != captured.format ||
-                    captures.readSubmission(target, localId) != submission || journal.capturedIdentity(target, attempt) != identity)
-                    return@withLock CapturedCreateBindingResult.UNRESOLVED
-                journal.bindCaptured(unknown, identity, observed)
-            }
-            if (!available()) return@withLock CapturedCreateBindingResult.INACTIVE
-            if (remote.format != captured.format || store.transaction(target) { checkpoint?.format } != captured.format ||
-                captures.readSubmission(target, localId) != submission || journal.capturedBinding(identity) == null)
-                return@withLock CapturedCreateBindingResult.UNRESOLVED
-            CapturedCreateBindingResult.RETAINED
-        } catch (cancelled: CancellationException) { throw cancelled }
-          catch (_: Exception) { CapturedCreateBindingResult.UNRESOLVED }
-          finally {
-              journal.admitAssociation = { false }
-              captures.admitCapture = { false }
-              store.admitTransaction = { false }
-          }
+        capturedCreateRestoration(target, captures, journal).bind(localId, id, attempt, port)
     }
 
     /** Original-row metadata only; the incoming hold is not released by this operation. */
@@ -2788,57 +2180,7 @@ class ImportCoordinator(
         val captures = localCreates ?: return@withLock CapturedCreateAttachmentResult.UNRESOLVED
         val journal = creates ?: return@withLock CapturedCreateAttachmentResult.UNRESOLVED
         ensureCreateLifecycle()
-        val expected = generation
-        val policy = createPolicyRevision.get()
-        val active = { authenticated && generation == expected && createPolicyRevision.get() == policy && hasCalendarPermissions() }
-        suspend fun available(): Boolean {
-            if (!isCurrent(expected, target.account) || !active()) return false
-            val selected = store.selections(target.account).singleOrNull { it.scope == target }
-            return selected?.enabled == true && selected.available && active()
-        }
-        try {
-            if (!available()) return@withLock CapturedCreateAttachmentResult.INACTIVE
-            store.admitTransaction = { it == target && active() }
-            captures.admitCapture = { it == target && active() }
-            journal.admitAssociation = { it == target && active() }
-            projection.admitOperation = { active() }
-            val submission = captures.readSubmission(target, localId) ?: return@withLock CapturedCreateAttachmentResult.UNRESOLVED
-            val reserved = submission.reservation
-            val capture = reserved.intent.reservation
-            if (capture.scope != target || capture.localId != localId || capture.id != id || reserved.attempt != attempt ||
-                capture.format != remote.format || store.transaction(target) { checkpoint?.format } != capture.format ||
-                projection.capturedAttachmentProtocol != 1) return@withLock CapturedCreateAttachmentResult.UNRESOLVED
-            val identity = CapturedCreateDispatchIdentity.of(submission)
-            val binding = journal.capturedBinding(identity) ?: return@withLock CapturedCreateAttachmentResult.UNRESOLVED
-            // The durable nonce precedes any Provider change. No network or submission port is used.
-            val receipt = journal.prepareCapturedAttachment(binding)
-            suspend fun exact(): Boolean = captures.readSubmission(target, localId) == submission &&
-                remote.format == capture.format && projection.capturedAttachmentProtocol == receipt.protocol &&
-                store.transaction(target) { checkpoint?.format } == capture.format &&
-                journal.capturedBinding(identity) == binding && journal.capturedAttachment(binding) == receipt
-            if (!available()) return@withLock CapturedCreateAttachmentResult.INACTIVE
-            if (!exact()) return@withLock CapturedCreateAttachmentResult.UNRESOLVED
-            var witness = projection.inspectCapturedAttachment(receipt)
-            if (witness == null) {
-                if (!available()) return@withLock CapturedCreateAttachmentResult.INACTIVE
-                if (!exact()) return@withLock CapturedCreateAttachmentResult.UNRESOLVED
-                witness = projection.attachCapturedCreate(receipt)
-            }
-            if (!available()) return@withLock CapturedCreateAttachmentResult.INACTIVE
-            if (witness?.receipt != receipt || !exact()) return@withLock CapturedCreateAttachmentResult.UNRESOLVED
-            // Historical metadata proof is deliberately insufficient to ACK a later local edit.
-            CapturedCreateAttachmentResult.ATTACHED
-        } catch (cancelled: CancellationException) {
-            currentCoroutineContext().ensureActive()
-            if (!active()) CapturedCreateAttachmentResult.INACTIVE else throw cancelled
-        } catch (_: Exception) {
-            if (!active()) CapturedCreateAttachmentResult.INACTIVE else CapturedCreateAttachmentResult.UNRESOLVED
-        } finally {
-            journal.admitAssociation = { false }
-            captures.admitCapture = { false }
-            store.admitTransaction = { false }
-            projection.admitOperation = { false }
-        }
+        capturedCreateRestoration(target, captures, journal).attach(localId, id, attempt)
     }
 
     /** Retain the verified sent baseline only. Never clean the original row or release its hold. */
@@ -2847,55 +2189,7 @@ class ImportCoordinator(
         val captures = localCreates ?: return@withLock CapturedCreateBaselineResult.UNRESOLVED
         val journal = creates ?: return@withLock CapturedCreateBaselineResult.UNRESOLVED
         ensureCreateLifecycle()
-        val expected = generation
-        val policy = createPolicyRevision.get()
-        val active = { authenticated && generation == expected && createPolicyRevision.get() == policy && hasCalendarPermissions() }
-        suspend fun available(): Boolean {
-            if (!isCurrent(expected, target.account) || !active()) return false
-            val selected = store.selections(target.account).singleOrNull { it.scope == target }
-            return selected?.enabled == true && selected.available && active()
-        }
-        try {
-            if (!available()) return@withLock CapturedCreateBaselineResult.INACTIVE
-            store.admitTransaction = { it == target && active() }
-            captures.admitCapture = { it == target && active() }
-            projection.admitOperation = { active() }
-            val submission = captures.readSubmission(target, localId) ?: return@withLock CapturedCreateBaselineResult.UNRESOLVED
-            val reserved = submission.reservation
-            val capture = reserved.intent.reservation
-            if (capture.scope != target || capture.localId != localId || capture.id != id || reserved.attempt != attempt ||
-                capture.format != remote.format || store.transaction(target) { checkpoint?.format } != capture.format ||
-                projection.capturedAttachmentProtocol != 1) return@withLock CapturedCreateBaselineResult.UNRESOLVED
-            val identity = CapturedCreateDispatchIdentity.of(submission)
-            val binding = journal.capturedBinding(identity) ?: return@withLock CapturedCreateBaselineResult.UNRESOLVED
-            // This path only reads an existing durable attachment plan and its current Provider proof.
-            val receipt = journal.capturedAttachment(binding) ?: return@withLock CapturedCreateBaselineResult.UNRESOLVED
-            val baseline = CapturedCreateBaseline(receipt,
-                RemoteChange.Upsert(binding.eventId, binding.verifiedRevision, reserved.intent.content))
-            suspend fun exact(): Boolean = captures.readSubmission(target, localId) == submission &&
-                remote.format == capture.format && projection.capturedAttachmentProtocol == receipt.protocol &&
-                store.transaction(target) { checkpoint?.format } == capture.format &&
-                journal.capturedBinding(identity) == binding && journal.capturedAttachment(binding) == receipt
-            if (!available()) return@withLock CapturedCreateBaselineResult.INACTIVE
-            if (!exact()) return@withLock CapturedCreateBaselineResult.UNRESOLVED
-            val witness = projection.inspectCapturedAttachment(receipt)
-            if (!available()) return@withLock CapturedCreateBaselineResult.INACTIVE
-            if (witness?.receipt != receipt || !exact()) return@withLock CapturedCreateBaselineResult.UNRESOLVED
-            if (!store.retainCapturedBaseline(baseline, witness)) return@withLock CapturedCreateBaselineResult.UNRESOLVED
-            if (!available()) return@withLock CapturedCreateBaselineResult.INACTIVE
-            if (!exact() || store.capturedBaseline(target, binding.eventId) != baseline)
-                return@withLock CapturedCreateBaselineResult.UNRESOLVED
-            CapturedCreateBaselineResult.RETAINED
-        } catch (cancelled: CancellationException) {
-            currentCoroutineContext().ensureActive()
-            if (!active()) CapturedCreateBaselineResult.INACTIVE else throw cancelled
-        } catch (_: Exception) {
-            if (!active()) CapturedCreateBaselineResult.INACTIVE else CapturedCreateBaselineResult.UNRESOLVED
-        } finally {
-            captures.admitCapture = { false }
-            store.admitTransaction = { false }
-            projection.admitOperation = { false }
-        }
+        capturedCreateRestoration(target, captures, journal).retainBaseline(localId, id, attempt)
     }
 
     /** Explicit one-shot clean acknowledgement of an unchanged captured original.
@@ -2906,82 +2200,7 @@ class ImportCoordinator(
         val captures = localCreates ?: return@withLock CapturedCreateAcknowledgementResult.UNRESOLVED
         val journal = creates ?: return@withLock CapturedCreateAcknowledgementResult.UNRESOLVED
         ensureCreateLifecycle()
-        val expected = generation
-        val policy = createPolicyRevision.get()
-        val active = { authenticated && generation == expected && createPolicyRevision.get() == policy && hasCalendarPermissions() }
-        suspend fun available(): Boolean {
-            if (!isCurrent(expected, target.account) || !active()) return false
-            val selected = store.selections(target.account).singleOrNull { it.scope == target }
-            return selected?.enabled == true && selected.available && active()
-        }
-        try {
-            if (!available()) return@withLock CapturedCreateAcknowledgementResult.INACTIVE
-            store.admitTransaction = { it == target && active() }
-            captures.admitCapture = { it == target && active() }
-            projection.admitOperation = { active() }
-            val submission = captures.readSubmission(target, localId) ?: return@withLock CapturedCreateAcknowledgementResult.UNRESOLVED
-            val reserved = submission.reservation
-            val capture = reserved.intent.reservation
-            if (capture.scope != target || capture.localId != localId || capture.id != id || reserved.attempt != attempt ||
-                capture.format != remote.format || store.transaction(target) { checkpoint?.format } != capture.format ||
-                projection.capturedAttachmentProtocol != 1 || projection.capturedAcknowledgementProtocol != 1)
-                return@withLock CapturedCreateAcknowledgementResult.UNRESOLVED
-            val identity = CapturedCreateDispatchIdentity.of(submission)
-            val binding = journal.capturedBinding(identity) ?: return@withLock CapturedCreateAcknowledgementResult.UNRESOLVED
-            val attachment = journal.capturedAttachment(binding) ?: return@withLock CapturedCreateAcknowledgementResult.UNRESOLVED
-            val baseline = CapturedCreateBaseline(attachment,
-                RemoteChange.Upsert(binding.eventId, binding.verifiedRevision, reserved.intent.content))
-            suspend fun exactSource(): Boolean = captures.readSubmission(target, localId) == submission &&
-                remote.format == capture.format && projection.capturedAttachmentProtocol == attachment.protocol &&
-                projection.capturedAcknowledgementProtocol == 1 &&
-                store.transaction(target) { checkpoint?.format } == capture.format &&
-                journal.capturedBinding(identity) == binding && journal.capturedAttachment(binding) == attachment &&
-                store.capturedBaseline(target, binding.eventId) == baseline
-            if (!available()) return@withLock CapturedCreateAcknowledgementResult.INACTIVE
-            if (!exactSource()) return@withLock CapturedCreateAcknowledgementResult.UNRESOLVED
-            var record = store.capturedAcknowledgement(target, binding.eventId)
-            if (record != null && record.receipt.baseline != baseline) return@withLock CapturedCreateAcknowledgementResult.UNRESOLVED
-            var fresh = false
-            if (record == null) {
-                val observed = projection.captureCapturedCreateCurrent(baseline)
-                if (!available()) return@withLock CapturedCreateAcknowledgementResult.INACTIVE
-                if (!exactSource()) return@withLock CapturedCreateAcknowledgementResult.UNRESOLVED
-                if (observed == CapturedCreateCurrentObservation.Unsupported) return@withLock CapturedCreateAcknowledgementResult.UNSUPPORTED
-                val snapshot = (observed as? CapturedCreateCurrentObservation.Supported)?.snapshot
-                    ?: return@withLock CapturedCreateAcknowledgementResult.UNRESOLVED
-                if (snapshot.baseline != baseline || snapshot.acknowledgement != null || !snapshot.unchanged) return@withLock CapturedCreateAcknowledgementResult.UNRESOLVED
-                val reservation = store.reserveCapturedAcknowledgement(CapturedCreateAcknowledgementReceipt(baseline, java.util.UUID.randomUUID().toString()))
-                record = reservation.record
-                fresh = reservation.fresh
-            }
-            val admitted = checkNotNull(record)
-            if (!available()) return@withLock CapturedCreateAcknowledgementResult.INACTIVE
-            if (!exactSource() || store.capturedAcknowledgement(target, binding.eventId) != admitted)
-                return@withLock CapturedCreateAcknowledgementResult.UNRESOLVED
-            // Only this invocation's fresh reservation may call the write port. All gaps and
-            // reopened outcomes inspect the original immutable nonce; none can rearm the batch.
-            val proof = if (fresh) projection.acknowledgeCapturedCreate(admitted.receipt)
-                else projection.inspectCapturedAcknowledgement(admitted.receipt)
-            if (!available()) return@withLock CapturedCreateAcknowledgementResult.INACTIVE
-            if (proof?.receipt != admitted.receipt || !exactSource() ||
-                store.capturedAcknowledgement(target, binding.eventId) != admitted)
-                return@withLock CapturedCreateAcknowledgementResult.UNRESOLVED
-            val proven = if (admitted.state == CapturedCreateAcknowledgementState.PROVEN) admitted
-                else store.retainCapturedAcknowledgement(proof)
-            if (!available()) return@withLock CapturedCreateAcknowledgementResult.INACTIVE
-            if (!exactSource() || store.capturedAcknowledgement(target, binding.eventId) != proven)
-                return@withLock CapturedCreateAcknowledgementResult.UNRESOLVED
-            CapturedCreateAcknowledgementResult.ACKNOWLEDGED
-        } catch (cancelled: CancellationException) {
-            currentCoroutineContext().ensureActive()
-            if (!active()) CapturedCreateAcknowledgementResult.INACTIVE else throw cancelled
-        } catch (_: Exception) {
-            if (!active()) CapturedCreateAcknowledgementResult.INACTIVE else CapturedCreateAcknowledgementResult.UNRESOLVED
-        } finally {
-            captures.admitCapture = { false }
-            store.admitTransaction = { false }
-            projection.admitOperation = { false }
-        }
+        capturedCreateRestoration(target, captures, journal).acknowledge(localId, id, attempt)
     }
 
     /** Explicit offline point-in-time qualification; no ACK, durable clean state or hold release. */
@@ -2990,61 +2209,7 @@ class ImportCoordinator(
         val captures = localCreates ?: return@withLock CapturedCreateCleanResult.UNRESOLVED
         val journal = creates ?: return@withLock CapturedCreateCleanResult.UNRESOLVED
         ensureCreateLifecycle()
-        val expected = generation
-        val policy = createPolicyRevision.get()
-        val active = { authenticated && generation == expected && createPolicyRevision.get() == policy && hasCalendarPermissions() }
-        suspend fun available(): Boolean {
-            if (!isCurrent(expected, target.account) || !active()) return false
-            val selected = store.selections(target.account).singleOrNull { it.scope == target }
-            return selected?.enabled == true && selected.available && active()
-        }
-        try {
-            if (!available()) return@withLock CapturedCreateCleanResult.INACTIVE
-            store.admitTransaction = { it == target && active() }
-            captures.admitCapture = { it == target && active() }
-            projection.admitOperation = { active() }
-            val submission = captures.readSubmission(target, localId) ?: return@withLock CapturedCreateCleanResult.UNRESOLVED
-            val reserved = submission.reservation
-            val capture = reserved.intent.reservation
-            if (capture.scope != target || capture.localId != localId || capture.id != id || reserved.attempt != attempt ||
-                capture.format != remote.format || store.transaction(target) { checkpoint?.format } != capture.format ||
-                projection.capturedAttachmentProtocol != 1 || projection.capturedAcknowledgementProtocol != 1)
-                return@withLock CapturedCreateCleanResult.UNRESOLVED
-            val identity = CapturedCreateDispatchIdentity.of(submission)
-            val binding = journal.capturedBinding(identity) ?: return@withLock CapturedCreateCleanResult.UNRESOLVED
-            val attachment = journal.capturedAttachment(binding) ?: return@withLock CapturedCreateCleanResult.UNRESOLVED
-            val baseline = CapturedCreateBaseline(attachment,
-                RemoteChange.Upsert(binding.eventId, binding.verifiedRevision, reserved.intent.content))
-            val record = store.capturedAcknowledgement(target, binding.eventId)
-                ?: return@withLock CapturedCreateCleanResult.UNRESOLVED
-            if (record.state != CapturedCreateAcknowledgementState.PROVEN || record.receipt.baseline != baseline)
-                return@withLock CapturedCreateCleanResult.UNRESOLVED
-            suspend fun exactSource(): Boolean = captures.readSubmission(target, localId) == submission &&
-                remote.format == capture.format && projection.capturedAttachmentProtocol == attachment.protocol &&
-                projection.capturedAcknowledgementProtocol == record.receipt.protocol &&
-                store.transaction(target) { checkpoint?.format } == capture.format &&
-                journal.capturedBinding(identity) == binding && journal.capturedAttachment(binding) == attachment &&
-                store.capturedBaseline(target, binding.eventId) == baseline &&
-                store.capturedCleanSource(record.receipt)
-            if (!available()) return@withLock CapturedCreateCleanResult.INACTIVE
-            if (!exactSource()) return@withLock CapturedCreateCleanResult.UNRESOLVED
-            val proof = projection.inspectAcknowledgedCreateClean(record.receipt)
-            if (!available()) return@withLock CapturedCreateCleanResult.INACTIVE
-            if (proof?.receipt != record.receipt || !exactSource()) return@withLock CapturedCreateCleanResult.UNRESOLVED
-            if (!available()) return@withLock CapturedCreateCleanResult.INACTIVE
-            // The Provider observation and SQL checks are separate. No state is promoted,
-            // queued work consumed or lease handed to a future projection on this result.
-            CapturedCreateCleanResult.CLEAN
-        } catch (cancelled: CancellationException) {
-            currentCoroutineContext().ensureActive()
-            if (!active()) CapturedCreateCleanResult.INACTIVE else throw cancelled
-        } catch (_: Exception) {
-            if (!active()) CapturedCreateCleanResult.INACTIVE else CapturedCreateCleanResult.UNRESOLVED
-        } finally {
-            captures.admitCapture = { false }
-            store.admitTransaction = { false }
-            projection.admitOperation = { false }
-        }
+        capturedCreateRestoration(target, captures, journal).qualifyClean(localId, id, attempt)
     }
 
     /** Snapshot and retain the current local intention only; no Provider ACK or hold release. */
@@ -3053,80 +2218,16 @@ class ImportCoordinator(
         val captures = localCreates ?: return@withLock CapturedCreateReconciliationResult.UNRESOLVED
         val journal = creates ?: return@withLock CapturedCreateReconciliationResult.UNRESOLVED
         ensureCreateLifecycle()
-        val expected = generation
-        val policy = createPolicyRevision.get()
-        val active = { authenticated && generation == expected && createPolicyRevision.get() == policy && hasCalendarPermissions() }
-        suspend fun available(): Boolean {
-            if (!isCurrent(expected, target.account) || !active()) return false
-            val selected = store.selections(target.account).singleOrNull { it.scope == target }
-            return selected?.enabled == true && selected.available && active()
-        }
-        try {
-            if (!available()) return@withLock CapturedCreateReconciliationResult.INACTIVE
-            store.admitTransaction = { it == target && active() }
-            captures.admitCapture = { it == target && active() }
-            projection.admitOperation = { active() }
-            val submission = captures.readSubmission(target, localId) ?: return@withLock CapturedCreateReconciliationResult.UNRESOLVED
-            val reserved = submission.reservation
-            val capture = reserved.intent.reservation
-            if (capture.scope != target || capture.localId != localId || capture.id != id || reserved.attempt != attempt ||
-                capture.format != remote.format || store.transaction(target) { checkpoint?.format } != capture.format ||
-                projection.capturedAttachmentProtocol != 1 || mutation == id || mutation == attempt || mutation.value == localId.value)
-                return@withLock CapturedCreateReconciliationResult.UNRESOLVED
-            val identity = CapturedCreateDispatchIdentity.of(submission)
-            val binding = journal.capturedBinding(identity) ?: return@withLock CapturedCreateReconciliationResult.UNRESOLVED
-            val receipt = journal.capturedAttachment(binding) ?: return@withLock CapturedCreateReconciliationResult.UNRESOLVED
-            val baseline = CapturedCreateBaseline(receipt,
-                RemoteChange.Upsert(binding.eventId, binding.verifiedRevision, reserved.intent.content))
-            val acknowledgement = store.capturedAcknowledgement(target, binding.eventId)
-            if (acknowledgement != null && (acknowledgement.state != CapturedCreateAcknowledgementState.PROVEN ||
-                acknowledgement.receipt.baseline != baseline || projection.capturedAcknowledgementProtocol != acknowledgement.receipt.protocol))
-                return@withLock CapturedCreateReconciliationResult.UNRESOLVED
-            suspend fun currentSnapshot(): CapturedCreateCurrentObservation = if (acknowledgement == null)
-                projection.captureCapturedCreateCurrent(baseline)
-                else projection.captureAcknowledgedCreateCurrent(acknowledgement.receipt)
-            suspend fun exact(): Boolean = store.capturedAcknowledgement(target, binding.eventId) == acknowledgement &&
-                (acknowledgement == null || projection.capturedAcknowledgementProtocol == acknowledgement.receipt.protocol) &&
-                captures.readSubmission(target, localId) == submission &&
-                remote.format == capture.format && projection.capturedAttachmentProtocol == receipt.protocol &&
-                store.transaction(target) { checkpoint?.format } == capture.format &&
-                journal.capturedBinding(identity) == binding && journal.capturedAttachment(binding) == receipt &&
-                store.capturedBaseline(target, binding.eventId) == baseline
-            if (!available()) return@withLock CapturedCreateReconciliationResult.INACTIVE
-            if (!exact()) return@withLock CapturedCreateReconciliationResult.UNRESOLVED
-            // Cached intentions cannot qualify the original row. Every replay takes a fresh,
-            // assertion-only snapshot of the complete attachment, content and child absence.
-            val observed = currentSnapshot()
-            if (!available()) return@withLock CapturedCreateReconciliationResult.INACTIVE
-            if (!exact()) return@withLock CapturedCreateReconciliationResult.UNRESOLVED
-            if (observed == CapturedCreateCurrentObservation.Unsupported)
-                return@withLock CapturedCreateReconciliationResult.UNSUPPORTED
-            val snapshot = (observed as? CapturedCreateCurrentObservation.Supported)?.snapshot
-                ?: return@withLock CapturedCreateReconciliationResult.UNRESOLVED
-            if (snapshot.baseline != baseline || snapshot.acknowledgement != acknowledgement?.receipt) return@withLock CapturedCreateReconciliationResult.UNRESOLVED
-            val retained = store.retainCapturedLocalChange(snapshot, mutation)
-            if (!available()) return@withLock CapturedCreateReconciliationResult.INACTIVE
-            if (!exact()) return@withLock CapturedCreateReconciliationResult.UNRESOLVED
-            val current = currentSnapshot() as? CapturedCreateCurrentObservation.Supported
-            if (!available()) return@withLock CapturedCreateReconciliationResult.INACTIVE
-            if (current?.snapshot != snapshot || !exact()) return@withLock CapturedCreateReconciliationResult.UNRESOLVED
-            // Even this second observation is point-in-time evidence, never a future ACK lease.
-            when (retained) {
-                null -> CapturedCreateReconciliationResult.UNCHANGED
-                LocalEditState.PAUSED -> CapturedCreateReconciliationResult.RETAINED
-                LocalEditState.CONFLICT -> CapturedCreateReconciliationResult.CONFLICT
-            }
-        } catch (cancelled: CancellationException) {
-            currentCoroutineContext().ensureActive()
-            if (!active()) CapturedCreateReconciliationResult.INACTIVE else throw cancelled
-        } catch (_: Exception) {
-            if (!active()) CapturedCreateReconciliationResult.INACTIVE else CapturedCreateReconciliationResult.UNRESOLVED
-        } finally {
-            captures.admitCapture = { false }
-            store.admitTransaction = { false }
-            projection.admitOperation = { false }
-        }
+        capturedCreateRestoration(target, captures, journal).reconcile(localId, id, attempt, mutation)
     }
+
+    /** The caller supplies its original epoch and phase-specific consent predicate. */
+    private fun capturedCreateHandoff(target: CalendarScope, captures: LocalCreateStore,
+        journal: CreateAttemptStore, expected: Long, active: () -> Boolean) =
+        CapturedCreateHandoff(target, store, projection, captures, journal, scheduler,
+            currentFormat = { remote.format }, active = active,
+            currentAccount = { account -> isCurrent(expected, account) },
+            source = { frame -> handoffSource(frame, active) })
 
     /** Explicit transfer; never submit again or adopt an original through ordinary projection. */
     suspend fun handoffLocalCreate(target: CalendarScope, localId: LocalEventId, id: MutationId,
@@ -3142,67 +2243,7 @@ class ImportCoordinator(
         val expected = generation
         val policy = createPolicyRevision.get()
         val active = { authenticated && generation == expected && createPolicyRevision.get() == policy && hasCalendarPermissions() }
-        suspend fun available(): Boolean = isCurrent(expected, target.account) && active() &&
-            store.selections(target.account).singleOrNull { it.scope == target }?.let { it.enabled && it.available } == true && active()
-        try {
-            if (!available()) return CapturedCreateHandoffResult.INACTIVE
-            store.admitTransaction = { it == target && active() }
-            captures.admitCapture = { it == target && active() }
-            projection.admitOperation = active
-            val submission = captures.readSubmission(target, localId) ?: return CapturedCreateHandoffResult.UNRESOLVED
-            val capture = submission.reservation.intent.reservation
-            if (capture.scope != target || capture.localId != localId || capture.id != id ||
-                submission.reservation.attempt != attempt || capture.format != remote.format)
-                return CapturedCreateHandoffResult.UNRESOLVED
-            val identity = CapturedCreateDispatchIdentity.of(submission)
-            val binding = journal.capturedBinding(identity) ?: return CapturedCreateHandoffResult.UNRESOLVED
-            val attachment = journal.capturedAttachment(binding) ?: return CapturedCreateHandoffResult.UNRESOLVED
-            val original = CapturedCreateBaseline(attachment, RemoteChange.Upsert(binding.eventId,
-                binding.verifiedRevision, submission.reservation.intent.content))
-            var role = store.capturedHandoff(target, binding.eventId)
-            if (role == null) {
-                val ack = store.capturedAcknowledgement(target, binding.eventId) ?: return CapturedCreateHandoffResult.UNRESOLVED
-                if (ack.state != CapturedCreateAcknowledgementState.PROVEN || ack.receipt.baseline != original)
-                    return CapturedCreateHandoffResult.UNRESOLVED
-                val frame = CapturedCreateHandoffFrame(CapturedCreateHandoffReceipt(ack.receipt, java.util.UUID.randomUUID().toString()), original.change)
-                if (!available()) return CapturedCreateHandoffResult.INACTIVE
-                if (!handoffSource(frame, active)) return CapturedCreateHandoffResult.UNRESOLVED
-                role = store.reserveCapturedHandoff(frame.receipt)
-            }
-            if (role.frame.receipt.acknowledgement.baseline != original || !handoffSource(role.frame, active))
-                return CapturedCreateHandoffResult.UNRESOLVED
-            if (!available()) return CapturedCreateHandoffResult.INACTIVE
-            if (role.state == CapturedCreateHandoffState.PENDING) {
-                val clean = projection.inspectAcknowledgedCreateClean(role.frame.receipt.acknowledgement)
-                if (!available()) return CapturedCreateHandoffResult.INACTIVE
-                if (clean?.receipt != role.frame.receipt.acknowledgement || !handoffSource(role.frame, active) ||
-                    store.capturedHandoff(target, binding.eventId) != role) return CapturedCreateHandoffResult.UNRESOLVED
-                role = store.retainCapturedHandoff(role.frame.receipt, clean)
-            } else {
-                if (!recoverHandoffProjection(role.frame, expected, active)) {
-                    store.waitCapturedHandoff(role.frame)
-                    return CapturedCreateHandoffResult.WAITING
-                }
-                role = store.capturedHandoff(target, binding.eventId) ?: return CapturedCreateHandoffResult.UNRESOLVED
-                val clean = projection.inspectCapturedHandoffBase(role.frame)
-                if (!available()) return CapturedCreateHandoffResult.INACTIVE
-                if (clean?.frame != role.frame || !handoffSource(role.frame, active) || !store.resumeCapturedHandoff(clean)) {
-                    store.waitCapturedHandoff(role.frame)
-                    return CapturedCreateHandoffResult.WAITING
-                }
-            }
-            if (!available()) return CapturedCreateHandoffResult.INACTIVE
-            return if (store.capturedHandoff(target, binding.eventId)?.let {
-                it.frame == role.frame && it.state == CapturedCreateHandoffState.RELEASED && !it.waiting
-            } == true && handoffSource(role.frame, active)) CapturedCreateHandoffResult.HANDED_OFF else CapturedCreateHandoffResult.UNRESOLVED
-        } catch (cancelled: CancellationException) {
-            currentCoroutineContext().ensureActive()
-            if (!active()) return CapturedCreateHandoffResult.INACTIVE else throw cancelled
-        } catch (_: Exception) {
-            return if (!active()) CapturedCreateHandoffResult.INACTIVE else CapturedCreateHandoffResult.UNRESOLVED
-        } finally {
-            captures.admitCapture = { false }; store.admitTransaction = { false }; projection.admitOperation = { false }
-        }
+        return capturedCreateHandoff(target, captures, journal, expected, active).transfer(localId, id, attempt)
     }
 
     /** Immutable local/dispatch provenance is checked separately from the mutable import reference. */
@@ -3227,22 +2268,14 @@ class ImportCoordinator(
         } finally { captures.admitCapture = previous }
     }
 
-    /** Recover only historical proof. No Provider write, even after a later edit or unsupported import. */
-    private suspend fun recoverHandoffProjection(frame: CapturedCreateHandoffFrame, expected: Long,
-        active: () -> Boolean): Boolean {
-        if (!handoffSource(frame, active)) return false
-        val prepared = store.capturedHandoffProjection(frame) ?: return true
-        val witness = projection.inspectCapturedHandoffProjection(prepared) ?: return false
-        if (witness.plan != prepared || !isCurrent(expected, frame.scope.account) || !active() || !handoffSource(frame, active)) return false
-        return store.restoreCapturedHandoffProjection(witness)
-    }
 
     /** Retain a later dirty intention against the current reference, never the original sent base.
      * Automatic observations reuse an existing durable owner, or allocate a distinct new UUID.
      * Explicit caller identities retain their original strict matching behavior.
      */
     suspend fun reconcileHandoffLocalCreate(target: CalendarScope, localId: LocalEventId, id: MutationId,
-        attempt: MutationId, mutation: MutationId? = null): CapturedCreateReconciliationResult = mutex.withLock {
+        attempt: MutationId, mutation: MutationId? = null,
+        beforeNewOwner: suspend () -> Unit = {}): CapturedCreateReconciliationResult = mutex.withLock {
         val captures = localCreates ?: return@withLock CapturedCreateReconciliationResult.UNRESOLVED
         val journal = creates ?: return@withLock CapturedCreateReconciliationResult.UNRESOLVED
         ensureCreateLifecycle()
@@ -3250,109 +2283,7 @@ class ImportCoordinator(
         val policy = createPolicyRevision.get()
         val active = { authenticated && generation == expected && createPolicyRevision.get() == policy && hasCalendarPermissions() &&
             (mutation != null || systemCreatesEnabled(target)) }
-        suspend fun available(): Boolean = isCurrent(expected, target.account) && active() &&
-            store.selections(target.account).singleOrNull { it.scope == target }?.let { it.enabled && it.available } == true && active()
-        try {
-            if (!available()) return@withLock CapturedCreateReconciliationResult.INACTIVE
-            store.admitTransaction = { it == target && active() }; captures.admitCapture = { it == target && active() }; projection.admitOperation = active
-            val submission = captures.readSubmission(target, localId) ?: return@withLock CapturedCreateReconciliationResult.UNRESOLVED
-            val capture = submission.reservation.intent.reservation
-            if (capture.id != id || capture.localId != localId || capture.scope != target || submission.reservation.attempt != attempt ||
-                mutation == id || mutation == attempt || mutation?.value == localId.value) return@withLock CapturedCreateReconciliationResult.UNRESOLVED
-            val binding = journal.capturedBinding(CapturedCreateDispatchIdentity.of(submission)) ?: return@withLock CapturedCreateReconciliationResult.UNRESOLVED
-            var role = store.capturedHandoff(target, binding.eventId) ?: return@withLock CapturedCreateReconciliationResult.UNRESOLVED
-            if (role.state != CapturedCreateHandoffState.RELEASED || !handoffSource(role.frame, active) ||
-                !recoverHandoffProjection(role.frame, expected, active)) return@withLock CapturedCreateReconciliationResult.UNRESOLVED
-            role = store.capturedHandoff(target, binding.eventId) ?: return@withLock CapturedCreateReconciliationResult.UNRESOLVED
-            // A title acknowledgement or incoming projection can leave this CREATE
-            // follow-up queued after its native row is already clean. Qualify the
-            // current frame; inspecting the original CREATE revision cannot close it.
-            val clean = projection.inspectCapturedHandoffBase(role.frame)
-            currentCoroutineContext().ensureActive()
-            if (!available()) return@withLock CapturedCreateReconciliationResult.INACTIVE
-            if (clean != null) {
-                if (clean.frame != role.frame) return@withLock CapturedCreateReconciliationResult.UNRESOLVED
-                val qualified = handoffSource(role.frame, active)
-                currentCoroutineContext().ensureActive()
-                if (!available()) return@withLock CapturedCreateReconciliationResult.INACTIVE
-                val sameRole = store.capturedHandoff(target, binding.eventId) == role
-                currentCoroutineContext().ensureActive()
-                if (!available()) return@withLock CapturedCreateReconciliationResult.INACTIVE
-                if (!qualified || !sameRole) return@withLock CapturedCreateReconciliationResult.UNRESOLVED
-                val resumed = store.resumeCapturedHandoff(clean)
-                currentCoroutineContext().ensureActive()
-                if (!available()) return@withLock CapturedCreateReconciliationResult.INACTIVE
-                if (!resumed)
-                    return@withLock CapturedCreateReconciliationResult.UNRESOLVED
-                val after = projection.inspectCapturedHandoffBase(role.frame)
-                currentCoroutineContext().ensureActive()
-                if (!available()) return@withLock CapturedCreateReconciliationResult.INACTIVE
-                val sourceCurrent = handoffSource(role.frame, active)
-                currentCoroutineContext().ensureActive()
-                if (!available()) return@withLock CapturedCreateReconciliationResult.INACTIVE
-                val current = store.capturedHandoff(target, binding.eventId)
-                currentCoroutineContext().ensureActive()
-                if (!available()) return@withLock CapturedCreateReconciliationResult.INACTIVE
-                if (after?.frame != role.frame || !sourceCurrent ||
-                    current == null || current.frame != role.frame || current.state != CapturedCreateHandoffState.RELEASED || current.waiting) {
-                    if (active() && current?.frame == role.frame) store.waitCapturedHandoff(role.frame)
-                    currentCoroutineContext().ensureActive()
-                    if (!available()) return@withLock CapturedCreateReconciliationResult.INACTIVE
-                    return@withLock CapturedCreateReconciliationResult.UNRESOLVED
-                }
-                if (role.waiting) {
-                    val pending = store.capturedHandoffPending(current.frame)
-                    currentCoroutineContext().ensureActive()
-                    if (!available()) return@withLock CapturedCreateReconciliationResult.INACTIVE
-                    if (pending == ProjectionIntent(target, current.frame.base)) {
-                        val sourceStillCurrent = handoffSource(current.frame, active)
-                        currentCoroutineContext().ensureActive()
-                        if (!available()) return@withLock CapturedCreateReconciliationResult.INACTIVE
-                        val settledRole = store.capturedHandoff(target, binding.eventId)
-                        currentCoroutineContext().ensureActive()
-                        if (!available()) return@withLock CapturedCreateReconciliationResult.INACTIVE
-                        if (!sourceStillCurrent || settledRole != current)
-                            return@withLock CapturedCreateReconciliationResult.UNRESOLVED
-                        // Import precedes this metadata-only release in the worker.
-                        // Append a local pass: KEEP could lose this wake while it runs.
-                        scheduler.continueWork(network = false)
-                    }
-                }
-                return@withLock CapturedCreateReconciliationResult.UNCHANGED
-            }
-            val observed = projection.captureCapturedHandoffCurrent(role.frame)
-            if (!available()) return@withLock CapturedCreateReconciliationResult.INACTIVE
-            if (!handoffSource(role.frame, active) || store.capturedHandoff(target, binding.eventId) != role)
-                return@withLock CapturedCreateReconciliationResult.UNRESOLVED
-            val snapshot = (observed as? CapturedHandoffCurrentObservation.Supported)?.snapshot
-            if (snapshot?.frame != role.frame) {
-                store.waitCapturedHandoff(role.frame)
-                return@withLock if (observed == CapturedHandoffCurrentObservation.Unsupported)
-                    CapturedCreateReconciliationResult.UNSUPPORTED else CapturedCreateReconciliationResult.UNRESOLVED
-            }
-            val owner = mutation ?: store.localEdit(target, binding.eventId)?.id ?: store.localDelete(target, binding.eventId)?.id
-                ?: MutationId(java.util.UUID.randomUUID().toString())
-            if (owner == id || owner == attempt || owner.value == localId.value)
-                return@withLock CapturedCreateReconciliationResult.UNRESOLVED
-            val retained = store.retainCapturedHandoffLocalChange(snapshot, owner)
-            if (!available()) return@withLock CapturedCreateReconciliationResult.INACTIVE
-            val second = projection.captureCapturedHandoffCurrent(role.frame) as? CapturedHandoffCurrentObservation.Supported
-            if (!available()) return@withLock CapturedCreateReconciliationResult.INACTIVE
-            if (second?.snapshot != snapshot || !handoffSource(role.frame, active) ||
-                store.capturedHandoff(target, binding.eventId)?.frame != role.frame) return@withLock CapturedCreateReconciliationResult.UNRESOLVED
-            when (retained) {
-                null -> CapturedCreateReconciliationResult.UNCHANGED
-                LocalEditState.PAUSED -> CapturedCreateReconciliationResult.RETAINED
-                LocalEditState.CONFLICT -> CapturedCreateReconciliationResult.CONFLICT
-            }
-        } catch (cancelled: CancellationException) {
-            currentCoroutineContext().ensureActive()
-            if (!active()) CapturedCreateReconciliationResult.INACTIVE else throw cancelled
-        } catch (_: Exception) {
-            if (!active()) CapturedCreateReconciliationResult.INACTIVE else CapturedCreateReconciliationResult.UNRESOLVED
-        } finally {
-            captures.admitCapture = { false }; store.admitTransaction = { false }; projection.admitOperation = { false }
-        }
+        capturedCreateHandoff(target, captures, journal, expected, active).reconcile(localId, id, attempt, mutation, beforeNewOwner)
     }
 
     private class CapturedProjectionPending : IllegalStateException("Captured creation reconciliation pending")
@@ -3383,7 +2314,13 @@ class ImportCoordinator(
     // Keep the hold read and status publication out of the larger import coroutine.
     private suspend fun publishImportProgress(target: CalendarScope, status: String, completedAt: Long? = null) {
         val held = capturedProjectionHold(target).blocksProjection
-        store.status(target, if (held) "CREATE_PENDING" else status, if (held) null else completedAt)
+        val locallyHeld = store.heldProjectionCount(target) > 0
+        val visible = when {
+            held -> "CREATE_PENDING"
+            locallyHeld && status in setOf("IMPORTED", "PARTIAL", "SERIES_PENDING", "HISTORY_GAP") -> "INCOMPLETE"
+            else -> status
+        }
+        store.status(target, visible, if (held || locallyHeld) null else completedAt)
     }
     private suspend fun requireProjectionAvailable(target: CalendarScope, eventId: EventId) {
         if (store.transaction(target) { hasPendingMutation(eventId) }) throw CapturedProjectionPending()
@@ -3393,6 +2330,8 @@ class ImportCoordinator(
         val hold = capturedProjectionHold(target)
         return if (hold.scopeBlocked) emptyList() else store.pending(target, limit, hold.events)
     }
+    private suspend fun nativeChangesBlock(intent: ProjectionIntent): Boolean = projection.hasOwnedLocalChanges(intent,
+        if (intent.change is RemoteChange.Deleted) store.deletedSeriesUid(intent.scope, intent.change.eventId) else null)
 
     private suspend fun captureBaseline(expected: Long, target: CalendarScope, eventId: EventId): RemoteChange.Upsert? {
         if (capturedRawHold(target).holds(eventId)) throw CapturedProjectionPending()
@@ -3427,9 +2366,13 @@ class ImportCoordinator(
         store.requireDirectProjection(intent.scope, intent.change.eventId)
         val outstanding = store.projectionReceipt(intent.scope, intent.change.eventId)
         var representation: ProjectedEventReference? = null
+        val recovered = outstanding?.let { recoverProjection(expected, it) } ?: false
+        // A historical receipt can be recovered without consuming newer native edits. Once
+        // inspected, an unsupported local change holds only this event, including old receipts.
+        if (nativeChangesBlock(intent))
+            throw CalendarProjectionException(CalendarProjectionFailure.LOCAL_CHANGE_PENDING)
+        if (recovered && outstanding?.change == intent.change) return
         if (outstanding != null) {
-            val recovered = recoverProjection(expected, outstanding)
-            if (recovered && outstanding.change == intent.change) return
             if (!recovered && (outstanding.change != intent.change || outstanding.format != remote.format ||
                 outstanding.protocol != projection.projectionReceiptProtocol)) {
                 throw CalendarProjectionException(CalendarProjectionFailure.PROVIDER_REJECTED)
@@ -3654,181 +2597,210 @@ class ImportCoordinator(
                     store.status(calendarScope, "PERMISSION")
                     continue
                 }
-                try {
-                    store.status(calendarScope, "RUNNING")
-                    if (!isCurrent(expected, account)) return ImportRunResult.COMPLETE
-                    val createsMode = systemCreatesEnabled(calendarScope)
-                    val accessPolicy = createPolicyRevision.get()
-                    projection.admitOperation = { authenticated && generation == expected &&
-                        createPolicyRevision.get() == accessPolicy && systemCreatesEnabled(calendarScope) == createsMode }
-                    val ensuredCalendar = try {
-                        if (createsMode) projection.ensureCalendarState(calendarScope, selection.summary, true)
-                        else projection.ensureCalendarState(calendarScope, selection.summary)
-                    } finally { projection.admitOperation = { authenticated && generation == expected } }
-                    val providerId = ensuredCalendar.id
-                    val providerKey = projection.accountFor(account).name + ":" + selection.scope.calendar.value
-                    if (ensuredCalendar.created || providerIds.getLong(providerKey, -1) != providerId) {
-                        store.requeueAll(calendarScope)
-                        check(providerIds.edit().putLong(providerKey, providerId).commit())
-                    }
-                    val allowNetwork = network && selection.nextAttempt <= System.currentTimeMillis()
-                    if (remote is ContentMappingRemote)
-                        store.ensureMappingProfile(calendarScope, remote.contentMapping)
-                    val mappingPending = store.mappingRescanPending(calendarScope)
-                    // Evaluate before rearming blocked reads: a missing ID must not permanently
-                    // prevent unchanged events from entering the rolling import window.
-                    val canRefresh = deltaEngine == null || store.transaction(calendarScope) {
-                        val delta = this as DeltaSyncTransaction
-                        delta.deltaReceived == null && delta.deltaJobs(1).isEmpty()
-                    }
-                    // Admit an extension before prepare rearms deltaMore. Both the planned
-                    // checkpoint and the post-scan feed check survive a crash at this boundary.
-                    val rolling = allowNetwork && fresh && !mappingPending && tryRollingRefresh(selection)
-                    val deltaReady = deltaEngine?.prepare(calendarScope, allowNetwork, fresh || mappingPending) ?: true
-                    if (allowNetwork && remote is CalendarDeltaRemote) remote.refreshContext(calendarScope)
-                    if (allowNetwork && (fresh || mappingPending)) {
-                        serial.run(account) {
-                            // Finish existing obligations before beginning another moving-window scan.
-                            if (canRefresh && !rolling) store.beginRefresh(calendarScope)
-                            store.prepareDeferredRetry(calendarScope)
-                        }
-                    }
-                    // A full refresh clears the old checkpoint before requeuing native work.
-                    // Commit its first staged page before draining: a DIRTY row may reject
-                    // projection, and capture needs a confirmed observation format to proceed.
-                    // Offline this only decodes an already retained page; it never invents one.
-                    val bootstrap = bootstrapInitialPage(calendarScope, allowNetwork, deltaReady)
-                    if (!isCurrent(expected, account)) return ImportRunResult.COMPLETE
-                    suspend fun drain(): Boolean {
-                        for (intent in runnableProjections(calendarScope)) {
-                            if (!isCurrent(expected, account)) throw CancellationException()
-                            projectPending(intent, expected)
-                        }
-                        return runnableProjections(calendarScope, 1).isNotEmpty()
-                    }
-                    var remaining = drain()
-                    if (stagedEngine != null && !remaining) {
-                        var recoveredLocally = false
-                        for (event in store.pendingDeferredRetries(calendarScope)) {
-                            if (!isCurrent(expected, account)) throw CancellationException()
-                            recoveredLocally = stagedEngine.retryDeferred(calendarScope, event) || recoveredLocally
-                            store.acknowledgeDeferredRetry(calendarScope, event)
-                        }
-                        val deferredNetwork = network && selection.nextAttempt > System.currentTimeMillis()
-                        val progress = if (deltaReady) stagedEngine.run(calendarScope, allowNetwork = allowNetwork,
-                            maxPages = 4 - bootstrap.pagesCommitted)
-                            else ImportProgress(0, false)
-                        val deltaProgress = if (deltaReady && progress.traversalComplete)
-                            deltaEngine?.run(calendarScope, allowNetwork) else null
-                        val receivedPending = store.transaction(calendarScope) { (this as StagedSyncTransaction).received != null }
-                        remaining = drain() || receivedPending || store.pendingDeferredRetries(calendarScope, 1).isNotEmpty() ||
-                            (deltaProgress?.workRemaining == true && (network || !deltaProgress.needsNetwork))
-                        val incompleteNetwork = network && !deferredNetwork && !progress.traversalComplete
-                        val localProgress = bootstrap.pagesCommitted + progress.pagesCommitted > 0 ||
-                            recoveredLocally || (deltaProgress?.processed ?: 0) > 0
-                        val blocked = !network && (selection.status in setOf("NETWORK", "ERROR", "AUTH") ||
-                            !localProgress && selection.status in setOf("UNSUPPORTED", "CAPACITY", "LOCAL_KEYS"))
-                        val historyGap = selection.historyGap || deltaProgress?.historyGap == true
-                        val missingSeries = store.blockedSeriesCount(calendarScope) > 0
-                        val mappingRemaining = store.mappingRescanPending(calendarScope)
-                        val status = when {
-                            blocked -> selection.status
-                            mappingRemaining || deferredNetwork || remaining || !progress.traversalComplete || deltaProgress?.workRemaining == true -> "PENDING"
-                            deltaProgress?.blocked == true -> "INCOMPLETE"
-                            missingSeries -> "SERIES_PENDING"
-                            store.deferredCount(calendarScope) > 0 -> "PARTIAL"
-                            historyGap -> "HISTORY_GAP"
-                            else -> "IMPORTED"
-                        }
-                        if (!isCurrent(expected, account)) return ImportRunResult.COMPLETE
-                        publishImportProgress(calendarScope, status,
-                            if (!blocked && progress.traversalComplete && !remaining && deltaProgress?.blocked != true &&
-                                deltaProgress?.workRemaining != true &&
-                                !historyGap && !missingSeries && !mappingRemaining &&
-                                (localProgress || selection.completedAt == null || selection.status !in setOf("IMPORTED", "PARTIAL")))
-                                System.currentTimeMillis() else null)
-                        retry = retry || deferredNetwork
-                        remaining = remaining || incompleteNetwork || (allowNetwork && mappingRemaining)
-                    } else if (network && selection.nextAttempt > System.currentTimeMillis()) {
-                        retry = true
-                        publishImportProgress(calendarScope, "PENDING")
-                    } else if (network && !remaining) {
-                        val progress = engine.importPages(calendarScope)
-                        remaining = drain() || !progress.traversalComplete || store.mappingRescanPending(calendarScope)
-                        val missingSeries = store.blockedSeriesCount(calendarScope) > 0
-                        if (!isCurrent(expected, account)) return ImportRunResult.COMPLETE
-                        publishImportProgress(calendarScope, if (remaining) "PENDING" else if (missingSeries) "SERIES_PENDING"
-                            else if (selection.historyGap) "HISTORY_GAP" else "IMPORTED",
-                            if (remaining || selection.historyGap || missingSeries)
-                                null else System.currentTimeMillis())
-                    } else {
-                        // Local work must not overwrite the reason the last network run was blocked.
-                        val blocked = selection.status in setOf("NETWORK", "UNSUPPORTED", "ERROR", "AUTH", "CAPACITY", "LOCAL_KEYS")
-                        publishImportProgress(calendarScope, if (blocked) selection.status else if (remaining || store.mappingRescanPending(calendarScope)) "PENDING" else
-                            if (store.complete(calendarScope)) {
-                                if (store.blockedSeriesCount(calendarScope) > 0) "SERIES_PENDING"
-                                else if (store.deferredCount(calendarScope) > 0) "PARTIAL"
-                                else if (selection.historyGap) "HISTORY_GAP" else "IMPORTED"
-                            } else "PENDING")
-                    }
-                    continuation = continuation || remaining
-                } catch (cancelled: CancellationException) {
-                    throw cancelled
-                } catch (_: ImportCapacityException) {
-                    store.status(calendarScope, "CAPACITY")
-                } catch (_: SecurityException) {
-                    retainCreatePermissionLoss()
-                    store.status(calendarScope, "PERMISSION")
-                } catch (failure: CalendarProjectionException) {
-                    if (failure.category == CalendarProjectionFailure.PERMISSION_REQUIRED) retainCreatePermissionLoss()
-                    val recoverable = retryableImportFailure(failure)
-                    retry = retry || recoverable
-                    // A local retry must clear itself after a successful offline drain. ERROR
-                    // remains reserved for blocked failures which local work cannot resolve.
-                    store.status(calendarScope, if (recoverable) {
-                        if (selection.status in setOf("NETWORK", "ERROR", "AUTH", "UNSUPPORTED", "CAPACITY", "LOCAL_KEYS"))
-                            selection.status else "PENDING"
-                    } else
-                        if (failure.category == CalendarProjectionFailure.PERMISSION_REQUIRED) "PERMISSION" else "ERROR")
-                } catch (failure: RemoteImportException) {
-                    val status = when (failure.reason) {
-                        RemoteImportFailure.AUTHENTICATION -> "AUTH"
-                        RemoteImportFailure.NETWORK -> "NETWORK"
-                        RemoteImportFailure.UNSUPPORTED -> "UNSUPPORTED"
-                        RemoteImportFailure.LOCAL_KEYS -> "LOCAL_KEYS"
-                        RemoteImportFailure.CAPACITY -> "CAPACITY"
-                        RemoteImportFailure.NOT_FOUND -> "ERROR"
-                        RemoteImportFailure.RETRY -> "ERROR"
-                    }
-                    store.status(calendarScope, status)
-                    failure.retryAfterMillis?.let { store.deferNetwork(calendarScope, it) }
-                    retry = retry || failure.reason == RemoteImportFailure.NETWORK || failure.reason == RemoteImportFailure.RETRY
-                } catch (failure: Exception) {
-                    // Storage errors can also happen while publishing status or refreshing UI.
-                    // Let the worker boundary back off without depending on another DB write.
-                    if (retryableImportFailure(failure)) throw failure
-                    store.status(calendarScope, if (failure is CapturedProjectionPending) "CREATE_PENDING" else "ERROR")
+                when (runCalendar(selection, calendarScope, account, expected, network, fresh)) {
+                    null -> return ImportRunResult.COMPLETE
+                    ImportRunResult.RETRY -> retry = true
+                    ImportRunResult.CONTINUE -> continuation = true
+                    ImportRunResult.COMPLETE -> Unit
                 }
             }
         } catch (failure: Exception) {
             runFailure = failure
             throw failure
         } finally {
-            try {
-                refreshState()
-            } catch (refreshFailure: Exception) {
-                // Preserve the original cancellation/failure if storage is also unavailable
-                // while refreshing diagnostics. Cleanup must never keep the UI busy.
-                if (runFailure == null) {
-                    runFailure = refreshFailure
-                    throw refreshFailure
-                }
-            } finally {
-                mutableState.value = state.value.copy(busy = false)
-                if (network && authenticated && runFailure == null) enqueueLocal()
-            }
+            finishImportRun(network, runFailure)
         }
         return when { retry -> ImportRunResult.RETRY; continuation -> ImportRunResult.CONTINUE; else -> ImportRunResult.COMPLETE }
+    }
+
+    /** One calendar pass; null preserves an inactive epoch's early exit from the entire run.
+     * Keep its suspensions and status handlers outside the run's diagnostic finally. */
+    private suspend fun runCalendar(selection: ImportStore.Selection, calendarScope: CalendarScope,
+        account: AccountId, expected: Long, network: Boolean, fresh: Boolean): ImportRunResult? {
+        var retry = false
+        var continuation = false
+        try {
+            store.status(calendarScope, "RUNNING")
+            if (!isCurrent(expected, account)) return null
+            val createsMode = systemCreatesEnabled(calendarScope)
+            val accessPolicy = createPolicyRevision.get()
+            projection.admitOperation = { authenticated && generation == expected &&
+                createPolicyRevision.get() == accessPolicy && systemCreatesEnabled(calendarScope) == createsMode }
+            val ensuredCalendar = try {
+                if (createsMode) projection.ensureCalendarState(calendarScope, selection.summary, true)
+                else projection.ensureCalendarState(calendarScope, selection.summary)
+            } finally { projection.admitOperation = { authenticated && generation == expected } }
+            val providerId = ensuredCalendar.id
+            val providerKey = projection.accountFor(account).name + ":" + selection.scope.calendar.value
+            if (ensuredCalendar.created || providerIds.getLong(providerKey, -1) != providerId) {
+                store.requeueAll(calendarScope)
+                check(providerIds.edit().putLong(providerKey, providerId).commit())
+            }
+            val allowNetwork = network && selection.nextAttempt <= System.currentTimeMillis()
+            if (remote is ContentMappingRemote)
+                store.ensureMappingProfile(calendarScope, remote.contentMapping)
+            val mappingPending = store.mappingRescanPending(calendarScope)
+            // Evaluate before rearming blocked reads: a missing ID must not permanently
+            // prevent unchanged events from entering the rolling import window.
+            val canRefresh = deltaEngine == null || store.transaction(calendarScope) {
+                val delta = this as DeltaSyncTransaction
+                delta.deltaReceived == null && delta.deltaJobs(1).isEmpty()
+            }
+            // Admit an extension before prepare rearms deltaMore. Both the planned
+            // checkpoint and the post-scan feed check survive a crash at this boundary.
+            val rolling = allowNetwork && fresh && !mappingPending && tryRollingRefresh(selection)
+            val deltaReady = deltaEngine?.prepare(calendarScope, allowNetwork, fresh || mappingPending) ?: true
+            if (allowNetwork && remote is CalendarDeltaRemote) remote.refreshContext(calendarScope)
+            if (allowNetwork && (fresh || mappingPending)) {
+                serial.run(account) {
+                    // Finish existing obligations before beginning another moving-window scan.
+                    if (canRefresh && !rolling) store.beginRefresh(calendarScope)
+                    store.prepareDeferredRetry(calendarScope)
+                }
+            }
+            // A full refresh clears the old checkpoint before requeuing native work.
+            // Commit its first staged page before draining: a DIRTY row may reject
+            // projection, and capture needs a confirmed observation format to proceed.
+            // Offline this only decodes an already retained page; it never invents one.
+            val bootstrap = bootstrapInitialPage(calendarScope, allowNetwork, deltaReady)
+            if (!isCurrent(expected, account)) return null
+            suspend fun drain(): Boolean {
+                for (intent in runnableProjections(calendarScope)) {
+                    if (!isCurrent(expected, account)) throw CancellationException()
+                    try { projectPending(intent, expected) }
+                    catch (failure: CalendarProjectionException) {
+                        val racedLocalChange = failure.category in setOf(CalendarProjectionFailure.PROVIDER_REJECTED,
+                            CalendarProjectionFailure.IDENTITY_CONFLICT) && nativeChangesBlock(intent)
+                        if (failure.category != CalendarProjectionFailure.LOCAL_CHANGE_PENDING && !racedLocalChange) throw failure
+                        // Retain the exact intent and receipt; a fresh observation may
+                        // rearm it, but this continuation must let other events progress.
+                        store.holdLocalProjection(intent)
+                    }
+                }
+                return runnableProjections(calendarScope, 1).isNotEmpty()
+            }
+            var remaining = drain()
+            if (stagedEngine != null && !remaining) {
+                var recoveredLocally = false
+                for (event in store.pendingDeferredRetries(calendarScope)) {
+                    if (!isCurrent(expected, account)) throw CancellationException()
+                    recoveredLocally = stagedEngine.retryDeferred(calendarScope, event) || recoveredLocally
+                    store.acknowledgeDeferredRetry(calendarScope, event)
+                }
+                val deferredNetwork = network && selection.nextAttempt > System.currentTimeMillis()
+                val progress = if (deltaReady) stagedEngine.run(calendarScope, allowNetwork = allowNetwork,
+                    maxPages = 4 - bootstrap.pagesCommitted)
+                    else ImportProgress(0, false)
+                val deltaProgress = if (deltaReady && progress.traversalComplete)
+                    deltaEngine?.run(calendarScope, allowNetwork) else null
+                val receivedPending = store.transaction(calendarScope) { (this as StagedSyncTransaction).received != null }
+                remaining = drain() || receivedPending || store.pendingDeferredRetries(calendarScope, 1).isNotEmpty() ||
+                    (deltaProgress?.workRemaining == true && (network || !deltaProgress.needsNetwork))
+                val incompleteNetwork = network && !deferredNetwork && !progress.traversalComplete
+                val localProgress = bootstrap.pagesCommitted + progress.pagesCommitted > 0 ||
+                    recoveredLocally || (deltaProgress?.processed ?: 0) > 0
+                val blocked = !network && (selection.status in setOf("NETWORK", "ERROR", "AUTH") ||
+                    !localProgress && selection.status in setOf("UNSUPPORTED", "CAPACITY", "LOCAL_KEYS"))
+                val historyGap = selection.historyGap || deltaProgress?.historyGap == true
+                val missingSeries = store.blockedSeriesCount(calendarScope) > 0
+                val mappingRemaining = store.mappingRescanPending(calendarScope)
+                val status = when {
+                    blocked -> selection.status
+                    mappingRemaining || deferredNetwork || remaining || !progress.traversalComplete || deltaProgress?.workRemaining == true -> "PENDING"
+                    deltaProgress?.blocked == true -> "INCOMPLETE"
+                    missingSeries -> "SERIES_PENDING"
+                    store.deferredCount(calendarScope) > 0 -> "PARTIAL"
+                    historyGap -> "HISTORY_GAP"
+                    else -> "IMPORTED"
+                }
+                if (!isCurrent(expected, account)) return null
+                publishImportProgress(calendarScope, status,
+                    if (!blocked && progress.traversalComplete && !remaining && deltaProgress?.blocked != true &&
+                        deltaProgress?.workRemaining != true &&
+                        !historyGap && !missingSeries && !mappingRemaining &&
+                        (localProgress || selection.completedAt == null || selection.status !in setOf("IMPORTED", "PARTIAL")))
+                        System.currentTimeMillis() else null)
+                retry = retry || deferredNetwork
+                remaining = remaining || incompleteNetwork || (allowNetwork && mappingRemaining)
+            } else if (network && selection.nextAttempt > System.currentTimeMillis()) {
+                retry = true
+                publishImportProgress(calendarScope, "PENDING")
+            } else if (network && !remaining) {
+                val progress = engine.importPages(calendarScope)
+                remaining = drain() || !progress.traversalComplete || store.mappingRescanPending(calendarScope)
+                val missingSeries = store.blockedSeriesCount(calendarScope) > 0
+                if (!isCurrent(expected, account)) return null
+                publishImportProgress(calendarScope, if (remaining) "PENDING" else if (missingSeries) "SERIES_PENDING"
+                    else if (selection.historyGap) "HISTORY_GAP" else "IMPORTED",
+                    if (remaining || selection.historyGap || missingSeries)
+                        null else System.currentTimeMillis())
+            } else {
+                // Local work must not overwrite the reason the last network run was blocked.
+                val blocked = selection.status in setOf("NETWORK", "UNSUPPORTED", "ERROR", "AUTH", "CAPACITY", "LOCAL_KEYS")
+                publishImportProgress(calendarScope, if (blocked) selection.status else if (remaining || store.mappingRescanPending(calendarScope)) "PENDING" else
+                    if (store.complete(calendarScope)) {
+                        if (store.blockedSeriesCount(calendarScope) > 0) "SERIES_PENDING"
+                        else if (store.deferredCount(calendarScope) > 0) "PARTIAL"
+                        else if (selection.historyGap) "HISTORY_GAP" else "IMPORTED"
+                    } else "PENDING")
+            }
+            continuation = continuation || remaining
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: ImportCapacityException) {
+            store.status(calendarScope, "CAPACITY")
+        } catch (_: SecurityException) {
+            retainCreatePermissionLoss()
+            store.status(calendarScope, "PERMISSION")
+        } catch (failure: CalendarProjectionException) {
+            if (failure.category == CalendarProjectionFailure.PERMISSION_REQUIRED) retainCreatePermissionLoss()
+            val recoverable = retryableImportFailure(failure)
+            retry = retry || recoverable
+            // A local retry must clear itself after a successful offline drain. ERROR
+            // remains reserved for blocked failures which local work cannot resolve.
+            store.status(calendarScope, if (recoverable) {
+                if (selection.status in setOf("NETWORK", "ERROR", "AUTH", "UNSUPPORTED", "CAPACITY", "LOCAL_KEYS"))
+                    selection.status else "PENDING"
+            } else
+                if (failure.category == CalendarProjectionFailure.PERMISSION_REQUIRED) "PERMISSION" else "ERROR")
+        } catch (failure: RemoteImportException) {
+            val status = when (failure.reason) {
+                RemoteImportFailure.AUTHENTICATION -> "AUTH"
+                RemoteImportFailure.NETWORK -> "NETWORK"
+                RemoteImportFailure.UNSUPPORTED -> "UNSUPPORTED"
+                RemoteImportFailure.LOCAL_KEYS -> "LOCAL_KEYS"
+                RemoteImportFailure.CAPACITY -> "CAPACITY"
+                RemoteImportFailure.NOT_FOUND -> "ERROR"
+                RemoteImportFailure.RETRY -> "ERROR"
+            }
+            store.status(calendarScope, status)
+            failure.retryAfterMillis?.let { store.deferNetwork(calendarScope, it) }
+            retry = retry || failure.reason == RemoteImportFailure.NETWORK || failure.reason == RemoteImportFailure.RETRY
+        } catch (failure: Exception) {
+            // Storage errors can also happen while publishing status or refreshing UI.
+            // Let the worker boundary back off without depending on another DB write.
+            if (retryableImportFailure(failure)) throw failure
+            store.status(calendarScope, if (failure is CapturedProjectionPending) "CREATE_PENDING" else "ERROR")
+        }
+        return when { retry -> ImportRunResult.RETRY; continuation -> ImportRunResult.CONTINUE; else -> ImportRunResult.COMPLETE }
+    }
+
+    // Keep suspending diagnostic cleanup outside the main import coroutine's state machine.
+    private suspend fun finishImportRun(network: Boolean, failure: Exception?) {
+        var runFailure = failure
+        try {
+            refreshState()
+        } catch (refreshFailure: Exception) {
+            // Preserve the original cancellation/failure if storage is also unavailable
+            // while refreshing diagnostics. Cleanup must never keep the UI busy.
+            if (runFailure == null) {
+                runFailure = refreshFailure
+                throw refreshFailure
+            }
+        } finally {
+            mutableState.value = state.value.copy(busy = false)
+            if (network && authenticated && runFailure == null) enqueueLocal()
+        }
     }
 
     private suspend fun isCurrent(expected: Long, account: AccountId) =

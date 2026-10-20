@@ -103,6 +103,9 @@ class LocalCreateSubmissionCoordinatorDeviceTest {
         permission = true; account = AccountId("foreign-synthetic")
         assertEquals(LocalCreateSubmissionResult.INACTIVE, prepare())
         account = target.account; declaredPreparationFormat = null
+        // Observing the restored account invalidates this invocation's original policy.
+        assertEquals(LocalCreateSubmissionResult.INACTIVE, prepare())
+        assertEquals(0, calls); assertEquals(0, inspections)
         assertEquals(LocalCreateSubmissionResult.UNSUPPORTED, prepare())
         assertEquals(0, calls); assertEquals(0, inspections); assertNull(retainedSubmission())
         journal.admitCapture = { it == target }; assertNull(journal.readSubmissionReservation(target, localId))
@@ -136,6 +139,11 @@ class LocalCreateSubmissionCoordinatorDeviceTest {
             onPrepare = { if (changeAccount) account = AccountId("changed-synthetic-account") else permission = false; receipt() }
             assertEquals(LocalCreateSubmissionResult.INACTIVE, prepare()); assertNull(retainedSubmission())
             account = target.account; permission = true
+            if (changeAccount) {
+                // A restored account is another observation, not renewal of the old epoch.
+                assertEquals(LocalCreateSubmissionResult.INACTIVE, prepare())
+                assertNull(retainedSubmission())
+            }
             assertEquals(LocalCreateSubmissionResult.UNRESOLVED, prepare()); assertEquals(1, calls)
         }
     }

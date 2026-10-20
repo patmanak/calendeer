@@ -39,6 +39,53 @@ class RecurrenceProviderDeviceTest {
         assumeTrue(projection.hasPermissions())
     }
 
+    @Test fun localChangeObservationIncludesDirtyParentsChildrenAndOrphanedDeletionDependencies() = runBlocking {
+        fixture { scope, other, calendar, otherCalendar ->
+            val master = timed("held-master", "2030-07-01T10:00:00Z", EventRecurrence("held-series", "FREQ=DAILY;COUNT=3"))
+            val child = timed("held-child", "2030-07-02T14:00:00Z", EventRecurrence("held-series", original = point("2030-07-02T10:00:00Z")))
+            for (target in listOf(scope, other)) {
+                projection.apply(ProjectionIntent(target, master)); projection.apply(ProjectionIntent(target, child))
+            }
+            val parentId = row(calendar, "held-master").id
+            val childId = row(calendar, "held-child").id
+            val account = projection.accountFor(scope.account)
+            val uri = Events.CONTENT_URI.buildUpon().appendQueryParameter(CalendarContract.CALLER_IS_SYNCADAPTER, "true")
+                .appendQueryParameter(Events.ACCOUNT_NAME, account.name).appendQueryParameter(Events.ACCOUNT_TYPE, account.type).build()
+            fun dirty(id: Long, value: Int) {
+                assertEquals(1, resolver.update(uri, ContentValues().apply { put(Events.DIRTY, value) },
+                    "${Events._ID}=?", arrayOf(id.toString())))
+            }
+            val deletion = ProjectionIntent(scope, RemoteChange.Deleted(master.eventId, Revision("deleted")))
+            assertFalse(projection.hasOwnedLocalChanges(deletion, "held-series"))
+            dirty(childId, 1)
+            assertTrue(projection.hasOwnedLocalChanges(deletion, "held-series"))
+            assertTrue(projection.hasOwnedLocalChanges(ProjectionIntent(scope, master.copy(content = master.content.copy(recurrence = null)))))
+            assertFalse(projection.hasOwnedLocalChanges(ProjectionIntent(other, master)))
+            dirty(childId, 0); dirty(parentId, 1)
+            assertTrue(projection.hasOwnedLocalChanges(ProjectionIntent(scope, child)))
+            dirty(parentId, 0)
+            assertFalse(projection.hasOwnedLocalChanges(ProjectionIntent(scope, child)))
+            // Preserve the synthetic child's owned metadata to model a historical orphan
+            // independently of this Provider's choice to cascade or retain native children.
+            val childColumns = arrayOf(Events.CALENDAR_ID, Events._SYNC_ID, Events.SYNC_DATA1, Events.SYNC_DATA2,
+                Events.SYNC_DATA4, Events.TITLE, Events.DTSTART, Events.DTEND, Events.DURATION,
+                Events.ALL_DAY, Events.EVENT_TIMEZONE, Events.EVENT_END_TIMEZONE, Events.ORIGINAL_SYNC_ID,
+                Events.ORIGINAL_INSTANCE_TIME, Events.ORIGINAL_ALL_DAY, Events.STATUS)
+            val orphan = resolver.query(uri, childColumns, "${Events._ID}=?", arrayOf(childId.toString()), null)!!.use {
+                assertTrue(it.moveToFirst())
+                ContentValues().apply { android.database.DatabaseUtils.cursorRowToContentValues(it, this) }
+            }
+            assertEquals(1, resolver.delete(uri, "${Events._ID}=?", arrayOf(parentId.toString())))
+            val survived = resolver.query(uri, arrayOf(Events._ID), "${Events._ID}=?", arrayOf(childId.toString()), null)!!.use { it.moveToFirst() }
+            if (survived) dirty(childId, 1) else {
+                orphan.put(Events.DIRTY, 1); orphan.put(Events.DELETED, 0)
+                assertNotNull(resolver.insert(uri, orphan))
+            }
+            assertTrue(projection.hasOwnedLocalChanges(deletion, "held-series"))
+            assertEquals(2, count(otherCalendar))
+        }
+    }
+
     @Test fun timedOriginalBecomesAllDayAcrossDstWithoutDuplicateNativeOccurrences() = runBlocking {
         qualifyConversion(originalAllDay = false)
     }
