@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="system_write_concurrency_warning">Scrittura sperimentale: una modifica effettuata nello stesso momento in un’altra app di calendario può essere sovrascritta nonostante i controlli locali.</string>
+</resources>

@@ -31,7 +31,7 @@
     <string name="import_status_unavailable">Ten kalendarz nie jest już dostępny. Wcześniej zaimportowane wydarzenia są zachowane.</string>
     <string name="import_status_history_gap">Ostatnie zmiany zaimportowane; starsza historia jest niepełna</string>
     <string name="import_history_gap_help">Proton zresetował historię zmian. Nie można zweryfikować niektórych starszych zmian lub usunięć. Istniejące wydarzenia Androida są zachowane; odświeżenie nie potwierdzi wszystkich starszych kopii.</string>
-    <string name="import_coverage_progress">Okresy w tym przebiegu: %1$d/%2$d odebranych · %3$d/%2$d przetworzonych</string>
+    <string name="import_coverage_progress">Okresy skanowania — odebrane: %1$d/%2$d · przetworzone: %3$d/%2$d</string>
     <string name="import_coverage_help">Po przetworzeniu mogą pozostać nieobsługiwane wydarzenia. Aktualizacje Androida i luki w historii zmian są śledzone osobno.</string>
     <string name="import_projection_pending">Aktualizacje oczekujące na skopiowanie do Androida: %1$d</string>
     <string name="import_status_series_pending">Niektóre wystąpienia czekają na oryginalną serię przed importem. Odśwież, aby spróbować ponownie.</string>

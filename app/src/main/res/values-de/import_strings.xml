@@ -31,7 +31,7 @@
     <string name="import_status_unavailable">Dieser Kalender ist nicht mehr zugänglich. Bereits importierte Termine bleiben erhalten.</string>
     <string name="import_status_history_gap">Aktuelle Änderungen importiert; älterer Verlauf unvollständig</string>
     <string name="import_history_gap_help">Proton hat den Änderungsverlauf zurückgesetzt. Einige ältere Änderungen oder Löschungen konnten nicht überprüft werden. Vorhandene Android-Termine bleiben erhalten; eine Aktualisierung bestätigt nicht alle älteren Kopien.</string>
-    <string name="import_coverage_progress">Zeiträume dieses Durchlaufs: %1$d/%2$d empfangen · %3$d/%2$d verarbeitet</string>
+    <string name="import_coverage_progress">Scan-Zeiträume — empfangen: %1$d/%2$d · verarbeitet: %3$d/%2$d</string>
     <string name="import_coverage_help">Nach der Verarbeitung können nicht unterstützte Termine verbleiben. Android-Aktualisierungen und Lücken im Änderungsverlauf werden separat erfasst.</string>
     <string name="import_projection_pending">Ausstehende Aktualisierungen für Android: %1$d</string>
     <string name="import_status_series_pending">Einige Vorkommen warten vor dem Import auf ihre ursprüngliche Serie. Zum erneuten Versuch aktualisieren.</string>

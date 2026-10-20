@@ -1,7 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="auth_sign_in_title">Connect to Proton</string>
-    <string name="auth_sign_in_help">Use your Proton account to connect this calendar bridge.</string>
     <string name="auth_username">Username or email</string>
     <string name="auth_password">Password</string>
     <string name="auth_code">Verification code</string>
@@ -13,17 +12,13 @@
     <string name="auth_restoring_title">Restoring connection</string>
     <string name="auth_restoring_help">Checking the saved account session…</string>
     <string name="auth_code_title">Two-factor verification</string>
-    <string name="auth_code_help">Enter a code from your authenticator. Security-key-only accounts are not supported.</string>
     <string name="auth_mailbox_title">Mailbox password</string>
-    <string name="auth_mailbox_help">Enter your separate mailbox password to unlock your account keys.</string>
     <string name="auth_unlock_title">Unlock account keys</string>
-    <string name="auth_unlock_help">Enter your Proton password to unlock your account keys.</string>
     <string name="auth_security_key_title">Security key required</string>
     <string name="auth_security_key_help">This connection cannot complete security-key-only verification. Your account settings have not been changed.</string>
     <string name="auth_human_title">Human verification</string>
     <string name="auth_human_help">The required verification could not be displayed. Cancel and try again later.</string>
     <string name="auth_connected_title">Account connected</string>
-    <string name="auth_connected_help">Your account is connected. Choose calendars on the home screen to import supported events into Android, read-only by default.</string>
     <string name="auth_input_required">Enter all required fields.</string>
     <string name="auth_rejected">The credentials or verification code were rejected. Try again.</string>
     <string name="auth_already_connected">This account is already connected.</string>

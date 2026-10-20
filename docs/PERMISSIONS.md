@@ -7,10 +7,12 @@ permissions, so sign-in has no runtime permission dialog. Authentication and
 theme/language preferences do not require Calendar, Contacts, storage, location,
 microphone, camera or notification access.
 
-The merged manifest also contains `WAKE_LOCK`, `RECEIVE_BOOT_COMPLETED` and
-`FOREGROUND_SERVICE` through AndroidX WorkManager dependencies, plus AndroidX's
-app-specific signature permission for non-exported dynamic receivers. These are
-not runtime consent dialogs and do not mean calendar synchronization is scheduled.
+The merged manifest also contains `WAKE_LOCK` and `RECEIVE_BOOT_COMPLETED` through
+AndroidX WorkManager dependencies, plus AndroidX's app-specific signature permission
+for non-exported dynamic receivers. The app explicitly removes WorkManager's unused
+foreground service and `FOREGROUND_SERVICE` permission. These install-time
+declarations do not produce runtime consent dialogs; scheduling behavior is defined
+by the bounded synchronization workers.
 Audit the merged APK manifest, including dependency contributions, when changing
 dependencies. Do not infer available feature access from declarations alone.
 
@@ -65,7 +67,7 @@ Qualify background scheduling and OEM restrictions with the actual worker design
   normal permissions used by authentication are granted without a runtime prompt.
 - On a controlled device, qualify initial denial, partial grant, repeated denial,
   settings return, automatic permission reset and revocation during provider work
-  once the calendar adapter is implemented. Do not grant permissions through ADB
+  against the implemented calendar adapter. Do not grant permissions through ADB
   as a substitute for testing the actual request/refusal flow.
 - Permission audits must not print account/device identifiers or inspect events.
 

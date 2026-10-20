@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="system_write_concurrency_warning">Eksperymentalny zapis: zmiana wprowadzona w tym samym czasie w innej aplikacji kalendarza może zostać nadpisana mimo lokalnych kontroli.</string>
+</resources>

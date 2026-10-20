@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="system_write_concurrency_warning">Écriture expérimentale : une modification faite au même moment dans une autre application de calendrier peut être écrasée malgré les contrôles locaux.</string>
+</resources>

@@ -31,7 +31,7 @@
     <string name="import_status_unavailable">Este calendário já não está acessível. Os eventos já importados são mantidos.</string>
     <string name="import_status_history_gap">Alterações recentes importadas; histórico anterior incompleto</string>
     <string name="import_history_gap_help">O Proton repôs o histórico de alterações. Algumas alterações ou eliminações anteriores não puderam ser verificadas. Os eventos Android existentes são mantidos; atualizar não permite confirmar todas as cópias anteriores.</string>
-    <string name="import_coverage_progress">Períodos desta análise: %1$d/%2$d recebidos · %3$d/%2$d processados</string>
+    <string name="import_coverage_progress">Períodos da análise — recebidos: %1$d/%2$d · processados: %3$d/%2$d</string>
     <string name="import_coverage_help">O processamento pode deixar eventos não suportados. As atualizações do Android e as lacunas no histórico são indicadas separadamente.</string>
     <string name="import_projection_pending">Atualizações à espera de cópia para o Android: %1$d</string>
     <string name="import_status_series_pending">Algumas ocorrências aguardam a série original antes da importação. Atualize para tentar novamente.</string>

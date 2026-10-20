@@ -1,15 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_subtitle">Ihre Kalender, mit Android verbunden</string>
-    <string name="connection_heading">VERBINDUNG</string>
     <string name="calendars_heading">Kalender</string>
-    <string name="calendars_empty">Keine Kalender verbunden</string>
-    <string name="calendars_description">Die Kalendersynchronisierung wird in einer späteren Version verfügbar sein.</string>
-    <string name="preferences_heading">Nach Ihren Wünschen</string>
     <string name="appearance">Darstellung</string>
     <string name="language">Sprache</string>
-    <string name="preferences_scope">Diese Einstellungen gelten nur für Calendeer. Andere Kalender-Apps und Termininhalte bleiben unverändert.</string>
-    <string name="development_notice">Entwicklungsversion · schreibgeschützter Import</string>
     <string name="follow_system">Systemeinstellung</string>
     <string name="theme_light">Hell</string>
     <string name="theme_dark">Dunkel</string>
@@ -23,7 +17,7 @@
     <string name="system_create_mode">Erstellung im Systemkalender erlauben</string>
     <string name="system_title_mode">Titeländerungen synchronisieren (experimentell)</string>
     <string name="system_title_limits">Nur Titel: Termine mit Uhrzeit oder ganztägig, ohne Wiederholung, Erinnerungen, Gäste oder eigene Farbe. Dies gilt für aus Proton importierte und in Android erstellte Termine nach ihrer ersten erfolgreichen Synchronisierung. Änderungen an Datum, Beschreibung und Ort bleiben in Android.</string>
-    <string name="system_create_pending">%1$d Erstellungen warten oder müssen geprüft werden. Ein ungewisser Versand wird nie automatisch wiederholt.</string>
+    <string name="system_create_pending">Wartende oder zu prüfende Erstellungen: %1$d. Ein ungewisser Versand wird nie automatisch wiederholt.</string>
     <string name="system_create_error">Bei der Synchronisierung mit Android ist ein Problem aufgetreten. Ihre Daten bleiben erhalten.</string>
     <string name="system_text_mode">Änderungen an Beschreibung und Ort synchronisieren (experimentell)</string>
     <string name="system_text_limits">Einfache Termine mit Uhrzeit oder ganztägig, ohne Wiederholung, Erinnerung, Gäste oder eigene Farben. Für Proton-Termine und in Android erstellte Termine nach ihrer ersten erfolgreichen Synchronisierung. Ein gleichzeitig mit Beschreibung oder Ort geänderter Titel wird eingeschlossen. Reine Datumsänderungen nutzen die separate Zeitoption. Kombinierte Datums- und Textänderungen bleiben auf Android. Löschungen unterstützter importierter Termine nutzen eine separate Option.</string>

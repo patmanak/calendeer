@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="system_write_concurrency_warning">Escrita experimental: uma alteração feita ao mesmo tempo noutra aplicação de calendário pode ser substituída apesar das verificações locais.</string>
+</resources>

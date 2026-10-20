@@ -31,7 +31,7 @@
     <string name="import_status_unavailable">Deze agenda is niet meer toegankelijk. Eerder geïmporteerde afspraken blijven behouden.</string>
     <string name="import_status_history_gap">Recente wijzigingen geïmporteerd; oudere geschiedenis onvolledig</string>
     <string name="import_history_gap_help">Proton heeft de wijzigingsgeschiedenis opnieuw ingesteld. Sommige oudere wijzigingen of verwijderingen konden niet worden gecontroleerd. Bestaande Android-afspraken blijven behouden; vernieuwen bevestigt niet alle oudere kopieën.</string>
-    <string name="import_coverage_progress">Perioden in deze scan: %1$d/%2$d ontvangen · %3$d/%2$d verwerkt</string>
+    <string name="import_coverage_progress">Scanperioden — ontvangen: %1$d/%2$d · verwerkt: %3$d/%2$d</string>
     <string name="import_coverage_help">Na verwerking kunnen niet-ondersteunde afspraken overblijven. Android-updates en hiaten in de wijzigingsgeschiedenis worden apart bijgehouden.</string>
     <string name="import_projection_pending">Updates die nog naar Android moeten worden gekopieerd: %1$d</string>
     <string name="import_status_series_pending">Sommige afspraken wachten op hun oorspronkelijke reeks voordat ze worden geïmporteerd. Vernieuw om opnieuw te proberen.</string>

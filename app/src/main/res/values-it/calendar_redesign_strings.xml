@@ -15,10 +15,10 @@
     <string name="calendar_dashboard_usage">Come funziona la sincronizzazione</string>
     <string name="calendar_dashboard_editing">Modifiche da Android</string>
     <string name="calendar_dashboard_history">Alcune vecchie modifiche non sono state verificate.</string>
-    <string name="calendar_dashboard_held">%1$d eventi in attesa di supporto o verifica</string>
-    <string name="calendar_dashboard_pending">%1$d aggiornamenti in attesa per Android</string>
-    <string name="calendar_dashboard_local">%1$d modifiche locali salvate · %2$d conflitti</string>
-    <string name="calendar_dashboard_outgoing">%1$d modifiche in attesa di invio o verifica</string>
+    <string name="calendar_dashboard_held">In attesa di supporto o verifica: %1$d</string>
+    <string name="calendar_dashboard_pending">Aggiornamenti in attesa per Android: %1$d</string>
+    <string name="calendar_dashboard_local">Modifiche locali salvate: %1$d · Conflitti: %2$d</string>
+    <string name="calendar_dashboard_outgoing">In attesa di invio o verifica: %1$d</string>
     <string name="calendar_dashboard_read_only">Sola lettura</string>
     <string name="calendar_dashboard_create_mode">Creazione di eventi consentita</string>
     <string name="calendar_dashboard_title_mode">Creazione e modifiche dei titoli consentite</string>

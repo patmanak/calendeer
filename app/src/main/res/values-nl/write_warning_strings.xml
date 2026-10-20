@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="system_write_concurrency_warning">Experimenteel schrijven: een wijziging die tegelijk in een andere agenda-app wordt gemaakt, kan ondanks lokale controles worden overschreven.</string>
+</resources>

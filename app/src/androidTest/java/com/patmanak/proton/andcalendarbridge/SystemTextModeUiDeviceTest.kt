@@ -59,6 +59,8 @@ class SystemTextModeUiDeviceTest {
 
     @Test fun openingOptionsDoesNotOptInAndTextConsentIsIndependentOfTitles() {
         start()
+        compose.onNodeWithTag("system-write-concurrency-warning").performScrollTo().assertIsDisplayed()
+            .assertTextEquals(compose.activity.getString(R.string.system_write_concurrency_warning))
         compose.onNodeWithTag("system-text-toggle").assertIsOff().assertIsNotEnabled()
         compose.runOnIdle {
             assertEquals(emptyList<Boolean>(), textChanges)

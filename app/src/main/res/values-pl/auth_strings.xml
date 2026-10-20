@@ -1,7 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="auth_sign_in_title">Połącz z Proton</string>
-    <string name="auth_sign_in_help">Połącz swoje konto Proton z tym mostem kalendarzy.</string>
     <string name="auth_username">Nazwa użytkownika lub e-mail</string>
     <string name="auth_password">Hasło</string>
     <string name="auth_code">Kod weryfikacyjny</string>
@@ -13,17 +12,13 @@
     <string name="auth_restoring_title">Przywracanie połączenia</string>
     <string name="auth_restoring_help">Sprawdzanie zapisanej sesji konta…</string>
     <string name="auth_code_title">Weryfikacja dwuetapowa</string>
-    <string name="auth_code_help">Wpisz kod z aplikacji uwierzytelniającej. Konta używające wyłącznie klucza bezpieczeństwa nie są obsługiwane.</string>
     <string name="auth_mailbox_title">Hasło skrzynki</string>
-    <string name="auth_mailbox_help">Wpisz oddzielne hasło skrzynki, aby odblokować klucze konta.</string>
     <string name="auth_unlock_title">Odblokuj klucze konta</string>
-    <string name="auth_unlock_help">Wpisz hasło Proton, aby odblokować klucze konta.</string>
     <string name="auth_security_key_title">Wymagany klucz bezpieczeństwa</string>
     <string name="auth_security_key_help">To połączenie nie obsługuje weryfikacji wyłącznie kluczem bezpieczeństwa. Ustawienia konta nie zostały zmienione.</string>
     <string name="auth_human_title">Weryfikacja człowieka</string>
     <string name="auth_human_help">Nie można wyświetlić wymaganej weryfikacji. Anuluj i spróbuj później.</string>
     <string name="auth_connected_title">Konto połączone</string>
-    <string name="auth_connected_help">Konto jest połączone. Wybierz kalendarze na ekranie głównym, aby importować obsługiwane wydarzenia do Androida, domyślnie tylko do odczytu.</string>
     <string name="auth_input_required">Wypełnij wszystkie wymagane pola.</string>
     <string name="auth_rejected">Dane logowania lub kod zostały odrzucone. Spróbuj ponownie.</string>
     <string name="auth_already_connected">To konto jest już połączone.</string>

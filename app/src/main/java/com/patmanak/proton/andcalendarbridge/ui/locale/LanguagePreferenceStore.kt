@@ -8,6 +8,7 @@ import android.content.SharedPreferences
 import android.content.res.Configuration
 import android.os.Build
 import android.os.LocaleList
+import androidx.core.content.edit
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
@@ -45,7 +46,7 @@ class AndroidLanguagePreferenceStore(context: Context) : LanguagePreferenceBound
             if (manager.applicationLocales.isEmpty && stored.tag != null) {
                 manager.applicationLocales = LocaleList.forLanguageTags(stored.tag)
             }
-            preferences.edit().putBoolean(KEY_NATIVE_MIGRATED, true).apply()
+            preferences.edit { putBoolean(KEY_NATIVE_MIGRATED, true) }
         }
         mutableLanguage = MutableStateFlow(readLanguage())
         preferences.registerOnSharedPreferenceChangeListener(this)
@@ -56,7 +57,7 @@ class AndroidLanguagePreferenceStore(context: Context) : LanguagePreferenceBound
             context.getSystemService(LocaleManager::class.java).applicationLocales =
                 language.tag?.let(LocaleList::forLanguageTags) ?: LocaleList.getEmptyLocaleList()
         }
-        preferences.edit().putString(KEY_LANGUAGE, language.name).apply()
+        preferences.edit { putString(KEY_LANGUAGE, language.name) }
         mutableLanguage.value = language
     }
 

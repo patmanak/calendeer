@@ -15,10 +15,10 @@
     <string name="calendar_dashboard_usage">Hoe synchronisatie werkt</string>
     <string name="calendar_dashboard_editing">Wijzigingen vanuit Android</string>
     <string name="calendar_dashboard_history">Sommige oudere wijzigingen konden niet worden gecontroleerd.</string>
-    <string name="calendar_dashboard_held">%1$d afspraken wachten op ondersteuning of controle</string>
-    <string name="calendar_dashboard_pending">%1$d updates wachten op Android</string>
-    <string name="calendar_dashboard_local">%1$d opgeslagen lokale wijzigingen · %2$d conflicten</string>
-    <string name="calendar_dashboard_outgoing">%1$d wijzigingen wachten op verzending of controle</string>
+    <string name="calendar_dashboard_held">Wachten op ondersteuning of controle: %1$d</string>
+    <string name="calendar_dashboard_pending">Updates die wachten op Android: %1$d</string>
+    <string name="calendar_dashboard_local">Opgeslagen lokale wijzigingen: %1$d · Conflicten: %2$d</string>
+    <string name="calendar_dashboard_outgoing">Wachten op verzending of controle: %1$d</string>
     <string name="calendar_dashboard_read_only">Alleen-lezen</string>
     <string name="calendar_dashboard_create_mode">Afspraken maken toegestaan</string>
     <string name="calendar_dashboard_title_mode">Afspraken maken en titels wijzigen toegestaan</string>

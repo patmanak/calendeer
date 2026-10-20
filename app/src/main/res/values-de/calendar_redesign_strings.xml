@@ -15,10 +15,10 @@
     <string name="calendar_dashboard_usage">So funktioniert die Synchronisierung</string>
     <string name="calendar_dashboard_editing">Änderungen aus Android</string>
     <string name="calendar_dashboard_history">Einige ältere Änderungen konnten nicht geprüft werden.</string>
-    <string name="calendar_dashboard_held">%1$d Termine warten auf Unterstützung oder Prüfung</string>
-    <string name="calendar_dashboard_pending">%1$d Aktualisierungen für Android ausstehend</string>
-    <string name="calendar_dashboard_local">%1$d gespeicherte lokale Änderungen · %2$d Konflikte</string>
-    <string name="calendar_dashboard_outgoing">%1$d Änderungen warten auf Versand oder Prüfung</string>
+    <string name="calendar_dashboard_held">Warten auf Unterstützung oder Prüfung: %1$d</string>
+    <string name="calendar_dashboard_pending">Für Android ausstehende Aktualisierungen: %1$d</string>
+    <string name="calendar_dashboard_local">Gespeicherte lokale Änderungen: %1$d · Konflikte: %2$d</string>
+    <string name="calendar_dashboard_outgoing">Warten auf Versand oder Prüfung: %1$d</string>
     <string name="calendar_dashboard_read_only">Schreibgeschützt</string>
     <string name="calendar_dashboard_create_mode">Erstellen von Terminen erlaubt</string>
     <string name="calendar_dashboard_title_mode">Erstellen von Terminen und Titeländerungen erlaubt</string>

@@ -18,8 +18,8 @@ baseline remains provisional. No release has been published.
 - `sync`: plain Kotlin/JVM contracts and orchestration. Account/calendar-scoped
   identifiers, access policy, page checkpoints, queued changes and recovery
   behavior have no Android or Proton SDK dependencies.
-- `app`: Android configuration UI, language/theme preferences and eventual
-  Calendar Provider, durable storage and background-execution adapters.
+- `app`: Android configuration UI, language/theme preferences, Calendar Provider
+  projection, durable SQLite storage and WorkManager background-execution adapters.
 - `auth`: extracted application-facing login contract and state management from
   Contako, kept separate from contact synchronization and Proton SDK types.
 - `proton-auth`: Android Proton Core binding, SRP login, protected account/session
@@ -27,7 +27,7 @@ baseline remains provisional. No release has been published.
   It implements the `auth` and metadata catalog ports; an authenticated identity does not imply Calendar
   keys, membership or synchronization readiness.
 
-Domain contracts own behavior. The future Proton adapter owns SDK types, opaque
+Domain contracts own behavior. The Proton adapter owns SDK types, opaque
 payloads/revisions, keys and versioned continuation state. The Android adapter
 owns provider rows and permissions. Neither representation is the domain model.
 Prefer reusing proven upstream behavior to reimplementing protocol or cryptography.
@@ -189,8 +189,11 @@ and adapter state version prevent accidental reuse across incompatible adapters.
 
 The scheduler is not the queue. Foreground/manual/background triggers share a
 serialized engine per account; durable state survives process death. Local-only
-processing is distinct from network work. WorkManager and provider registration
-will be integrated only with a persistent production repository and usable adapter.
+processing is distinct from network work. WorkManager drives bounded network and
+local workers over the persistent SQLite repository and connected Proton/Provider
+adapters. Periodic refresh targets six hours, subject to Android scheduling and
+OEM restrictions; manual refresh is also available. Scheduling qualification remains
+scoped to the evidence in [validation](VALIDATION.md).
 
 ## Versioned recurrence projection model
 

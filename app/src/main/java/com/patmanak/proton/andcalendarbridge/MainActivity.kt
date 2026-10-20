@@ -6,7 +6,6 @@ package com.patmanak.proton.andcalendarbridge
 import android.content.Context
 import android.Manifest
 import android.content.Intent
-import android.net.Uri
 import android.provider.Settings
 import android.graphics.Color
 import android.os.Build
@@ -16,6 +15,7 @@ import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.net.toUri
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
@@ -115,7 +115,7 @@ class MainActivity : ComponentActivity() {
                             onRequestPermission = { calendarPermissions.launch(arrayOf(
                                 Manifest.permission.READ_CALENDAR, Manifest.permission.WRITE_CALENDAR)) },
                             onOpenSettings = { startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-                                Uri.parse("package:$packageName"))) },
+                                "package:$packageName".toUri())) },
                             onMode = preferences.systemCreates::setEnabled,
                             onTitlesMode = preferences.systemCreates::setTitlesEnabled,
                             onTextMode = preferences.systemCreates::setTextsEnabled,

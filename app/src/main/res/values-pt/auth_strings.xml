@@ -1,7 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="auth_sign_in_title">Ligar ao Proton</string>
-    <string name="auth_sign_in_help">Ligue a sua conta Proton a esta ponte de calendários.</string>
     <string name="auth_username">Nome de utilizador ou email</string>
     <string name="auth_password">Palavra-passe</string>
     <string name="auth_code">Código de verificação</string>
@@ -13,17 +12,13 @@
     <string name="auth_restoring_title">A restaurar ligação</string>
     <string name="auth_restoring_help">A verificar a sessão guardada…</string>
     <string name="auth_code_title">Verificação de dois fatores</string>
-    <string name="auth_code_help">Introduza um código da aplicação de autenticação. Contas que usam apenas uma chave de segurança não são suportadas.</string>
     <string name="auth_mailbox_title">Palavra-passe da caixa de correio</string>
-    <string name="auth_mailbox_help">Introduza a palavra-passe separada da caixa de correio para desbloquear as chaves da conta.</string>
     <string name="auth_unlock_title">Desbloquear chaves da conta</string>
-    <string name="auth_unlock_help">Introduza a palavra-passe Proton para desbloquear as chaves da conta.</string>
     <string name="auth_security_key_title">Chave de segurança necessária</string>
     <string name="auth_security_key_help">Esta ligação não suporta verificação apenas com chave de segurança. As definições da conta não foram alteradas.</string>
     <string name="auth_human_title">Verificação humana</string>
     <string name="auth_human_help">Não foi possível apresentar a verificação necessária. Cancele e tente mais tarde.</string>
     <string name="auth_connected_title">Conta ligada</string>
-    <string name="auth_connected_help">A conta está ligada. Escolha calendários no ecrã inicial para importar eventos suportados para Android, só de leitura por predefinição.</string>
     <string name="auth_input_required">Preencha todos os campos obrigatórios.</string>
     <string name="auth_rejected">As credenciais ou o código foram rejeitados. Tente novamente.</string>
     <string name="auth_already_connected">Esta conta já está ligada.</string>

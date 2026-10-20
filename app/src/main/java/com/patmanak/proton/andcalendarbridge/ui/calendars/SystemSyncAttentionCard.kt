@@ -20,7 +20,7 @@ internal fun canRequestSystemSync(imports: ImportUiState, state: SystemCreateUiS
 /** Explains the aggregate attention flag without inventing a failure cause or changing consent. */
 @Composable
 internal fun SystemSyncAttentionCard(imports: ImportUiState, state: SystemCreateUiState,
-    onRetry: (() -> Unit)? = null, modifier: Modifier = Modifier) {
+    modifier: Modifier = Modifier, onRetry: (() -> Unit)? = null) {
     if (!imports.authenticated || !state.failed) return
     var expanded by remember { mutableStateOf(false) }
     Surface(modifier.fillMaxWidth().testTag(CalendarDashboardTags.OUTGOING_ERROR),

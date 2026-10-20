@@ -24,6 +24,8 @@ fun SystemCreatePanel(imports: ImportUiState, state: SystemCreateUiState,
     if (!imports.authenticated || imports.selections.isEmpty()) return
     Column(modifier.fillMaxWidth().testTag("system-create-panel"), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(stringResource(R.string.system_create_title), style = MaterialTheme.typography.titleMedium)
+        Text(stringResource(R.string.system_write_concurrency_warning), style = MaterialTheme.typography.bodySmall,
+            modifier = Modifier.testTag("system-write-concurrency-warning"))
         Text(stringResource(R.string.system_create_limits), style = MaterialTheme.typography.bodySmall)
         Text(stringResource(R.string.system_title_limits), style = MaterialTheme.typography.bodySmall)
         imports.selections.forEach { selection ->
@@ -39,7 +41,7 @@ fun SystemCreatePanel(imports: ImportUiState, state: SystemCreateUiState,
             if (pending > 0) Text(stringResource(R.string.system_create_pending, pending),
                 style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("system-create-pending"))
         }
-        SystemSyncAttentionCard(imports, state, onRetry)
+        SystemSyncAttentionCard(imports, state, onRetry = onRetry)
     }
 }
 

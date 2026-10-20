@@ -217,6 +217,9 @@ private fun CalendarCard(
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 Text(stringResource(R.string.calendar_dashboard_editing), style = MaterialTheme.typography.titleSmall,
                     modifier = Modifier.semantics { heading() })
+                Text(stringResource(R.string.system_write_concurrency_warning),
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.testTag("system-write-concurrency-warning"))
                 val canEnable = imports.hasPermission && selection.enabled && selection.available
                 ModeToggle(stringResource(R.string.system_create_mode), createEnabled, createEnabled || canEnable,
                     "system-create-toggle") { onMode(selection, it) }

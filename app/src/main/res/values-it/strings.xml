@@ -1,15 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_subtitle">I tuoi calendari, collegati ad Android</string>
-    <string name="connection_heading">CONNESSIONE</string>
     <string name="calendars_heading">Calendari</string>
-    <string name="calendars_empty">Nessun calendario connesso</string>
-    <string name="calendars_description">La sincronizzazione dei calendari sarà disponibile in una versione futura.</string>
-    <string name="preferences_heading">Come piace a te</string>
     <string name="appearance">Aspetto</string>
     <string name="language">Lingua</string>
-    <string name="preferences_scope">Queste preferenze si applicano solo a Calendeer. Le altre app di calendario e i contenuti degli eventi restano invariati.</string>
-    <string name="development_notice">Versione di sviluppo · importazione in sola lettura</string>
     <string name="follow_system">Segui il sistema</string>
     <string name="theme_light">Chiaro</string>
     <string name="theme_dark">Scuro</string>
@@ -23,7 +17,7 @@
     <string name="system_create_mode">Consenti la creazione dal calendario di sistema</string>
     <string name="system_title_mode">Sincronizza modifiche ai titoli (sperimentale)</string>
     <string name="system_title_limits">Solo titoli: eventi con orario o di tutto il giorno, senza ripetizioni, promemoria, invitati o colori personalizzati. Include gli eventi importati da Proton e quelli creati in Android dopo la prima sincronizzazione riuscita. Le modifiche a date, descrizioni e luoghi restano in Android.</string>
-    <string name="system_create_pending">%1$d creazioni in attesa o da verificare. Un invio incerto non viene mai ripetuto automaticamente.</string>
+    <string name="system_create_pending">Creazioni in attesa o da verificare: %1$d. Un invio incerto non viene mai ripetuto automaticamente.</string>
     <string name="system_create_error">Si è verificato un problema durante la sincronizzazione con Android. I dati vengono conservati.</string>
     <string name="system_text_mode">Sincronizza le modifiche a descrizione e luogo (sperimentale)</string>
     <string name="system_text_limits">Eventi semplici con orario o di un giorno intero, senza ripetizioni, promemoria, invitati o colori personalizzati. Include gli eventi Proton e quelli creati in Android dopo la prima sincronizzazione riuscita. Il titolo modificato insieme alla descrizione o al luogo è incluso. Le sole modifiche alle date usano l’opzione orario separata. Le modifiche combinate di date e testo restano su Android. Le eliminazioni di eventi importati supportati usano un’opzione separata.</string>

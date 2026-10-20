@@ -31,7 +31,7 @@
     <string name="import_status_unavailable">This calendar is no longer accessible. Previously imported events are retained.</string>
     <string name="import_status_history_gap">Recent changes imported; older history is incomplete</string>
     <string name="import_history_gap_help">Proton reset the change history. Some older changes or deletions could not be verified. Existing Android events are retained; refreshing cannot confirm all older copies.</string>
-    <string name="import_coverage_progress">Periods in this scan: %1$d/%2$d received · %3$d/%2$d processed</string>
+    <string name="import_coverage_progress">Scan periods — received: %1$d/%2$d · processed: %3$d/%2$d</string>
     <string name="import_coverage_help">Processing may leave unsupported events. Android updates and incomplete change history are tracked separately.</string>
     <string name="import_projection_pending">Updates waiting to be copied to Android: %1$d</string>
     <string name="import_status_series_pending">Waiting for the original series before importing some occurrences. Refresh to retry.</string>

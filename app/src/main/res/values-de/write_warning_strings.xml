@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="system_write_concurrency_warning">Experimentelles Schreiben: Eine gleichzeitig in einer anderen Kalender-App vorgenommene Änderung kann trotz lokaler Prüfungen überschrieben werden.</string>
+</resources>

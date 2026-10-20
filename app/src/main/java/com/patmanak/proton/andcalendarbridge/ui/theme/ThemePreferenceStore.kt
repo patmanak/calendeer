@@ -4,6 +4,7 @@ package com.patmanak.proton.andcalendarbridge.ui.theme
 
 import android.content.Context
 import android.content.SharedPreferences
+import androidx.core.content.edit
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
@@ -22,7 +23,7 @@ class AndroidThemePreferenceStore(context: Context) : ThemePreferenceBoundary,
     init { preferences.registerOnSharedPreferenceChangeListener(this) }
 
     override fun setMode(mode: ThemeMode) {
-        preferences.edit().putString(KEY_MODE, mode.name).apply()
+        preferences.edit { putString(KEY_MODE, mode.name) }
         mutableMode.value = mode
     }
 
