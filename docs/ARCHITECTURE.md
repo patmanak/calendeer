@@ -90,6 +90,15 @@ reading edit-sending consent; factual evidence survives editing-policy loss but
 cannot follow logout or account replacement. Deletion retains its additional
 consent latch over the shared proof admission.
 
+Text/time source qualification shares three private coordinator functions for
+native contents, the surrounding SQL/source rechecks and fresh-ACK role checks.
+Every suspended read still uses the caller's original `ScopedEditOwnerAccess`;
+ordinary sources cannot adopt a transferred CREATE or bypass incoming holds.
+Operation profiles, raw/canonical text comparison, date constraints, preparations,
+verified results and acknowledgement journals remain typed. The shared checks do
+not write the Provider, claim work or renew access; historical receipts retain
+their inspection-only path.
+
 `LocalChangeCapture` retains imported-event UPDATE/DELETE snapshots, sharing
 selection/session checks and admission setup/cleanup. The coordinator retains the
 mutex, original epoch and distinct initial gates, plus incoming hold/baseline

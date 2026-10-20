@@ -324,22 +324,7 @@ class ImportCoordinator(
             return sameTextPreparation(access.read { store.localTextEditPreparation(target, event) }, preparation) &&
                 remote.format == intent.format
         }
-        if (!sql()) return false
-        val role = access.read { store.capturedHandoff(target, event) }
-        val hold = access.read { capturedRawHold(target) }
-        if (hold.scopeBlocked || (role == null && hold.holds(event))) return false
-        val content = if (role == null) access.read { projection.captureOwnedSimpleEdit(target, intent.base) }?.content else {
-            if (!access.read { currentSystemTitleHandoff(role, intent, access::active) }) return false
-            val observed = access.read { projection.captureCapturedHandoffCurrent(role.frame) }
-                as? CapturedHandoffCurrentObservation.Supported
-            observed?.snapshot?.takeIf { it.frame == role.frame && !it.deleted }?.content
-        }
-        if (content != intent.content || access.read { store.capturedHandoff(target, event) } != role) return false
-        if (role != null && !access.read { currentSystemTitleHandoff(role, intent, access::active) }) return false
-        val after = access.read { capturedRawHold(target) }
-        if (after.scopeBlocked || (role == null && after.holds(event)) ||
-            access.read { store.capturedHandoff(target, event) } != role) return false
-        return sql()
+        return currentEditSource(intent, access, ::sql)
     }
 
     private suspend fun currentTextResult(result: TextUpdateVerifiedResult, journal: TextUpdateRecoveryJournal,
@@ -369,16 +354,7 @@ class ImportCoordinator(
             return currentTextResult(result, journal, access)
         val reservation = if (existing != null) TextUpdateAcknowledgementReservation(existing, false) else {
             val role = access.read { store.capturedHandoff(target, event) }
-            val hold = access.read { capturedRawHold(target) }
-            if (hold.scopeBlocked || (role == null && hold.holds(event))) return false
-            val content = if (role == null) access.read { projection.captureOwnedSimpleEdit(target, intent.base) }?.content else {
-                if (!access.read { currentSystemTitleHandoff(role, intent, access::active) }) return false
-                val observed = access.read { projection.captureCapturedHandoffCurrent(role.frame) }
-                    as? CapturedHandoffCurrentObservation.Supported
-                observed?.snapshot?.takeIf { it.frame == role.frame && !it.deleted }?.content
-            }
-            if (content != intent.content || access.read { store.capturedHandoff(target, event) } != role ||
-                !currentTextResult(result, journal, access)) return false
+            if (!currentEditNativeSource(intent, role, access) || !currentTextResult(result, journal, access)) return false
             access.read { store.prepareTextUpdateAcknowledgement(result, role?.frame) } ?: return false
         }
         val retained = reservation.record
@@ -390,13 +366,7 @@ class ImportCoordinator(
             val echoedOwner = owner?.state == LocalEditState.CONFLICT && owner.copy(state = LocalEditState.PAUSED) == intent
             if ((owner != intent && !echoedOwner) || !sameTextPreparation(
                     access.read { store.localTextEditPreparation(target, event) }, result.record.preparation)) return false
-            val frame = retained.receipt.handoff
-            val role = access.read { store.capturedHandoff(target, event) }
-            if (frame == null) {
-                val hold = access.read { capturedRawHold(target) }
-                if (role != null || hold.scopeBlocked || hold.holds(event)) return false
-            } else if (role == null || role != CapturedCreateHandoffRecord(frame, CapturedCreateHandoffState.RELEASED, waiting = true) ||
-                !access.read { currentSystemTitleHandoff(role, intent, access::active) }) return false
+            if (!currentEditAcknowledgementRole(intent, retained.receipt.handoff, access)) return false
         }
         val historicalFrame = retained.receipt.handoff
         if (historicalFrame != null && !access.read { handoffSource(historicalFrame, access::active) }) return false
@@ -749,6 +719,51 @@ class ImportCoordinator(
             if (current?.content != ack.receipt.intent.content) conflict() else false
         }
 
+    /** Current native contents only. The caller retains the observed role and typed SQL proof. */
+    private suspend fun currentEditNativeSource(intent: LocalEditIntent, role: CapturedCreateHandoffRecord?,
+        access: ScopedEditOwnerAccess): Boolean {
+        val target = access.target
+        val event = intent.base.eventId
+        val hold = access.read { capturedRawHold(target) }
+        if (hold.scopeBlocked || (role == null && hold.holds(event))) return false
+        val content = if (role == null) access.read { projection.captureOwnedSimpleEdit(target, intent.base) }?.content else {
+            if (!access.read { currentSystemTitleHandoff(role, intent, access::active) }) return false
+            val observed = access.read { projection.captureCapturedHandoffCurrent(role.frame) }
+                as? CapturedHandoffCurrentObservation.Supported
+            observed?.snapshot?.takeIf { it.frame == role.frame && !it.deleted }?.content
+        }
+        return content == intent.content && access.read { store.capturedHandoff(target, event) } == role
+    }
+
+    /** Recheck the same typed SQL owner/capsule before and after the shared native observations. */
+    private suspend fun currentEditSource(intent: LocalEditIntent, access: ScopedEditOwnerAccess,
+        sql: suspend () -> Boolean): Boolean {
+        val target = access.target
+        val event = intent.base.eventId
+        if (!sql()) return false
+        val role = access.read { store.capturedHandoff(target, event) }
+        if (!currentEditNativeSource(intent, role, access)) return false
+        if (role != null && !access.read { currentSystemTitleHandoff(role, intent, access::active) }) return false
+        val after = access.read { capturedRawHold(target) }
+        if (after.scopeBlocked || (role == null && after.holds(event)) ||
+            access.read { store.capturedHandoff(target, event) } != role) return false
+        return sql()
+    }
+
+    /** A fresh native ACK still requires the exact current ordinary or transferred owner role. */
+    private suspend fun currentEditAcknowledgementRole(intent: LocalEditIntent, frame: CapturedCreateHandoffFrame?,
+        access: ScopedEditOwnerAccess): Boolean {
+        val target = access.target
+        val event = intent.base.eventId
+        val role = access.read { store.capturedHandoff(target, event) }
+        if (frame == null) {
+            val hold = access.read { capturedRawHold(target) }
+            if (role != null || hold.scopeBlocked || hold.holds(event)) return false
+        } else if (role == null || role != CapturedCreateHandoffRecord(frame, CapturedCreateHandoffState.RELEASED, waiting = true) ||
+            !access.read { currentSystemTitleHandoff(role, intent, access::active) }) return false
+        return true
+    }
+
     private class ScopedEditOwnerDenied : IllegalStateException("Edit owner access is inactive")
 
     private inner class ScopedEditOwnerAccess(val target: CalendarScope, private val expected: Long,
@@ -839,22 +854,7 @@ class ImportCoordinator(
             return sameTimePreparation(access.read { store.localTimeEditPreparation(target, event) }, preparation) &&
                 remote.format == intent.format
         }
-        if (!sql()) return false
-        val role = access.read { store.capturedHandoff(target, event) }
-        val hold = access.read { capturedRawHold(target) }
-        if (hold.scopeBlocked || (role == null && hold.holds(event))) return false
-        val content = if (role == null) access.read { projection.captureOwnedSimpleEdit(target, intent.base) }?.content else {
-            if (!access.read { currentSystemTitleHandoff(role, intent, access::active) }) return false
-            val observed = access.read { projection.captureCapturedHandoffCurrent(role.frame) }
-                as? CapturedHandoffCurrentObservation.Supported
-            observed?.snapshot?.takeIf { it.frame == role.frame && !it.deleted }?.content
-        }
-        if (content != intent.content || access.read { store.capturedHandoff(target, event) } != role) return false
-        if (role != null && !access.read { currentSystemTitleHandoff(role, intent, access::active) }) return false
-        val after = access.read { capturedRawHold(target) }
-        if (after.scopeBlocked || (role == null && after.holds(event)) ||
-            access.read { store.capturedHandoff(target, event) } != role) return false
-        return sql()
+        return currentEditSource(intent, access, ::sql)
     }
 
     private suspend fun currentTimeResult(result: TimeUpdateVerifiedResult, journal: TimeUpdateRecoveryJournal,
@@ -884,16 +884,7 @@ class ImportCoordinator(
             return currentTimeResult(result, journal, access)
         val reservation = if (existing != null) TimeUpdateAcknowledgementReservation(existing, false) else {
             val role = access.read { store.capturedHandoff(target, event) }
-            val hold = access.read { capturedRawHold(target) }
-            if (hold.scopeBlocked || (role == null && hold.holds(event))) return false
-            val content = if (role == null) access.read { projection.captureOwnedSimpleEdit(target, intent.base) }?.content else {
-                if (!access.read { currentSystemTitleHandoff(role, intent, access::active) }) return false
-                val observed = access.read { projection.captureCapturedHandoffCurrent(role.frame) }
-                    as? CapturedHandoffCurrentObservation.Supported
-                observed?.snapshot?.takeIf { it.frame == role.frame && !it.deleted }?.content
-            }
-            if (content != intent.content || access.read { store.capturedHandoff(target, event) } != role ||
-                !currentTimeResult(result, journal, access)) return false
+            if (!currentEditNativeSource(intent, role, access) || !currentTimeResult(result, journal, access)) return false
             access.read { store.prepareTimeUpdateAcknowledgement(result, role?.frame) } ?: return false
         }
         val retained = reservation.record
@@ -905,13 +896,7 @@ class ImportCoordinator(
             val echoedOwner = owner?.state == LocalEditState.CONFLICT && owner.copy(state = LocalEditState.PAUSED) == intent
             if ((owner != intent && !echoedOwner) || !sameTimePreparation(
                     access.read { store.localTimeEditPreparation(target, event) }, result.record.preparation)) return false
-            val frame = retained.receipt.handoff
-            val role = access.read { store.capturedHandoff(target, event) }
-            if (frame == null) {
-                val hold = access.read { capturedRawHold(target) }
-                if (role != null || hold.scopeBlocked || hold.holds(event)) return false
-            } else if (role == null || role != CapturedCreateHandoffRecord(frame, CapturedCreateHandoffState.RELEASED, waiting = true) ||
-                !access.read { currentSystemTitleHandoff(role, intent, access::active) }) return false
+            if (!currentEditAcknowledgementRole(intent, retained.receipt.handoff, access)) return false
         }
         val historicalFrame = retained.receipt.handoff
         if (historicalFrame != null && !access.read { handoffSource(historicalFrame, access::active) }) return false

@@ -1,5 +1,34 @@
 # Validation
 
+## Shared text/time source checks
+
+Three private coordinator functions share native-content qualification, the
+surrounding SQL/source rechecks and fresh-acknowledgement role checks. Four copies
+of the native preflight now use one definition. No new type, interface or generic
+outgoing pipeline is introduced; operation profiles, preparations, verified
+results, journals and completion remain typed.
+
+PASS: checking all three helper bodies and inlining the six delegation sites
+reconstructs the entire pre-change coordinator. Independent review confirms the
+same read order, short-circuiting, scope holds, transferred-CREATE provenance and
+null/unsupported-source refusal. ACK result identities already bind the event to
+the intent's base. Every suspended read retains the original scoped access and
+cancellation fences. A fresh reservation remains the only native-write authority;
+pending historical receipts only inspect. Format reads, UNKNOWN handling, lease
+closure, schema, payload and journal formats are unchanged.
+
+PASS: all 113 selected physical Android cases across eight classes, without
+failures or skips. Text/time owner gateways and recovery cover raw-versus-canonical
+text, date changes, transferred owners, revocation, cancellation, UNKNOWN and
+reopened pending receipts that cannot issue another native write. Both Provider
+ACK suites and the existing decode-cancellation/handoff-permission regressions
+also pass. Controlled fixture ports do not extend live Proton, OEM, reboot or
+power-loss qualification.
+
+All 1,469 host cases pass (427 domain, 20 authentication, 840 backend and 182 app),
+without failures or skips. Debug app/test APK builds and app lint pass (zero
+errors, 43 warnings).
+
 ## Title owner and source qualification
 
 `LocalTitleOwnerQualification` is extracted from the coordinator's existing inner
