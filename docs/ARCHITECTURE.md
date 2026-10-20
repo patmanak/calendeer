@@ -90,6 +90,14 @@ reading edit-sending consent; factual evidence survives editing-policy loss but
 cannot follow logout or account replacement. Deletion retains its additional
 consent latch over the shared proof admission.
 
+`EditSubmissionLease` shares the lifetime and irreversible callback gates of one
+text/time submission. The coordinator still captures the original operation and
+account-evidence admission before validation and locking; format checks remain
+live. Source rejection closes sending without discarding factual response evidence.
+Evidence rejection has its own latch, and both channels close when the invocation
+ends. The lease adds no session lookup, lock, SQL/native write or submission port;
+typed wire validation, submission and durable result checks remain in each gateway.
+
 Text/time source qualification shares three private coordinator functions for
 native contents, the surrounding SQL/source rechecks and fresh-ACK role checks.
 Every suspended read still uses the caller's original `ScopedEditOwnerAccess`;

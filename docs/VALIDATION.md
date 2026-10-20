@@ -1,5 +1,36 @@
 # Validation
 
+## Shared text/time submission callbacks
+
+`EditSubmissionLease` groups one invocation's lifetime, source refusal and factual
+evidence refusal. Text/time gateways retain the original operation context and
+account-evidence capture point, typed validation, submission and durable readback.
+DELETE keeps its separate callback logic; no generic dispatch pipeline is added.
+
+PASS: mechanical comparison of callback bodies and closure order, followed by
+inlining both delegations, reconstructs the complete original coordinator.
+Independent review confirms unchanged scope checks, short-circuiting, cancellation,
+live format reads, lock order and final closure. Source refusal remains permanent
+without revoking otherwise admitted factual evidence. Evidence refusal cannot
+borrow restored account/caller access. Neither channel can survive the invocation
+or acquire acknowledgement/dispatch authority from retained proof.
+
+Ten added JVM regressions cover lazy admission, live format revocation, rejection
+followed by restored contents, account/calendar/generation isolation, independent
+evidence refusal, retained callbacks after closure, ordinary source failure,
+swallowed cancellation and closure/cancellation during admission observation.
+
+PASS: all 47 selected physical Android cases across six classes, without failures
+or skips. Text/time owner gateways and recovery preserve import/auth lock order,
+independent consent/evidence, expired callbacks, UNKNOWN history, transferred-CREATE
+provenance and inspection-only recovery of interrupted receipts. Existing decode
+cancellation and handoff permission-loss regressions also pass. Controlled fixture
+ports do not extend live Proton, OEM, reboot or power-loss qualification.
+
+All 1,479 host cases pass (427 domain, 20 authentication, 840 backend and 192 app),
+without failures or skips. Debug app/test APK builds and app lint pass (zero
+errors, 43 warnings).
+
 ## Shared text/time source checks
 
 Three private coordinator functions share native-content qualification, the

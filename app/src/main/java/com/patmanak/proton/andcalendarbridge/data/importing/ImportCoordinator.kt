@@ -226,17 +226,8 @@ class ImportCoordinator(
             val frozen = record.frozen()
             val target = frozen.scope
             val accountEvidence = systemTextEvidenceAdmission(target)
-            val open = AtomicBoolean(true)
-            val sourceClosed = AtomicBoolean(false)
-            val evidenceClosed = AtomicBoolean(false)
-            val evidence: (CalendarScope) -> Boolean = { requested ->
-                operation.ensureActive()
-                val allowed = open.get() && !evidenceClosed.get() && requested == target &&
-                    accountEvidence(requested) && admitEvidence(requested)
-                operation.ensureActive()
-                if (!allowed) evidenceClosed.set(true)
-                allowed && !evidenceClosed.get() && open.get()
-            }
+            val lease = EditSubmissionLease(target, operation, accountEvidence, admitEvidence)
+            val evidence = lease.evidence
             try {
                 if (frozen.state != TextUpdateAttemptState.PREPARED || frozen.protectedEvidence != null ||
                     port.textUpdateFormat != frozen.format ||
@@ -244,23 +235,9 @@ class ImportCoordinator(
                     return TextUpdateSubmissionObservation.Unknown
                 return withScopedEditOwner(target, admit, consent = true, sendingEnabled = systemTextsEnabled, denied = TextUpdateSubmissionObservation.Unknown,
                     finalAccessRequired = false) { access ->
-                    val sending: (CalendarScope) -> Boolean = { requested ->
-                        operation.ensureActive()
-                        val allowed = open.get() && !sourceClosed.get() && requested == target && access.active() &&
-                            port.textUpdateFormat == frozen.format
-                        operation.ensureActive()
-                        if (!allowed) sourceClosed.set(true)
-                        allowed && !sourceClosed.get() && open.get()
-                    }
-                    suspend fun source(requested: CalendarScope): Boolean {
-                        operation.ensureActive()
-                        return try {
-                            val valid = sending(requested) && textSource(frozen.preparation.intent, frozen.preparation, access) &&
-                                sending(requested)
-                            if (!valid) sourceClosed.set(true)
-                            valid
-                        } catch (cancelled: CancellationException) { throw cancelled }
-                          catch (_: Exception) { operation.ensureActive(); sourceClosed.set(true); false }
+                    val sending = lease.sending(access::active) { port.textUpdateFormat == frozen.format }
+                    suspend fun source(requested: CalendarScope): Boolean = lease.source(requested, sending) {
+                        textSource(frozen.preparation.intent, frozen.preparation, access)
                     }
                     if (!sending(target) || access.read { journal.read(target, frozen.id, sending) } != frozen ||
                         !source(target)) return@withScopedEditOwner TextUpdateSubmissionObservation.Unknown
@@ -278,7 +255,7 @@ class ImportCoordinator(
                     TextUpdateSubmissionObservation.Verified(durable, observation.event)
                 }
             } finally {
-                open.set(false); sourceClosed.set(true); evidenceClosed.set(true)
+                lease.close()
             }
         }
 
@@ -461,17 +438,8 @@ class ImportCoordinator(
             val frozen = record.frozen()
             val target = frozen.scope
             val accountEvidence = systemTimeEvidenceAdmission(target)
-            val open = AtomicBoolean(true)
-            val sourceClosed = AtomicBoolean(false)
-            val evidenceClosed = AtomicBoolean(false)
-            val evidence: (CalendarScope) -> Boolean = { requested ->
-                operation.ensureActive()
-                val allowed = open.get() && !evidenceClosed.get() && requested == target &&
-                    accountEvidence(requested) && admitEvidence(requested)
-                operation.ensureActive()
-                if (!allowed) evidenceClosed.set(true)
-                allowed && !evidenceClosed.get() && open.get()
-            }
+            val lease = EditSubmissionLease(target, operation, accountEvidence, admitEvidence)
+            val evidence = lease.evidence
             try {
                 if (frozen.state != TimeUpdateAttemptState.PREPARED || frozen.protectedEvidence != null ||
                     port.timeUpdateFormat != frozen.format ||
@@ -479,23 +447,9 @@ class ImportCoordinator(
                     return TimeUpdateSubmissionObservation.Unknown
                 return withScopedEditOwner(target, admit, consent = true, denied = TimeUpdateSubmissionObservation.Unknown,
                     finalAccessRequired = false) { access ->
-                    val sending: (CalendarScope) -> Boolean = { requested ->
-                        operation.ensureActive()
-                        val allowed = open.get() && !sourceClosed.get() && requested == target && access.active() &&
-                            port.timeUpdateFormat == frozen.format
-                        operation.ensureActive()
-                        if (!allowed) sourceClosed.set(true)
-                        allowed && !sourceClosed.get() && open.get()
-                    }
-                    suspend fun source(requested: CalendarScope): Boolean {
-                        operation.ensureActive()
-                        return try {
-                            val valid = sending(requested) && timeSource(frozen.preparation.intent, frozen.preparation, access) &&
-                                sending(requested)
-                            if (!valid) sourceClosed.set(true)
-                            valid
-                        } catch (cancelled: CancellationException) { throw cancelled }
-                          catch (_: Exception) { operation.ensureActive(); sourceClosed.set(true); false }
+                    val sending = lease.sending(access::active) { port.timeUpdateFormat == frozen.format }
+                    suspend fun source(requested: CalendarScope): Boolean = lease.source(requested, sending) {
+                        timeSource(frozen.preparation.intent, frozen.preparation, access)
                     }
                     if (!sending(target) || access.read { journal.read(target, frozen.id, sending) } != frozen ||
                         !source(target)) return@withScopedEditOwner TimeUpdateSubmissionObservation.Unknown
@@ -513,7 +467,7 @@ class ImportCoordinator(
                     TimeUpdateSubmissionObservation.Verified(durable, observation.event)
                 }
             } finally {
-                open.set(false); sourceClosed.set(true); evidenceClosed.set(true)
+                lease.close()
             }
         }
 

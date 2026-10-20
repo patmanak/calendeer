@@ -86,7 +86,7 @@ before a separate-process native/SQL ACK. This is not a measured network failure
 or production-worker interruption during transport. Final restarted replay keeps
 the identical request/result/completion without a new send or native write.
 
-Current host suites pass 427 domain, 20 authentication, 840 backend and 182 app JVM cases without
+Current host suites pass 427 domain, 20 authentication, 840 backend and 192 app JVM cases without
 skips. Physical crypto, SQL/migration, Provider, worker/recovery and option UI
 checks pass; APK builds and app lint pass. Scope-specific evidence and remaining
 qualification are in [validation](VALIDATION.md) and the linked contracts.
