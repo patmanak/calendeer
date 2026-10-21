@@ -1,5 +1,38 @@
 # Validation
 
+## Shared attempt work-page SQL
+
+The text, time and deletion journals share one synchronous metadata reader
+instead of three copies of their paging query and decoding loop. Each journal
+retains its typed state/ref/page construction and transaction/admission wrapper.
+The reader accepts only the three fixed table names. It preserves the validated
+query's limit plus one lookahead row, account/calendar/generation scope and
+SQLite `BINARY` continuation order. SQL bounds mutation/event/state cells to
+4096/4096/15 bytes before materialization; UTF-8 decoding and per-row cancellation
+remain strict. Capsules and proofs never enter the metadata cursor; discovery
+still grants no ownership or dispatch authority. No new class, schema or
+lifecycle framework is introduced.
+
+PASS: mechanical comparison reconstructs all three original query/decoding
+blocks from the shared reader. Complete journals differ only in page delegation
+and two unused imports each. Independent source review finds no correctness
+defect.
+
+PASS: all 192 app JVM cases and all 29 selected physical cases, without failures,
+errors or skips. The physical selection comprises 13 text work-page cases, six
+deletion recovery-journal cases and ten time recovery/controller cases on the
+enrolled API 35 target with new debug app/test APKs. Isolated SQLite fixtures
+cover malformed/oversized metadata, lookahead corruption, Unicode continuation,
+opaque multi-megabyte payloads, scoped reopening, revocation and cancellation.
+The native boundary in time recovery is controlled; these checks do not add
+Provider, live-service, OEM, Android 17 or 16 KiB runtime qualification.
+
+PASS: debug app/test and unsigned release APK builds and lint, offline with
+strict dependency verification and resolved Kotlin/Compose/KSP assertions.
+Lint retains zero errors and nine existing `UseKtx` warnings, without suppression.
+The static native gate passes on both new APKs, covering 12 packaged ARM64/x86_64
+library copies.
+
 ## Shared projection acknowledgement guards
 
 `ImportStore` shares the identical ordinary-source, redundant-projection
