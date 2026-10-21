@@ -1,5 +1,37 @@
 # Validation
 
+## Shared update acknowledgement checks
+
+`ImportStore` replaces 14 duplicated private acknowledgement helpers with five
+shared functions and updates their 28 call sites, removing 88 net source lines.
+Only identical title/text/time guards are shared: retained-observation requeue,
+redundant projection, direct baseline and format checks, plus the text/time owner
+reader. The title owner reader stays separate because its profile validation
+differs. Typed transactions, source admission, preparation, histories and codecs
+retain their existing behavior; no new type, interface or schema is introduced.
+One time-history error label now correctly names time instead of text.
+
+PASS: mechanical comparison reconstructs all original helper bodies and the rest
+of the store after the expected immutable-field substitutions and call renames,
+apart from comments, blank lines and fixed diagnostic labels. SQL, bindings and
+guard order are unchanged; the title owner function is byte-identical.
+Independent source review finds no correctness defect.
+
+PASS: all 192 app JVM cases, without failures, errors or skips. Debug app/test
+and unsigned release APK builds and lint pass offline with strict dependency
+verification and resolved Kotlin/Compose/KSP assertions. Lint retains zero errors
+and nine existing `UseKtx` warnings, with no suppression. The static native gate
+passes on both new APKs, covering 12 packaged ARM64/x86_64 library copies.
+
+PASS: all 203 selected physical cases, without failures or skips: the three
+acknowledgement stores (69), title history (18), coordinator/Provider/SQL
+integration (101) and captured-create handoff store (15). The new debug app/test
+APKs are installed on the enrolled API 35 target. Controlled fixtures cover
+requeue/replay, exact ownership, later edits, represented projections, captured
+creation, scope/format rejection and transactional rollback/cancellation.
+These checks do not add live-service or OEM qualification. Android 17 and
+16 KiB runtime qualification remains **NOT RUN** pending compatible hardware.
+
 ## Android 17 / 16 KiB qualification preparation
 
 The [qualification plan](ANDROID_17_QUALIFICATION.md) separates static APK
