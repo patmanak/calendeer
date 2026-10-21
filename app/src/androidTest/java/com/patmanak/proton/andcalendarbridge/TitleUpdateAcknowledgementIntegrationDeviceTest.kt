@@ -1562,7 +1562,7 @@ class TitleUpdateAcknowledgementIntegrationDeviceTest {
                 "projection" -> store.writableDatabase.execSQL("INSERT INTO projection_receipts " +
                     "(scope,event,nonce,payload,adapter,version,previous_base,protocol) " +
                     "SELECT scope,event,'synthetic-competing-projection',payload,?,?,payload,1 FROM projection_bases",
-                    arrayOf(format.id, format.version))
+                    arrayOf<Any?>(format.id, format.version))
                 else -> error("Unknown synthetic observation case")
             }
             val expectedOwner = intent.copy(state = LocalEditState.CONFLICT).let {

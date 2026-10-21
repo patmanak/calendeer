@@ -292,13 +292,13 @@ class LocalEditStoreDeviceTest {
                 db.execSQL("CREATE INDEX series_members_uid ON series_members(scope,uid,role)")
                 db.execSQL("CREATE TABLE mapping_profiles(scope TEXT PRIMARY KEY,adapter TEXT NOT NULL,version INTEGER NOT NULL,rescan_pending INTEGER NOT NULL DEFAULT 1)")
                 db.execSQL("INSERT INTO calendars(scope,account,calendar,generation,title,enabled) VALUES(?,?,?,?,?,1)",
-                    arrayOf(scopeKey,scope.account.value,scope.calendar.value,0,"Fixture"))
+                    arrayOf<Any?>(scopeKey,scope.account.value,scope.calendar.value,0,"Fixture"))
                 listOf("stable" to 0, "pending" to 1, "deferred" to 0, "deleted" to 0).forEach { (id, pending) ->
-                    db.execSQL("INSERT INTO records VALUES(?,?,?,?)", arrayOf(scopeKey,id,payload(id,id == "deleted"),pending))
+                    db.execSQL("INSERT INTO records VALUES(?,?,?,?)", arrayOf<Any?>(scopeKey,id,payload(id,id == "deleted"),pending))
                 }
                 db.execSQL("INSERT INTO deferred_events(scope,event,revision,adapter,version,reason,payload) VALUES(?,?,?,?,?,?,?)",
-                    arrayOf(scopeKey,"deferred","unmapped","legacy",1,"UNSUPPORTED_CONTENT","retained-sealed"))
-                db.execSQL("INSERT INTO mapping_profiles VALUES(?,?,?,?)", arrayOf(scopeKey,"legacy",7,1))
+                    arrayOf<Any?>(scopeKey,"deferred","unmapped","legacy",1,"UNSUPPORTED_CONTENT","retained-sealed"))
+                db.execSQL("INSERT INTO mapping_profiles VALUES(?,?,?,?)", arrayOf<Any?>(scopeKey,"legacy",7,1))
                 db.version = 7
             }
             ImportStore(context, name).use { store ->

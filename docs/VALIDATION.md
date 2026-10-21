@@ -1,5 +1,55 @@
 # Validation
 
+## Patched Kotlin build chain
+
+Kotlin/KGP and the Compose compiler plugin are upgraded to 2.4.21, with KSP
+2.3.12. AGP 9.2.1 and Gradle 9.4.1 stay unchanged. The resolved root plugin
+classpath is checked against all three selected versions; the five lockfiles
+record the new graph. The obsolete Android Kotlin source-set workaround and
+the earlier KAPT activation guard are removed. The patched component replaces
+that mitigation; no advisory exception or compiler-diagnostic suppression is added.
+Compatibility and advisory sources are in [build security](BUILD_SECURITY.md#patched-kotlin-toolchain).
+
+The first upgraded compilation reproduced Kotlin's
+`TYPE_INTERSECTION_AS_REIFIED_ERROR` in eight heterogeneous SQL binding arrays.
+Those test fixtures now declare `arrayOf<Any?>` explicitly. Mechanical comparison
+of all five complete files confirms that queries, binding values, assertions and
+all other lines are identical. No production application source changes.
+
+PASS: all 1,483 host cases (427 domain, 20 authentication, 844 backend, 192 app),
+without failures, errors or skips. All 145 selected physical Android cases pass,
+without failures or skips: the maintained 131-case regression selection, nine
+authentication UI/startup cases and the five affected SQL-fixture methods. This
+covers synchronization admission/recovery, native crypto/parser checks, secure
+authentication UI, retained-session startup and the independently constructed
+legacy-schema migration. Controlled fixtures and activity recreation do not
+qualify additional OEMs, reboot/power loss or live-service transport. Room's
+exported schemas and the Proton Core/native crypto pins remain unchanged.
+The merged debug/release manifests retain backup and cleartext exclusions and
+permission gates on exported services/receivers.
+
+PASS: the final full Gradle task graph builds debug app/test and unsigned release
+APKs and runs the host suites/lint offline with strict dependency verification,
+without lock/checksum update flags. The resolved-classpath assertions confirm
+Kotlin/KGP 2.4.21, Compose compiler plugin 2.4.21 and KSP 2.3.12. An init script
+isolates local build destinations while using the normal production sources and
+task list. Final offline lint reports zero errors and 12 warnings (one API target,
+one version-gated locale attribute, one dependency-age hint and nine synchronous
+`commit()` suggestions whose boolean results remain required). Online metadata
+can produce additional version-availability hints; these are separate from the
+advisory lookup. No lint suppression is added.
+
+PASS: the Maven inventory contains 571 distinct name/version pairs. OSV returns
+`NO_MATCHES` with exit 0, including the resolved root Kotlin plugin, without
+suppression. This supersedes the earlier 553-package baseline below and does not
+establish complete vulnerability coverage. The five principal Kotlin/KSP plugin,
+compiler and analysis JAR hashes match Maven Central HTTPS checksum sidecars or
+fresh downloads. An intentionally incorrect AGP checksum is rejected by strict
+dependency verification; the metadata is restored byte for byte afterward.
+The eight advisory-tooling cases and workflow validation also pass. The configured
+JDK 17 GitHub CI workflow has not been run remotely; local builds use Android
+Studio's JBR 21.0.10 with Java bytecode target 17.
+
 ## Audit stabilization and build assurance
 
 The backend text/time adapters now share `UpdateRequestLease`, the identical
@@ -44,7 +94,9 @@ the resolved inventory; this is not complete vulnerability coverage. The upstrea
 fix concerns KAPT's incremental-cache deserialization. KAPT is not used; all four
 attempts to activate its canonical/legacy plugin identifiers at the root or a JVM
 module fail through the explicit guard before tasks execute. The finding is not
-suppressed. See the [applicability boundary](BUILD_SECURITY.md#retained-kotlin-tooling-advisory).
+suppressed in that baseline. The [patched toolchain](BUILD_SECURITY.md#patched-kotlin-toolchain)
+supersedes this earlier applicability assessment; a plugin guard alone did not
+qualify KSP's reuse of KAPT cache infrastructure.
 
 Targeted fixes cover Jackson Core (Android runtime), Netty 4.1, Commons Lang,
 HttpClient, Bouncy Castle, jose4j and JDOM (the other findings were in tooling/test

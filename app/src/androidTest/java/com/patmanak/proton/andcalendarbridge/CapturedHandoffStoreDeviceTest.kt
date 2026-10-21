@@ -233,7 +233,7 @@ class CapturedHandoffStoreDeviceTest {
 
     @Test fun rawOutstandingOrdinaryProofBlocksReservation() = fixture {
         prove(); raw { it.execSQL("INSERT INTO projection_receipts (scope, event, nonce, payload, adapter, version, previous_base, protocol) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            arrayOf(scopeKey(), original.change.eventId.value, UUID(0, 701).toString(), "unreadable", format.id, 1, null, 1)) }
+            arrayOf<Any?>(scopeKey(), original.change.eventId.value, UUID(0, 701).toString(), "unreadable", format.id, 1, null, 1)) }
         val before = snapshot(); reject { store.reserveCapturedHandoff(handoff()) }; unchanged(before)
     }
 

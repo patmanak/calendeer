@@ -92,9 +92,9 @@ checks pass; APK builds and app lint pass. Scope-specific evidence and remaining
 qualification are in [validation](VALIDATION.md) and the linked contracts.
 
 Resolved Maven versions and SHA-256 checksums are locked, with a Windows CI
-baseline and advisory inventory. The Kotlin/KAPT tooling advisory remains visible;
-KAPT is unused and its activation is blocked. See [build security](BUILD_SECURITY.md)
-for applicability, trust limits and the required toolchain qualification.
+baseline and advisory inventory. Kotlin/Compose 2.4.21 and KSP 2.3.12 replace the
+vulnerable Kotlin/KAPT baseline while retaining AGP 9.2.1 and Gradle 9.4.1.
+See [build security](BUILD_SECURITY.md) for qualification and trust limits.
 
 For a useful bidirectional RC, finish:
 

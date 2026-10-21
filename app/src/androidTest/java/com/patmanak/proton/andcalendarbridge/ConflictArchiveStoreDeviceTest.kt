@@ -172,7 +172,7 @@ class ConflictArchiveStoreDeviceTest {
     @Test fun exhaustedBudgetRollsBackNewVariantButDoesNotPreventReadingOldProof() = fixture { store, _ ->
         store.establish(); store.captureLocalEdit(intent()); store.receive(changed); val ref = store.ref()
         store.writableDatabase.execSQL("INSERT INTO delta_reconciliation(scope,adapter,version,after_cursor,payload) VALUES(?,?,1,'fixture',zeroblob(?))",
-            arrayOf(key(), format.id, ImportStore.STAGING_BUDGET_BYTES))
+            arrayOf<Any?>(key(), format.id, ImportStore.STAGING_BUDGET_BYTES))
         try { store.receive(changed.copy(revision = Revision("too-large"))); fail("Budget was ignored") } catch (_: ImportCapacityException) { }
         assertEquals(base, store.conflictArchive(ref)?.base); assertEquals(2, store.observations(ref).size)
         assertEquals(1, store.conflictArchives(ConflictArchiveQuery(scope)).entries.size)

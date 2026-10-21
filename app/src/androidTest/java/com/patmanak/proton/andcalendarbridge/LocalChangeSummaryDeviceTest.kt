@@ -71,7 +71,7 @@ class LocalChangeSummaryDeviceTest {
         val originalKey = org.json.JSONArray().put(target.account.value).put(target.calendar.value).put(0).toString()
         val generationKey = org.json.JSONArray().put(target.account.value).put(target.calendar.value).put(1).toString()
         writableDatabase.execSQL("INSERT INTO calendars (scope,account,calendar,generation,title) VALUES (?,?,?,?,?)",
-            arrayOf(generationKey, target.account.value, target.calendar.value, 1, "Other generation"))
+            arrayOf<Any?>(generationKey, target.account.value, target.calendar.value, 1, "Other generation"))
         writableDatabase.execSQL("INSERT INTO local_edits SELECT ?, mutation, event, adapter, version, base, local, state, kind FROM local_edits WHERE scope=?",
             arrayOf(generationKey, originalKey))
         ImportStore(ApplicationProvider.getApplicationContext(), name).use { reopened ->

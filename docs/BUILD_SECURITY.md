@@ -52,22 +52,33 @@ References: [Gradle locking](https://docs.gradle.org/current/userguide/dependenc
 [Gradle verification](https://docs.gradle.org/current/userguide/dependency_verification.html)
 and [OSV API](https://google.github.io/osv.dev/api/).
 
-## Retained Kotlin tooling advisory
+## Patched Kotlin toolchain
 
-OSV still reports Kotlin Gradle plugin 2.2.10 under
+The build uses Kotlin/KGP and the Compose compiler plugin 2.4.21, with KSP 2.3.12.
+AGP 9.2.1, Gradle 9.4.1, Java bytecode target 17, Room 2.8.4 and the Proton
+Core/native crypto versions stay unchanged. The explicit root buildscript
+classpath upgrades AGP's built-in Kotlin/KSP baseline; the JVM and Compose plugin
+declarations use the same Kotlin version. The obsolete
+`android.disallowKotlinSourceSets=false` workaround is removed. No compiler
+metadata-version bypass or new processor-language opt-in is used.
+
+Kotlin 2.4.21 contains the fix for
 [GHSA-r937-wjx7-w2jp](https://github.com/advisories/GHSA-r937-wjx7-w2jp).
-The referenced [upstream fix](https://github.com/JetBrains/kotlin/commit/bf51df665b458fda7c3eaf436c4d88dc119d7ec6)
-restricts deserialization of KAPT's incremental Java/annotation-processing caches.
-This build uses KSP for Room, with no KAPT plugin or annotation-processing Gradle
-dependency. Both KAPT plugin identifiers are explicitly rejected in all current
-projects, including the root. This guard does not cover future included builds.
+The earlier plugin-activation guard is removed after upgrading the underlying
+component; KAPT remains unconfigured and Room continues using KSP. An activation
+guard alone was not a substitute for the patch: KSP also reuses KAPT cache
+infrastructure. Verify the actually selected classpath and all resolved locks,
+not just a plugin version declaration. The OSV tool retains its normal matching
+and failure behavior, with no advisory suppression or exception.
 
-This is a reviewed applicability boundary, not a Kotlin patch or proof of general
-non-exploitability. The advisory is neither suppressed nor removed from reports;
-`--osv` continues to exit 1. A compatible Kotlin/Compose/KSP/AGP toolchain containing
-the upstream fix must be qualified before removing the guard or introducing KAPT.
-Do not restore untrusted build caches. The CI uses fresh runners with no configured
-build-cache restoration; no advisory exception turns the scan green.
+Compatibility sources: [Kotlin's Gradle/AGP table](https://kotlinlang.org/docs/gradle-configure-project.html),
+[AGP's supported classpath upgrade](https://developer.android.com/build/releases/agp-9-0-0-release-notes#runtime-dependency-on-kotlin-gradle-plugin),
+[KSP 2.3.12](https://github.com/google/ksp/releases/tag/2.3.12) and its
+[versioned cache integration](https://github.com/google/ksp/blob/2.3.12/gradle-plugin/src/main/kotlin/com/google/devtools/ksp/gradle/KspSubplugin.kt).
+The KSP release/source supports the chosen candidate; actual compilation,
+generated-schema checks and Android tests provide the project-specific
+qualification in [validation](VALIDATION.md). Do not restore untrusted build caches;
+CI uses fresh runners without configured build-cache restoration.
 
 ## Remaining release gates
 
