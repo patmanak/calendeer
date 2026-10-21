@@ -96,6 +96,8 @@ baseline and advisory inventory. Kotlin/Compose 2.4.21 and KSP 2.3.12 replace th
 vulnerable Kotlin/KAPT baseline while retaining AGP 9.2.1 and Gradle 9.4.1.
 Android modules compile against API 37; the app targets 37 with minimum API 31.
 Android 17 runtime qualification remains open; API 35 regressions are separate evidence.
+The [qualification plan](ANDROID_17_QUALIFICATION.md) separates static APK checks
+from the Android 17 and 16 KiB device journeys still required.
 See [build security](BUILD_SECURITY.md) for qualification and trust limits.
 
 For a useful bidirectional RC, finish:

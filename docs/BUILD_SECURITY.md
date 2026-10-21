@@ -104,6 +104,8 @@ found no required application-code workaround:
 Build, host and enrolled API 35 device evidence is in [validation](VALIDATION.md).
 It does not establish Android 17 runtime compatibility. Do not weaken platform
 security or synchronization guarantees to make a future qualification pass.
+The [qualification plan](ANDROID_17_QUALIFICATION.md) defines the repeatable
+native APK gate, required device profiles, test matrix and pass criteria.
 
 ## Remaining release gates
 

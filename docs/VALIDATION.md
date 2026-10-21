@@ -1,5 +1,26 @@
 # Validation
 
+## Android 17 / 16 KiB qualification preparation
+
+The [qualification plan](ANDROID_17_QUALIFICATION.md) separates static APK
+checks from Android 17 / 4 KiB, Android 17 / 16 KiB and earlier Android / 16 KiB
+device profiles. Its device rows define prerequisites, assertions, restoration
+and evidence boundaries; none is marked passed by a build or static tool.
+
+PASS: 19 Python tooling cases, including 11 native-gate cases for valid separate
+RELRO LOADs, both rounded protection edges, bad alignment/header/table/segment
+data, ABI mismatch, empty/duplicate inventories, compressed/misaligned packaging
+and aggregate CLI failure. The read-only native gate passes on the existing SDK
+37 debug/release APKs: six ARM64/x86_64 libraries each, 12 packaged copies. Every
+report keeps Android 17 and 16 KiB runtime fields `NOT_RUN`. CI now runs this
+gate on both built APKs and propagates a failed check; the remote job is not run.
+
+A read-only capability probe confirms that the enrolled target is API 35,
+ARM64 with 4096-byte pages. It cannot exercise either new runtime profile.
+Android 17 / 16 KiB journeys remain **NOT RUN**. This preparation changes only
+tooling, CI and documentation; application builds and physical regressions from
+the SDK migration below are reused, not rerun or counted as new qualification.
+
 ## SDK 37 migration
 
 Both Android modules compile against API 37; the app targets 37 and retains
