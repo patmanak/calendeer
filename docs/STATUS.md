@@ -94,6 +94,8 @@ qualification are in [validation](VALIDATION.md) and the linked contracts.
 Resolved Maven versions and SHA-256 checksums are locked, with a Windows CI
 baseline and advisory inventory. Kotlin/Compose 2.4.21 and KSP 2.3.12 replace the
 vulnerable Kotlin/KAPT baseline while retaining AGP 9.2.1 and Gradle 9.4.1.
+Android modules compile against API 37; the app targets 37 with minimum API 31.
+Android 17 runtime qualification remains open; API 35 regressions are separate evidence.
 See [build security](BUILD_SECURITY.md) for qualification and trust limits.
 
 For a useful bidirectional RC, finish:

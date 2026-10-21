@@ -80,6 +80,31 @@ generated-schema checks and Android tests provide the project-specific
 qualification in [validation](VALIDATION.md). Do not restore untrusted build caches;
 CI uses fresh runners without configured build-cache restoration.
 
+## Android API 37 baseline
+
+Both Android modules compile against API 37; the app targets 37 and retains
+minimum API 31. CI installs the stable `platforms;android-37.0` package, not a
+preview or a later minor platform. AGP 9.2.1 supports API 37.0 with Gradle 9.4.1
+and Build Tools 36.0.0; the Kotlin/KSP and Proton Core/native versions remain
+unchanged. See the [AGP compatibility table](https://developer.android.com/build/releases/agp-9-2-0-release-notes#compatibility)
+and [SDK setup](https://developer.android.com/about/versions/17/setup-sdk).
+
+Review of [target-specific changes](https://developer.android.com/about/versions/17/behavior-changes-17)
+and [all-app changes](https://developer.android.com/about/versions/17/behavior-changes-all)
+found no required application-code workaround:
+
+| Area | Reviewed behavior and remaining boundary |
+| --- | --- |
+| Native loading | The resolved `android-golib` uses `go.Seq` and `System.loadLibrary("gojni")`. No application extraction/`System.load` path or writable-code exception is added. Android 17 native startup remains to be measured. |
+| TLS and authentication | Keep platform CT/ECH defaults, HTTPS validation, WebView SSL cancellation and origin checks. No trust override, cleartext allowance or new permission is added. Real Android 17 API/WebView transport remains to be measured. |
+| Sensitive UI | Authentication and hosted verification already use `FLAG_SECURE`; no deprecated content-capture opt-out replaces it. Test Android 17 recreation, keyboard and large-screen behavior before claiming qualification. |
+| Background work and Provider | Workers remain bounded, with existing request/consent/recovery gates. The documented CP2 changes concern Contacts rather than Calendar Provider. Android 17 scheduling, permissions and recovery still need device coverage. |
+| Other platform changes | No application use of MessageQueue reflection, final-field mutation, LAN discovery, SMS, RemoteViews, audio or Bluetooth was found. Memory-limit behavior remains unmeasured. |
+
+Build, host and enrolled API 35 device evidence is in [validation](VALIDATION.md).
+It does not establish Android 17 runtime compatibility. Do not weaken platform
+security or synchronization guarantees to make a future qualification pass.
+
 ## Remaining release gates
 
 | Gate | Required evidence or decision |

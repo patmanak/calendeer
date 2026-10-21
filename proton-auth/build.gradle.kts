@@ -6,7 +6,7 @@ plugins {
 }
 android {
     namespace = "com.patmanak.proton.andcalendarbridge.protonauth"
-    compileSdk = 36
+    compileSdk = 37
     defaultConfig { minSdk = 31 }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17

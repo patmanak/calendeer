@@ -1,5 +1,47 @@
 # Validation
 
+## SDK 37 migration
+
+Both Android modules compile against API 37; the app targets 37 and retains
+minimum API 31. The local platform is stable Android 37.0 revision 2. AGP 9.2.1,
+Gradle 9.4.1, Build Tools 36.0.0, Kotlin/Compose 2.4.21 and KSP 2.3.12 remain
+unchanged. CI installs `platforms;android-37.0`; its remote JDK 17 job has not
+been run. Local builds use JBR 21.0.10 with Java bytecode target 17.
+No application-code, dependency-lock, checksum, Room-schema or security-override
+change is required. The static compatibility review and remaining platform
+coverage are in [build security](BUILD_SECURITY.md#android-api-37-baseline).
+
+PASS: all 1,483 host cases (427 domain, 20 authentication, 844 backend, 192 app),
+without failures, errors or skips. The full task graph builds debug app/test and
+unsigned release APKs and runs host suites/lint offline with strict dependency
+verification, without lock/checksum update flags. Resolved Kotlin/Compose/KSP
+classpath assertions also pass. Local build destinations are isolated while
+using the normal sources and task list. Final lint reports zero errors and nine
+`UseKtx` warnings; both SDK-age hints are gone. The checked synchronous
+`commit()` results remain unchanged, with no suppression or severity override.
+
+PASS: all 145 selected physical cases after installing the SDK 37-targeting APKs
+on the enrolled Android 15/API 35 device, without failures or skips. This repeats
+the bounded synchronization, SQL/migration, consent, native crypto/parser and
+authentication UI/retained-startup selection described below. These controlled
+fixtures qualify backward regression coverage; they do not exercise Android 17
+behavior or new live-service transport paths.
+
+PASS: compiled debug/release manifests declare compile/target API 37 and minimum
+31, retain backup/cleartext exclusions and exported service/receiver permission
+gates, and reference the same eight packaged app languages. Both APKs pass
+`zipalign -c -P 16 4`. All six packaged ARM64/x86_64 libraries in each APK have
+16 KiB-aligned LOAD segments. Rounded RELRO protection does not overlap writable
+data outside RELRO, including the [separate-LOAD case](https://developer.android.com/guide/practices/page-sizes#check-relro).
+This static check covers 12 packaged library copies; it does not qualify runtime
+page-size assumptions on a 16 KiB device. No RELRO or loader bypass is added.
+
+PASS: workflow validation and the advisory lookup on the unchanged 571 Maven
+name/version pairs (`NO_MATCHES`, exit 0). The SDK platform is outside this Maven
+inventory. Android 17 runtime/16 KiB testing remains **NOT RUN**, including native
+startup, real HTTPS and hosted verification, Provider/permissions, scheduling and
+recovery, rotation/keyboard, large screens and memory limits.
+
 ## Generated application language configuration
 
 AGP now generates the application locale configuration from resources, with
