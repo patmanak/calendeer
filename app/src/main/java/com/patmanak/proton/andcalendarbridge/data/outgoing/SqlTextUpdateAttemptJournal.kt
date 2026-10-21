@@ -5,8 +5,6 @@ import android.database.sqlite.SQLiteDatabase
 import com.patmanak.proton.andcalendarbridge.data.serialization.TextUpdateAttemptStorageCodec
 import com.patmanak.proton.andcalendarbridge.data.serialization.TextUpdateProofStorageCodec
 import com.patmanak.proton.andcalendarbridge.sync.*
-import java.nio.CharBuffer
-import java.nio.charset.CodingErrorAction
 import kotlinx.coroutines.*
 
 /** The helper owns its mutex and connection. Neither callback may suspend or re-enter a helper. */
@@ -31,11 +29,11 @@ internal class SqlTextUpdateAttemptJournal(
         return access(frozen.record.scope, admit, false) { db, check -> TextUpdateAttemptSql(db, check).retainVerified(frozen, capsule) }
     }
     override suspend fun readVerified(scope: CalendarScope, id: MutationId, admit: (CalendarScope) -> Boolean): TextUpdateVerifiedResult? {
-        currentCoroutineContext().ensureActive(); reference(scope, id)
+        currentCoroutineContext().ensureActive(); requireAttemptJournalReference(scope, id, LocalTextEditPreparation.MAX_CONTEXT_BYTES)
         return access(scope, admit, null) { db, check -> TextUpdateAttemptSql(db, check).readVerified(scope, id) }
     }
     override suspend fun readCompletion(scope: CalendarScope, id: MutationId, admit: (CalendarScope) -> Boolean): TextUpdateCompletion? {
-        currentCoroutineContext().ensureActive(); reference(scope, id)
+        currentCoroutineContext().ensureActive(); requireAttemptJournalReference(scope, id, LocalTextEditPreparation.MAX_CONTEXT_BYTES)
         return access(scope, admit, null) { db, check -> TextUpdateAttemptSql(db, check).readCompletion(scope, id) }
     }
     override suspend fun retainCompletion(completion: TextUpdateCompletion, admit: (CalendarScope) -> Boolean): Boolean {
@@ -56,7 +54,7 @@ internal class SqlTextUpdateAttemptJournal(
     }
     override suspend fun read(scope: CalendarScope, id: MutationId, admit: (CalendarScope) -> Boolean): TextUpdateAttemptRecord? {
         currentCoroutineContext().ensureActive()
-        reference(scope, id)
+        requireAttemptJournalReference(scope, id, LocalTextEditPreparation.MAX_CONTEXT_BYTES)
         return access(scope, admit, null) { db, check -> TextUpdateAttemptSql(db, check).read(scope, id) }
     }
     override suspend fun claim(expected: TextUpdateAttemptRecord, admit: (CalendarScope) -> Boolean): Boolean {
@@ -81,14 +79,6 @@ internal class SqlTextUpdateAttemptJournal(
         }
     }
 
-    private fun reference(scope: CalendarScope, id: MutationId) {
-        for (value in listOf(scope.account.value, scope.calendar.value, id.value)) {
-            require(value.isNotBlank() && value.length <= LocalTextEditPreparation.MAX_CONTEXT_BYTES)
-            require(Charsets.UTF_8.newEncoder().onMalformedInput(CodingErrorAction.REPORT)
-                .onUnmappableCharacter(CodingErrorAction.REPORT).encode(CharBuffer.wrap(value)).remaining() <=
-                LocalTextEditPreparation.MAX_CONTEXT_BYTES)
-        }
-    }
     private suspend fun <T> access(scope: CalendarScope, admit: (CalendarScope) -> Boolean, denied: T,
         action: (SQLiteDatabase, () -> Unit) -> T): T =
         attemptJournalTransaction(database, scope, admit, denied, "Invalid text update journal", action)

@@ -5,8 +5,6 @@ import android.database.sqlite.SQLiteDatabase
 import com.patmanak.proton.andcalendarbridge.data.serialization.DeleteAttemptStorageCodec
 import com.patmanak.proton.andcalendarbridge.data.serialization.DeleteProofStorageCodec
 import com.patmanak.proton.andcalendarbridge.sync.*
-import java.nio.CharBuffer
-import java.nio.charset.CodingErrorAction
 import kotlinx.coroutines.*
 
 /** The helper owns its mutex and connection. Neither callback may suspend or re-enter a helper. */
@@ -31,11 +29,11 @@ internal class SqlDeleteAttemptJournal(
         return access(frozen.record.scope, admit, false) { db, check -> DeleteAttemptSql(db, check).retainVerified(frozen, capsule) }
     }
     override suspend fun readVerified(scope: CalendarScope, id: MutationId, admit: (CalendarScope) -> Boolean): DeleteVerifiedResult? {
-        currentCoroutineContext().ensureActive(); reference(scope, id)
+        currentCoroutineContext().ensureActive(); requireAttemptJournalReference(scope, id, 4096)
         return access(scope, admit, null) { db, check -> DeleteAttemptSql(db, check).readVerified(scope, id) }
     }
     override suspend fun readCompletion(scope: CalendarScope, id: MutationId, admit: (CalendarScope) -> Boolean): DeleteCompletion? {
-        currentCoroutineContext().ensureActive(); reference(scope, id)
+        currentCoroutineContext().ensureActive(); requireAttemptJournalReference(scope, id, 4096)
         return access(scope, admit, null) { db, check -> DeleteAttemptSql(db, check).readCompletion(scope, id) }
     }
     override suspend fun retainCompletion(completion: DeleteCompletion, admit: (CalendarScope) -> Boolean): Boolean {
@@ -56,7 +54,7 @@ internal class SqlDeleteAttemptJournal(
     }
     override suspend fun read(scope: CalendarScope, id: MutationId, admit: (CalendarScope) -> Boolean): DeleteAttemptRecord? {
         currentCoroutineContext().ensureActive()
-        reference(scope, id)
+        requireAttemptJournalReference(scope, id, 4096)
         return access(scope, admit, null) { db, check -> DeleteAttemptSql(db, check).read(scope, id) }
     }
     override suspend fun claim(expected: DeleteAttemptRecord, admit: (CalendarScope) -> Boolean): Boolean {
@@ -81,14 +79,6 @@ internal class SqlDeleteAttemptJournal(
         }
     }
 
-    private fun reference(scope: CalendarScope, id: MutationId) {
-        for (value in listOf(scope.account.value, scope.calendar.value, id.value)) {
-            require(value.isNotBlank() && value.length <= 4096)
-            require(Charsets.UTF_8.newEncoder().onMalformedInput(CodingErrorAction.REPORT)
-                .onUnmappableCharacter(CodingErrorAction.REPORT).encode(CharBuffer.wrap(value)).remaining() <=
-                4096)
-        }
-    }
     private suspend fun <T> access(scope: CalendarScope, admit: (CalendarScope) -> Boolean, denied: T,
         action: (SQLiteDatabase, () -> Unit) -> T): T =
         attemptJournalTransaction(database, scope, admit, denied, "Invalid delete journal", action)

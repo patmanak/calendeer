@@ -1,5 +1,32 @@
 # Validation
 
+## Shared journal lookup reference validation
+
+Text, time and deletion journals share the identical account/calendar/mutation
+lookup guard in their existing common journal code. Each supplies its original
+context budget. The nine calls preserve cancellation before validation and
+validation before SQL; character and encoded-byte bounds, strict UTF-8 and
+exception behavior are unchanged. No identity normalization, schema, class or
+interface is introduced. Transaction/admission and typed codecs remain separate.
+
+PASS: mechanical comparison reconstructs all three original validators with
+their family-specific constants and the complete journal/transaction sources
+apart from delegation and imports. Independent review finds no correctness defect.
+
+PASS: all 199 app JVM cases, including three new lookup-boundary cases. They
+test each identity field at 4096 UTF-8 bytes with ASCII, accents and supplementary
+Unicode, reject oversized values even below the character limit and reject
+unpaired UTF-16 surrogates without replacement. All 32 selected physical SQL
+cases pass on the enrolled API 35 target with new debug app/test APKs: text
+attempt (12), shared time ownership (10) and deletion attempt (10). No failures,
+errors or skips are reported. These isolated fixtures add no Provider, service,
+OEM, Android 17 or 16 KiB runtime qualification. The static native gate passes
+on both new APKs, covering 12 packaged ARM64/x86_64 library copies.
+
+PASS: debug app/test and unsigned release APK builds and lint, offline with
+strict dependency verification and resolved Kotlin/Compose/KSP assertions.
+Lint retains zero errors and nine existing `UseKtx` warnings, without suppression.
+
 ## Shared bounded attempt metadata
 
 The existing `BoundedAttemptBlobReader` owns the identical metadata query and

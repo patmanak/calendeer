@@ -3,7 +3,20 @@ package com.patmanak.proton.andcalendarbridge.data.outgoing
 
 import android.database.sqlite.SQLiteDatabase
 import com.patmanak.proton.andcalendarbridge.sync.CalendarScope
+import com.patmanak.proton.andcalendarbridge.sync.MutationId
+import java.nio.CharBuffer
+import java.nio.charset.CodingErrorAction
 import kotlinx.coroutines.*
+
+/** Validate lookup identity before entering SQL; each journal supplies its own context budget. */
+internal fun requireAttemptJournalReference(scope: CalendarScope, id: MutationId, maxContextBytes: Int) {
+    for (value in listOf(scope.account.value, scope.calendar.value, id.value)) {
+        require(value.isNotBlank() && value.length <= maxContextBytes)
+        require(Charsets.UTF_8.newEncoder().onMalformedInput(CodingErrorAction.REPORT)
+            .onUnmappableCharacter(CodingErrorAction.REPORT).encode(CharBuffer.wrap(value)).remaining() <=
+            maxContextBytes)
+    }
+}
 
 /** The helper owns the connection/mutex; callbacks cannot suspend or re-enter it. */
 internal interface AttemptJournalDatabase {
