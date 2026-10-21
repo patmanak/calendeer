@@ -18,7 +18,10 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     buildFeatures { compose = true }
-    androidResources { localeFilters += listOf("en", "fr", "de", "es", "it", "nl", "pl", "pt") }
+    androidResources {
+        generateLocaleConfig = true
+        localeFilters += listOf("en", "fr", "de", "es", "it", "nl", "pl", "pt")
+    }
     bundle { language { enableSplit = false } }
     buildTypes { release { isMinifyEnabled = false } }
 }

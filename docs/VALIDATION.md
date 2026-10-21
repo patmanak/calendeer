@@ -1,5 +1,35 @@
 # Validation
 
+## Generated application language configuration
+
+AGP now generates the application locale configuration from resources, with
+English as the unqualified-resource locale and the existing eight-language filter.
+The duplicate handwritten XML list and source-manifest reference are removed;
+the generated manifest still declares app languages for Android 13+. The Android
+12/12L in-app language path is unchanged. This follows Android's
+[automatic per-app language support](https://developer.android.com/guide/topics/resources/app-languages#auto-per-app-languages).
+No lint suppression, baseline, severity override or dependency change is added.
+
+PASS: the 192 app JVM cases, without failures, errors or skips, and debug app/test
+and unsigned release APK builds with offline strict dependency verification.
+Structural checks compare all generated locale variants and the compiled XML in
+both APKs against the previous eight-language declaration and the in-app picker.
+They also verify the packaged manifest's locale reference, unchanged SDK levels,
+backup/cleartext exclusions and exported service/receiver permission gates.
+This resource/configuration change does not rerun physical-device or live-service
+journeys; their previous measured scope remains below.
+
+Final offline lint reports zero errors and 11 warnings, down from 12:
+the manual manifest's `UnusedAttribute` finding is gone. Nine `UseKtx` suggestions
+remain because these consent, cursor and identity writes check the synchronous
+`Editor.commit()` result. The [AndroidX edit extension](https://github.com/androidx/androidx/blob/androidx-main/core/core/src/main/java/androidx/core/content/SharedPreferences.kt)
+returns `Unit`, including with `commit = true`, so a direct replacement would
+discard failure evidence. These calls remain unchanged. The other two warnings
+recommend newer compile/target SDKs; both remain at the qualified API 36 baseline.
+The [Android 17 target behavior changes](https://developer.android.com/about/versions/17/behavior-changes-17)
+require separate qualification, including native loading, authentication and
+background work. Compiler/plugin security updates remain in effect.
+
 ## Patched Kotlin build chain
 
 Kotlin/KGP and the Compose compiler plugin are upgraded to 2.4.21, with KSP
