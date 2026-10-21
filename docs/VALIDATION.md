@@ -1,5 +1,36 @@
 # Validation
 
+## Recurrence dependency SQL boundary
+
+Five recurrence membership/dependency SQL methods and their state types move
+from `ImportStore` into the stateless internal `ImportSeriesSql`, removing 67
+net lines from the store. Three repeated master-role checks share one UID
+lookup; the membership record stays private. The caller retains its connection,
+transactions and admission. No schema, interface or remote protocol changes.
+
+PASS: mechanical comparison proves the five method bodies and SQL unchanged
+apart from visibility, and reconstructs the rest of the store with only imports
+and the three equivalent lookup substitutions. Deferred masters remain unknown;
+inactive parents, recurrence identity/kind checks, duplicate-master rejection,
+retained tombstone associations, local edits and pending-state guards are
+preserved. Independent source review finds no correctness defect.
+
+PASS: all 199 app JVM cases and all 23 selected physical cases, without failures,
+errors or skips. The physical selection comprises recurrence store (9),
+recurrence coordinator (5), staged store (8) and the text acknowledgement case
+for a missing/inactive recurrence parent (1). Controlled fixtures cover parent
+dependency handling, deferred replacements, deletion, rollback, reopening,
+admission and acknowledgement gates on the enrolled API 35 target with new
+debug app/test APKs. Coordinator cases use the real Android Provider with a
+synthetic remote; these checks add no live-service, OEM, Android 17 or 16 KiB
+runtime qualification.
+
+PASS: debug app/test and unsigned release APK builds and lint, offline with
+strict dependency verification and resolved Kotlin/Compose/KSP assertions.
+Lint retains zero errors and nine existing `UseKtx` warnings, without suppression.
+The static native gate passes on both new APKs, covering 12 packaged ARM64/x86_64
+library copies.
+
 ## Shared journal lookup reference validation
 
 Text, time and deletion journals share the identical account/calendar/mutation

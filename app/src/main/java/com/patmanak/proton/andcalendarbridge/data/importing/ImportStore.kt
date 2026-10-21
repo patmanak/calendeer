@@ -16,6 +16,12 @@ import com.patmanak.proton.andcalendarbridge.data.importing.ImportPayloadCodec.e
 import com.patmanak.proton.andcalendarbridge.data.importing.ImportPayloadCodec.decodeCoverage
 import com.patmanak.proton.andcalendarbridge.data.importing.ImportPayloadCodec.key
 import com.patmanak.proton.andcalendarbridge.data.importing.ImportPayloadCodec.requirePreparationSnapshotBudget
+import com.patmanak.proton.andcalendarbridge.data.importing.ImportSeriesSql.MasterState
+import com.patmanak.proton.andcalendarbridge.data.importing.ImportSeriesSql.masterStates
+import com.patmanak.proton.andcalendarbridge.data.importing.ImportSeriesSql.masterUid
+import com.patmanak.proton.andcalendarbridge.data.importing.ImportSeriesSql.requeueSeriesChildren
+import com.patmanak.proton.andcalendarbridge.data.importing.ImportSeriesSql.suppressInactiveChildren
+import com.patmanak.proton.andcalendarbridge.data.importing.ImportSeriesSql.updateSeries
 import com.patmanak.proton.andcalendarbridge.data.importing.ImportSqlValues.archiveString
 import com.patmanak.proton.andcalendarbridge.data.importing.ImportSqlValues.archiveText
 import com.patmanak.proton.andcalendarbridge.data.importing.ImportSqlValues.stagedQuery
@@ -323,7 +329,7 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
     }
     suspend fun deletedSeriesUid(scope: CalendarScope, eventId: EventId): String? = access { db ->
         requireKnown(db, scope)
-        seriesMember(db, scope, eventId)?.takeIf { it.role == "master" }?.uid
+        masterUid(db, scope, eventId)
     }
     /** Latest imported stable snapshot for identity reconciliation, never the earlier CREATE content.
      * Deferred/pending/deleted work cannot prove a settled Android projection. No writes occur here.
@@ -2671,79 +2677,6 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
     private fun countPending(db: SQLiteDatabase, scope: CalendarScope): Int = db.rawQuery(
         "SELECT COUNT(*) FROM records r WHERE scope=? AND pending IN (1,2) AND NOT EXISTS (SELECT 1 FROM local_edits l WHERE l.scope=r.scope AND l.event=r.event)", arrayOf(key(scope)),
     ).use { check(it.moveToFirst()); it.getInt(0) }
-    private data class SeriesMember(val uid: String, val role: String)
-    private enum class MasterState {
-        INACTIVE, ALL_DAY, TIMED;
-        fun accepts(original: RecurrencePoint?): Boolean = when (this) {
-            INACTIVE -> false
-            ALL_DAY -> original is RecurrencePoint.AllDay
-            TIMED -> original is RecurrencePoint.Timed
-        }
-    }
-    private fun seriesMember(db: SQLiteDatabase, scope: CalendarScope, eventId: EventId): SeriesMember? =
-        db.rawQuery("SELECT uid,role FROM series_members WHERE scope=? AND event=?", arrayOf(key(scope), eventId.value)).use {
-            if (it.moveToFirst()) SeriesMember(it.getString(0), it.getString(1)) else null
-        }
-    /** Deferred parent contents cannot establish a usable dependency, even with a cached old copy. */
-    private fun masterStates(db: SQLiteDatabase, scope: CalendarScope): Map<String, MasterState> =
-        db.rawQuery("SELECT s.uid,r.payload,EXISTS(SELECT 1 FROM deferred_events d WHERE d.scope=s.scope AND d.event=s.event) FROM series_members s JOIN records r ON r.scope=s.scope AND r.event=s.event WHERE s.scope=? AND s.role='master'", arrayOf(key(scope))).use { cursor ->
-            buildMap {
-                val unusable = mutableSetOf<String>()
-                while (cursor.moveToNext()) {
-                    val uid = cursor.getString(0)
-                    if (cursor.getInt(2) != 0) { unusable.add(uid); continue }
-                    val content = (decodeChange(cursor.getString(1)) as? RemoteChange.Upsert)?.content
-                    val recurrence = content?.recurrence
-                    val active = recurrence != null && recurrence.isMaster && recurrence.uid == uid
-                    if (active) put(uid, if (content!!.time is EventTime.AllDay) MasterState.ALL_DAY else MasterState.TIMED)
-                    else if (uid !in this) put(uid, MasterState.INACTIVE)
-                }
-                // An older inactive association must not turn an unusable new parent into a deletion.
-                unusable.forEach { uid -> if (get(uid) == MasterState.INACTIVE) remove(uid) }
-            }
-        }
-    private fun suppressInactiveChildren(db: SQLiteDatabase, scope: CalendarScope) {
-        val masters = masterStates(db, scope)
-        db.rawQuery("SELECT r.event,r.payload FROM records r JOIN series_members s ON s.scope=r.scope AND s.event=r.event WHERE r.scope=? AND r.pending=1 AND s.role='exception'", arrayOf(key(scope))).use { cursor ->
-            while (cursor.moveToNext()) {
-                val recurrence = (decodeChange(cursor.getString(1)) as? RemoteChange.Upsert)?.content?.recurrence
-                if (recurrence != null && !recurrence.isMaster && masters[recurrence.uid] == MasterState.INACTIVE)
-                    db.update("records", ContentValues().apply { put("pending", 0) }, "scope=? AND event=?", arrayOf(key(scope), cursor.getString(0)))
-            }
-        }
-    }
-    private fun updateSeries(db: SQLiteDatabase, scope: CalendarScope, change: RemoteChange) {
-        val previous = seriesMember(db, scope, change.eventId)
-        val recurrence = (change as? RemoteChange.Upsert)?.content?.recurrence
-        if (recurrence != null) {
-            val role = if (recurrence.isMaster) "master" else "exception"
-            require(previous == null || previous == SeriesMember(recurrence.uid, role)) { "Recurrence identity changed" }
-            if (recurrence.isMaster) db.rawQuery("SELECT r.payload FROM series_members s JOIN records r ON r.scope=s.scope AND r.event=s.event WHERE s.scope=? AND s.uid=? AND s.role='master' AND s.event<>?",
-                arrayOf(key(scope), recurrence.uid, change.eventId.value)).use { cursor ->
-                while (cursor.moveToNext()) {
-                    val other = (decodeChange(cursor.getString(0)) as? RemoteChange.Upsert)?.content?.recurrence
-                    require(other == null || !other.isMaster || other.uid != recurrence.uid) { "Ambiguous recurrence master" }
-                }
-            }
-            db.insertWithOnConflict("series_members", null, ContentValues().apply {
-                put("scope", key(scope)); put("event", change.eventId.value); put("uid", recurrence.uid); put("role", role)
-            }, SQLiteDatabase.CONFLICT_REPLACE).also { check(it != -1L) }
-        } else if (change is RemoteChange.Upsert && previous?.role == "exception") {
-            db.delete("series_members", "scope=? AND event=?", arrayOf(key(scope), change.eventId.value))
-        }
-        // Deleted records retain the association. A master becoming simple does too.
-    }
-    private fun requeueSeriesChildren(db: SQLiteDatabase, scope: CalendarScope, uid: String) {
-        val state = masterStates(db, scope)[uid] ?: return
-        db.rawQuery("SELECT r.event,r.payload FROM records r JOIN series_members s ON s.scope=r.scope AND s.event=r.event WHERE r.scope=? AND s.uid=? AND s.role='exception' AND NOT EXISTS (SELECT 1 FROM deferred_events d WHERE d.scope=r.scope AND d.event=r.event) AND NOT EXISTS (SELECT 1 FROM local_edits l WHERE l.scope=r.scope AND l.event=r.event)", arrayOf(key(scope), uid)).use { cursor ->
-            while (cursor.moveToNext()) {
-                val recurrence = (decodeChange(cursor.getString(1)) as? RemoteChange.Upsert)?.content?.recurrence
-                if (recurrence != null && !recurrence.isMaster)
-                    db.update("records", ContentValues().apply { put("pending", if (state != MasterState.INACTIVE) 1 else 0) },
-                        "scope=? AND event=? AND pending<>2", arrayOf(key(scope), cursor.getString(0)))
-            }
-        }
-    }
     private fun countUnverified(db: SQLiteDatabase, scope: CalendarScope): Int = db.rawQuery(
         "SELECT COUNT(*) FROM deferred_events WHERE scope=? AND reason=?",
         arrayOf(key(scope), DeferredEventReason.UNVERIFIED_CONTENT.name),
@@ -2945,8 +2878,8 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
                 }
                 override fun clearDeferred(eventId: EventId) {
                     val removed = db.delete("deferred_events", "scope=? AND event=?", arrayOf(key(scope), eventId.value))
-                    if (removed != 0) seriesMember(db, scope, eventId)?.takeIf { it.role == "master" }?.let {
-                        requeueSeriesChildren(db, scope, it.uid)
+                    if (removed != 0) masterUid(db, scope, eventId)?.let {
+                        requeueSeriesChildren(db, scope, it)
                     }
                 }
                 override fun deferred(eventId: EventId): DeferredCalendarEvent? = stagedQuery(db,
@@ -2987,8 +2920,8 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
                     }
                     archive?.let { conflicts(db).append(it, ConflictObservationKind.VERIFIED, ConflictObservationOrigin.RECEIVED,
                         conflicts(db).currentFormat(scope), change.revision, null, encodeChange(change)) }
-                    seriesMember(db, scope, change.eventId)?.takeIf { it.role == "master" }?.let {
-                        requeueSeriesChildren(db, scope, it.uid)
+                    masterUid(db, scope, change.eventId)?.let {
+                        requeueSeriesChildren(db, scope, it)
                     }
                 }
                 override fun hasPendingMutation(eventId: EventId) = hasLocalMutation(db, scope, eventId)
