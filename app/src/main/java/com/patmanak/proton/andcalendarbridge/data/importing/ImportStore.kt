@@ -1283,7 +1283,7 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
             val owner = editAcknowledgementOwner(db, scope, event)
             val historicalAdmission = owner == proposed.intent &&
                 localTextPreparationAdmission(db, proposed.intent) == LocalTextPreparationAdmission.HISTORICAL
-            if (!historicalAdmission && !exactTextResultEcho(db, proposed, owner))
+            if (!historicalAdmission && !exactUpdateResultEcho(db, proposed.intent, proposed.projection, owner))
                 return@guardedEditMutation null
             val preparation = readLocalTextEditPreparation(db, scope, event) ?: return@guardedEditMutation null
             if (!sameTextPreparation(preparation, frozen.record.preparation) || !proposed.attempt.matchesPreparation(preparation))
@@ -1334,7 +1334,7 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
             if (readBaseline(db, scope, event) != intent.base) return@guardedEditMutation false
             // The native ACK is now proven. Retire only a still-redundant ordinary
             // plan, atomically with baseline/owner restoration; never claim its apply succeeded.
-            if (receipt.handoff == null) retireRedundantTextProjection(db, receipt)
+            if (receipt.handoff == null) retireRedundantUpdateProjection(db, receipt.intent, receipt.handoff)
             val oldBase = encodeChange(intent.base)
             val newBase = encodeChange(receipt.projection.change)
             val local = encodeChange(intent.base.copy(content = intent.content))
@@ -1401,13 +1401,14 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
         }
     }
 
-    private fun ordinaryTextAcknowledgement(db: SQLiteDatabase, receipt: TextUpdateAcknowledgementReceipt): Boolean {
-        val scope = receipt.intent.scope
-        val event = receipt.intent.base.eventId
+    private fun ordinaryUpdateAcknowledgement(db: SQLiteDatabase, intent: LocalEditIntent,
+        handoff: CapturedCreateHandoffFrame?): Boolean {
+        val scope = intent.scope
+        val event = intent.base.eventId
         if (listOf("captured_create_bases", "captured_create_acknowledgements", "captured_create_handoffs")
             .any { hasRawEventRow(db, it, scope, event) }) return false
         val pending = readProjectionReceipt(db, scope, event) ?: return true
-        return redundantUpdateProjection(pending, receipt.intent, receipt.handoff)
+        return redundantUpdateProjection(pending, intent, handoff)
     }
 
     /** A dirty edit can interrupt a tracked no-change projection after preparation.
@@ -1420,21 +1421,22 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
             pending.format == intent.format && pending.change == intent.base &&
             pending.previousBase == intent.base && pending.representation == null && pending.previousRepresentation == null
 
-    private fun retireRedundantTextProjection(db: SQLiteDatabase, receipt: TextUpdateAcknowledgementReceipt) {
-        val pending = readProjectionReceipt(db, receipt.intent.scope, receipt.intent.base.eventId) ?: return
-        check(redundantUpdateProjection(pending, receipt.intent, receipt.handoff)) { "Text projection obligation changed" }
+    private fun retireRedundantUpdateProjection(db: SQLiteDatabase, intent: LocalEditIntent,
+        handoff: CapturedCreateHandoffFrame?) {
+        val pending = readProjectionReceipt(db, intent.scope, intent.base.eventId) ?: return
+        check(redundantUpdateProjection(pending, intent, handoff)) { "Update projection obligation changed" }
         check(db.delete("projection_receipts", "scope=? AND event=? AND nonce=? AND payload=? AND adapter=? AND version=? " +
             "AND previous_base=? AND protocol=? AND representation IS NULL AND previous_representation IS NULL",
             arrayOf(key(pending.scope), pending.change.eventId.value, pending.nonce, encodeChange(pending.change),
                 pending.format.id, pending.format.version.toString(), encodeChange(checkNotNull(pending.previousBase)),
-                pending.protocol.toString())) == 1) { "Text projection obligation changed" }
+                pending.protocol.toString())) == 1) { "Update projection obligation changed" }
     }
 
     private fun textAcknowledgementSource(db: SQLiteDatabase, receipt: TextUpdateAcknowledgementReceipt): Boolean {
         val scope = receipt.intent.scope
         val event = receipt.intent.base.eventId
         if (hasForeignLocalPreparation(db, scope, event, "local_text_edit_preparations")) return false
-        val frame = receipt.handoff ?: return ordinaryTextAcknowledgement(db, receipt)
+        val frame = receipt.handoff ?: return ordinaryUpdateAcknowledgement(db, receipt.intent, receipt.handoff)
         if (!activeProjectionScope(db, scope) || !acknowledgementFormatMatches(db, scope, receipt.intent.format) ||
             hasRawEventRow(db, "projection_receipts", scope, event)) return false
         // This reader validates the full immutable origin/PROVEN acknowledgement and current base.
@@ -1455,9 +1457,8 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
      * Source (including the complete handoff frame) and capsule equality are
      * checked by the caller in the same transaction.
      */
-    private fun exactTextResultEcho(db: SQLiteDatabase, receipt: TextUpdateAcknowledgementReceipt,
-        owner: LocalEditIntent?): Boolean {
-        val intent = receipt.intent
+    private fun exactUpdateResultEcho(db: SQLiteDatabase, intent: LocalEditIntent,
+        projection: ProjectionReceipt, owner: LocalEditIntent?): Boolean {
         val scope = intent.scope
         val event = intent.base.eventId
         if (owner?.state != LocalEditState.CONFLICT ||
@@ -1466,7 +1467,7 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
             hasRawEventRow(db, "deferred_events", scope, event)) return false
         val observed = stagedQuery(db, "SELECT payload FROM records WHERE scope=? AND event=?",
             arrayOf(key(scope), event.value)).use { if (it.moveToFirst()) decodeChange(it.getString(0)) else null }
-        return observed == receipt.projection.change
+        return observed == projection.change
     }
 
     private fun directUpdateAcknowledgementBase(db: SQLiteDatabase, scope: CalendarScope, event: EventId): Boolean =
@@ -1721,7 +1722,7 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
             val owner = editAcknowledgementOwner(db, scope, event)
             val historicalAdmission = owner == proposed.intent &&
                 localTimePreparationAdmission(db, proposed.intent) == LocalTimePreparationAdmission.HISTORICAL
-            if (!historicalAdmission && !exactTimeResultEcho(db, proposed, owner))
+            if (!historicalAdmission && !exactUpdateResultEcho(db, proposed.intent, proposed.projection, owner))
                 return@guardedEditMutation null
             val preparation = readLocalTimeEditPreparation(db, scope, event) ?: return@guardedEditMutation null
             if (!sameTimePreparation(preparation, frozen.record.preparation) || !proposed.attempt.matchesPreparation(preparation))
@@ -1772,7 +1773,7 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
             if (readBaseline(db, scope, event) != intent.base) return@guardedEditMutation false
             // The native ACK is now proven. Retire only a still-redundant ordinary
             // plan, atomically with baseline/owner restoration; never claim its apply succeeded.
-            if (receipt.handoff == null) retireRedundantTimeProjection(db, receipt)
+            if (receipt.handoff == null) retireRedundantUpdateProjection(db, receipt.intent, receipt.handoff)
             val oldBase = encodeChange(intent.base)
             val newBase = encodeChange(receipt.projection.change)
             val local = encodeChange(intent.base.copy(content = intent.content))
@@ -1815,55 +1816,17 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
         }
     }
 
-    private fun ordinaryTimeAcknowledgement(db: SQLiteDatabase, receipt: TimeUpdateAcknowledgementReceipt): Boolean {
-        val scope = receipt.intent.scope
-        val event = receipt.intent.base.eventId
-        if (listOf("captured_create_bases", "captured_create_acknowledgements", "captured_create_handoffs")
-            .any { hasRawEventRow(db, it, scope, event) }) return false
-        val pending = readProjectionReceipt(db, scope, event) ?: return true
-        return redundantUpdateProjection(pending, receipt.intent, receipt.handoff)
-    }
-
-    private fun retireRedundantTimeProjection(db: SQLiteDatabase, receipt: TimeUpdateAcknowledgementReceipt) {
-        val pending = readProjectionReceipt(db, receipt.intent.scope, receipt.intent.base.eventId) ?: return
-        check(redundantUpdateProjection(pending, receipt.intent, receipt.handoff)) { "Time projection obligation changed" }
-        check(db.delete("projection_receipts", "scope=? AND event=? AND nonce=? AND payload=? AND adapter=? AND version=? " +
-            "AND previous_base=? AND protocol=? AND representation IS NULL AND previous_representation IS NULL",
-            arrayOf(key(pending.scope), pending.change.eventId.value, pending.nonce, encodeChange(pending.change),
-                pending.format.id, pending.format.version.toString(), encodeChange(checkNotNull(pending.previousBase)),
-                pending.protocol.toString())) == 1) { "Time projection obligation changed" }
-    }
-
     private fun timeAcknowledgementSource(db: SQLiteDatabase, receipt: TimeUpdateAcknowledgementReceipt): Boolean {
         val scope = receipt.intent.scope
         val event = receipt.intent.base.eventId
         if (hasForeignLocalPreparation(db, scope, event, "local_time_edit_preparations")) return false
-        val frame = receipt.handoff ?: return ordinaryTimeAcknowledgement(db, receipt)
+        val frame = receipt.handoff ?: return ordinaryUpdateAcknowledgement(db, receipt.intent, receipt.handoff)
         if (!activeProjectionScope(db, scope) || !acknowledgementFormatMatches(db, scope, receipt.intent.format) ||
             hasRawEventRow(db, "projection_receipts", scope, event)) return false
         // This reader validates the full immutable origin/PROVEN acknowledgement and current base.
         // The ordinary handoff clean guard cannot be reused while this exact local intent is held.
         val current = readCapturedHandoff(db, scope, event) ?: return false
         return current.state == CapturedCreateHandoffState.RELEASED && current.waiting && current.frame == frame
-    }
-
-    /** A verified result can be imported before its first ACK receipt is reserved.
-     * Consume only that exact owner/result, never reopen conflict dispatch.
-     * Source (including the complete handoff frame) and capsule equality are
-     * checked by the caller in the same transaction.
-     */
-    private fun exactTimeResultEcho(db: SQLiteDatabase, receipt: TimeUpdateAcknowledgementReceipt,
-        owner: LocalEditIntent?): Boolean {
-        val intent = receipt.intent
-        val scope = intent.scope
-        val event = intent.base.eventId
-        if (owner?.state != LocalEditState.CONFLICT ||
-            owner.copy(state = LocalEditState.PAUSED) != intent || !activeProjectionScope(db, scope) ||
-            !acknowledgementFormatMatches(db, scope, intent.format) || readBaseline(db, scope, event) != intent.base ||
-            hasRawEventRow(db, "deferred_events", scope, event)) return false
-        val observed = stagedQuery(db, "SELECT payload FROM records WHERE scope=? AND event=?",
-            arrayOf(key(scope), event.value)).use { if (it.moveToFirst()) decodeChange(it.getString(0)) else null }
-        return observed == receipt.projection.change
     }
 
     private fun readTimeUpdateAcknowledgement(db: SQLiteDatabase, scope: CalendarScope, event: EventId,
@@ -2158,7 +2121,7 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
             val owner = titleAcknowledgementOwner(db, scope, event)
             val historicalAdmission = owner == proposed.intent &&
                 localTitlePreparationAdmission(db, proposed.intent) == LocalTitlePreparationAdmission.HISTORICAL
-            if (!historicalAdmission && !exactTitleResultEcho(db, proposed, owner))
+            if (!historicalAdmission && !exactUpdateResultEcho(db, proposed.intent, proposed.projection, owner))
                 return@stagingMutation null
             val preparation = readLocalEditPreparation(db, scope, event) ?: return@stagingMutation null
             if (preparation != frozen.record.preparation || !proposed.attempt.matchesPreparation(preparation))
@@ -2207,7 +2170,7 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
             if (readBaseline(db, scope, event) != intent.base) return@stagingMutation false
             // The native ACK is now proven. Retire only a still-redundant ordinary
             // plan, atomically with baseline/owner restoration; never claim its apply succeeded.
-            if (receipt.handoff == null) retireRedundantTitleProjection(db, receipt)
+            if (receipt.handoff == null) retireRedundantUpdateProjection(db, receipt.intent, receipt.handoff)
             val oldBase = encodeChange(intent.base)
             val newBase = encodeChange(receipt.projection.change)
             val local = encodeChange(intent.base.copy(content = intent.content))
@@ -2250,30 +2213,11 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
         }
     }
 
-    private fun ordinaryTitleAcknowledgement(db: SQLiteDatabase, receipt: TitleUpdateAcknowledgementReceipt): Boolean {
-        val scope = receipt.intent.scope
-        val event = receipt.intent.base.eventId
-        if (listOf("captured_create_bases", "captured_create_acknowledgements", "captured_create_handoffs")
-            .any { hasRawEventRow(db, it, scope, event) }) return false
-        val pending = readProjectionReceipt(db, scope, event) ?: return true
-        return redundantUpdateProjection(pending, receipt.intent, receipt.handoff)
-    }
-
-    private fun retireRedundantTitleProjection(db: SQLiteDatabase, receipt: TitleUpdateAcknowledgementReceipt) {
-        val pending = readProjectionReceipt(db, receipt.intent.scope, receipt.intent.base.eventId) ?: return
-        check(redundantUpdateProjection(pending, receipt.intent, receipt.handoff)) { "Title projection obligation changed" }
-        check(db.delete("projection_receipts", "scope=? AND event=? AND nonce=? AND payload=? AND adapter=? AND version=? " +
-            "AND previous_base=? AND protocol=? AND representation IS NULL AND previous_representation IS NULL",
-            arrayOf(key(pending.scope), pending.change.eventId.value, pending.nonce, encodeChange(pending.change),
-                pending.format.id, pending.format.version.toString(), encodeChange(checkNotNull(pending.previousBase)),
-                pending.protocol.toString())) == 1) { "Title projection obligation changed" }
-    }
-
     private fun titleAcknowledgementSource(db: SQLiteDatabase, receipt: TitleUpdateAcknowledgementReceipt): Boolean {
         val scope = receipt.intent.scope
         val event = receipt.intent.base.eventId
         if (hasForeignLocalPreparation(db, scope, event, "local_edit_preparations")) return false
-        val frame = receipt.handoff ?: return ordinaryTitleAcknowledgement(db, receipt)
+        val frame = receipt.handoff ?: return ordinaryUpdateAcknowledgement(db, receipt.intent, receipt.handoff)
         if (!activeProjectionScope(db, scope) || !acknowledgementFormatMatches(db, scope, receipt.intent.format) ||
             hasRawEventRow(db, "projection_receipts", scope, event)) return false
         // This reader validates the full immutable origin/PROVEN acknowledgement and current base.
@@ -2286,25 +2230,6 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
         val update = db.rawQuery("SELECT 1 FROM local_edits WHERE scope=? AND event=? AND kind='UPDATE'",
             arrayOf(key(scope), event.value)).use { it.moveToFirst() }
         return if (update) readPreparationOwner(db, scope, event) else null
-    }
-
-    /** A verified result can be imported before its first ACK receipt is reserved.
-     * Consume only that exact owner/result, never reopen conflict dispatch.
-     * Source (including the complete handoff frame) and capsule equality are
-     * checked by the caller in the same transaction.
-     */
-    private fun exactTitleResultEcho(db: SQLiteDatabase, receipt: TitleUpdateAcknowledgementReceipt,
-        owner: LocalEditIntent?): Boolean {
-        val intent = receipt.intent
-        val scope = intent.scope
-        val event = intent.base.eventId
-        if (owner?.state != LocalEditState.CONFLICT ||
-            owner.copy(state = LocalEditState.PAUSED) != intent || !activeProjectionScope(db, scope) ||
-            !acknowledgementFormatMatches(db, scope, intent.format) || readBaseline(db, scope, event) != intent.base ||
-            hasRawEventRow(db, "deferred_events", scope, event)) return false
-        val observed = stagedQuery(db, "SELECT payload FROM records WHERE scope=? AND event=?",
-            arrayOf(key(scope), event.value)).use { if (it.moveToFirst()) decodeChange(it.getString(0)) else null }
-        return observed == receipt.projection.change
     }
 
     private fun readTitleUpdateAcknowledgement(db: SQLiteDatabase, scope: CalendarScope, event: EventId,

@@ -1,5 +1,35 @@
 # Validation
 
+## Shared projection acknowledgement guards
+
+`ImportStore` shares the identical ordinary-source, redundant-projection
+retirement and exact-result-echo mechanics across title/text/time updates.
+Nine private helpers become three at nine call sites, removing 75 net source
+lines. Callers pass frozen fields from the same typed receipt. Source-specific
+preparation tables, the title owner reader, capsule/result checks and transaction
+boundaries remain unchanged. Projection retirement still requires native proof
+and an exact SQL delete inside baseline/owner restoration. No new type, schema
+or generic lifecycle framework is introduced.
+
+PASS: mechanical comparison reconstructs all nine original bodies and the rest
+of the store, except removed duplicate documentation and the shared projection
+error label. SQL, bindings and guard order are identical. Independent source review
+finds no correctness defect.
+
+PASS: all 192 app JVM cases, without failures, errors or skips. Debug app/test
+and unsigned release APKs build offline with strict dependency verification and
+resolved Kotlin/Compose/KSP assertions. Lint retains zero errors and nine existing
+`UseKtx` warnings, without suppression. The static native gate passes on both new
+APKs, covering 12 packaged ARM64/x86_64 library copies.
+
+PASS: all 102 selected physical cases, without failures or skips: three
+acknowledgement stores (69), captured-create handoff store (15) and 18 targeted
+coordinator/Provider/SQL integration cases. They cover exact/refused echoes,
+redundant/distinct projections, immutable provenance, later edits and native/SQL
+rollback and recovery. The enrolled API 35 target runs the new debug app/test
+APKs using controlled fixtures. No additional live-service, OEM, Android 17 or
+16 KiB runtime qualification is claimed.
+
 ## Shared update acknowledgement checks
 
 `ImportStore` replaces 14 duplicated private acknowledgement helpers with five
