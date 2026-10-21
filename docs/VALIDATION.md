@@ -1,5 +1,35 @@
 # Validation
 
+## Coverage serialization in the existing import codec
+
+Eleven pure coverage encoding/validation methods move from `ImportStore` to
+`ImportPayloadCodec`, removing 84 net lines from the SQL facade. No new class,
+interface or schema is introduced. The four module-local entry points preserve
+their call sites; SQL, transaction and lease boundaries remain unchanged.
+The page schema stays at 1; ledgers still read schemas 1/2 and write schema 2.
+The shared 256 KiB byte budget, 128-window bounds, null handling and progress/
+timestamp/history validation are retained.
+
+PASS: mechanical comparison proves byte-identical method bodies after the four
+visibility changes, with the rest of both production files unchanged apart from
+imports. Independent source review finds no correctness defect.
+
+PASS: all 196 app JVM cases, including four new handwritten JSON compatibility
+and rejection cases. They qualify legacy progress/observation, page encoding,
+invalid plans/schemas/history/timestamps, exact/+1-byte input limits and
+multibyte UTF-8 read/write budgets. All eight selected physical cases pass:
+seven isolated coverage-store cases and one production coordinator/Provider case
+with a synthetic remote. They cover reopening, scoped state, quota/lease rollback,
+legacy migration and receipt/application/projection separation on the enrolled
+API 35 target with new debug app/test APKs. No failures or skips are reported;
+these checks do not add live-service, OEM, Android 17 or 16 KiB runtime coverage.
+
+PASS: debug app/test and unsigned release APK builds and lint, offline with
+strict dependency verification and resolved Kotlin/Compose/KSP assertions.
+Lint retains zero errors and nine existing `UseKtx` warnings, without suppression.
+The static native gate passes on both new APKs, covering 12 packaged ARM64/x86_64
+library copies.
+
 ## Shared attempt work-page SQL
 
 The text, time and deletion journals share one synchronous metadata reader

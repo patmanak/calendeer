@@ -4,6 +4,7 @@ import com.patmanak.proton.andcalendarbridge.sync.*
 import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Test
+import java.time.LocalDate
 import java.time.ZoneId
 
 /** Fixed historical payloads, independent of Android storage and outgoing receipt codecs. */
@@ -47,5 +48,73 @@ class ImportPayloadCodecTest {
     @Test fun unsupportedHistoricalDetailsSchemaFailsClosed() {
         val legacy = """{"id":"fixture","revision":"opaque","deleted":false,"title":"","description":"","location":"","allDay":true,"start":"2030-07-01","end":"2030-07-02","details":{"schema":99,"reminders":[],"attendees":[]}}"""
         assertThrows(IllegalArgumentException::class.java) { ImportPayloadCodec.decodeChange(legacy) }
+    }
+
+    private val intervalJson = """{"start":"2030-07-01","end":"2030-08-01","zone":"UTC"}"""
+    private val finishedRunJson = """{"adapter":"fixture-coverage","version":2,"lastIndex":0,"finished":true,"windows":[{"interval":$intervalJson,"prefixKnown":true,"receivedPages":1,"appliedPages":1,"terminalReceived":true,"terminalApplied":true,"receivedAt":10,"appliedAt":11}]}"""
+    private val interval = CoverageInterval(LocalDate.of(2030, 7, 1), LocalDate.of(2030, 8, 1), ZoneId.of("UTC"))
+
+    @Test fun historicalCoverageSchemasPreserveProgressAndOptionalObservation() {
+        val legacy = """{"schema":1,"epoch":4,"active":null,"previous":$finishedRunJson}"""
+        val decoded = ImportPayloadCodec.decodeCoverage(legacy)
+        assertEquals(4L, decoded.epoch)
+        assertNull(decoded.active); assertNull(decoded.observed)
+        val previous = requireNotNull(decoded.previous)
+        assertTrue(previous.finished)
+        assertEquals(interval, previous.windows.single().interval)
+        val current = JSONObject(legacy).put("schema", 2).put("observed", JSONObject.NULL)
+        assertEquals(current.toString(), ImportPayloadCodec.encodeCoverage(decoded))
+
+        current.put("observed", JSONObject("""{"adapter":"fixture-observation","version":3,"interval":$intervalJson}"""))
+        val observed = ImportPayloadCodec.decodeCoverage(current.toString())
+        assertEquals(CoverageObservation(AdapterFormat("fixture-observation", 3), interval), observed.observed)
+        assertEquals(current.toString(), ImportPayloadCodec.encodeCoverage(observed))
+    }
+
+    @Test fun historicalPageCoverageRetainsEncodingAndPlanValidation() {
+        val legacy = """{"schema":1,"plan":[$intervalJson],"index":0,"starts":true,"finishes":false}"""
+        val decoded = ImportPayloadCodec.decodePageCoverage(legacy)
+        assertEquals(PageCoverage(listOf(interval), 0, true, false), decoded)
+        assertEquals(JSONObject(legacy).toString(), ImportPayloadCodec.encodePageCoverage(decoded))
+        assertThrows(IllegalArgumentException::class.java) {
+            ImportPayloadCodec.decodePageCoverage(JSONObject(legacy).put("schema", 2).toString())
+        }
+        for (plan in listOf("[]", "[$intervalJson,$intervalJson]", "[${List(129) { intervalJson }.joinToString(",")}]")) {
+            assertThrows(IllegalArgumentException::class.java) {
+                ImportPayloadCodec.decodePageCoverage("""{"schema":1,"plan":$plan,"index":0,"starts":true,"finishes":false}""")
+            }
+        }
+    }
+
+    @Test fun coverageBudgetCountsUtf8BytesForBothReadingAndWriting() {
+        val maximum = 256 * 1024
+        val empty = """{"schema":2,"epoch":0,"active":null,"previous":null,"observed":null}"""
+        assertEquals(CoverageLedger(), ImportPayloadCodec.decodeCoverage(empty + " ".repeat(maximum - empty.length)))
+        val multibyte = empty + "é".repeat(maximum / 2)
+        assertTrue(multibyte.length < maximum)
+        for (payload in listOf(empty + " ".repeat(maximum - empty.length + 1), multibyte)) {
+            val failure = assertThrows(IllegalArgumentException::class.java) { ImportPayloadCodec.decodeCoverage(payload) }
+            assertEquals("Coverage payload exceeds limit", failure.message)
+        }
+        val oversized = CoverageLedger(observed = CoverageObservation(AdapterFormat("é".repeat(maximum / 2), 1), interval))
+        val failure = assertThrows(IllegalArgumentException::class.java) { ImportPayloadCodec.encodeCoverage(oversized) }
+        assertEquals("Coverage payload exceeds limit", failure.message)
+    }
+
+    @Test fun unknownCoverageVersionsAndIncompleteHistoryAreRejected() {
+        for (schema in listOf(0, 3)) {
+            assertThrows(IllegalArgumentException::class.java) {
+                ImportPayloadCodec.decodeCoverage("""{"schema":$schema,"epoch":0,"active":null,"previous":null}""")
+            }
+        }
+        val unfinished = JSONObject(finishedRunJson).put("finished", false)
+        assertThrows(IllegalArgumentException::class.java) {
+            ImportPayloadCodec.decodeCoverage("""{"schema":2,"epoch":0,"active":null,"previous":$unfinished}""")
+        }
+        val negativeTimestamp = JSONObject(finishedRunJson)
+        negativeTimestamp.getJSONArray("windows").getJSONObject(0).put("receivedAt", -1)
+        assertThrows(IllegalArgumentException::class.java) {
+            ImportPayloadCodec.decodeCoverage("""{"schema":2,"epoch":0,"active":$negativeTimestamp,"previous":null}""")
+        }
     }
 }

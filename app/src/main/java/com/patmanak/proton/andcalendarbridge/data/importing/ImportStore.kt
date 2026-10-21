@@ -10,9 +10,12 @@ import com.patmanak.proton.andcalendarbridge.data.importing.ImportPayloadCodec.d
 import com.patmanak.proton.andcalendarbridge.data.importing.ImportPayloadCodec.decodeCheckpoint
 import com.patmanak.proton.andcalendarbridge.data.importing.ImportPayloadCodec.encodeChange
 import com.patmanak.proton.andcalendarbridge.data.importing.ImportPayloadCodec.encodeCheckpoint
+import com.patmanak.proton.andcalendarbridge.data.importing.ImportPayloadCodec.encodePageCoverage
+import com.patmanak.proton.andcalendarbridge.data.importing.ImportPayloadCodec.decodePageCoverage
+import com.patmanak.proton.andcalendarbridge.data.importing.ImportPayloadCodec.encodeCoverage
+import com.patmanak.proton.andcalendarbridge.data.importing.ImportPayloadCodec.decodeCoverage
 import com.patmanak.proton.andcalendarbridge.data.importing.ImportPayloadCodec.key
 import com.patmanak.proton.andcalendarbridge.data.importing.ImportPayloadCodec.requirePreparationSnapshotBudget
-import com.patmanak.proton.andcalendarbridge.data.importing.ImportSqlValues.COVERAGE_MAX_BYTES
 import com.patmanak.proton.andcalendarbridge.data.importing.ImportSqlValues.archiveString
 import com.patmanak.proton.andcalendarbridge.data.importing.ImportSqlValues.archiveText
 import com.patmanak.proton.andcalendarbridge.data.importing.ImportSqlValues.stagedQuery
@@ -25,8 +28,6 @@ import com.patmanak.proton.andcalendarbridge.sync.catalog.CalendarSummary
 import java.nio.charset.CodingErrorAction
 import java.time.DateTimeException
 import java.time.Instant
-import java.time.LocalDate
-import java.time.ZoneId
 import java.util.UUID
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -35,7 +36,6 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import org.json.JSONArray
 import org.json.JSONException
 import org.json.JSONObject
 
@@ -2764,90 +2764,6 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
         db.insertWithOnConflict("coverage_state", null, ContentValues().apply {
             put("scope", key(scope)); put("payload", encodeCoverage(value))
         }, SQLiteDatabase.CONFLICT_REPLACE).also { check(it != -1L) { "Could not retain coverage" } }
-    }
-
-    // This schema stores project-owned observations, never adapter cursor internals.
-    private fun intervalJson(value: CoverageInterval) = JSONObject().apply {
-        put("start", value.start.toString()); put("end", value.endExclusive.toString()); put("zone", value.zone.id)
-    }
-    private fun readInterval(value: JSONObject) = CoverageInterval(LocalDate.parse(value.getString("start")),
-        LocalDate.parse(value.getString("end")), ZoneId.of(value.getString("zone")))
-    private fun boundedCoverage(payload: String): String {
-        require(payload.toByteArray(Charsets.UTF_8).size <= COVERAGE_MAX_BYTES) { "Coverage payload exceeds limit" }
-        return payload
-    }
-    private fun coverageJson(payload: String, maximumSchema: Int = 1): JSONObject = JSONObject(boundedCoverage(payload)).also {
-        require(it.getInt("schema") in 1..maximumSchema) { "Unknown coverage schema" }
-    }
-    private fun encodePageCoverage(value: PageCoverage): String = boundedCoverage(JSONObject().apply {
-        put("schema", 1); put("plan", JSONArray(value.plan.map(::intervalJson)))
-        put("index", value.windowIndex); put("starts", value.startsWindow); put("finishes", value.finishesWindow)
-    }.toString())
-    private fun decodePageCoverage(payload: String): PageCoverage = coverageJson(payload).let {
-        val plan = it.getJSONArray("plan")
-        require(plan.length() in 1..128)
-        PageCoverage((0 until plan.length()).map { index -> readInterval(plan.getJSONObject(index)) },
-            it.getInt("index"), it.getBoolean("starts"), it.getBoolean("finishes"))
-    }
-    private fun validateRun(value: CoverageRun) {
-        PageCoverage(value.windows.map { it.interval }, 0, true, false) // Validate disjoint dates and zone.
-        value.windows.forEach {
-            require((it.receivedAt ?: 0) >= 0)
-            require((it.appliedAt ?: 0) >= 0)
-            require(!it.prefixKnown || it.receivedPages > 0)
-            require(!it.terminalReceived || it.receivedPages > 0)
-            require(!it.terminalApplied || it.appliedPages == it.receivedPages)
-            require((it.receivedPages == 0L) == (it.receivedAt == null))
-            require((it.appliedPages == 0L) == (it.appliedAt == null))
-        }
-        require(value.lastIndex >= 0 || value.windows.all { it.receivedPages == 0L })
-        require(!value.finished || value.lastIndex == value.windows.lastIndex && value.windows.last().terminalApplied)
-    }
-    private fun runJson(value: CoverageRun): JSONObject {
-        validateRun(value)
-        return JSONObject().apply {
-            put("adapter", value.format.id); put("version", value.format.version)
-            put("lastIndex", value.lastIndex); put("finished", value.finished)
-            put("windows", JSONArray(value.windows.map { window -> JSONObject().apply {
-                put("interval", intervalJson(window.interval)); put("prefixKnown", window.prefixKnown)
-                put("receivedPages", window.receivedPages); put("appliedPages", window.appliedPages)
-                put("terminalReceived", window.terminalReceived); put("terminalApplied", window.terminalApplied)
-                put("receivedAt", window.receivedAt ?: JSONObject.NULL); put("appliedAt", window.appliedAt ?: JSONObject.NULL)
-            } }))
-        }
-    }
-    private fun readRun(value: JSONObject): CoverageRun {
-        val windows = value.getJSONArray("windows")
-        require(windows.length() in 1..128)
-        return CoverageRun(AdapterFormat(value.getString("adapter"), value.getInt("version")),
-            (0 until windows.length()).map { index -> windows.getJSONObject(index).let {
-                WindowCoverage(readInterval(it.getJSONObject("interval")), it.getBoolean("prefixKnown"),
-                    it.getLong("receivedPages"), it.getLong("appliedPages"), it.getBoolean("terminalReceived"),
-                    it.getBoolean("terminalApplied"), if (it.isNull("receivedAt")) null else it.getLong("receivedAt"),
-                    if (it.isNull("appliedAt")) null else it.getLong("appliedAt"))
-            } }, value.getInt("lastIndex"), value.getBoolean("finished")).also(::validateRun)
-    }
-    private fun encodeCoverage(value: CoverageLedger): String {
-        require(value.previous?.finished != false)
-        return boundedCoverage(JSONObject().apply {
-            put("schema", 2); put("epoch", value.epoch)
-            put("active", value.active?.let(::runJson) ?: JSONObject.NULL)
-            put("previous", value.previous?.let(::runJson) ?: JSONObject.NULL)
-            put("observed", value.observed?.let { observation -> JSONObject().apply {
-                put("adapter", observation.format.id); put("version", observation.format.version)
-                put("interval", intervalJson(observation.interval))
-            } } ?: JSONObject.NULL)
-        }.toString())
-    }
-    private fun decodeCoverage(payload: String): CoverageLedger = coverageJson(payload, maximumSchema = 2).let {
-        CoverageLedger(it.getLong("epoch"), if (it.isNull("active")) null else readRun(it.getJSONObject("active")),
-            if (it.isNull("previous")) null else readRun(it.getJSONObject("previous")),
-            if (it.getInt("schema") == 1 || it.isNull("observed")) null else it.getJSONObject("observed").let { observation ->
-                CoverageObservation(AdapterFormat(observation.getString("adapter"), observation.getInt("version")),
-                    readInterval(observation.getJSONObject("interval")))
-            }).also { ledger ->
-            require(ledger.previous?.finished != false)
-        }
     }
 
     private fun ensureDeltaState(db: SQLiteDatabase, scope: CalendarScope) {
