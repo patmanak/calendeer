@@ -1,5 +1,37 @@
 # Validation
 
+## Shared bounded attempt metadata
+
+The existing `BoundedAttemptBlobReader` owns the identical metadata query and
+strict decoding formerly copied in text, time and deletion SQL readers. Three
+private metadata records become one nested record. Each typed reader still
+supplies its codec's capsule limit, decodes the capsule and compares scope,
+mutation, event and state before accepting it. Transaction, ownership, claim,
+evidence and completion rules remain unchanged; no schema or interface changes.
+
+PASS: mechanical comparison reconstructs all three original query/decoding
+bodies. The remaining typed SQL differs only in delegation, unused imports and
+removal of the redundant database argument at 30 private calls. Every call uses
+the instance connection already bound to the shared reader. Chunk/proof reading
+is byte-identical. SQL types, 4096-byte text limits, nonnegative generations,
+strict UTF-8, uniqueness and cancellation checks are preserved. Independent
+source review finds no correctness defect.
+
+PASS: all 196 app JVM cases and all 57 selected physical SQL cases, without
+failures, errors or skips. The physical selection comprises text attempt (12)
+and proof (19), shared time ownership (10), deletion attempt (10) and deletion
+recovery (6) suites on the enrolled API 35 target with new debug app/test APKs.
+Controlled fixtures cover malformed/oversized metadata and capsules, strict
+UTF-8, metadata/payload disagreement, large chunked reads, reopened immutable
+proofs, cross-family/generation ownership, concurrency, revocation and rollback/
+cancellation. These cases do not add Provider, live-service, OEM, Android 17 or
+16 KiB runtime qualification. The static native gate passes on both new APKs,
+covering 12 packaged ARM64/x86_64 library copies.
+
+PASS: debug app/test and unsigned release APK builds and lint, offline with
+strict dependency verification and resolved Kotlin/Compose/KSP assertions.
+Lint retains zero errors and nine existing `UseKtx` warnings, without suppression.
+
 ## Coverage serialization in the existing import codec
 
 Eleven pure coverage encoding/validation methods move from `ImportStore` to
