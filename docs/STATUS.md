@@ -86,7 +86,15 @@ before a separate-process native/SQL ACK. This is not a measured network failure
 or production-worker interruption during transport. Final restarted replay keeps
 the identical request/result/completion without a new send or native write.
 
-Current host suites pass 427 domain, 20 authentication, 844 backend and 199 app JVM cases without
+An isolated authenticated DELETE also passes actual Wi-Fi loss at the start of
+its HTTP body, followed by a natural socket failure and two fresh-process offline
+UNKNOWN recoveries. After reconnection, authenticated inspection finds the original
+event still present and safely holds the unchanged request without resend or ACK;
+another local replay preserves it. Network settings are restored. This uses the
+evidence-persistence cancellation checkpoint too; production-worker transport loss
+and server-accepted/lost-response interruptions remain unqualified.
+
+Current host suites pass 427 domain, 20 authentication, 852 backend and 199 app JVM cases without
 skips. Physical crypto, SQL/migration, Provider, worker/recovery and option UI
 checks pass; APK builds and app lint pass. Scope-specific evidence and remaining
 qualification are in [validation](VALIDATION.md) and the linked contracts.

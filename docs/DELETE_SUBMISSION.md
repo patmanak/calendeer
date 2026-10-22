@@ -155,5 +155,22 @@ production-worker interruption during transport. Device reboot, power loss,
 every production-worker conflict path, atomic remote preconditions and Samsung/
 One UI remain outside the measured scope.
 Existing retained synthetic events must not be used as disposable fixtures.
+
+The opt-in `NETWORK_INTERRUPTION` journey additionally measures a real socket
+failure after disabling Wi-Fi at the authenticated request-body start. Its debug
+listener binds the exact frozen wire, URL, session, tag/body and call; release
+has no interruption listener. The fixture also cancels the first evidence
+persistence, then runs `UNKNOWN_REPLAY` in two new processes while actually
+offline. After network restoration, `INSPECT` may retain a present original event
+as UNKNOWN with no new send, proof or native ACK. This measured outcome and another
+local replay preserve the original request, pending receipt and dirty tombstone.
+If authenticated inspection instead proves absence, only the normal separately
+restarted ACK/REPLAY path may complete. That alternative is not implied by this
+present-event result. The protected operator must restore the original Wi-Fi,
+mobile-data and airplane settings in `finally`, including on failure; the fixture
+requires a no-SIM, Wi-Fi-only target and changes only Wi-Fi. Partial body upload,
+server acceptance followed by response loss, production-worker transport loss,
+reboot and power loss remain separate qualification cases.
+
 Detailed measured evidence is recorded in [validation](VALIDATION.md); passing fake
 boundaries alone does not qualify the service, Provider, editor or WorkManager.

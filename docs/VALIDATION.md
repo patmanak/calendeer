@@ -1,5 +1,61 @@
 # Validation
 
+## Real DELETE socket loss and UNKNOWN recovery
+
+PASS: six opt-in live phases on the enrolled API 35 target: PREPARE, SEND, two
+fresh-process offline UNKNOWN_REPLAY passes, reconnected INSPECT and another
+fresh-process local UNKNOWN_REPLAY. A new explicitly disposable timed event is
+created on the authorized account and deleted only in its isolated native
+calendar through the system editor before submission. Existing fixtures are
+not reused as disposable events; no account/security settings are changed.
+
+At the authenticated PUT request-body start, the debug listener disables Wi-Fi
+and confirms no INTERNET-capable network before returning to the real transport.
+The same call reports a natural SocketException, with one matched call and body
+start. The measurement requires an in-memory hash of the exact wire opened from
+the frozen protected request, URL, session, one-shot deletion tag/body and authenticated headers.
+It excludes cancellation, timeout, hook failure, synthetic IO and successful calls.
+No response, exception or transport outcome is manufactured by the listener.
+The fixture then separately injects cancellation at the first evidence-persistence
+checkpoint, so the exact UNKNOWN request has no response capsule, proof or ACK.
+This additional persistence interruption is part of the measured scope.
+
+Both actual offline process restarts preserve that request, its only history,
+original pending native receipt, local owner/base and dirty deleted row. The first
+replay witness is retained atomically and is unchanged by the second pass. These
+fixture recovery ports cannot prepare, claim, submit, inspect HTTP or acknowledge.
+After restoring connectivity, authenticated inspection finds the original event
+PRESENT with unchanged qualified context. Production inspection holds it: no
+resend, result, completion, native write or false ACK. A further local process
+restart preserves this same held state. The event and isolated evidence remain
+available for inspection. Original Wi-Fi/mobile-data/airplane settings are verified
+restored; only Wi-Fi is changed, on the no-SIM Wi-Fi-only test target.
+
+PASS: all 55 selected controlled physical regressions, without failure, error or
+skip: deletion attempt store (10), recovery journal (6), native acknowledgement
+Provider (30) and owner gateway (9). The raw runner reports 55 distinct starts
+and successes. These are separate SQL/Provider/controller fixtures, not extra
+live-service interruption profiles.
+
+PASS: 852 backend and 199 app JVM cases, including eight new debug-probe cases
+for exact-wire/session/call binding, another deletion in the same calendar,
+ambiguous headers, repeated entry, closure, cancellation and rejected failure
+categories. Strict offline debug app/test, unsigned release and lint builds pass
+with resolved Kotlin/Compose/KSP assertions. Lint retains zero errors and nine
+existing UseKtx warnings without suppression. Static APK inspection confirms
+release retains both single-dispatch guards and contains none of the debug
+interruption probe/session/observation classes. The release extension is inert;
+TLS, retry, redirect, consent and journal rules stay unchanged. The static native
+gate passes on both APKs, covering 12 packaged library copies. Independent source
+review includes the strengthened exact-wire binding.
+
+This qualifies an isolated authenticated adapter/coordinator journey at request
+body start plus the evidence-persistence interruption. Partial body upload,
+server-accepted/lost-response recovery, production-worker transport loss, reboot,
+power loss, other operation families/OEM and Android 17/16 KiB runtime remain
+unqualified. A still-present original event deliberately stays UNKNOWN; no new
+send identity, resend, invented absence or forced completion closes that state.
+
 ## Audit closeout and volume/interruption baseline
 
 The [closeout](AUDIT_CLOSEOUT.md) separates corrected initial findings from

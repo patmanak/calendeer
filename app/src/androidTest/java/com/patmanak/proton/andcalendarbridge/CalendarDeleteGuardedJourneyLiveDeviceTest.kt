@@ -18,6 +18,8 @@ import com.patmanak.proton.andcalendarbridge.data.serialization.DeleteAttemptSto
 import com.patmanak.proton.andcalendarbridge.data.serialization.DeleteProofStorageCodec
 import com.patmanak.proton.andcalendarbridge.data.serialization.TextUpdateAcknowledgementCodec
 import com.patmanak.proton.andcalendarbridge.protonauth.ProtonDeleteInspectionProbe
+import com.patmanak.proton.andcalendarbridge.protonauth.ProtonDeleteNetworkInterruptionProbe
+import com.patmanak.proton.andcalendarbridge.protonauth.DeleteReadResult
 import com.patmanak.proton.andcalendarbridge.protonauth.ProtonAuthentication
 import com.patmanak.proton.andcalendarbridge.protonauth.ProtonCreateSubmissionProbe
 import com.patmanak.proton.andcalendarbridge.sync.*
@@ -39,7 +41,7 @@ import org.junit.Test
 
 /** Opt-in disposable real-service event, isolated native calendar and persistent journals.
  * Arguments: liveDeleteJourney=true, deleteFixtureToken (12 lowercase hex),
- * deleteAccountHash (SHA-256), deleteJourneyScenario=NORMAL|REMOTE_CONFLICT|EVIDENCE_INTERRUPTION (default NORMAL),
+ * deleteAccountHash (SHA-256), deleteJourneyScenario=NORMAL|REMOTE_CONFLICT|EVIDENCE_INTERRUPTION|NETWORK_INTERRUPTION,
  * deleteJourneyPhase=PREPARE|SEND|LOCAL|INSPECT|ACK|REPLAY|CONFLICT|CONFLICT_REVIEW|CONFLICT_REPLAY.
  * deleteConflictExpectedZone defaults to Z and is frozen during fresh PREPARE; an
  * official-editor zone change must be declared explicitly. CONFLICT_REVIEW audits an
@@ -53,6 +55,9 @@ import org.junit.Test
  * EVIDENCE_INTERRUPTION uses PREPARE, SEND, restarted UNKNOWN_REPLAY, restarted INSPECT,
  * ACK and REPLAY. SEND injects cancellation at evidence persistence after a transport
  * attempt; this proves neither successful remote deletion nor actual network loss.
+ * NETWORK_INTERRUPTION additionally interrupts real Wi-Fi at the authenticated HTTP body's
+ * start and requires a natural socket failure. Its protected driver must restore network
+ * settings. Restarted inspection may hold a still-present original event without resending.
  * Offline sentinels cover this fixture composition, not independent application traffic.
  * No production deletion qualification or user preference is changed. Retain the native
  * tombstone and isolated journals for inspection; the service event is explicitly disposable.
@@ -106,10 +111,11 @@ class CalendarDeleteGuardedJourneyLiveDeviceTest {
         val phase = args.getString("deleteJourneyPhase").orEmpty()
         val scenario = args.getString("deleteJourneyScenario") ?: "NORMAL"
         val conflictScenario = scenario == "REMOTE_CONFLICT"
-        val interruptionScenario = scenario == "EVIDENCE_INTERRUPTION"
+        val networkScenario = scenario == "NETWORK_INTERRUPTION"
+        val interruptionScenario = scenario == "EVIDENCE_INTERRUPTION" || networkScenario
         val expectedConflictZone = ZoneId.of(args.getString("deleteConflictExpectedZone") ?: "Z")
         assertTrue("Require explicit fixture, account and phase", token.matches(Regex("[a-f0-9]{12}")) &&
-            hash.matches(Regex("[a-f0-9]{64}")) && scenario in setOf("NORMAL", "REMOTE_CONFLICT", "EVIDENCE_INTERRUPTION") &&
+            hash.matches(Regex("[a-f0-9]{64}")) && scenario in setOf("NORMAL", "REMOTE_CONFLICT", "EVIDENCE_INTERRUPTION", "NETWORK_INTERRUPTION") &&
             phase in (if (conflictScenario) setOf("PREPARE", "CONFLICT", "CONFLICT_REVIEW", "CONFLICT_REPLAY")
                 else if (interruptionScenario) setOf("PREPARE", "SEND", "UNKNOWN_REPLAY", "INSPECT", "ACK", "REPLAY")
                 else setOf("PREPARE", "SEND", "LOCAL", "INSPECT", "ACK", "REPLAY")))
@@ -338,6 +344,7 @@ class CalendarDeleteGuardedJourneyLiveDeviceTest {
                         var prepares = 0; var sends = 0; var inspections = 0
                         var claims = 0
                         var evidenceCheckpoints = 0
+                        var networkProbe: ProtonDeleteNetworkInterruptionProbe.Handle? = null
                         val interruption = CancellationException("guarded_delete_interruption_evidence_checkpoint")
                         var conflictReturned: DeleteSubmissionObservation.Conflict? = null
                         var wireReturned = false; var verifiedReturned = false
@@ -389,6 +396,8 @@ class CalendarDeleteGuardedJourneyLiveDeviceTest {
                                         assertTrue("The original native receipt is reserved before interruption",
                                             reservation.state == DeleteAcknowledgementState.PENDING &&
                                                 reservation.receipt.attempt == DeleteAttemptIdentity.of(unknown))
+                                        if (networkScenario) DeleteNetworkInterruptionJourney.retainMeasurement(prefs,
+                                            checkNotNull(networkProbe).observation())
                                         // Deliberately do not delegate persistence of the supplied protected response.
                                         assertTrue(prefs.edit().putString("interruption_unknown_hash", bytesHash(DeleteAttemptStorageCodec.encode(unknown)))
                                             .putString("interruption_native_hash", nativeHash(values()))
@@ -399,13 +408,16 @@ class CalendarDeleteGuardedJourneyLiveDeviceTest {
                                         throw interruption
                                     }
                                 } else journal
-                                return actualPort.submit(record, guarded, admit, qualifySource, admitEvidence).also {
+                                if (networkScenario) networkProbe = ProtonDeleteNetworkInterruptionProbe.arm(app, record, hash) {
+                                    DeleteNetworkInterruptionJourney.cutWifi(app, prefs)
+                                }
+                                try { return actualPort.submit(record, guarded, admit, qualifySource, admitEvidence).also {
                                     if (it is DeleteSubmissionObservation.Conflict) conflictReturned = it
                                     if (it is DeleteSubmissionObservation.Verified) {
                                         verifiedReturned = true
                                         consent.set(false); coordinator.systemCreatePolicyChanged(source, true)
                                     }
-                                }
+                                } } finally { networkProbe?.close() }
                             }
                             override suspend fun inspect(record: DeleteAttemptRecord, journal: DeleteAttemptJournal,
                                 admit: (CalendarScope) -> Boolean): DeleteSubmissionObservation {
@@ -441,6 +453,8 @@ class CalendarDeleteGuardedJourneyLiveDeviceTest {
                             return@runBlocking
                         }
                         if (interruptionScenario && phase == "UNKNOWN_REPLAY") {
+                            if (networkScenario && !prefs.getBoolean("network_inspection_held", false))
+                                DeleteNetworkInterruptionJourney.assertOffline(app)
                             runUnknownReplay(prefs, source, event, content, store, journal, coordinator, operations, projection,
                                 factual, ::allowStore, ::values, actualPort == null && actualRemote == null) {
                                 prepares == 0 && sends == 0 && inspections == 0 && claims == 0 && evidenceCheckpoints == 0 && !verifiedReturned
@@ -485,6 +499,14 @@ class CalendarDeleteGuardedJourneyLiveDeviceTest {
                                     putString("guarded_delete_evidence_shape", evidenceShape)
                                     putString("guarded_delete_read_shape", shape.toString())
                                 })
+                                if (networkScenario && shape?.result == DeleteReadResult.PRESENT) {
+                                    assertTrue("The reconnected read must retain the original authenticated context", shape.contextMatched)
+                                    runNetworkPresentInspection(prefs, source, event, content, store, journal, coordinator,
+                                        operations, projection, factual, ::allowStore, ::values) {
+                                        prepares == 0 && sends == 0 && inspections == 1 && claims == 0 && evidenceCheckpoints == 0
+                                    }
+                                    return@runBlocking
+                                }
                             }
                             val dirty = values()
                             assertTrue("Require the editor's present dirty tombstone", dirty[Events.DELETED] == "1" && dirty[Events.DIRTY] == "1")
@@ -514,6 +536,7 @@ class CalendarDeleteGuardedJourneyLiveDeviceTest {
                                     assertTrue("Retain exactly one immutable history", deleteHistoryCount(app, prefix, source) == 1)
                                     witness("guarded_delete_interruption_checkpoint", "guarded_delete_interruption_unknown_retained",
                                         "guarded_delete_interruption_no_proof_or_ack")
+                                    if (networkScenario) witness("guarded_delete_network_socket_failure", "guarded_delete_network_offline_confirmed")
                                     return@runBlocking
                                 }
                             } else {
@@ -576,6 +599,32 @@ class CalendarDeleteGuardedJourneyLiveDeviceTest {
             jobs.coroutineContext[Job]!!.cancelAndJoin()
             native.admitOperation = { false }
         }
+    }
+
+    private suspend fun runNetworkPresentInspection(
+        prefs: android.content.SharedPreferences, source: CalendarScope, event: EventId, content: EventContent,
+        store: ImportStore, journal: DeleteRecoveryJournal, coordinator: ImportCoordinator,
+        operations: CoordinatorSystemDeleteOperations, projection: IsolatedProjection,
+        factual: (CalendarScope) -> Boolean, allowStore: () -> Unit, values: () -> Map<String, String?>,
+        noSend: () -> Boolean,
+    ) {
+        assertTrue("Require the measured interrupted original call", prefs.getBoolean("network_socket_failure", false) &&
+            prefs.getInt("network_calls", 0) == 1 && prefs.getInt("network_body_starts", 0) == 1)
+        val before = values()
+        allowStore()
+        val original = assertInterruptionState(prefs, source, event, content, store, journal, factual, before)
+        var wakes = 0
+        val progress = operations.inspect(TitleUpdateWorkQuery(source), coordinator.systemDeleteRunAdmission(source)) { wakes++ }
+        assertTrue("A still-present original is held, never resent or falsely acknowledged", progress.held == 1 &&
+            progress.completed == 0 && progress.failed == 0 && !progress.inactive && wakes == 0 && noSend() && projection.writes.get() == 0)
+        allowStore()
+        assertTrue("Inspection preserves exact UNKNOWN, pending native receipt and tombstone",
+            assertInterruptionState(prefs, source, event, content, store, journal, factual, values()) == original && values() == before)
+        assertTrue(prefs.edit().putBoolean("network_inspection_held", true).putInt("network_inspection_pid", Process.myPid()).commit())
+        InstrumentationRegistry.getInstrumentation().sendStatus(0, Bundle().apply {
+            putBoolean("guarded_delete_network_inspection_held", true)
+            putBoolean("guarded_delete_network_no_resend_or_ack", true)
+        })
     }
 
     /** Keep offline acknowledgement in a separate coroutine to bound generated method size. */
