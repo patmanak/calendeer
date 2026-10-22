@@ -2,6 +2,7 @@
 # Run with providerFixture=true; this does not qualify live Proton transport or OEM/reboot behavior.
 com.patmanak.proton.andcalendarbridge.DirtyProjectionRefreshDeviceTest
 com.patmanak.proton.andcalendarbridge.ImportActiveCapacityDeviceTest
+com.patmanak.proton.andcalendarbridge.ImportVolumeInterruptionDeviceTest
 com.patmanak.proton.andcalendarbridge.LocalEditCaptureCoordinatorDeviceTest
 com.patmanak.proton.andcalendarbridge.LocalDeleteCaptureCoordinatorDeviceTest
 com.patmanak.proton.andcalendarbridge.SystemTextOwnerGatewayDeviceTest

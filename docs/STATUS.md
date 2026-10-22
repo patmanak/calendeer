@@ -136,6 +136,7 @@ recurrence editing are not implied by the current profile.
 
 ## Working entry points
 
+- [Audit closeout](AUDIT_CLOSEOUT.md): corrected findings and remaining qualification/release gates.
 - [Working method](WORKFLOW.md): bounded assignments, roles and evidence.
 - [Proton source audit](research/PROTON.md) and [FOSS reuse](research/FOSS_SYNC_REUSE.md): source-backed integration choices.
 - [Licensing](LICENSING.md) and [workflow provenance](WORKFLOW_SOURCES.md).

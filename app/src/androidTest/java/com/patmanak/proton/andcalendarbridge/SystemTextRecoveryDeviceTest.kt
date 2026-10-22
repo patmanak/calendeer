@@ -38,6 +38,7 @@ class SystemTextRecoveryDeviceTest {
         var writes = 0
         var captures = 0
         var beforeScan: suspend () -> Unit = {}
+        var afterWrite: suspend () -> Unit = {}
         val order = mutableListOf<String>()
         val contents = mutableMapOf<EventId, EventContent>()
         private val receipts = mutableMapOf<EventId, TextUpdateAcknowledgementReceipt>()
@@ -63,6 +64,7 @@ class SystemTextRecoveryDeviceTest {
             check(receipts.putIfAbsent(receipt.intent.base.eventId, receipt) == null)
             order += "ack"; writes++
             contents[receipt.intent.base.eventId] = receipt.projection.change.content
+            afterWrite()
             return AppliedTextUpdateAcknowledgement(receipt)
         }
         override suspend fun inspectTextUpdateAcknowledgement(receipt: TextUpdateAcknowledgementReceipt): AppliedTextUpdateAcknowledgement? {
@@ -134,6 +136,7 @@ class SystemTextRecoveryDeviceTest {
         var beforeRecovery: suspend (TitleUpdateWorkQuery, () -> Boolean) -> Unit = { _, _ -> }
         val queries = mutableListOf<TitleUpdateWorkQuery>()
         val reports = mutableListOf<TitleUpdateOfflineRecoveryProgress>()
+        var recoveryPageSize = 1
         val cursors get() = AndroidTitleRecoveryCursorStore(context, "offline-text-proof-cursors")
         lateinit var controller: SystemCreateController
 
@@ -155,7 +158,7 @@ class SystemTextRecoveryDeviceTest {
         fun rebuild(reopenJournal: Boolean = false) {
             if (reopenJournal) { attempts.close(); attempts = TitleUpdateAttemptStore(context, names[1]) }
             val operations = CoordinatorSystemTextOperations(imports, journal, ports, ports)
-            val recovery = SystemTitleRecoveryController(cursors, { error("Guarded recovery is required") }, pageSize = 1,
+            val recovery = SystemTitleRecoveryController(cursors, { error("Guarded recovery is required") }, pageSize = recoveryPageSize,
                 guardedRecover = { query, active ->
                     queries += query
                     beforeRecovery(query, active)
@@ -335,5 +338,60 @@ class SystemTextRecoveryDeviceTest {
         assertEquals(1, cancellations); assertEquals(0, ordinaryFailures); assertEquals(0, returns)
         assertEquals(0, projection.writes); assertEquals(0, projection.scans)
         assertNull(cursors.read(target)); assertNull(journal.readCompletion(target, record.id) { true })
+    }
+
+    @Test fun multiPageRecoveryResumesAfterNativeWriteWithoutRepeatingWritesOrSendingUnknownRequests() = fixture {
+        recoveryPageSize = 25
+        rebuild()
+        val records = (0 until 67).map { prepared("volume-${it.toString().padStart(3, '0')}") }
+        val unknownIndices = setOf(7, 32, 61)
+        val results = records.mapIndexed { index, record ->
+            if (index in unknownIndices) { seed(record, unknown = true); null }
+            else seed(record, verified = true)!!
+        }
+        assertEquals(ImportRunResult.CONTINUE, controller.run(network = false))
+        val savedCursor = TitleUpdateWorkCursor(target, records[24].eventId)
+        assertEquals(savedCursor, cursors.read(target)); assertEquals(24, projection.writes)
+        projection.afterWrite = {
+            if (projection.writes == 31) { currentCoroutineContext().cancel(); yield() }
+        }
+        supervisorScope {
+            val interrupted = async { controller.run(network = false, fresh = false) }
+            try { interrupted.await(); fail("Cancellation after native write must escape") }
+            catch (_: CancellationException) { }
+        }
+        assertEquals(31, projection.writes)
+        assertEquals(savedCursor, cursors.read(target)) // The partial page cannot advance discovery.
+        val interrupted = records[31]
+        assertEquals(results[31], journal.readVerified(target, interrupted.id) { true })
+        assertNull(journal.readCompletion(target, interrupted.id) { true })
+        store.admitTransaction = { it == target }
+        assertEquals(TextUpdateAcknowledgementState.PENDING,
+            store.textUpdateAcknowledgement(target, interrupted.eventId, interrupted.id)!!.state)
+
+        projection.afterWrite = {}
+        rebuild(reopenJournal = true)
+        var passes = 0
+        do {
+            val progress = controller.run(network = false, fresh = false)
+            assertTrue(progress == ImportRunResult.CONTINUE || progress == ImportRunResult.COMPLETE)
+            passes++
+            assertTrue("Recovery must exhaust its bounded pages", passes <= 4)
+        } while (progress != ImportRunResult.COMPLETE)
+        assertTrue(cursors.exhausted(target))
+        records.forEachIndexed { index, record ->
+            if (index in unknownIndices) {
+                assertEquals(record.copy(state = TextUpdateAttemptState.OUTCOME_UNKNOWN), journal.read(target, record.id) { true })
+                assertNull(journal.readVerified(target, record.id) { true })
+                assertNull(journal.readCompletion(target, record.id) { true })
+            } else assertRestored(record, results[index]!!)
+        }
+        assertEquals(64, projection.writes); assertEquals(0, ports.calls)
+        val pages = queries.size
+        repeat(3) { assertEquals(ImportRunResult.COMPLETE, controller.run(network = false, fresh = false)) }
+        assertEquals(pages, queries.size); assertEquals(64, projection.writes)
+        rebuild(reopenJournal = true)
+        assertEquals(ImportRunResult.COMPLETE, controller.run(network = false, fresh = false))
+        assertEquals(pages, queries.size); assertEquals(64, projection.writes)
     }
 }

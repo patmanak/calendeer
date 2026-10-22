@@ -1,5 +1,47 @@
 # Validation
 
+## Audit closeout and volume/interruption baseline
+
+The [closeout](AUDIT_CLOSEOUT.md) separates corrected initial findings from
+remaining maintenance, concurrency, distribution and device qualification work.
+This slice adds two controlled Android regressions and no production changes.
+
+PASS: 32 distinct physical cases, with 32 starts and successes and no failure,
+error or skipped status. The selection comprises volume/interruption (1), text
+offline recovery (9), dirty-projection refresh (12), active capacity (2) and
+staged import store (8), using the enrolled API 35 target and the new test APK.
+The new volume case is included in the maintained bounded regression list.
+
+The volume case imports 4,097 multibyte-content events in 41 pages of at most
+100. Cancellation halfway through page 21 reaches the production commit-time
+fence after all page writes are attempted. Reopening proves the previous
+checkpoint, sealed receipt and 2,000 committed records survive with no partial
+page rows. Reapplication completes, then 137 oldest held rows remain intact
+while all 3,960 independent rows drain exactly once in batches of at most 100.
+Further reopening during/after draining preserves every remote value, the held
+rows and exact projected baselines for all acknowledged events.
+
+The text case traverses 67 owners in pages of 25: 64 verified results and three
+UNKNOWN requests. Injected cancellation after native write 31 leaves the page
+cursor unchanged and the interrupted SQL acknowledgement PENDING. Rebuilding
+the controller and reopening the journal complete recovery through receipt
+inspection with exactly 64 total native writes. All verified results/evidence
+and completions match; UNKNOWN requests remain identical without proof or
+completion. Preparation and transport ports are forbidden. Exhausted replay,
+including another journal/controller rebuild, adds no traversal or write.
+
+Independent source review finds no correctness defect. These fixtures exercise
+real isolated SQLite and production recovery controllers; native receipts stay
+in the controlled in-memory projection. They do not qualify actual Provider
+persistence, process death, reboot, power loss, live network failure, endurance,
+heap/latency limits, disk-history compaction, OEM or Android 17/16 KiB runtime.
+
+PASS: strict offline task graph for debug app/test, unsigned release, app JVM
+tests and lint, with all three resolved Kotlin/Compose/KSP assertions. The new
+instrumentation sources compile. Unchanged app JVM results are reused (199
+cases, no failures/errors/skips); lint retains zero errors and nine existing
+`UseKtx` warnings without suppression. No new native qualification is claimed.
+
 ## Recurrence dependency SQL boundary
 
 Five recurrence membership/dependency SQL methods and their state types move
