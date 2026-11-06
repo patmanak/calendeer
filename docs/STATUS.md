@@ -107,6 +107,16 @@ Another offline process preserves that held state, and all modes/radios are rest
 This cancellation is distinct from the isolated natural socket failure above;
 the observation does not establish its stop reason.
 
+A separate controlled calendar qualifies real production-worker process death at
+the authenticated DELETE body-start callback. The host verifies the original PID
+is gone even when Android has already restarted Calendeer. Two offline worker
+recoveries, normal reconnect and another offline recovery preserve the same
+UNKNOWN, pending receipt and dirty tombstone without a response capsule, resend
+or false ACK. The reconnect diagnostic finds PRESENT with matched context; it
+does not prove a worker GET was observed. All prior production DELETE histories
+stay byte-identical, with only this enrolled request added. Original modes and
+radios are restored. Later submission/proof/ACK death remains unqualified.
+
 An isolated real-process-death journey also passes after a complete bound DELETE
 response reaches memory, before its capsule is persisted. The measured response is
 UNCLASSIFIED, not reported success. The host observes actual process termination;
@@ -146,8 +156,8 @@ For a useful bidirectional RC, finish:
    submission. Isolated real-service recovery also passes after injected evidence-
    persistence cancellation. Real production-worker radio loss at body start also
    retains UNKNOWN without fabricated transport/results. Extend worker conflict,
-   partial upload, server-accepted/network-response loss and production-worker
-   process interruption, reboot and power loss,
+   partial upload, server-accepted/network-response loss and worker death later
+   in submission, proof retention or acknowledgement, reboot and power loss,
    then richer events and OEM behavior.
    Current source checks and permanent incoming barriers remain required; UNKNOWN
    is never reset or resent.

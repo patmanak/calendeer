@@ -238,3 +238,38 @@ The complete existing production DELETE history remains byte-identical, and
 original effective settings are restored. This qualifies loss of a response's
 durable evidence through real process death, not a reported-success envelope,
 server attribution, network response loss, production-worker death or reboot.
+
+The separate opt-in `deleteWorkerProcess=true` profile runs ordinary timed
+deletion through normal production WorkManager scheduling. It requires the
+offline capture/replay profile and excludes the radio-loss profile. A private
+calendar-hash witness may select a different controlled calendar; it grants no
+account access, consent or exemption from full SQL/native quiescence. Existing
+uncertain work in another calendar remains untouched. The default selector keeps
+the original dedicated QA calendar.
+
+`PROCESS_RUN` makes only a genuine read-only preparation preview to enroll the
+existing debug request listener; the preview is never claimed, journalled or
+submitted. The production worker independently prepares, claims and sends. At
+its authenticated request-body-start callback, local checks require one matching
+call/body start, the complete original UNKNOWN with no response capsule/result/
+completion, its exact PENDING receipt and native tombstone, compare-owned target
+consent and disabled writes in other selected calendars. Exactly one network
+WorkManager job must be RUNNING. The checkpoint atomically stores opaque hashes,
+receipt and process/work witnesses, then kills the real application process.
+It does not change a radio, inject cancellation or substitute transport/journals.
+
+The protected host must observe terminated instrumentation and disappearance of
+the original PID before any operator restart. Android may already have restarted
+the app with another PID; this is recorded separately, never treated as failure
+or assumed from READY alone. The host disconnects the enrolled Wi-Fi-only target
+before controlled recovery. `PROCESS_OFFLINE_REPLAY` activates ordinary local
+workers, preserves the exact request and first recovery witness and restores the
+five target modes. `PROCESS_RECONNECT` uses normal workers; a separate read-only
+diagnostic may establish PRESENT but never proves that a worker GET was observed.
+PRESENT retains UNKNOWN without ACK; ABSENT still requires actual production
+completion before success. Offline-only `PROCESS_RESTORE` restores compare-owned
+settings after an interrupted test without dispatch or a recovery claim.
+
+This checkpoint qualifies process death at authenticated body start. It cannot
+establish partial upload, server acceptance, response loss or death later in
+submission, proof retention or native acknowledgement.

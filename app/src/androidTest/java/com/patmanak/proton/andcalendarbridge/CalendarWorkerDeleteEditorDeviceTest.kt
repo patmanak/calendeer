@@ -37,19 +37,19 @@ class CalendarWorkerDeleteEditorDeviceTest {
         assumeTrue(args.getString("workerDeleteEditor") == "true")
         val token = args.getString("deleteFixtureToken").orEmpty()
         val accountHash = args.getString("deleteAccountHash").orEmpty()
+        val calendarWitness = WorkerDeleteFixtureScope.witness(args)
         assertTrue("Explicit fixture and account witnesses are required",
             token.matches(Regex("[a-f0-9]{12}")) && accountHash.matches(Regex("[a-f0-9]{64}")))
         val app = compose.activity.application as BridgeApplication
         DeleteNetworkInterruptionJourney.assertOffline(app)
         withTimeout(60_000) {
             while (!app.imports.state.value.let { it.authenticated && it.hasPermission && !it.busy &&
-                    it.selections.count { selection -> selection.enabled && selection.available &&
-                        selection.summary.title == "Calendeer QA Automatic Worker" } == 1 }) {
+                    it.selections.count { selection -> WorkerDeleteFixtureScope.matches(selection, calendarWitness) } == 1 }) {
                 DeleteNetworkInterruptionJourney.assertOffline(app); delay(100)
             }
         }
         val target = app.imports.state.value.selections.single {
-            it.enabled && it.available && it.summary.title == "Calendeer QA Automatic Worker"
+            WorkerDeleteFixtureScope.matches(it, calendarWitness)
         }.scope
         val prefs = app.getSharedPreferences("calendar-delete-worker-v1-$token", Context.MODE_PRIVATE)
         fun frozen(key: String) = checkNotNull(prefs.getString(key, null))
@@ -58,8 +58,7 @@ class CalendarWorkerDeleteEditorDeviceTest {
         val original = (0..4).map { prefs.getBoolean("original_$it", false) }
         fun owned() = (0..4).map { prefs.getBoolean("owned_$it", false) }
         fun accessible() = app.imports.state.value.let { state -> state.authenticated && state.hasPermission &&
-            state.selections.count { it.scope == target && it.enabled && it.available &&
-                it.summary.title == "Calendeer QA Automatic Worker" } == 1 }
+            state.selections.count { it.scope == target && WorkerDeleteFixtureScope.matches(it, calendarWitness) } == 1 }
         fun flags() = SystemCreateWorkStore(app).use {
             listOf(it.modeEnabled(target), it.titlesEnabled(target), it.textsEnabled(target), it.timesEnabled(target), it.deletesEnabled(target))
         }
@@ -69,10 +68,11 @@ class CalendarWorkerDeleteEditorDeviceTest {
                 accessible() && flags() == owned() && !original[4] && !prefs.getBoolean("mode_write_pending", false) &&
                     (original[0] || original.none { it } && args.getString("allowReadOnlyDeleteWorker") == "true" &&
                         prefs.getBoolean("readonly_activation", false)))
-            assertTrue("Use only the frozen prepared network fixture before worker dispatch",
+            assertTrue("Use only the frozen prepared offline fixture before worker dispatch",
                 frozen("token") == token && frozen("account_hash") == accountHash && frozen("profile") == "TIMED" &&
-                    prefs.getBoolean("network_journey", false) && prefs.getBoolean("offline_journey", false) &&
-                    prefs.getBoolean("prepared", false) && !prefs.contains("network_run_started") &&
+                    (prefs.getBoolean("network_journey", false) xor prefs.getBoolean("process_journey", false)) &&
+                    prefs.getString("calendar_witness", "") == calendarWitness && prefs.getBoolean("offline_journey", false) &&
+                    prefs.getBoolean("prepared", false) && !prefs.contains("network_run_started") && !prefs.contains("process_run_requested") &&
                     !prefs.getBoolean("editor_deleted", false) && frozen("account") == target.account.value &&
                     frozen("calendar") == target.calendar.value && prefs.getLong("generation", -1) == target.generation)
             assertTrue("Current authentication must still match the controlled account",

@@ -1,5 +1,66 @@
 # Validation
 
+## Production-worker process death at authenticated body start
+
+PASS: eight normal fixture executions on the enrolled API 35 target: PREPARE,
+actual system-editor deletion, OFFLINE_CAPTURE, OFFLINE_REPLAY, two restarted
+PROCESS_OFFLINE_REPLAY runs, PROCESS_RECONNECT and another offline recovery.
+The separate PAUSE/RESTORE controls also pass. PROCESS_RUN deliberately kills
+the real process and is an expected termination, not a passing JUnit execution.
+
+A private calendar-hash witness selects a different controlled, enabled calendar
+with no prior retained owner. Full account, current-source, SQL/history and native
+quiescence audits still apply; no unrelated UNKNOWN is exempted. The default
+selector remains unchanged. The fixture freezes this witness before mutation;
+the editor utility uses the installed calendar application's uniquely qualified event/action
+and localized deletion question. Its Provider access stays read-only; the
+temporary general-only editor lease restores the five original target modes.
+
+After actual offline local-worker capture and restarted replay without a DELETE
+attempt, the fixture takes one authentic read-only preparation preview solely
+to enroll the existing debug listener. It never stores, claims or sends that
+preview. Ordinary production consent setters and scheduling independently prepare,
+reserve, claim and dispatch the real request. At its authenticated body-start
+callback, exactly one matching call/body start and one RUNNING network WorkManager
+job are observed. Local checks retain the original complete UNKNOWN, owner/base,
+exact PENDING receipt and dirty native digest, with no capsule, result or completion.
+The fixture atomically freezes opaque request/native/receipt/process/work witnesses,
+then calls `Process.killProcess` without changing radios or substituting any
+transport, cancellation, journal or production worker operation.
+
+The host observes READY and terminated instrumentation. Android has already
+restarted Calendeer by the first presence check: the current PID differs from
+the frozen positive PID and the original process directory is absent, before
+any operator force-stop/restart. This qualifies death of the initial process,
+not an observed interval with the entire application absent. The host then
+disconnects Wi-Fi before controlled recovery. Subsequent full-record/native/
+receipt comparisons show the automatic restart did not change the retained request.
+
+Two new offline processes activate ordinary local workers and retain the same
+UNKNOWN with no response capsule, result, completion or native ACK. Repetition
+preserves the first successful recovery PID. After network restoration, normal
+workers are activated and a separate authenticated read-only diagnostic finds
+the enrolled event PRESENT with matched context. The diagnostic is not proof of
+an observed worker GET. No new attempt or false ACK is created; another offline
+process retains the identical request, complete owner/base and PENDING receipt.
+The alternative ABSENT/completion branch is NOT RUN for this profile.
+
+All prior production DELETE rows are byte-identical before/after; exactly the
+enrolled new UNKNOWN was added without result/completion. Five target settings,
+the separately paused preexisting general-only setting and original Wi-Fi/mobile/
+airplane values are restored. The synthetic service event and native tombstone
+remain inspectable. Calendeer is reopened, device runners joined and the shared
+phone guardian exits normally. No account or lock-screen attribute is changed.
+
+PASS: independent source review, strict offline app/test APK builds and app lint
+(zero errors, nine UseKtx warnings and seven cached version advisories). Runtime
+code, schemas, adapter formats and dependencies are unchanged. Existing JVM suite
+counts are reused, not rerun for instrumentation-only changes. Offline-only
+PROCESS_RESTORE compiles and is source-reviewed; its emergency path is NOT RUN.
+Partial upload, server acceptance, network response loss, worker death after a
+response/proof/native ACK, reboot/power loss and Samsung/Android 17/16 KiB runtime
+behavior are not qualified by this body-start/PRESENT result.
+
 ## Real process death before DELETE response persistence
 
 PASS: the final controlled API 35 journey has seven normal fixture executions:
