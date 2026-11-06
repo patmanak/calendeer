@@ -55,7 +55,7 @@ class CalendarGuardedDeleteEditorDeviceTest {
             DeleteProcessStopJourney.assertQuiet(app, source, ::accessible)
             assertTrue("Use only the exact prepared process fixture before any DELETE submission",
                 frozen("token") == token && frozen("account_hash") == accountHash &&
-                    frozen("scenario") == "PROCESS_INTERRUPTION" && prefs.getBoolean("prepared", false) &&
+                    frozen("scenario") in setOf("PROCESS_INTERRUPTION", "PROOF_PROCESS_INTERRUPTION", "ACK_PROCESS_INTERRUPTION") && prefs.getBoolean("prepared", false) &&
                     !prefs.getBoolean("editor_deleted", false) && !prefs.getBoolean("delete_requested", false) &&
                     !prefs.contains("attempt_id") && !prefs.contains("process_stop_ready") &&
                     frozen("account") == source.account.value && frozen("calendar") == source.calendar.value &&

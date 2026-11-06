@@ -126,6 +126,14 @@ ACK and immutable replay. Existing production DELETE history remains unchanged;
 the temporary general-write pause is restored. This does not qualify network
 response loss, production WorkManager process death or reboot/power loss.
 
+Two additional isolated real-service scenarios pass actual process death after
+durable absence-proof retention and after native ACK but before SQL restoration.
+Fresh local recovery finishes the first ACK once; historical-marker recovery
+finishes the second with zero new native writes. Separate replays keep immutable
+request/result/completion hashes and suppress old incoming upserts. All existing
+production DELETE rows remain unchanged. These qualify integrated recovery
+boundaries, not the corresponding WorkManager checkpoints.
+
 Current host suites pass 427 domain, 20 authentication, 856 backend and 199 app JVM cases without
 skips. Physical crypto, SQL/migration, Provider, worker/recovery and option UI
 checks pass; APK builds and app lint pass. Scope-specific evidence and remaining

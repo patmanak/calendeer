@@ -273,3 +273,26 @@ settings after an interrupted test without dispatch or a recovery claim.
 This checkpoint qualifies process death at authenticated body start. It cannot
 establish partial upload, server acceptance, response loss or death later in
 submission, proof retention or native acknowledgement.
+
+Two further isolated real-service profiles cover local persistence gaps without
+changing production WorkManager composition. `PROOF_PROCESS_INTERRUPTION`
+delegates the real `retainVerified` commit before stopping the process, while the
+fully bound native receipt remains PENDING and the row remains dirty/deleted.
+The checkpoint does not pretend that SEND returned. A new-process local ACK uses
+the retained authenticated-absence proof, then a separate replay checks immutable
+request/result/completion hashes and the permanent incoming barrier.
+
+`ACK_PROCESS_INTERRUPTION` completes ordinary submission with ACK deferred, then
+stops after the actual Provider acknowledgement returns its exact receipt and
+historical marker, before SQLite restoration. The native row is clean/deleted
+while its SQL receipt is still PENDING and completion absent. `ACK_RECOVER` must
+inspect that historical marker and finish SQL/completion with zero new native
+writes. It cannot rewind the row, replace the nonce or recreate a request.
+
+Both profiles use distinct disposable events, private journals and frozen native
+generations. Before claiming or stopping, bounded waiting allows read-only
+production maintenance to settle; the same account/permission/five-mode guard
+still follows. Full native and durable bindings are reread after a checkpoint
+wait. The protected host independently verifies process death. These are real
+Proton/coordinator/SQLite/Provider boundaries, not production-worker, reboot or
+power-loss qualification.

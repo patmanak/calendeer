@@ -1,5 +1,62 @@
 # Validation
 
+## Process death after durable proof and native acknowledgement
+
+PASS: two opt-in isolated real-service profiles on the enrolled API 35 target.
+The proof profile has four normal executions: PREPARE, real system-editor
+deletion, restarted local ACK and separate REPLAY. SEND is an expected actual
+process termination after proof retention. The native-ACK profile has five normal
+executions: PREPARE, editor deletion, SEND, restarted ACK_RECOVER and separate
+REPLAY. ACK is an expected actual process termination after the native write.
+The shared PAUSE/RESTORE controls also pass: eleven normal accepted-profile/control
+executions and two deliberate terminations, counted separately.
+
+Each profile creates a different disposable service event, private SQL journals
+and frozen positive native generation. The existing Proton adapter performs the
+real request and fresh authenticated absence verification; no proof or response
+is manufactured. The normal protected response remains in its original journal.
+All selected production write modes remain disabled, with a separately owned
+temporary pause of the preexisting general-only setting.
+
+PROOF_PROCESS_INTERRUPTION delegates the actual retainVerified commit first,
+then checks the exact UNKNOWN request, retained result, PAUSED owner/base, dirty
+deleted native row and fully bound PENDING receipt, with no completion. It freezes
+hashes/nonce/format/PID and kills the process without falsely recording a returned
+SEND. The host observes READY, terminated instrumentation and disappearance of
+the original PID before any operator restart. New-process recovery uses only local
+ports, performs the native ACK once and completes SQL. Replay preserves the
+request, result and first completion hash without another native write or resend.
+
+ACK_PROCESS_INTERRUPTION first retains real absence proof with native ACK
+deferred. A later local ACK performs the real Provider batch and verifies its
+exact applied receipt and historical marker. Before control returns to SQL
+restoration, the row is clean/deleted while the SQL receipt is still PENDING and
+completion absent. The process is killed at that boundary, again independently
+observed by the host. ACK_RECOVER inspects the exact historical marker and
+finishes SQL/completion with zero new projection acknowledgement calls or native
+writes. A separate replay preserves all three history hashes. Both profiles
+retain the permanent incoming barrier when an old upsert is deliberately requeued.
+
+An earlier native-profile SEND was refused before dispatch because read-only
+production maintenance briefly published busy. Its journal remains PREPARED,
+without claim, result or completion; it was not retried or reset. The fixture now
+waits up to 60 seconds before applying the same strict quiet guard. At a stop
+checkpoint it rereads complete durable/native bindings after that wait. The proof
+profile passed before this test-only waiting adjustment; the fresh native profile
+passes with the final build. No production policy or synchronization code changed.
+
+PASS: strict offline debug app/test builds, app lint (zero errors and sixteen
+existing warnings) and independent source review, including the waiting change.
+Existing JVM suite counts are unchanged and were not repeated. Every preexisting
+production DELETE row is byte-identical before/after, with none added or removed.
+Original effective write settings are restored; no radio or lock-screen setting
+changes are made. Native tombstones and private fixture journals remain available,
+Calendeer is reopened, runners joined and the shared guardian exits normally.
+
+This measures real integrated Proton/coordinator/SQLite/Provider process-death
+boundaries. It does not qualify equivalent production WorkManager checkpoints,
+device reboot/power loss, server atomicity, Samsung or Android 17/16 KiB runtime.
+
 ## Production-worker process death at authenticated body start
 
 PASS: eight normal fixture executions on the enrolled API 35 target: PREPARE,
