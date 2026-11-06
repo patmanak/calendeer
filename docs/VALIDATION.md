@@ -1,5 +1,60 @@
 # Validation
 
+## Real process death before DELETE response persistence
+
+PASS: the final controlled API 35 journey has seven normal fixture executions:
+PREPARE, actual system-editor deletion, two fresh-process UNKNOWN_REPLAY passes,
+INSPECT, ACK and REPLAY. Two additional PAUSE/RESTORE setting controls pass.
+SEND is an expected actual process termination, not a passing JUnit execution.
+All phases bind one new disposable timed event and isolated native generation;
+existing uncertain service/worker fixtures are never reset or resent.
+
+The real adapter prepares and claims once, then returns a genuine complete bound
+response. Its protected capsule opens locally as UNCLASSIFIED, with reported
+success explicitly false; the production parser is unchanged. The checkpoint
+retains only closed category/receipt/process witnesses and opaque hashes, then
+calls `Process.killProcess` before response persistence. The protected host
+observes READY, terminated instrumentation and an absent target process before
+any force-stop for recovery. The killed process keeps no response capsule,
+verified result, completion or native ACK. Receiving this response does not
+establish remote acceptance or absence.
+
+Two restarted processes exercise the ordinary UNKNOWN guard and offline recovery
+with no HTTP composition, retaining the same complete request, PAUSED owner,
+base, dirty native tombstone and PENDING receipt. Repetition preserves the first
+recovery PID witness. Subsequent authenticated inspection observes structured
+exact-event absence with unchanged qualified context and retains the normal
+verified result; ACK is still deferred. Separate new processes then pass exact
+native/SQL acknowledgement and final replay, with identical request/result/
+completion hashes, no resend or new native write and old-upsert suppression.
+
+All selected production scopes have five effective write modes disabled and idle
+local write control before mutation and immediately before death. The optional
+general-only setting lease freezes its owner before the ordinary synchronous
+setter. RESTORE also admits interruption before its final pause marker, checks
+the persisted five-mode vector and does not mistake asynchronous UI settlement
+for preference persistence. Original true values and default-false semantics
+are restored; existing false entries removed by the normal setter remain false.
+The complete prior production DELETE history is byte-identical before/after.
+No radio or lock-screen setting changes are used; Calendeer is reopened and the
+shared phone lock is released after joining device runners.
+
+The success-only prototype failed before READY and left a separate uncertain
+request intact; it was not reused. The final checkpoint records the observed
+complete response category instead of asserting server success. Its incomplete/
+invalid-response guard uses an ordinary exception so it follows the adapter's
+UNKNOWN path. An initial restore wait also timed out after the preference was
+already persisted; corrected restoration and its pending-marker recovery pass.
+
+PASS: strict offline debug app/test APK builds, app lint (zero errors, nine UseKtx
+warnings and seven cached version advisories), and independent source review.
+Existing JVM suite counts are unchanged; they were not repeated for this
+instrumentation-only slice. No runtime adapter, schema, consent policy, dispatch
+guard or release artifact changes are introduced. This qualifies the isolated
+real adapter/coordinator/native recovery composition after response reception,
+not network response loss, a reported-success envelope, production WorkManager
+process death, reboot/power loss, Samsung or Android 17/16 KiB runtime behavior.
+
 ## Production-worker radio loss and cancelled transport recovery
 
 PASS: nine controlled physical executions on API 35: PREPARE, real editor

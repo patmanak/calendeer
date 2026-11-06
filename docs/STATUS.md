@@ -107,6 +107,15 @@ Another offline process preserves that held state, and all modes/radios are rest
 This cancellation is distinct from the isolated natural socket failure above;
 the observation does not establish its stop reason.
 
+An isolated real-process-death journey also passes after a complete bound DELETE
+response reaches memory, before its capsule is persisted. The measured response is
+UNCLASSIFIED, not reported success. The host observes actual process termination;
+two fresh-process local recoveries preserve the original UNKNOWN without HTTP or
+ACK. Only subsequent authenticated absence permits separate-process native/SQL
+ACK and immutable replay. Existing production DELETE history remains unchanged;
+the temporary general-write pause is restored. This does not qualify network
+response loss, production WorkManager process death or reboot/power loss.
+
 Current host suites pass 427 domain, 20 authentication, 856 backend and 199 app JVM cases without
 skips. Physical crypto, SQL/migration, Provider, worker/recovery and option UI
 checks pass; APK builds and app lint pass. Scope-specific evidence and remaining
@@ -137,7 +146,8 @@ For a useful bidirectional RC, finish:
    submission. Isolated real-service recovery also passes after injected evidence-
    persistence cancellation. Real production-worker radio loss at body start also
    retains UNKNOWN without fabricated transport/results. Extend worker conflict,
-   partial upload, server-accepted/lost-response and process interruption, reboot and power loss,
+   partial upload, server-accepted/network-response loss and production-worker
+   process interruption, reboot and power loss,
    then richer events and OEM behavior.
    Current source checks and permanent incoming barriers remain required; UNKNOWN
    is never reset or resent.

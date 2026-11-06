@@ -209,3 +209,32 @@ process kill, reboot/power loss and OEM qualification remain open.
 
 Detailed measured evidence is recorded in [validation](VALIDATION.md); passing fake
 boundaries alone does not qualify the service, Provider, editor or WorkManager.
+
+The opt-in isolated `PROCESS_INTERRUPTION` profile uses a fresh disposable event
+and distinct native generation. All selected production calendars must have all
+five effective write modes disabled and idle local write control before CREATE,
+SEND and the process-stop checkpoint. An optional separately owned general-only
+setting pause uses the ordinary production setter, durable before-write ownership
+and explicit restoration; it never enables an editing submode or changes an
+uncertain request. The system-editor utility qualifies only the frozen isolated
+row and makes no direct Provider writes.
+
+After the real adapter claims and returns a complete bound response, the fixture
+opens its genuine protected capsule locally. Only REPORTED_SUCCESS,
+REPORTED_FAILURE or UNCLASSIFIED can reach this checkpoint; NONE, NO_RESPONSE and
+BINDING_INVALID cannot. It retains the original UNKNOWN/native hashes, receipt nonce,
+response-capsule hash, closed response category and PID atomically, then kills its
+actual process without delegating response persistence. No response body or capsule
+is retained. READY alone is not death evidence: the protected host must observe
+the terminated runner and absent target process before any recovery force-stop.
+
+PASS: the measured response is UNCLASSIFIED, with reported-success explicitly
+false. Two different restarted local processes retain the original UNKNOWN with
+no capsule, result, completion or ACK and do not compose HTTP ports. Fresh
+authenticated inspection then proves absence before separately restarted ACK
+and replay. Request/result/completion history remains immutable, the exact
+native tombstone is acknowledged and an old incoming upsert cannot recreate it.
+The complete existing production DELETE history remains byte-identical, and
+original effective settings are restored. This qualifies loss of a response's
+durable evidence through real process death, not a reported-success envelope,
+server attribution, network response loss, production-worker death or reboot.

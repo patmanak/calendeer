@@ -41,7 +41,7 @@ import org.junit.Test
 
 /** Opt-in disposable real-service event, isolated native calendar and persistent journals.
  * Arguments: liveDeleteJourney=true, deleteFixtureToken (12 lowercase hex),
- * deleteAccountHash (SHA-256), deleteJourneyScenario=NORMAL|REMOTE_CONFLICT|EVIDENCE_INTERRUPTION|NETWORK_INTERRUPTION,
+ * deleteAccountHash (SHA-256), deleteJourneyScenario=NORMAL|REMOTE_CONFLICT|EVIDENCE_INTERRUPTION|NETWORK_INTERRUPTION|PROCESS_INTERRUPTION,
  * deleteJourneyPhase=PREPARE|SEND|LOCAL|INSPECT|ACK|REPLAY|CONFLICT|CONFLICT_REVIEW|CONFLICT_REPLAY.
  * deleteConflictExpectedZone defaults to Z and is frozen during fresh PREPARE; an
  * official-editor zone change must be declared explicitly. CONFLICT_REVIEW audits an
@@ -59,6 +59,11 @@ import org.junit.Test
  * start and requires a natural socket failure. Its protected driver must restore network
  * settings. Restarted inspection may hold a still-present original event without resending.
  * Offline sentinels cover this fixture composition, not independent application traffic.
+ * PROCESS_INTERRUPTION kills this actual process after a complete bound DELETE response in
+ * memory and before evidence persistence. Response reception never establishes acceptance.
+ * It uses the interruption phases, requires all
+ * production write flags off, and still needs authenticated absence inspection before ACK.
+ * This is not packet-loss/server-atomicity or production WorkManager kill qualification.
  * No production deletion qualification or user preference is changed. Retain the native
  * tombstone and isolated journals for inspection; the service event is explicitly disposable.
  */
@@ -112,10 +117,11 @@ class CalendarDeleteGuardedJourneyLiveDeviceTest {
         val scenario = args.getString("deleteJourneyScenario") ?: "NORMAL"
         val conflictScenario = scenario == "REMOTE_CONFLICT"
         val networkScenario = scenario == "NETWORK_INTERRUPTION"
-        val interruptionScenario = scenario == "EVIDENCE_INTERRUPTION" || networkScenario
+        val processScenario = scenario == "PROCESS_INTERRUPTION"
+        val interruptionScenario = scenario == "EVIDENCE_INTERRUPTION" || networkScenario || processScenario
         val expectedConflictZone = ZoneId.of(args.getString("deleteConflictExpectedZone") ?: "Z")
         assertTrue("Require explicit fixture, account and phase", token.matches(Regex("[a-f0-9]{12}")) &&
-            hash.matches(Regex("[a-f0-9]{64}")) && scenario in setOf("NORMAL", "REMOTE_CONFLICT", "EVIDENCE_INTERRUPTION", "NETWORK_INTERRUPTION") &&
+            hash.matches(Regex("[a-f0-9]{64}")) && scenario in setOf("NORMAL", "REMOTE_CONFLICT", "EVIDENCE_INTERRUPTION", "NETWORK_INTERRUPTION", "PROCESS_INTERRUPTION") &&
             phase in (if (conflictScenario) setOf("PREPARE", "CONFLICT", "CONFLICT_REVIEW", "CONFLICT_REPLAY")
                 else if (interruptionScenario) setOf("PREPARE", "SEND", "UNKNOWN_REPLAY", "INSPECT", "ACK", "REPLAY")
                 else setOf("PREPARE", "SEND", "LOCAL", "INSPECT", "ACK", "REPLAY")))
@@ -137,6 +143,7 @@ class CalendarDeleteGuardedJourneyLiveDeviceTest {
         fun accessible() = app.imports.state.value.let { state -> state.authenticated && state.hasPermission &&
             state.selections.any { it.scope == source && it.enabled && it.available && it.summary.title == calendarName } }
         assertTrue("Require current accessible source", accessible())
+        if (processScenario) DeleteProcessStopJourney.assertQuiet(app, source, ::accessible)
         if (!prefs.contains("token")) {
             assertTrue("Only PREPARE can enroll a new disposable fixture", phase == "PREPARE")
             val start = Instant.now().plus(2, ChronoUnit.DAYS).truncatedTo(ChronoUnit.HOURS)
@@ -166,6 +173,9 @@ class CalendarDeleteGuardedJourneyLiveDeviceTest {
         if (conflictScenario && phase == "PREPARE") assertTrue("Conflict enrollment cannot replace any existing DELETE history",
             !prefs.getBoolean("prepared", false) && !prefs.contains("attempt_id") &&
                 !prefs.getBoolean("delete_requested", false) && !prefs.getBoolean("conflict_entered", false))
+        if (processScenario && phase == "PREPARE") assertTrue("Process interruption requires a fresh PREPARE",
+            !prefs.getBoolean("prepared", false) && !prefs.contains("attempt_id") &&
+                !prefs.getBoolean("create_requested", false) && !prefs.getBoolean("delete_requested", false))
         assertTrue("Never move or replace an enrolled fixture", frozen("token") == token && frozen("account_hash") == hash &&
             frozen("account") == source.account.value && frozen("calendar") == source.calendar.value &&
             prefs.getLong("generation", -1) == source.generation && frozen("source_calendar_name") == calendarName)
@@ -345,7 +355,7 @@ class CalendarDeleteGuardedJourneyLiveDeviceTest {
                         var claims = 0
                         var evidenceCheckpoints = 0
                         var networkProbe: ProtonDeleteNetworkInterruptionProbe.Handle? = null
-                        val interruption = CancellationException("guarded_delete_interruption_evidence_checkpoint")
+                        val interruption = if (processScenario) null else CancellationException("guarded_delete_interruption_evidence_checkpoint")
                         var conflictReturned: DeleteSubmissionObservation.Conflict? = null
                         var wireReturned = false; var verifiedReturned = false
                         val port = object : CalendarDeleteSubmissionPort {
@@ -371,6 +381,9 @@ class CalendarDeleteGuardedJourneyLiveDeviceTest {
                                 else assertTrue("Conflict preflight cannot be entered twice",
                                     !prefs.getBoolean("conflict_entered", false) &&
                                         prefs.edit().putBoolean("conflict_entered", true).commit())
+                                val processNativeBeforeSend = if (processScenario) values().also {
+                                    DeleteProcessStopJourney.assertQuiet(app, source, ::accessible)
+                                } else null
                                 val guarded = if (phase == "CONFLICT") object : DeleteAttemptJournal by journal {
                                     override suspend fun claim(expected: DeleteAttemptRecord, admit: (CalendarScope) -> Boolean): Boolean {
                                         claims++
@@ -398,14 +411,31 @@ class CalendarDeleteGuardedJourneyLiveDeviceTest {
                                                 reservation.receipt.attempt == DeleteAttemptIdentity.of(unknown))
                                         if (networkScenario) DeleteNetworkInterruptionJourney.retainMeasurement(prefs,
                                             checkNotNull(networkProbe).observation())
+                                        val row = values()
+                                        if (processScenario) assertTrue("Stop preserves the exact full owner, baseline, tombstone and pending receipt without proof",
+                                            unknown.scope == source && unknown.eventId == event && unknown.intent.id == id("intent_id") &&
+                                                unknown.id == DeleteAttemptIdentity.requestId(unknown.intent, unknown.format) &&
+                                                unknown.intent.content == content && unknown.intent.base.content == content &&
+                                                store.localDelete(source, event) == unknown.intent &&
+                                                store.projectedBaseline(source, event) == unknown.intent.base &&
+                                                store.transaction(source) { remote(event) } == unknown.intent.base &&
+                                                reservation.receipt.intent == unknown.intent &&
+                                                row == processNativeBeforeSend && row[Events.DELETED] == "1" && row[Events.DIRTY] == "1" &&
+                                                shared.deleteJournal.readVerified(source, record.id, factual) == null &&
+                                                shared.deleteJournal.readCompletion(source, record.id, factual) == null &&
+                                                !prefs.getBoolean("submit_completed", false) && !prefs.getBoolean("ack_completed", false) &&
+                                                !verifiedReturned && projection.writes.get() == 0)
                                         // Deliberately do not delegate persistence of the supplied protected response.
-                                        assertTrue(prefs.edit().putString("interruption_unknown_hash", bytesHash(DeleteAttemptStorageCodec.encode(unknown)))
-                                            .putString("interruption_native_hash", nativeHash(values()))
+                                        val interruptionEdit = prefs.edit().putString("interruption_unknown_hash", bytesHash(DeleteAttemptStorageCodec.encode(unknown)))
+                                            .putString("interruption_native_hash", nativeHash(row))
                                             .putString("interruption_ack_nonce", reservation.receipt.nonce)
                                             .putString("interruption_format_id", unknown.format.id)
                                             .putInt("interruption_format_version", unknown.format.version)
-                                            .putInt("interruption_pid", Process.myPid()).putBoolean("evidence_interrupted", true).commit())
-                                        throw interruption
+                                            .putInt("interruption_pid", Process.myPid()).putBoolean("evidence_interrupted", true)
+                                        if (processScenario) DeleteProcessStopJourney.stop(app, prefs, unknown, protectedEvidence,
+                                            interruptionEdit, ::accessible)
+                                        assertTrue(interruptionEdit.commit())
+                                        throw checkNotNull(interruption)
                                     }
                                 } else journal
                                 if (networkScenario) networkProbe = ProtonDeleteNetworkInterruptionProbe.arm(app, record, hash) {
@@ -524,7 +554,7 @@ class CalendarDeleteGuardedJourneyLiveDeviceTest {
                                         RetainedLocalChangeRef(event, local.id, MutationKind.DELETE, LocalEditState.PAUSED),
                                         MutationId("unused-traversal-candidate"), timestamp, coordinator.systemDeleteRunAdmission(source)) { wakes++ })
                                 } catch (cancelled: CancellationException) {
-                                    if (!interruptionScenario || cancelled !== interruption) throw cancelled
+                                    if (!interruptionScenario || processScenario || cancelled !== interruption) throw cancelled
                                     interrupted = true
                                 }
                                 assertTrue("Exactly one preparation and submission", prepares == 1 && sends == 1 && inspections == 0)
@@ -703,6 +733,7 @@ class CalendarDeleteGuardedJourneyLiveDeviceTest {
         store: ImportStore, journal: DeleteRecoveryJournal, factual: (CalendarScope) -> Boolean,
         row: Map<String, String?>,
     ): DeleteAttemptRecord {
+        if (prefs.getString("scenario", null) == "PROCESS_INTERRUPTION") DeleteProcessStopJourney.assertRestarted(prefs)
         fun frozen(key: String) = checkNotNull(prefs.getString(key, null))
         val attempt = MutationId(frozen("attempt_id"))
         val record = checkNotNull(journal.read(source, attempt, factual))

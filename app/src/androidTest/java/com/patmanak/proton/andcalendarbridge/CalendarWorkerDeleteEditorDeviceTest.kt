@@ -8,7 +8,6 @@ import android.content.Intent
 import android.os.Bundle
 import android.provider.CalendarContract
 import android.provider.CalendarContract.Events
-import android.view.accessibility.AccessibilityNodeInfo
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.test.platform.app.InstrumentationRegistry
 import com.patmanak.proton.andcalendarbridge.data.calendar.AndroidCalendarProjection
@@ -16,7 +15,6 @@ import com.patmanak.proton.andcalendarbridge.data.outgoing.SystemCreateWorkStore
 import com.patmanak.proton.andcalendarbridge.data.outgoing.TitleUpdateAttemptStore
 import com.patmanak.proton.andcalendarbridge.protonauth.ProtonCreateSubmissionProbe
 import com.patmanak.proton.andcalendarbridge.sync.*
-import java.util.Locale
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
@@ -171,7 +169,7 @@ class CalendarWorkerDeleteEditorDeviceTest {
             suspend fun clickQualified(confirmation: Boolean) {
                 // Two independently obtained, qualified roots prevent acting on a stale tree.
                 withTimeout(15_000) {
-                    while (!qualifiedRoot(automation.rootInActiveWindow, frozen("title"), deletionMessage, confirmation, click = false)) {
+                    while (!QualifiedCalendarEditorUi.qualifiedRoot(automation.rootInActiveWindow, EDITOR, frozen("title"), deletionMessage, confirmation, click = false)) {
                         guard(); delay(100)
                     }
                 }
@@ -179,7 +177,7 @@ class CalendarWorkerDeleteEditorDeviceTest {
                 guard()
                 assertTrue("The enrolled row stays clean until the editor confirms deletion", !nativeDeleted())
                 assertTrue("The same qualified editor surface must remain before clicking",
-                    qualifiedRoot(automation.rootInActiveWindow, frozen("title"), deletionMessage, confirmation, click = true))
+                    QualifiedCalendarEditorUi.qualifiedRoot(automation.rootInActiveWindow, EDITOR, frozen("title"), deletionMessage, confirmation, click = true))
             }
             clickQualified(confirmation = false)
             clickQualified(confirmation = true)
@@ -231,41 +229,6 @@ class CalendarWorkerDeleteEditorDeviceTest {
                 "AND (event=? OR completion IS NULL) LIMIT 1", arrayOf(target.account.value, target.calendar.value, event.value)).use {
                 assertTrue("No prior target request or foreign uncertain deletion may borrow consent", it.count == 0)
             }
-        }
-    }
-
-    /** Own and release every node returned by the framework; no content escapes the test. */
-    @Suppress("DEPRECATION")
-    private fun qualifiedRoot(root: AccessibilityNodeInfo?, title: String, deletionMessage: String,
-        confirmation: Boolean, click: Boolean): Boolean {
-        if (root == null) return false
-        val nodes = ArrayList<AccessibilityNodeInfo>()
-        try {
-            fun walk(node: AccessibilityNodeInfo, depth: Int) {
-                nodes.add(node)
-                assertTrue("Bound the editor accessibility tree", nodes.size <= 512 && depth <= 32)
-                for (index in 0 until node.childCount) node.getChild(index)?.let { walk(it, depth + 1) }
-            }
-            walk(root, 0)
-            if (root.packageName?.toString() != EDITOR) return false
-            val action = if (confirmation) {
-                val positive = nodes.filter { it.viewIdResourceName == "android:id/button1" }
-                val negative = nodes.filter { it.viewIdResourceName == "android:id/button2" }
-                val messages = nodes.filter { it.viewIdResourceName == "android:id/message" }
-                if (messages.size != 1 || messages.single().text?.toString() != deletionMessage ||
-                    !messages.single().isVisibleToUser || positive.size != 1 || negative.size != 1 || positive.single().text?.toString() != "OK" ||
-                    negative.single().text?.toString()?.lowercase(Locale.ROOT) !in setOf("cancel", "annuler")) return false
-                positive.single()
-            } else {
-                if (nodes.count { it.text?.toString() == title } != 1) return false
-                val delete = nodes.filter { it.viewIdResourceName == "$EDITOR:id/info_action_delete" }
-                if (delete.size != 1) return false
-                delete.single()
-            }
-            if (!action.isEnabled || !action.isClickable || !action.isVisibleToUser || action.packageName?.toString() != EDITOR) return false
-            return !click || action.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-        } finally {
-            if (nodes.isEmpty()) root.recycle() else nodes.forEach { it.recycle() }
         }
     }
 
