@@ -4,6 +4,7 @@ package com.patmanak.proton.andcalendarbridge.protonauth
 import android.content.Context
 import com.patmanak.proton.andcalendarbridge.sync.*
 import java.io.IOException
+import java.io.InterruptedIOException
 import java.net.SocketException
 import java.security.MessageDigest
 import java.util.concurrent.atomic.AtomicReference
@@ -18,9 +19,13 @@ import me.proton.core.crypto.android.context.AndroidCryptoContext
 /** Closed observations only: no addresses, identifiers, headers, bodies or exceptions escape. */
 data class DeleteNetworkInterruptionObservation(val calls: Int, val authenticated: Boolean,
     val bodyStarts: Int, val hookCompleted: Boolean, val hookFailed: Boolean,
-    val socketFailure: Boolean, val callEnded: Boolean) {
+    val socketFailure: Boolean, val callEnded: Boolean, val cancelledAfterLoss: Boolean = false) {
     val measuredFailure: Boolean get() = calls == 1 && authenticated && bodyStarts == 1 &&
         hookCompleted && !hookFailed && socketFailure && !callEnded
+    // WorkManager may stop a CONNECTED CoroutineWorker after the real radio cut. This
+    // is a separate observation, never natural socket-failure evidence.
+    val measuredCancellation: Boolean get() = calls == 1 && authenticated && bodyStarts == 1 &&
+        hookCompleted && !hookFailed && cancelledAfterLoss && !callEnded
 }
 
 /** Debug-only, one enrolled deletion and authenticated session. Never opens or retries a call.
@@ -87,6 +92,7 @@ internal class DeleteNetworkObservationSession(private val url: HttpUrl, private
     private var hookFailed = false
     private var socketFailure = false
     private var callEnded = false
+    private var cancelledAfterLoss = false
     private fun matches(request: Request): Boolean {
         if (request.url != url || request.method != "PUT") return false
         val tag = request.tag(ProtonDeleteDispatchAttempt::class.java) ?: return false
@@ -116,7 +122,7 @@ internal class DeleteNetworkObservationSession(private val url: HttpUrl, private
                 if (call !== owner) return
                 val run = synchronized(this@DeleteNetworkObservationSession) {
                     bodyStarts++
-                    open && calls == 1 && authenticated && bodyStarts == 1
+                    open && calls == 1 && authenticated && bodyStarts == 1 && !call.isCanceled()
                 }
                 if (run) {
                     try {
@@ -132,11 +138,14 @@ internal class DeleteNetworkObservationSession(private val url: HttpUrl, private
                 // A local cancellation, listener error, timeout or dispatch denial is not a
                 // measured socket interruption. Do not classify nested synthetic exceptions.
                 if (call === owner) socketFailure = open && hookCompleted && !hookFailed && !call.isCanceled() && ioe is SocketException
+                if (call === owner) cancelledAfterLoss = open && calls == 1 && authenticated && bodyStarts == 1 &&
+                    hookCompleted && !hookFailed && !callEnded && call.isCanceled() &&
+                    ioe !is InterruptedIOException && ioe !is ProtonSingleDispatchDenied
             }
             override fun callEnd(call: Call) = synchronized(this@DeleteNetworkObservationSession) { if (call === owner) callEnded = true }
         }
     }
     @Synchronized fun observation() = DeleteNetworkInterruptionObservation(calls, authenticated, bodyStarts,
-        hookCompleted, hookFailed, socketFailure, callEnded)
+        hookCompleted, hookFailed, socketFailure, callEnded, cancelledAfterLoss)
     @Synchronized fun close() { open = false; payloadHash.fill(0) }
 }

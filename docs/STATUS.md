@@ -91,10 +91,23 @@ its HTTP body, followed by a natural socket failure and two fresh-process offlin
 UNKNOWN recoveries. After reconnection, authenticated inspection finds the original
 event still present and safely holds the unchanged request without resend or ACK;
 another local replay preserves it. Network settings are restored. This uses the
-evidence-persistence cancellation checkpoint too; production-worker transport loss
-and server-accepted/lost-response interruptions remain unqualified.
+evidence-persistence cancellation checkpoint too. The separate production-worker
+profile below does not inject that cancellation; server-accepted/lost-response
+interruptions remain unqualified.
 
-Current host suites pass 427 domain, 20 authentication, 852 backend and 199 app JVM cases without
+The normal WorkManager profile also qualifies real Wi-Fi loss at its authenticated
+DELETE body start, without an evidence-persistence cancellation or substituted
+journal. Its transport is observed cancelled after the cut; one matched call and
+body start remain stable through worker settlement. The real UNKNOWN record has
+no response capsule, result, completion or native ACK. Two fresh offline processes
+retain the exact request, first witness, local owner/base, pending receipt and dirty
+deleted row. After reconnecting, normal workers run and a read-only diagnostic
+confirms the original event PRESENT; no new attempt or false ACK is created.
+Another offline process preserves that held state, and all modes/radios are restored.
+This cancellation is distinct from the isolated natural socket failure above;
+the observation does not establish its stop reason.
+
+Current host suites pass 427 domain, 20 authentication, 856 backend and 199 app JVM cases without
 skips. Physical crypto, SQL/migration, Provider, worker/recovery and option UI
 checks pass; APK builds and app lint pass. Scope-specific evidence and remaining
 qualification are in [validation](VALIDATION.md) and the linked contracts.
@@ -122,8 +135,9 @@ For a useful bidirectional RC, finish:
    three-day deletion. A real preclaim conflict and local replay preserve the full
    variant. Offline capture, process restart and reconnection also pass before
    submission. Isolated real-service recovery also passes after injected evidence-
-   persistence cancellation. Extend production-worker conflict and actual network/
-   process interruption during/after remote claim, device reboot and power loss,
+   persistence cancellation. Real production-worker radio loss at body start also
+   retains UNKNOWN without fabricated transport/results. Extend worker conflict,
+   partial upload, server-accepted/lost-response and process interruption, reboot and power loss,
    then richer events and OEM behavior.
    Current source checks and permanent incoming barriers remain required; UNKNOWN
    is never reset or resent.

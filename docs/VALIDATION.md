@@ -1,5 +1,62 @@
 # Validation
 
+## Production-worker radio loss and cancelled transport recovery
+
+PASS: nine controlled physical executions on API 35: PREPARE, real editor
+deletion, OFFLINE_CAPTURE, OFFLINE_REPLAY, NETWORK_RUN, two fresh-process
+NETWORK_OFFLINE_REPLAY passes, NETWORK_RECONNECT and another offline replay.
+All phases share one new disposable timed event; capture and recovery retain one
+original owner.
+
+The framework UI helper opens the exact enrolled event in `foundation.e.calendar`
+and qualifies its title, action ID, package and the installed editor's localized
+ordinary-event deletion question before clicking. Direct Provider access in the
+fixture is read-only. On an initially read-only QA scope, the helper requires
+explicit opt-in, actual offline operation and full SQL/native quiescence before
+enabling general writability through the production setting; deletion sending
+remains disabled. Persistent compare-owned before/after witnesses precede each
+setter. Bounded non-cancellable cleanup restores the five original modes and
+test-service flags before success. The initial read-only editor attempt timed
+out without changing the event; the revised controlled lease passes.
+
+The network profile first makes an authenticated read-only preparation preview
+to bind the existing debug listener to the exact deterministic wire. This preview
+is never journalled, claimed or submitted. Normal WorkManager scheduling owns
+the real preparation, claim, transport and result handling. The listener cuts
+actual Wi-Fi only at the authenticated DELETE body start on the enrolled no-SIM
+Wi-Fi-only target. One matching call/body start is measured both before and
+after worker settlement. The observed outcome is CANCELLED, with no response
+capsule (`NONE`); it is not a natural SocketException measurement. No transport
+cancellation, exception, response, journal write or evidence loss is fabricated.
+The observation alone does not establish the cancellation's stop reason.
+
+Both offline restarts retain the original fully bound UNKNOWN record, first
+process witness, complete local owner/base, native digest and PENDING receipt.
+After reconnecting, normal workers are activated; a separate authenticated
+read-only diagnostic confirms PRESENT with matched context. This diagnostic is
+not proof that worker HTTP inspection was observed. The exact unchanged request
+remains held without a new attempt, result, completion, native write or false ACK.
+The final offline process replay preserves the same evidence and first witness.
+All five modes and original Wi-Fi/mobile-data/airplane settings are restored;
+Calendeer is reopened and the shared phone lock released.
+
+PASS: all 856 backend JVM cases, including 12 debug-probe methods with four new
+cancellation regressions. The earlier full strict task graph also passes, reusing
+427 domain, 20 authentication and 199 app JVM cases without failures/errors/skips.
+Final strict offline debug app/test builds and lint pass: zero errors, nine UseKtx
+warnings and seven version-availability advisories retained from online lint.
+Static native gates pass for debug and unsigned release; release excludes the
+debug network probe/session/observation classes and retains both dispatch guards.
+Five missing Maven metadata SHA-256 pins were individually reviewed without
+replacing existing pins or dependency versions; see [build security](BUILD_SECURITY.md).
+
+Independent source review passes. Release synchronization policy, TLS, dispatch
+guards, persistence schemas and adapter formats are unchanged. Partial upload,
+server-accepted/lost-response recovery, process kill during transport, device
+reboot/power loss, Samsung/One UI and Android 17/16 KiB runtime qualification remain
+outside this measured boundary. The supported absence/completion alternative of
+this worker profile is not qualified by the measured PRESENT outcome.
+
 ## Real DELETE socket loss and UNKNOWN recovery
 
 PASS: six opt-in live phases on the enrolled API 35 target: PREPARE, SEND, two

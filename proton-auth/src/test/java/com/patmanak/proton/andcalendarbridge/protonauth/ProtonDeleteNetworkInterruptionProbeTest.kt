@@ -2,6 +2,7 @@
 package com.patmanak.proton.andcalendarbridge.protonauth
 
 import java.io.IOException
+import java.io.InterruptedIOException
 import java.net.SocketException
 import java.net.SocketTimeoutException
 import java.security.MessageDigest
@@ -114,5 +115,56 @@ class ProtonDeleteNetworkInterruptionProbeTest {
         try { listener.requestBodyStart(call); fail("Hook must fail") } catch (_: IllegalStateException) {}
         listener.callFailed(call, SocketException()); assertFalse(session.observation().measuredFailure)
         session.close(); assertSame(EventListener.NONE, session.listener(taggedCall()))
+    }
+
+    @Test fun realPostHookCallCancellationIsDistinctFromNaturalSocketFailure() {
+        for (failure in listOf(IOException(), SocketException())) {
+            var hooks = 0
+            val session = DeleteNetworkObservationSession(url, "synthetic-session", fingerprint) { hooks++ }
+            val call = taggedCall(); val listener = session.listener(call)
+            listener.requestHeadersEnd(call, authenticated(call)); listener.requestBodyStart(call)
+            call.cancel(); listener.callFailed(call, failure)
+            assertEquals(1, hooks); assertTrue(session.observation().measuredCancellation)
+            assertFalse(session.observation().measuredFailure)
+        }
+    }
+
+    @Test fun cancellationBeforeBodyStartCannotRunTheRadioHook() {
+        var hooks = 0
+        val session = DeleteNetworkObservationSession(url, "synthetic-session", fingerprint) { hooks++ }
+        val call = taggedCall(); val listener = session.listener(call)
+        listener.requestHeadersEnd(call, authenticated(call)); call.cancel()
+        listener.requestBodyStart(call); listener.callFailed(call, IOException())
+        assertEquals(0, hooks); assertFalse(session.observation().hookCompleted)
+        assertFalse(session.observation().measuredCancellation); assertFalse(session.observation().measuredFailure)
+    }
+
+    @Test fun timeoutInterruptionAndDispatchDenialRemainExcludedEvenForCancelledCalls() {
+        for (failure in listOf(SocketTimeoutException(), InterruptedIOException(), ProtonSingleDispatchDenied())) {
+            val session = DeleteNetworkObservationSession(url, "synthetic-session", fingerprint) {}
+            val call = taggedCall(); val listener = session.listener(call)
+            listener.requestHeadersEnd(call, authenticated(call)); listener.requestBodyStart(call)
+            call.cancel(); listener.callFailed(call, failure)
+            assertFalse(session.observation().measuredCancellation); assertFalse(session.observation().measuredFailure)
+        }
+    }
+
+    @Test fun cancellationCannotBypassRepeatedClosedForeignSuccessfulOrUnauthenticatedExclusions() {
+        for (scenario in 0..5) {
+            val session = DeleteNetworkObservationSession(url, "synthetic-session", fingerprint) {}
+            val call = taggedCall(); val other = taggedCall(); val listener = session.listener(call)
+            if (scenario != 5) listener.requestHeadersEnd(call, authenticated(call))
+            listener.requestBodyStart(call)
+            when (scenario) {
+                0 -> session.listener(other)
+                1 -> session.close()
+                2 -> Unit // A foreign callback cannot donate failure evidence.
+                3 -> listener.callEnd(call)
+                4 -> listener.requestBodyStart(call)
+            }
+            call.cancel(); other.cancel()
+            listener.callFailed(if (scenario == 2) other else call, IOException())
+            assertFalse(session.observation().measuredCancellation); assertFalse(session.observation().measuredFailure)
+        }
     }
 }

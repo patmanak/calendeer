@@ -48,7 +48,12 @@ import org.junit.Test
  * event in foundation.e.calendar; an external driver deletes it there before RUN.
  * RUN invokes only consent setters and the normal scheduling trigger. REPLAY must run
  * in a new process. No direct DELETE preparation, capture, submission, inspection,
- * acknowledgement or manual worker entry point is used. Existing synthetic events stay.
+ * acknowledgement or manual worker entry point is used in the ordinary journey.
+ * Opt-in deleteWorkerNetwork=true requires deleteWorkerOffline=true and TIMED. It adds
+ * NETWORK_RUN, NETWORK_OFFLINE_REPLAY and NETWORK_RECONNECT. Its sole preparation
+ * exception is a read-only authentic preview to bind the socket probe before activation;
+ * the preview is never journaled, claimed or submitted. Reconnect may use a diagnostic
+ * read-only GET, which grants no proof of worker inspection. The host restores radios.
  * Five target modes have persistent compare-owned restoration; other calendars retain
  * their consent and may run their already authorized work. No global traffic claim.
  */
@@ -64,8 +69,11 @@ class CalendarSystemDeleteWorkerLiveDeviceTest {
         val allowReadOnly = args.getString("allowReadOnlyDeleteWorker") == "true"
         val profile = args.getString("deleteWorkerProfile") ?: "TIMED"
         val offlineJourney = args.getString("deleteWorkerOffline") == "true"
-        val offlinePhase = phase in setOf("OFFLINE_CAPTURE", "OFFLINE_REPLAY")
-        assertTrue("Explicit fixture, controlled account and phase are required", phase in setOf("PREPARE", "OFFLINE_CAPTURE", "OFFLINE_REPLAY", "RUN", "REPLAY") &&
+        val networkJourney = args.getString("deleteWorkerNetwork") == "true"
+        val networkPhase = phase.startsWith("NETWORK_")
+        val offlinePhase = phase in setOf("OFFLINE_CAPTURE", "OFFLINE_REPLAY", "NETWORK_OFFLINE_REPLAY")
+        assertTrue("Explicit fixture, controlled account and phase are required", phase in setOf("PREPARE", "OFFLINE_CAPTURE", "OFFLINE_REPLAY", "RUN", "REPLAY", "NETWORK_RUN", "NETWORK_OFFLINE_REPLAY", "NETWORK_RECONNECT") &&
+            (!networkJourney || offlineJourney && profile == "TIMED" && phase != "RUN") && (!networkPhase || networkJourney) &&
             (!offlinePhase || offlineJourney) &&
             token.matches(Regex("[a-f0-9]{12}")) && hash.matches(Regex("[a-f0-9]{64}")) &&
             profile in setOf("TIMED", "ALL_DAY_SINGLE", "ALL_DAY_MULTIPLE"))
@@ -102,6 +110,7 @@ class CalendarSystemDeleteWorkerLiveDeviceTest {
             val edit = prefs.edit().putString("token", token).putString("account_hash", hash)
                 .putString("profile", profile)
                 .putBoolean("offline_journey", offlineJourney)
+                .putBoolean("network_journey", networkJourney)
                 .putString("account", target.account.value).putString("calendar", target.calendar.value).putLong("generation", target.generation)
                 .putBoolean("readonly_activation", !original[0])
                 .putString("create_id", UUID.randomUUID().toString())
@@ -121,6 +130,7 @@ class CalendarSystemDeleteWorkerLiveDeviceTest {
         fun ownedModes() = (0..4).map { prefs.getBoolean("owned_$it", false) }
         assertTrue("Never move or replace the enrolled fixture", frozen("token") == token && frozen("account_hash") == hash &&
             prefs.getBoolean("offline_journey", false) == offlineJourney &&
+            prefs.getBoolean("network_journey", false) == networkJourney &&
             (prefs.getString("profile", null) ?: "TIMED") == profile &&
             frozen("account") == target.account.value && frozen("calendar") == target.calendar.value &&
             prefs.getLong("generation", -1) == target.generation && !originalModes[4] && accessible() &&
@@ -193,14 +203,15 @@ class CalendarSystemDeleteWorkerLiveDeviceTest {
             assertTrue(edit.commit())
         }
         val manager = WorkManager.getInstance(app)
+        fun waitingOffline() = offlinePhase || phase == "NETWORK_RUN" && prefs.getBoolean("network_loss_observed", false)
         suspend fun idle() = withTimeout(240_000) {
             var samples = 0
             while (samples < 2) {
-                if (offlinePhase) assertOffline(app)
+                if (waitingOffline()) assertOffline(app)
                 assertTrue("Retain exact fixture consent while waiting", accessible() && flags() == ownedModes())
                 val oneShot = listOf("calendar-import-network", "calendar-import-local").all { name ->
                     manager.getWorkInfosForUniqueWork(name).get().all {
-                        it.state.isFinished || (offlinePhase && name == "calendar-import-network" && it.state == WorkInfo.State.ENQUEUED)
+                        it.state.isFinished || (waitingOffline() && name == "calendar-import-network" && it.state == WorkInfo.State.ENQUEUED)
                     }
                 }
                 val periodic = manager.getWorkInfosForUniqueWork("calendar-import-periodic").get().none {
@@ -210,6 +221,7 @@ class CalendarSystemDeleteWorkerLiveDeviceTest {
                 if (samples < 2) delay(500)
             }
         }
+        var network: DeleteWorkerNetworkJourney? = null
         var restore = !prefs.getBoolean("modes_restored", false)
         try {
             recoverPendingModeWrite()
@@ -301,7 +313,7 @@ class CalendarSystemDeleteWorkerLiveDeviceTest {
                 app.systemCreates.state.value.deleteSupportAvailable)
             val event = EventId(frozen("event"))
             val offlineRowHash = if (offlinePhase) rowHash(row()) else null
-            if (offlinePhase) {
+            if (offlinePhase && !networkPhase) {
                 assertTrue("Offline phases cannot follow a completed online deletion", !prefs.getBoolean("worker_verified", false))
                 assertTrue("Offline capture starts from the real editor's dirty tombstone",
                     row()[Events.DELETED] == "1" && row()[Events.DIRTY] == "1")
@@ -345,13 +357,21 @@ class CalendarSystemDeleteWorkerLiveDeviceTest {
                 assertTrue("Bound the target native preflight", !page.more || pages < 20)
             } while (page.more)
             SystemWorkerFixtureAudit.assertDeleteActivationQuiescent(app, projection, target, event)
+            if (networkPhase) {
+                network = DeleteWorkerNetworkJourney(app, target, event, content, prefs, hash, admit, ::row, ::rowHash,
+                    { historyIds(app, target, event) }, { readProof(app, target, event, admit) != null }, ::status)
+                network.beforeActivation(phase)
+            }
             restore = true
             assertTrue(prefs.edit().putBoolean("modes_restored", false).commit())
             compose.runOnUiThread {
                 writeMode(0, true); writeMode(1, false); writeMode(2, false); writeMode(3, false); writeMode(4, true)
             }
             app.systemCreates.request()
-            if (offlinePhase) {
+            if (networkPhase && !checkNotNull(network).afterActivation(phase, ::idle) {
+                assertTrue("Preserve fixture access and exact active consent", accessible() && flags() == ownedModes())
+            }) return@runBlocking
+            if (offlinePhase && !networkPhase) {
                 verifyOfflineWorker(app, target, event, content, prefs, phase, checkNotNull(offlineRowHash), ::row, ::idle) {
                     assertTrue("Preserve fixture access and exact active consent", accessible() && flags() == ownedModes())
                 }
@@ -368,7 +388,8 @@ class CalendarSystemDeleteWorkerLiveDeviceTest {
             }
             idle()
             assertTrue("Production worker completed the exact ordinary deletion", proof.record.state == DeleteAttemptState.OUTCOME_UNKNOWN &&
-                proof.record.protectedEvidence != null && proof.record.intent.scope == target && proof.record.eventId == event &&
+                (if (networkJourney && frozen("network_evidence_shape") == "NONE") proof.record.protectedEvidence == null
+                 else proof.record.protectedEvidence != null) && proof.record.intent.scope == target && proof.record.eventId == event &&
                 proof.record.intent.base.content == content && proof.record.intent.content == content &&
                 proof.record.id == DeleteAttemptIdentity.requestId(proof.record.intent, proof.record.format) &&
                 proof.result.record == proof.record.copy(protectedEvidence = null) && proof.completion.result == proof.result)
@@ -384,7 +405,7 @@ class CalendarSystemDeleteWorkerLiveDeviceTest {
                 assertTrue("The production deletion barrier suppresses incoming recreation", store.pending(target).none { it.change.eventId == event } &&
                     store.stabilizedProjection(target, event) == null)
             }
-            if (phase == "RUN") {
+            if (phase == "RUN" || phase == "NETWORK_RECONNECT") {
                 assertTrue("Never replace a previously recorded completion", !prefs.contains("proof_hash") || frozen("proof_hash") == proof.hash)
                 assertTrue(prefs.edit().putString("attempt", proof.record.id.value).putString("proof_hash", proof.hash)
                     .putInt("run_pid", Process.myPid()).putBoolean("worker_verified", true).commit())
@@ -408,6 +429,7 @@ class CalendarSystemDeleteWorkerLiveDeviceTest {
                     status("system_delete_five_modes_restored")
                 }
             } finally {
+                network?.close()
                 projection.admitOperation = { false }
                 if (offlinePhase) assertOffline(app)
             }

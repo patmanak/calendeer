@@ -169,8 +169,43 @@ restarted ACK/REPLAY path may complete. That alternative is not implied by this
 present-event result. The protected operator must restore the original Wi-Fi,
 mobile-data and airplane settings in `finally`, including on failure; the fixture
 requires a no-SIM, Wi-Fi-only target and changes only Wi-Fi. Partial body upload,
-server acceptance followed by response loss, production-worker transport loss,
-reboot and power loss remain separate qualification cases.
+server acceptance followed by response loss, reboot and power loss remain separate
+qualification cases. The production-worker radio-loss profile is described below.
+
+The opt-in `deleteWorkerNetwork=true` profile extends the ordinary production
+worker fixture for timed events. PREPARE, actual system-editor deletion and
+offline capture/replay precede the one permitted NETWORK_RUN. A read-only
+authenticated preparation preview binds the debug listener to the deterministic
+raw DELETE wire; its protected capsule is never journalled, claimed or submitted.
+The normal worker independently prepares, claims and attempts its own request.
+Full calendar quiescence and exact retained-owner admission precede activation.
+
+PASS: actual Wi-Fi loss at that authenticated request-body start cancels the
+production transport. The first and settled observations agree on one matched
+call/body start. This is distinct from the isolated natural socket-error result
+above. No cancellation, response, exception, capsule or journal write is injected
+by this fixture. The real journal keeps its original UNKNOWN request with no
+response capsule, no verified result/completion and the original PENDING native
+receipt; the dirty deleted row and complete owner/base remain unchanged.
+
+The debug listener distinguishes natural socket failure from cancellation after
+the completed radio cut, excluding pre-cancelled calls, timeout/interruption,
+dispatch denial and foreign/repeated calls. The worker profile freezes the actual
+evidence shape (`NONE` or `NO_RESPONSE`) and full record hash without repairing
+or replacing either. WorkManager can stop a worker when a constraint disappears;
+see [Android's constraint lifecycle](https://developer.android.com/develop/background-work/background-tasks/persistent/getting-started/define-work).
+The observed cancellation does not independently establish its stop reason.
+
+PASS: two fresh-process offline worker activations retain the exact record,
+evidence shape, original owner/base, native digest and pending receipt. Repetition
+does not replace the first process witness. After network restoration, normal
+workers are activated and a separate authenticated read-only diagnostic confirms
+the original event PRESENT with unchanged qualified context. No new attempt,
+result, completion or native write is created; another offline process preserves
+that held state. The diagnostic does not prove that a worker GET was observed.
+The alternative authenticated-absence completion path remains outside this
+measured PRESENT outcome. Partial upload, server-accepted response loss,
+process kill, reboot/power loss and OEM qualification remain open.
 
 Detailed measured evidence is recorded in [validation](VALIDATION.md); passing fake
 boundaries alone does not qualify the service, Provider, editor or WorkManager.
