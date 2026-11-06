@@ -8,6 +8,20 @@ The initial checksum inventory was bootstrapped from the locally resolved public
 repositories/cache. This is trust on first use, not independent upstream signature
 verification or proof that the original download was trustworthy.
 
+Fresh online resolution also reads parent/BOM metadata that an existing offline
+cache may not expose. Reviewed SHA-256 pins cover the Guava parent POMs for
+[33.2.1-jre](https://repo.maven.apache.org/maven2/com/google/guava/guava-parent/33.2.1-jre/guava-parent-33.2.1-jre.pom)
+and [33.3.1-jre](https://repo.maven.apache.org/maven2/com/google/guava/guava-parent/33.3.1-jre/guava-parent-33.3.1-jre.pom),
+JUnit BOM module metadata for
+[5.10.2](https://repo.maven.apache.org/maven2/org/junit/junit-bom/5.10.2/junit-bom-5.10.2.module)
+and [5.11.0-M2](https://repo.maven.apache.org/maven2/org/junit/junit-bom/5.11.0-M2/junit-bom-5.11.0-M2.module),
+and the [coroutines 1.8.0 BOM POM](https://repo.maven.apache.org/maven2/org/jetbrains/kotlinx/kotlinx-coroutines-bom/1.8.0/kotlinx-coroutines-bom-1.8.0.pom).
+Their coordinates and exact cached bytes were checked against both Maven Central
+endpoints and published checksums: SHA-512 for JUnit/coroutines and SHA-1 for the
+Guava parents. The recorded pins use SHA-256 throughout. These additions retain
+all existing pins, versions and strict-verification rules; the upstream trust
+limit above still applies.
+
 ## Routine checks and dependency updates
 
 Use JDK 17 and the Android SDK specified by the build. The checked-in Windows CI
