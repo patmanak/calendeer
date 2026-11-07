@@ -1,0 +1,56 @@
+Source copyright/license headers (verbatim; distinct blocks deduplicated)
+
+Source example: golang.org/x/text@v0.28.0/internal/export/unicode/gen.go
+// Copyright 2009 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+Source example: golang.org/x/text@v0.28.0/unicode/norm/composition.go
+// Copyright 2011 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+Source example: golang.org/x/text@v0.28.0/collate/build/builder.go
+// Copyright 2012 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+Source example: golang.org/x/text@v0.28.0/collate/index.go
+// Copyright 2013 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+Source example: golang.org/x/text@v0.28.0/cases/cases.go
+// Copyright 2014 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+Source example: golang.org/x/text@v0.28.0/cases/info.go
+// Copyright 2015 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+Source example: golang.org/x/text@v0.28.0/cases/fold.go
+// Copyright 2016 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+Source example: golang.org/x/text@v0.28.0/cmd/gotext/common.go
+// Copyright 2017 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+Source example: golang.org/x/text@v0.28.0/internal/export/idna/conformance_test.go
+// Copyright 2018 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+Source example: golang.org/x/text@v0.28.0/encoding/ianaindex/ascii.go
+// Copyright 2019 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+Source example: golang.org/x/text@v0.28.0/collate/example_sort_test.go
+// Copyright 2021 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.

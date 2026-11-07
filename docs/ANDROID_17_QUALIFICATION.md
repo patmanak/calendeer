@@ -1,6 +1,7 @@
 # Android 17 and 16 KiB qualification
 
-This is a repeatable qualification plan, not a declaration of runtime support.
+This is a repeatable qualification plan with bounded evidence, not a declaration
+of complete runtime support.
 The build targets/compiles API 37 with minimum API 31. Existing evidence is in
 [validation](VALIDATION.md#sdk-37-migration); the platform review is in
 [build security](BUILD_SECURITY.md#android-api-37-baseline).
@@ -59,7 +60,7 @@ prerequisite is `BLOCKED` or `NOT_RUN`, never `PASS`.
 
 ## Device test matrix
 
-All rows start **NOT RUN** for the profiles above. Run applicable rows on both
+Unmeasured rows remain **NOT RUN** for each profile. Run applicable rows on both
 API 37 profiles and all native/page-size rows on every claimed 16 KiB profile.
 Use controlled fixtures and existing session restoration; execute real-service
 rows only with the separately authorized test account and bounded fixture scope.
@@ -85,6 +86,22 @@ already includes `PreferencesDeviceTest`. Run with `providerFixture=true` throug
 the authorized harness. Check runner completion, failures, errors and both ignored
 and assumption skips; an empty or partially skipped run cannot pass the row.
 These tests use synthetic ports/data and do not establish D03/D08/D10.
+
+## Measured subset
+
+On an isolated pre-release API 37 / x86_64 / 16 KiB image, selected D01/D02/D06
+fixtures pass: 102 native/SQL/handoff/startup cases, four debug native crypto
+cases, 470 migration regressions, 24 UI cases and three capacity cases. These
+counts cover different selections; they do not certify every matrix assertion.
+
+D10 has partial measured evidence: a non-debuggable same-key release update and
+actual reboot retain synthetic Provider/SQL/UNKNOWN state and a target-UID
+AndroidKeyStore challenge. Thirteen startup/native/Provider/persistence cases
+pass before and after. There is no authenticated release session on this fixture;
+D10 as a whole remains open. This local reboot also does not establish D08
+production-worker scheduling. API 37 / 4 KiB, ARM64, Samsung, large-screen,
+physical keyboard and live API/WebView journeys remain unmeasured here.
+See [validation](VALIDATION.md) for scope and remaining boundaries.
 
 ## Evidence and restoration
 

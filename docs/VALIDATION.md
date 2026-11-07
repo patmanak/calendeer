@@ -1,5 +1,111 @@
 # Validation
 
+## Personal-edit v2 integration and Android 17 / 16 KiB fixtures
+
+PASS: 444 domain, 907 backend and 230 app JVM tests, without skips. New coverage
+includes complete raw metadata/identity lifecycles, bounded work pages, disjoint
+legacy formats, full personal storage/proofs, consent revocation, cancellation,
+UNKNOWN inspection and historical CREATE recovery. The unchanged authentication
+suite retains its earlier 20-case baseline.
+
+PASS on a fresh isolated x86_64 emulator: actual API 37, page size 16384 and
+hardware virtualization observed. Seven new SQLite cases qualify additive shared
+journal 9→10 and import 22→23 migrations with exact old SQLite storage types/bytes,
+reciprocal four-family ownership across generations, immutable UNKNOWN/evidence,
+proof/completion, preparation/ACK reopening and preservation of a newer owner.
+Four personal Provider cases prove combined title/text and timed→all-day capture,
+unchanged reminders/color, exact reminder child IDs/values/count assertions in the
+ACK batch, LF readback, preserved later edits and rejection of changed metadata.
+Historical work-store recovery and the new exact-proof CREATE reconstruction pass.
+The selected suite also passes all 41 handoff integration cases, 34 legacy time
+Provider ACK cases and production startup/recreation. Together these are 102
+distinct selected cases. Three initial fixture failures were corrected and their
+focused retest passed; no assumption or ignored tests were accepted.
+
+PASS: four additional native Core crypto tests on this same emulator. Two new
+personal cases exercise both original signature modes across six combined/time/
+kind/zone scenarios each, with real session-key decryption, renewed signatures,
+protected reopening, complete decoded readback, raw ICS and Notifications/color
+preservation, and tamper/mismatch refusal. Two existing temporal crypto cases
+remain green. A further main-source-only runtime test executes Android Keystore
+protection, native asymmetric signatures/tamper refusal and a native symmetric
+round trip; its debug-artifact execution passes. Release execution is separate.
+
+PASS: all 24 authentication, preferences and dashboard UI cases after upgrading
+the test-only Espresso dependency to 3.7.0. The earlier runner used a hidden
+InputManager method removed in API 37. Three capacity/volume cases and 470
+SQLite migration regressions also pass, with no assumption or ignored tests.
+Permanent preparation refusals retain their work without network backoff;
+transient failures remain retryable, covered by two additional app JVM cases.
+
+These are controlled synthetic fixtures, not authenticated service, system-editor,
+Samsung/One UI, ARM64, natural periodic scheduling, reboot or signed-update proof.
+The device image is an installed Android 17 pre-release image; it does not qualify
+a later stable/OEM build or the API-37 4 KiB profile. Existing real API-35 service
+journeys are retained separately below. See [personal edits](PERSONAL_UPDATE.md)
+and [Android qualification](ANDROID_17_QUALIFICATION.md).
+
+## Signed release update and reboot on Android 17 / 16 KiB
+
+PASS: a fresh isolated API 37 / x86_64 / 16384-byte-page emulator installs the
+actual non-debuggable release APK, signed offline with the project release key.
+The baseline and candidate have the same verified certificate and increasing
+version codes. An in-place update preserves exact synthetic Provider calendar,
+event and reminder identities/values; private SQL storage types/bytes; a retained
+personal OUTCOME_UNKNOWN request; and an AndroidKeyStore AES-GCM challenge.
+Separate-process verification passes before the update, after the update and
+after an actual emulator reboot. The retained request is never sent. Exact
+fixture cleanup passes only after successful verification.
+
+Thirteen main-source startup, native crypto, personal Provider and persistence
+tests pass on the baseline and again after the update/reboot, without skips.
+The package is non-debuggable and reports pageSizeCompat=0. Static ELF/RELRO and
+16 KiB ZIP checks pass for the candidate. All DEX definitions are inspected:
+the release contains no JSR305 annotation definitions. All 50 host tool tests
+pass. Strict offline dependency verification, app lint and debug/test/unsigned
+release builds pass.
+
+This qualifies synthetic retained local state and native execution, not an
+authenticated Proton session upgrade, production worker reboot scheduling,
+Samsung/One UI, ARM64, API 37 / 4 KiB or a stable later image. The independent
+native source/license and advisory-applicability release gates remain open.
+
+## Authenticated combined personal edit and local recovery
+
+PASS on the enrolled API 35 target: a new isolated real-service fixture sends one
+combined title/description/location change and a timed-to-three-day-all-day
+transition through the production personal-v2 adapters and coordinator. A complete
+authenticated readback verifies the result, including canonical LF text. Revoking
+write consent after durable proof retains the dirty native row without an ACK.
+A separate-process recovery uses retained proof and local ports only, completes
+the same-row native/SQL ACK and preserves the immutable request/result history.
+A second new-process replay performs no send, preparation, inspection or native
+ACK and preserves a later local dirty title edit and the original completion.
+
+The first recovery exposed an omitted Personal table in the shared metadata-page
+whitelist. Adding only that table fixes discovery; the same original UNKNOWN
+request and proof are recovered without resetting or resending them. A subsequent
+fixture expectation was corrected to allow the already specified CRLF-to-LF text
+normalization during ACK. Eight actual Android SQLite regressions now pass,
+including reopened bounded pagination, lookahead, completed-row exclusion and
+denied admission. Independent source review passes for both corrections.
+
+The native edit is made by the isolated fixture rather than a system editor or
+production worker. The service event has explicit known-empty reminders/color;
+rich metadata preservation remains qualified by synthetic crypto/Provider tests,
+not this real-service case. No radio disconnection, Samsung/OEM behavior or
+authenticated release upgrade is claimed. The recognizable service example and
+its private history are retained for inspection.
+
+PASS: a separate authenticated text fixture on a three-day all-day event completes
+SUBMIT and two fresh-process RECOVER executions on the same API 35 target. Raw
+CRLF intent and canonical LF readback remain distinct; revoked write consent
+retains the proof, local recovery acknowledges the same row, and restarted replay
+preserves the later dirty local edit, original request/result/completion hashes
+and no-repeat-send witnesses. This is an isolated coordinator/Provider journey,
+not an all-day system-editor or production-worker test. The retained synthetic
+example remains visible; production settings and network state are unchanged.
+
 ## Process death after durable proof and native acknowledgement
 
 PASS: two opt-in isolated real-service profiles on the enrolled API 35 target.

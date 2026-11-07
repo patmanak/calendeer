@@ -14,3 +14,9 @@ is available alongside it in GPL-3.0.txt; the original grant also permits
 later versions of the GPL.
 
 No Contako artwork, contacts, account data or stored sessions are included.
+
+Calendeer original project contributions are GPL-3.0-or-later; imported
+Proton Calendar/WebClients adaptations retain GPL-3.0-only. The combined
+application is constrained to GPL version 3, without a blanket later-version
+option for imported material. Refer to the source LICENSE, module PROVENANCE.md
+and docs/LICENSING.md for grants and unresolved release dependency notices.

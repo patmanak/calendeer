@@ -1,0 +1,31 @@
+Source copyright/license headers (verbatim; distinct blocks deduplicated)
+
+Source example: commonMain/kotlinx/serialization/json/internal/StringOps.kt
+/*
+ * Copyright 2017-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license.
+ */
+
+Source example: commonMain/kotlinx/serialization/json/JsonContentPolymorphicSerializer.kt
+/*
+ * Copyright 2017-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license.
+ */
+
+Source example: jvmMain/kotlinx/serialization/json/JsonSchemaCache.kt
+/*
+ * Copyright 2017-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license.
+ */
+
+Source example: jvmMain/kotlinx/serialization/json/internal/ArrayPools.kt
+/*
+ * Copyright 2017-2022 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license.
+ */
+
+Source example: jvmMain/kotlinx/serialization/json/internal/FormatLanguage.kt
+/*
+ * Copyright 2017-2023 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license.
+ */
+
+Source example: commonMain/kotlinx/serialization/json/Json.kt
+/*
+ * Copyright 2017-2024 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license.
+ */

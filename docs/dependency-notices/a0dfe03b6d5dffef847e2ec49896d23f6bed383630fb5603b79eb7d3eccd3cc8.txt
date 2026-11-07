@@ -1,0 +1,41 @@
+Source copyright/license headers (verbatim; distinct blocks deduplicated)
+
+Source example: github.com/cronokirby/saferith@v0.33.0/arith.go
+// Copyright 2009 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE_go file.
+
+Source example: github.com/cronokirby/saferith@v0.33.0/arith_decl.go
+// Copyright 2010 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE_go file.
+
+Source example: github.com/cronokirby/saferith@v0.33.0/arith_arm64.s
+// Copyright 2013 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE_go file.
+
+Source example: github.com/cronokirby/saferith@v0.33.0/arith_decl_pure.go
+// Copyright 2015 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE_go file.
+
+Source example: github.com/cronokirby/saferith@v0.33.0/arith_decl_s390x.go
+// Copyright 2016 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE_go file.
+
+Source example: github.com/cronokirby/saferith@v0.33.0/arith_amd64.go
+// Copyright 2017 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE_go file.
+
+Source example: github.com/cronokirby/saferith@v0.33.0/arith_wasm.s
+// Copyright 2018 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE_go file.
+
+Source example: github.com/cronokirby/saferith@v0.33.0/arith_riscv64.s
+// Copyright 2020 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE_go file.

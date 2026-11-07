@@ -1,0 +1,91 @@
+Source copyright/license headers (verbatim; distinct blocks deduplicated)
+
+Source example: golang.org/x/crypto@v0.41.0/md4/md4.go
+// Copyright 2009 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+Source example: golang.org/x/crypto@v0.41.0/blowfish/block.go
+// Copyright 2010 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+Source example: golang.org/x/crypto@v0.41.0/bcrypt/base64.go
+// Copyright 2011 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+Source example: golang.org/x/crypto@v0.41.0/bn256/bn256.go
+// Copyright 2012 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+Source example: golang.org/x/crypto@v0.41.0/ocsp/ocsp.go
+// Copyright 2013 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+Source example: golang.org/x/crypto@v0.41.0/hkdf/example_test.go
+// Copyright 2014 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+Source example: golang.org/x/crypto@v0.41.0/acme/acme.go
+// Copyright 2015 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+Source example: golang.org/x/crypto@v0.41.0/acme/autocert/autocert.go
+// Copyright 2016 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+Source example: golang.org/x/crypto@v0.41.0/acme/autocert/example_test.go
+// Copyright 2017 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+Source example: golang.org/x/crypto@v0.41.0/acme/autocert/internal/acmetest/ca.go
+// Copyright 2018 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+Source example: golang.org/x/crypto@v0.41.0/chacha20/xor.go
+// Copyright 2018 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found src the LICENSE file.
+
+Source example: golang.org/x/crypto@v0.41.0/acme/internal/acmeprobe/prober.go
+// Copyright 2019 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+Source example: golang.org/x/crypto@v0.41.0/internal/wycheproof/aead_test.go
+// Copyright 2020 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+Source example: golang.org/x/crypto@v0.41.0/internal/testenv/testenv_notunix.go
+// Copyright 2021 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+Source example: golang.org/x/crypto@v0.41.0/internal/wycheproof/boring.go
+// Copyright 2022 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+Source example: golang.org/x/crypto@v0.41.0/internal/testenv/exec.go
+// Copyright 2023 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+Source example: golang.org/x/crypto@v0.41.0/ssh/mlkem.go
+// Copyright 2024 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+Source example: golang.org/x/crypto@v0.41.0/acme/pebble_test.go
+// Copyright 2025 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.

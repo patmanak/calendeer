@@ -3,6 +3,12 @@
 *.kts text eol=lf
 *.md text eol=lf
 *.xml text eol=lf
+*.json text eol=lf
+*.py text eol=lf
+*.lockfile text eol=lf
 gradlew text eol=lf
 gradlew.bat text eol=crlf
 proton-auth/licenses/biweekly.license -whitespace
+# Retained evidence is hashed as original bytes, including original line endings.
+docs/dependency-notices/*.txt -text -whitespace
+app/src/main/assets/legal/THIRD-PARTY-NOTICES.txt -text -whitespace

@@ -1,0 +1,89 @@
+Source copyright/license headers (verbatim; distinct blocks deduplicated)
+
+Source example: golang.org/x/net@v0.42.0/internal/http3/files_test.go
+// Check for copyright header while we're in here.
+
+Source example: golang.org/x/net@v0.42.0/dns/dnsmessage/message.go
+// Copyright 2009 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+Source example: golang.org/x/net@v0.42.0/dict/dict.go
+// Copyright 2010 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+Source example: golang.org/x/net@v0.42.0/html/const.go
+// Copyright 2011 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+Source example: golang.org/x/net@v0.42.0/html/atom/atom.go
+// Copyright 2012 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+Source example: golang.org/x/net@v0.42.0/html/charset/charset.go
+// Copyright 2013 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+Source example: golang.org/x/net@v0.42.0/context/context.go
+// Copyright 2014 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+Source example: golang.org/x/net@v0.42.0/context/ctxhttp/ctxhttp_test.go
+// Copyright 2015 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+Source example: golang.org/x/net@v0.42.0/bpf/asm.go
+// Copyright 2016 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+Source example: golang.org/x/net@v0.42.0/bpf/setter.go
+// Copyright 2017 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+Source example: golang.org/x/net@v0.42.0/http/httpguts/guts.go
+// Copyright 2018 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+Source example: golang.org/x/net@v0.42.0/internal/socket/defs_aix.go
+// Copyright 2019 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+Source example: golang.org/x/net@v0.42.0/internal/socket/cmsghdr_unix.go
+// Copyright 2020 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+Source example: golang.org/x/net@v0.42.0/http2/ascii.go
+// Copyright 2021 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+Source example: golang.org/x/net@v0.42.0/http2/hpack/gen.go
+// Copyright 2022 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+Source example: golang.org/x/net@v0.42.0/html/comment_test.go
+// Copyright 2023 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+Source example: golang.org/x/net@v0.42.0/html/iter.go
+// Copyright 2024 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+Source example: golang.org/x/net@v0.42.0/internal/http3/body.go
+// Copyright 2025 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.

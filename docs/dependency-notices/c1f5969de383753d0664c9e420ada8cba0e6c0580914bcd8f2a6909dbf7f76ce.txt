@@ -1,0 +1,103 @@
+Source copyright/license headers (verbatim; distinct blocks deduplicated)
+
+Source example: github.com/ProtonMail/go-crypto@v1.4.1-proton/openpgp/packet/aead_encrypted_test.go
+// Copyright (C) 2018 ProtonTech AG
+
+Source example: github.com/ProtonMail/go-crypto@v1.4.1-proton/eax/eax.go
+// Copyright (C) 2019 ProtonTech AG
+
+Source example: github.com/ProtonMail/go-crypto@v1.4.1-proton/internal/byteutil/byteutil.go
+// Copyright (C) 2019 ProtonTech AG
+// This file contains necessary tools for the aex and ocb packages.
+//
+// These functions SHOULD NOT be used elsewhere, since they are optimized for
+// specific input nature in the EAX and OCB modes of operation.
+
+Source example: github.com/ProtonMail/go-crypto@v1.4.1-proton/openpgp/internal/ecc/curve25519/field/fe.go
+// Copyright (c) 2017 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+Source example: github.com/ProtonMail/go-crypto@v1.4.1-proton/openpgp/internal/ecc/curve25519/field/fe_alias_test.go
+// Copyright (c) 2019 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+Source example: github.com/ProtonMail/go-crypto@v1.4.1-proton/openpgp/internal/ecc/curve25519/field/fe_arm64.go
+// Copyright (c) 2020 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+Source example: github.com/ProtonMail/go-crypto@v1.4.1-proton/openpgp/internal/ecc/curve25519/field/fe_arm64_noasm.go
+// Copyright (c) 2021 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+Source example: github.com/ProtonMail/go-crypto@v1.4.1-proton/bitcurves/bitcurve.go
+// Copyright 2010 The Go Authors. All rights reserved.
+// Copyright 2011 ThePiachu. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+Source example: github.com/ProtonMail/go-crypto@v1.4.1-proton/openpgp/armor/armor.go
+// Copyright 2010 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+Source example: github.com/ProtonMail/go-crypto@v1.4.1-proton/openpgp/canonical_text.go
+// Copyright 2011 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+Source example: github.com/ProtonMail/go-crypto@v1.4.1-proton/openpgp/clearsign/clearsign.go
+// Copyright 2012 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+Source example: github.com/ProtonMail/go-crypto@v1.4.1-proton/openpgp/packet/userattribute.go
+// Copyright 2013 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+Source example: github.com/ProtonMail/go-crypto@v1.4.1-proton/openpgp/aes/keywrap/keywrap.go
+// Copyright 2014 Matthew Endsley
+// All rights reserved
+//
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted providing that the following conditions
+// are met:
+// 1. Redistributions of source code must retain the above copyright
+//    notice, this list of conditions and the following disclaimer.
+// 2. Redistributions in binary form must reproduce the above copyright
+//    notice, this list of conditions and the following disclaimer in the
+//    documentation and/or other materials provided with the distribution.
+//
+// THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
+// IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+// WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+// ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY
+// DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+// DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+// OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+// HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
+// STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING
+// IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+// POSSIBILITY OF SUCH DAMAGE.
+
+Source example: github.com/ProtonMail/go-crypto@v1.4.1-proton/openpgp/ecdh/ecdh.go
+// Copyright 2017 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+Source example: github.com/ProtonMail/go-crypto@v1.4.1-proton/ocb/ocb_test.go
+// Copyright 2019 ProtonTech AG.
+
+Source example: github.com/ProtonMail/go-crypto@v1.4.1-proton/eax/eax_test.go
+// Copyright 2019 ProtonTech AG.
+//
+// This file only tests EAX mode when instantiated with AES-128.
+
+Source example: github.com/ProtonMail/go-crypto@v1.4.1-proton/openpgp/packet/symmetrically_encrypted_aead.go
+// Copyright 2023 Proton AG. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.

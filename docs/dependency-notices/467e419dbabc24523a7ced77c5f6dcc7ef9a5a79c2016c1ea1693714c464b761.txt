@@ -1,0 +1,51 @@
+Source copyright/license headers (verbatim; distinct blocks deduplicated)
+
+Source example: github.com/golang/protobuf@v1.4.2/proto/extensions.go
+// Copyright 2010 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+Source example: github.com/golang/protobuf@v1.4.2/proto/proto_clone_test.go
+// Copyright 2011 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+Source example: github.com/golang/protobuf@v1.4.2/proto/extensions_test.go
+// Copyright 2014 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+Source example: github.com/golang/protobuf@v1.4.2/protoc-gen-go/grpc/grpc.go
+// Copyright 2015 The Go Authors.  All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+Source example: github.com/golang/protobuf@v1.4.2/jsonpb/decode.go
+// Copyright 2015 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+Source example: github.com/golang/protobuf@v1.4.2/descriptor/descriptor.go
+// Copyright 2016 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+Source example: github.com/golang/protobuf@v1.4.2/proto/discard_test.go
+// Copyright 2017 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+Source example: github.com/golang/protobuf@v1.4.2/internal/gengogrpc/grpc.go
+// Copyright 2018 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+Source example: github.com/golang/protobuf@v1.4.2/internal/cmd/generate-alias/main.go
+// Copyright 2019 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+Source example: github.com/golang/protobuf@v1.4.2/descriptor/descriptor_test.go
+// Copyright 2020 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.

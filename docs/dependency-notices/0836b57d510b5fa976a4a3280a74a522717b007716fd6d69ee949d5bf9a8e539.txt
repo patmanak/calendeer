@@ -1,0 +1,110 @@
+Source copyright/license headers (verbatim; distinct blocks deduplicated)
+
+Source example: golang.org/x/sys@v0.35.0/plan9/asm_plan9_386.s
+// Copyright 2009 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+Source example: golang.org/x/sys@v0.35.0/unix/syscall_darwin.go
+// Copyright 2009,2010 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+Source example: golang.org/x/sys@v0.35.0/unix/env_unix.go
+// Copyright 2010 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+Source example: golang.org/x/sys@v0.35.0/plan9/env_plan9.go
+// Copyright 2011 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+Source example: golang.org/x/sys@v0.35.0/plan9/dir_plan9.go
+// Copyright 2012 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+Source example: golang.org/x/sys@v0.35.0/plan9/syscall_test.go
+// Copyright 2013 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+Source example: golang.org/x/sys@v0.35.0/plan9/asm.s
+// Copyright 2014 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+Source example: golang.org/x/sys@v0.35.0/plan9/pwd_go15_plan9.go
+// Copyright 2015 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+Source example: golang.org/x/sys@v0.35.0/unix/asm_linux_mipsx.s
+// Copyright 2016 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+Source example: golang.org/x/sys@v0.35.0/unix/endian_little.go
+// Copyright 2016 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+//
+//go:build 386 || amd64 || amd64p32 || alpha || arm || arm64 || loong64 || mipsle || mips64le || mips64p32le || nios2 || ppc64le || riscv || riscv64 || sh
+
+Source example: golang.org/x/sys@v0.35.0/unix/endian_big.go
+// Copyright 2016 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+//
+//go:build armbe || arm64be || m68k || mips || mips64 || mips64p32 || ppc || ppc64 || s390 || s390x || shbe || sparc || sparc64
+
+Source example: golang.org/x/sys@v0.35.0/unix/timestruct_test.go
+// Copyright 2017 The Go Authors. All right reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+Source example: golang.org/x/sys@v0.35.0/unix/cap_freebsd.go
+// Copyright 2017 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+Source example: golang.org/x/sys@v0.35.0/cpu/asm_aix_ppc64.s
+// Copyright 2018 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+Source example: golang.org/x/sys@v0.35.0/cpu/byteorder.go
+// Copyright 2019 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+Source example: golang.org/x/sys@v0.35.0/cpu/cpu_linux_mips64x.go
+// Copyright 2020 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+Source example: golang.org/x/sys@v0.35.0/unix/asm_bsd_386.s
+// Copyright 2021 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+Source example: golang.org/x/sys@v0.35.0/cpu/cpu_loong64.go
+// Copyright 2022 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+Source example: golang.org/x/sys@v0.35.0/cpu/endian_big.go
+// Copyright 2023 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+Source example: golang.org/x/sys@v0.35.0/cpu/asm_darwin_x86_gc.s
+// Copyright 2024 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+Source example: golang.org/x/sys@v0.35.0/cpu/cpu_linux_loong64.go
+// Copyright 2025 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.

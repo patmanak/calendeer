@@ -1,0 +1,20 @@
+Calendeer original contributions
+Copyright (C) 2026 Patmanak
+
+Original contributions by this project's copyright holder are free software:
+you can redistribute them and/or modify them under the terms of the GNU General
+Public License as published by the Free Software Foundation, either version 3
+of the License, or (at your option) any later version.
+
+They are distributed in the hope that they will be useful, but WITHOUT ANY
+WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+A PARTICULAR PURPOSE. See COPYING for the full GNU General Public License.
+
+SPDX-License-Identifier: GPL-3.0-or-later
+
+This grant applies to original contributions whose rights the project holder
+can license. Imported and dependency code retains its own license, copyright
+and notices. In particular, imported Proton Calendar/WebClients adaptations
+are GPL-3.0-only. The combined application must satisfy GPL version 3 and must
+not be described as entirely GPL-3.0-or-later. See docs/LICENSING.md, module
+PROVENANCE.md files and the release dependency notice inventory.

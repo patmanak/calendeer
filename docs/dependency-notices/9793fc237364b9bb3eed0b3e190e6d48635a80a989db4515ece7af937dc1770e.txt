@@ -1,0 +1,8 @@
+Source copyright/license headers (verbatim; distinct blocks deduplicated)
+
+Source example: github.com/ProtonMail/bcrypt@v0.0.0-20210511135022-227b4adcab57/bcrypt_test.go
+//
+// Copyright 2011 ZooWar.com. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+//

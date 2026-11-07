@@ -1,0 +1,19 @@
+Source copyright/license headers (verbatim; distinct blocks deduplicated)
+
+Source example: jvmMain/LocalDate.kt
+/*
+ * Copyright 2019-2020 JetBrains s.r.o.
+ * Use of this source code is governed by the Apache 2.0 License that can be found in the LICENSE.txt file.
+ */
+
+Source example: jvmMain/UtcOffsetJvm.kt
+/*
+ * Copyright 2019-2021 JetBrains s.r.o.
+ * Use of this source code is governed by the Apache 2.0 License that can be found in the LICENSE.txt file.
+ */
+
+Source example: jvmMain/LocalDateTime.kt
+/*
+ * Copyright 2019-2022 JetBrains s.r.o. and contributors.
+ * Use of this source code is governed by the Apache 2.0 License that can be found in the LICENSE.txt file.
+ */

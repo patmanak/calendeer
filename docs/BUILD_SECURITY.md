@@ -28,7 +28,7 @@ Use JDK 17 and the Android SDK specified by the build. The checked-in Windows CI
 workflow runs the host suites, lint, debug app/test and unsigned release builds,
 workflow validation, tooling tests and an offline dependency inventory. Actions
 are pinned by commit, permissions are read-only and no publication is configured.
-Physical-device tests require the separately authorized enrolled test target;
+Device tests require an authorized, explicitly selected physical or isolated emulator target;
 `tools/device-regressions.txt` defines the bounded controlled-fixture selection.
 
 ```powershell
@@ -94,6 +94,48 @@ generated-schema checks and Android tests provide the project-specific
 qualification in [validation](VALIDATION.md). Do not restore untrusted build caches;
 CI uses fresh runners without configured build-cache restoration.
 
+## Instrumentation compatibility and fresh metadata
+
+The UI test dependency is explicitly Espresso 3.7.0, including its matching idling
+resource. Espresso 3.5.0 failed on the measured API-37 image because it reflects
+`InputManager.getInstance`; the stable replacement uses `getSystemService`.
+See [AndroidX Test 3.7.0 release notes](https://developer.android.com/jetpack/androidx/releases/test#espresso-3.7.0).
+All 24 selected authentication/preferences/dashboard UI cases pass after this
+change. This affects instrumentation only; application runtime coordinates do not
+change. Three obsolete test-only transitives are removed by the resolved graph.
+
+The two AARs and two POMs match the official Google Maven bytes. Fresh online
+resolution also consumed the existing Core dependency graph metadata for
+[android-golib 2.9.0-2 POM](https://repo.maven.apache.org/maven2/me/proton/crypto/android-golib/2.9.0-2/android-golib-2.9.0-2.pom),
+[coroutines 1.8.0 module](https://repo.maven.apache.org/maven2/org/jetbrains/kotlinx/kotlinx-coroutines-core/1.8.0/kotlinx-coroutines-core-1.8.0.module)
+and [Room 2.7.2 module](https://dl.google.com/dl/android/maven2/androidx/room/room-runtime/2.7.2/room-runtime-2.7.2.module).
+These cached files were checked byte for byte against their official repositories
+before adding their SHA-256 pins. Existing pins are retained. Consumed metadata
+is not evidence that those earlier versions ship: the resolved application still
+uses its existing Core/native/Room constraints. Native runtime smoke tests compile
+against the same Core release through test-only compile dependencies, without
+packaging another Core copy in the instrumentation APK.
+
+## Native advisory review boundary
+
+The Maven advisory inventory does not cover the Go modules embedded in
+`android-golib`. The recovered native build information in the
+[dependency inventory](release-dependencies.json) records 25 exact Go module
+versions and Go 1.23.12 across four ABIs. Official OSV/Go queries find advisory
+version matches in several modules and the standard library; compiler/toolchain
+records are kept separate from runtime package reports. Examples include
+[edwards25519](https://pkg.go.dev/vuln/GO-2026-4503) and
+[protobuf](https://pkg.go.dev/vuln/GO-2024-2611).
+
+These are version matches, not demonstrated Android reachability or exploits.
+Neither successful native round trips nor a clean Maven query clears them. A
+public RC requires a recorded applicability/reachability assessment or a qualified
+fixed native build, alongside the corresponding-source/license work. The official
+[Maven native metadata](https://repo.maven.apache.org/maven2/me/proton/crypto/android-golib/maven-metadata.xml)
+still lists the pinned 2.10.0-2 as latest at this review; no newer patched aggregate
+was identified. No advisory is suppressed and no cryptography is rewritten to
+make this gate appear green.
+
 ## Android API 37 baseline
 
 Both Android modules compile against API 37; the app targets 37 and retains
@@ -109,14 +151,15 @@ found no required application-code workaround:
 
 | Area | Reviewed behavior and remaining boundary |
 | --- | --- |
-| Native loading | The resolved `android-golib` uses `go.Seq` and `System.loadLibrary("gojni")`. No application extraction/`System.load` path or writable-code exception is added. Android 17 native startup remains to be measured. |
+| Native loading | The resolved `android-golib` uses `go.Seq` and `System.loadLibrary("gojni")`. No application extraction/`System.load` path or writable-code exception is added. Native execution passes on an isolated API 37 / x86_64 / 16 KiB image, including the signed release after update/reboot; other profiles remain unmeasured. |
 | TLS and authentication | Keep platform CT/ECH defaults, HTTPS validation, WebView SSL cancellation and origin checks. No trust override, cleartext allowance or new permission is added. Real Android 17 API/WebView transport remains to be measured. |
 | Sensitive UI | Authentication and hosted verification already use `FLAG_SECURE`; no deprecated content-capture opt-out replaces it. Test Android 17 recreation, keyboard and large-screen behavior before claiming qualification. |
 | Background work and Provider | Workers remain bounded, with existing request/consent/recovery gates. The documented CP2 changes concern Contacts rather than Calendar Provider. Android 17 scheduling, permissions and recovery still need device coverage. |
 | Other platform changes | No application use of MessageQueue reflection, final-field mutation, LAN discovery, SMS, RemoteViews, audio or Bluetooth was found. Memory-limit behavior remains unmeasured. |
 
-Build, host and enrolled API 35 device evidence is in [validation](VALIDATION.md).
-It does not establish Android 17 runtime compatibility. Do not weaken platform
+Build, host, enrolled API 35 and bounded API 37 emulator evidence is in
+[validation](VALIDATION.md). It does not establish complete Android 17 runtime
+compatibility. Do not weaken platform
 security or synchronization guarantees to make a future qualification pass.
 The [qualification plan](ANDROID_17_QUALIFICATION.md) defines the repeatable
 native APK gate, required device profiles, test matrix and pass criteria.
@@ -126,7 +169,7 @@ native APK gate, required device profiles, test matrix and pass criteria.
 | Gate | Required evidence or decision |
 | --- | --- |
 | Concurrent remote edits | A supported atomic server precondition or an explicit accepted-risk product decision. GET then PUT/DELETE leaves a race; the experimental options display this warning and remain default-off. See [conditional writes](research/CONDITIONAL_WRITES.md). |
-| Distribution | Select the overall license, preserve required resolved dependency notices, provision release signing privately and qualify signed installation/update without session or data loss. Current release APKs are unsigned development artifacts. See [licensing](LICENSING.md). |
+| Distribution | Original contributions use GPL-3.0-or-later, while imported Proton terms constrain the combined application to GPLv3. Private offline signing is prepared; preserve complete notices and qualify actual signed updates. Native corresponding-source/license and advisory applicability gates remain open. See [licensing](LICENSING.md) and [distribution](RELEASE_DISTRIBUTION.md). |
 | Android qualification | Extend the measured editor/device coverage to the intended OEM, real reboot/power loss, production-worker interruption during transport, periodic scheduling, battery and large calendars. Process restart and synthetic fixtures do not substitute for these journeys. |
 | Supported write profile | Keep unsupported fields/variants held. Richer events, combined edits and kind/zone transitions need explicit profile contracts and qualification before enabling them. |
 

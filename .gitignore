@@ -6,6 +6,10 @@
 local.properties
 *.jks
 *.keystore
+*.p12
+*.pfx
+*.pkcs12
+*.clixml
 .env
 .env.*
 !.env.example

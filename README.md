@@ -62,17 +62,18 @@ authentication integration are implemented. The connection UI uses a real Proton
 Core adapter and discovers calendar names and colors through the retained session.
 Selected calendars mirror supported events into Android with durable offline
 processing and bounded background refresh. Read-only remains the default. Separate
-experimental options enable simple-event creation and title, description/location
-or same-kind date changes (timed or all-day), plus deletion of supported simple
-imported events, through the system calendar. Timed changes retain the time zone.
-Uncertain sends are inspected instead of resent; unsupported edits and conflicts
-remain retained. Time-zone/kind transitions and combined date/text edits are not
-yet supported. See the [current capabilities and RC limits](docs/STATUS.md).
+experimental options enable creation, title, description/location, dates and
+supported deletion through the system calendar. The new [personal edit profile](docs/PERSONAL_UPDATE.md)
+combines title/text/date changes, including timed/all-day and time-zone transitions,
+while preserving unchanged supported personal reminders and event colors. Existing
+requests retain their original strict profiles. Uncertain sends are inspected
+instead of resent; unsupported edits and conflicts remain retained. See the
+[current capabilities and RC limits](docs/STATUS.md) for measured qualification.
 Upstream workflow frameworks are selectively adapted; no installer/hook is required.
 
 ## Build
 
-Use a compatible JDK (17 or newer) and Android SDK platform 36. Configure the SDK
+Use a compatible JDK (17 or newer) and Android SDK platform 37. Configure the SDK
 in ignored `local.properties` or `ANDROID_HOME`, then run from the project root:
 
 ```sh
@@ -98,5 +99,8 @@ This checks local skill/agent metadata, references and source records. It does n
 prove that the desktop app loaded the agents or that an Android app works.
 The helper dependency stays in ignored `.local/`; it is not an app dependency.
 
-Upstream notices are retained in [docs/licenses](docs/licenses).
-The Android application's own license remains to be decided.
+Original contributions use [GPL-3.0-or-later](LICENSE). Imported Proton adaptations
+retain GPL-3.0-only terms; the combined application is constrained to GPL version 3.
+See [licensing and remaining distribution gates](docs/LICENSING.md) and
+[signed candidate preparation](docs/RELEASE_DISTRIBUTION.md). Upstream notices
+are retained in [docs/licenses](docs/licenses) and the dependency notice inventory.

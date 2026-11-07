@@ -8,7 +8,7 @@ contract relevant to the task. Existing detailed evidence is in
 
 Calendeer bridges Proton Calendar and Android's Calendar Provider. Event viewing
 and editing stay in system calendar applications. Read-only is the default;
-creation, title-only, description/location, same-kind date changes and deletion have separate
+creation, title, description/location, dates and deletion have separate
 experimental per-calendar options. See [requirements](SPECIFICATION.md),
 [architecture](ARCHITECTURE.md) and [acceptance](ACCEPTANCE.md).
 
@@ -28,9 +28,10 @@ uncertain writes are retained, never silently discarded or resent.
 | Outgoing CREATE | System editor discovery, immutable offline capture, guarded Proton submission/readback, same-row acknowledgement and durable handoff. | [Local capture](LOCAL_CREATE_CAPTURE.md). Simple events only; reminders, guests, recurrence and custom colors remain outside the send profile. |
 | Outgoing title | Default-off option for title-only edits of qualified ordinary or fully handed-off created timed/all-day events. Durable request ownership, inspection and native/SQL completion. | [Title submission](TITLE_UPDATE_SUBMISSION.md). Known-empty details, no recurrence/color; other fields must stay unchanged. |
 | Outgoing text | Default-off description/location option, optionally with simultaneous title change. Separate capsules, wire/proofs, cursors and consent; raw CRLF intent is distinct from canonical LF readback. | [Text delivery](SHARED_TEXT_PREPARATION.md). Creation mode must be enabled; narrow simple-event profile, unchanged dates and metadata. |
-| Outgoing time | Default-off date/duration option for simple timed/all-day events, retaining kind, zone and all other fields. Protected preparation, guarded readback, separate durable history and native completion. | [Temporal delivery](TEMPORAL_UPDATE.md). All-day metadata uses UTC midnight and exclusive end dates. Kind/zone transitions and combined edits remain unsupported. |
-| Outgoing DELETE | Default-off option with separate worker/consent, protected first request, authenticated inspection, durable results/completion and exact native/SQL ACK. Shared schema 9 and import schema 22 retain a permanent incoming barrier. | [Deletion submission](DELETE_SUBMISSION.md). Ordinary timed and one/multiple-day service/editor/production-worker RUN and restarted REPLAY pass. Timed offline capture/restart and reconnect completion pass. A controlled real preclaim conflict and offline replay retain the full variant. Simple imported events only; uncertain results never trigger another send. |
-| Recovery/conflicts | UNKNOWN is inspect-only. Native writes are guarded and receipts precede acknowledgement; newer local edits survive. A shared title/text/time/deletion journal prevents competing owners across generations. Local conflict dossiers preserve observed variants. | [Capture](LOCAL_EDIT_CAPTURE.md), [conflicts](CONFLICT_ARCHIVE.md). Trustworthy edit timestamps and general conflict resolution remain unfinished. |
+| Outgoing time | Default-off date/duration option for simple timed/all-day events, retaining kind, zone and all other fields. Protected preparation, guarded readback, separate durable history and native completion. | [Temporal delivery](TEMPORAL_UPDATE.md). All-day metadata uses UTC midnight and exclusive end dates. This legacy family excludes transitions/combined edits; the separate personal-v2 family handles its qualified profile. |
+| Outgoing personal edit | Combined title/text/date edits, timed/all-day and named-zone transitions, preserving unchanged known personal reminders and event color. Separate v2 capsules/proofs, worker cursors and per-changed-field consent; legacy families stay strict. | [Personal edits](PERSONAL_UPDATE.md). Combined text and timed-to-all-day service/restarted local recovery pass with empty metadata. Invitations, recurrence, changed reminders/colors and ambiguous DST endpoints stay held; richer service/editor qualification remains open. |
+| Outgoing DELETE | Default-off option with separate worker/consent, protected first request, authenticated inspection, durable results/completion and exact native/SQL ACK. Shared schema 10 and import schema 23 retain a permanent incoming barrier. | [Deletion submission](DELETE_SUBMISSION.md). Ordinary timed and one/multiple-day service/editor/production-worker RUN and restarted REPLAY pass. Timed offline capture/restart and reconnect completion pass. A controlled real preclaim conflict and offline replay retain the full variant. Simple imported events only; uncertain results never trigger another send. |
+| Recovery/conflicts | UNKNOWN is inspect-only. Native writes are guarded and receipts precede acknowledgement; newer local edits survive. A shared title/text/time/personal/deletion journal prevents competing owners across generations. Local conflict dossiers preserve observed variants. | [Capture](LOCAL_EDIT_CAPTURE.md), [conflicts](CONFLICT_ARCHIVE.md). Trustworthy edit timestamps and general conflict resolution remain unfinished. |
 
 A refresh with no checkpoint commits its first staged page before draining queued
 projections, so a dirty native edit cannot prevent its own capture indefinitely.
@@ -48,13 +49,15 @@ existing/uncertain owners never gain a new send or inspection attempt from this 
 Synchronization attention offers Retry through the existing workers and expandable
 explanations; it does not change consent or reset requests. Closed `CalendeerSync`
 stage codes identify the reporting branch without event/account contents.
-A stamped creation without its durable work identity stays held; do not repair it
-by adopting a native row ID or allocating a new send identity.
+A stamped creation without its durable work identity receives a bounded historical
+proof search. Only its exact retained CREATE, binding, proven ACK, released handoff
+and unique matching Provider identity can restore completed work. Missing or corrupt
+proof remains a metadata-only issue; no row-ID adoption or new request is allowed.
 
 ## Evidence and remaining RC work
 
 Real controlled-account journeys qualify login/import, simple CREATE, title edits,
-ordinary timed text edits and same-kind timed/all-day date edits through authenticated
+ordinary timed and three-day all-day text edits and same-kind timed/all-day date edits through authenticated
 ports. Seven temporal service profiles cover one/multiple civil days, Paris and
 New York DST, Lord Howe half-hour transitions and Kathmandu. Time also has
 production Provider/worker RUN and active restarted REPLAY for all seven profiles,
@@ -134,8 +137,8 @@ request/result/completion hashes and suppress old incoming upserts. All existing
 production DELETE rows remain unchanged. These qualify integrated recovery
 boundaries, not the corresponding WorkManager checkpoints.
 
-Current host suites pass 427 domain, 20 authentication, 856 backend and 199 app JVM cases without
-skips. Physical crypto, SQL/migration, Provider, worker/recovery and option UI
+Current host suites pass 444 domain, 20 authentication, 907 backend and 230 app JVM cases without
+skips. The authentication suite is unchanged from its earlier measured baseline. Physical crypto, SQL/migration, Provider, worker/recovery and option UI
 checks pass; APK builds and app lint pass. Scope-specific evidence and remaining
 qualification are in [validation](VALIDATION.md) and the linked contracts.
 
@@ -143,7 +146,10 @@ Resolved Maven versions and SHA-256 checksums are locked, with a Windows CI
 baseline and advisory inventory. Kotlin/Compose 2.4.21 and KSP 2.3.12 replace the
 vulnerable Kotlin/KAPT baseline while retaining AGP 9.2.1 and Gradle 9.4.1.
 Android modules compile against API 37; the app targets 37 with minimum API 31.
-Android 17 runtime qualification remains open; API 35 regressions are separate evidence.
+An isolated API 37 / x86_64 / 16 KiB emulator passes selected native, Provider,
+migration, UI and capacity cases, plus an actual same-key release update and
+reboot preserving synthetic SQL/Provider/Keystore state. Authenticated release
+session upgrades, OEMs and the other runtime profiles remain unqualified.
 The [qualification plan](ANDROID_17_QUALIFICATION.md) separates static APK checks
 from the Android 17 and 16 KiB device journeys still required.
 See [build security](BUILD_SECURITY.md) for qualification and trust limits.
@@ -169,12 +175,14 @@ For a useful bidirectional RC, finish:
    then richer events and OEM behavior.
    Current source checks and permanent incoming barriers remain required; UNKNOWN
    is never reset or resent.
-3. Preservation of ordinary reminders/colors during supported edits; current
-   send profiles still reject many such events.
+3. The personal-v2 family now preserves unchanged known personal reminders/colors
+   during supported combined edits. A combined text/kind-transition service journey
+   and restarted local recovery pass with known-empty metadata. Extend this to
+   richer service metadata and system-editor journeys; metadata changes stay held.
 4. Safe handling of incomplete historical creation associations and actionable
    conflicts. Last-modification-wins requires trustworthy comparable edit times;
    capture/processing time is insufficient. Otherwise preserve variants.
-5. Live all-day and transferred-CREATE text journeys, Samsung/One UI, periodic
+5. Transferred-CREATE text journeys, Samsung/One UI, periodic
    scheduling, reboot/offline recovery, battery and large-calendar qualification.
 6. Signed/versioned release packaging and installation/update checks without
    session or data loss, with accurate capability and license documentation.
