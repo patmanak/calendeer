@@ -29,7 +29,9 @@ class PersonalLocalOwnerSnapshot(intent: LocalEditIntent, preparation: PersonalE
  * Local methods never enter an authenticated facade. Submission acquires the local
  * coordinator lock before the supplied port, whose source callback stays inside that
  * same lock without reacquiring it. This keeps the import-before-auth lock order.
- * Receipt reservation precedes a unique native CAS; historical receipts inspect only.
+ * Receipt reservation precedes a native CAS. Historical receipts inspect first;
+ * a separate opt-in recovery capability may finish an interrupted CAS only after
+ * full current-owner/source requalification, preserving its original nonce.
  */
 interface SystemPersonalLocalOwner {
     suspend fun observe(scope: CalendarScope, event: EventId, owner: MutationId,

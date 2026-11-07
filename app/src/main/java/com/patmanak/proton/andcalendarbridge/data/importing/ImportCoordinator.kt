@@ -1090,11 +1090,23 @@ class ImportCoordinator(
         }
         val historicalFrame = retained.receipt.handoff
         if (historicalFrame != null && !access.read { handoffSource(historicalFrame, access::active) }) return false
-        // A retained pending receipt only inspects. An interrupted batch is never replayed.
-        val witness = access.read {
-            if (reservation.fresh) projection.acknowledgePersonalUpdate(retained.receipt)
-            else projection.inspectPersonalUpdateAcknowledgement(retained.receipt)
-        } ?: return false
+        val witness = recoverPersonalAcknowledgement(reservation.fresh,
+            projection.personalUpdateAcknowledgementRecoveryProtocol,
+            inspect = { access.read { projection.inspectPersonalUpdateAcknowledgement(retained.receipt) } },
+            qualifyCurrentOwner = {
+                val owner = access.read { store.localEdit(target, event) }
+                val echoedOwner = owner?.state == LocalEditState.CONFLICT && owner.copy(state = LocalEditState.PAUSED) == intent
+                val role = access.read { store.capturedHandoff(target, event) }
+                (owner == intent || echoedOwner) &&
+                    samePersonalPreparation(access.read { store.personalEditPreparation(target, event) }, result.record.preparation) &&
+                    currentEditAcknowledgementRole(intent, retained.receipt.handoff, access) &&
+                    role?.frame == retained.receipt.handoff && currentEditNativeSource(intent, role, access) &&
+                    currentPersonalResult(result, journal, access) &&
+                    access.read { store.personalUpdateAcknowledgement(target, event, attempt) } == retained
+            },
+            applyFresh = { access.read { projection.acknowledgePersonalUpdate(retained.receipt) } },
+            resume = { access.read { projection.resumePersonalUpdateAcknowledgement(retained.receipt) } },
+        ) ?: return false
         if (witness.receipt.snapshot() != retained.receipt || !currentPersonalResult(result, journal, access) ||
             access.read { store.personalUpdateAcknowledgement(target, event, attempt) } != retained) return false
         if (historicalFrame != null && !access.read { handoffSource(historicalFrame, access::active) }) return false

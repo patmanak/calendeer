@@ -19,6 +19,8 @@ import com.patmanak.proton.andcalendarbridge.data.serialization.DeleteProofStora
 import com.patmanak.proton.andcalendarbridge.data.serialization.TextUpdateAcknowledgementCodec
 import com.patmanak.proton.andcalendarbridge.protonauth.ProtonDeleteInspectionProbe
 import com.patmanak.proton.andcalendarbridge.protonauth.ProtonDeleteNetworkInterruptionProbe
+import com.patmanak.proton.andcalendarbridge.protonauth.ProtonDeleteResponseLossProbe
+import com.patmanak.proton.andcalendarbridge.protonauth.DeleteResponseLossObservation
 import com.patmanak.proton.andcalendarbridge.protonauth.DeleteReadResult
 import com.patmanak.proton.andcalendarbridge.protonauth.ProtonAuthentication
 import com.patmanak.proton.andcalendarbridge.protonauth.ProtonCreateSubmissionProbe
@@ -41,7 +43,7 @@ import org.junit.Test
 
 /** Opt-in disposable real-service event, isolated native calendar and persistent journals.
  * Arguments: liveDeleteJourney=true, deleteFixtureToken (12 lowercase hex),
- * deleteAccountHash (SHA-256), deleteJourneyScenario=NORMAL|REMOTE_CONFLICT|EVIDENCE_INTERRUPTION|NETWORK_INTERRUPTION|PROCESS_INTERRUPTION,
+ * deleteAccountHash (SHA-256), deleteJourneyScenario=NORMAL|REMOTE_CONFLICT|EVIDENCE_INTERRUPTION|NETWORK_INTERRUPTION|PROCESS_INTERRUPTION|RESPONSE_LOSS,
  * deleteJourneyPhase=PREPARE|SEND|LOCAL|INSPECT|ACK|REPLAY|CONFLICT|CONFLICT_REVIEW|CONFLICT_REPLAY.
  * deleteConflictExpectedZone defaults to Z and is frozen during fresh PREPARE; an
  * official-editor zone change must be declared explicitly. CONFLICT_REVIEW audits an
@@ -127,13 +129,14 @@ class CalendarDeleteGuardedJourneyLiveDeviceTest {
         val scenario = args.getString("deleteJourneyScenario") ?: "NORMAL"
         val conflictScenario = scenario == "REMOTE_CONFLICT"
         val networkScenario = scenario == "NETWORK_INTERRUPTION"
+        val responseLossScenario = scenario == "RESPONSE_LOSS"
         val processScenario = scenario == "PROCESS_INTERRUPTION"
         val persistenceScenario = DeletePersistenceProcessJourney.isScenario(scenario)
         val interruptionScenario = scenario == "EVIDENCE_INTERRUPTION" || networkScenario || processScenario
         val expectedConflictZone = ZoneId.of(args.getString("deleteConflictExpectedZone") ?: "Z")
         assertTrue("Require explicit fixture, account and phase", token.matches(Regex("[a-f0-9]{12}")) &&
             hash.matches(Regex("[a-f0-9]{64}")) && scenario in setOf("NORMAL", "REMOTE_CONFLICT", "EVIDENCE_INTERRUPTION", "NETWORK_INTERRUPTION", "PROCESS_INTERRUPTION",
-                "PROOF_PROCESS_INTERRUPTION", "ACK_PROCESS_INTERRUPTION") &&
+                "PROOF_PROCESS_INTERRUPTION", "ACK_PROCESS_INTERRUPTION", "RESPONSE_LOSS") &&
             phase in (if (conflictScenario) setOf("PREPARE", "CONFLICT", "CONFLICT_REVIEW", "CONFLICT_REPLAY")
                 else if (persistenceScenario) (if (scenario == "PROOF_PROCESS_INTERRUPTION")
                     setOf("PREPARE", "SEND", "ACK", "REPLAY") else setOf("PREPARE", "SEND", "ACK", "ACK_RECOVER", "REPLAY"))
@@ -377,6 +380,8 @@ class CalendarDeleteGuardedJourneyLiveDeviceTest {
                         var claims = 0
                         var evidenceCheckpoints = 0
                         var networkProbe: ProtonDeleteNetworkInterruptionProbe.Handle? = null
+                        var responseLossProbe: ProtonDeleteResponseLossProbe.Handle? = null
+                        var responseLossObservation: DeleteResponseLossObservation? = null
                         val interruption = if (processScenario) null else CancellationException("guarded_delete_interruption_evidence_checkpoint")
                         var conflictReturned: DeleteSubmissionObservation.Conflict? = null
                         var wireReturned = false; var verifiedReturned = false
@@ -462,17 +467,38 @@ class CalendarDeleteGuardedJourneyLiveDeviceTest {
                                         assertTrue(interruptionEdit.commit())
                                         throw checkNotNull(interruption)
                                     }
+                                } else if (responseLossScenario) object : DeleteAttemptJournal by journal {
+                                    override suspend fun retainEvidence(expectedUnknown: DeleteAttemptRecord,
+                                        protectedEvidence: String, admit: (CalendarScope) -> Boolean): Boolean {
+                                        val kept = journal.retainEvidence(expectedUnknown, protectedEvidence, admit)
+                                        if (kept && ProtonDeleteInspectionProbe.localEvidence(
+                                                expectedUnknown.copy(protectedEvidence = protectedEvidence)) == "NO_RESPONSE") {
+                                            assertTrue("Close only after the actual response loss and durable NO_RESPONSE",
+                                                responseLossProbe?.observation()?.measuredLoss == true &&
+                                                    !prefs.getBoolean("response_loss_admission_closed", false))
+                                            assertTrue(prefs.edit().putBoolean("response_loss_admission_closed", true).commit())
+                                            // Preserve the adapter's real evidence, then stop its immediate
+                                            // inspection through the existing policy gate. No fake response.
+                                            consent.set(false); coordinator.systemCreatePolicyChanged(source, true)
+                                        }
+                                        return kept
+                                    }
                                 } else journal
                                 if (networkScenario) networkProbe = ProtonDeleteNetworkInterruptionProbe.arm(app, record, hash) {
                                     DeleteNetworkInterruptionJourney.cutWifi(app, prefs)
                                 }
+                                if (responseLossScenario) responseLossProbe = ProtonDeleteResponseLossProbe.arm(app, record, hash)
                                 try { return actualPort.submit(record, guarded, admit, qualifySource, admitEvidence).also {
                                     if (it is DeleteSubmissionObservation.Conflict) conflictReturned = it
                                     if (it is DeleteSubmissionObservation.Verified) {
                                         verifiedReturned = true
                                         consent.set(false); coordinator.systemCreatePolicyChanged(source, true)
                                     }
-                                } } finally { networkProbe?.close() }
+                                } } finally {
+                                    networkProbe?.close()
+                                    responseLossObservation = responseLossProbe?.observation()
+                                    responseLossProbe?.close()
+                                }
                             }
                             override suspend fun inspect(record: DeleteAttemptRecord, journal: DeleteAttemptJournal,
                                 admit: (CalendarScope) -> Boolean): DeleteSubmissionObservation {
@@ -498,6 +524,9 @@ class CalendarDeleteGuardedJourneyLiveDeviceTest {
                         val operations = CoordinatorSystemDeleteOperations(owners, journal, port,
                             discoverLocal = { error("Only the exact enrolled deletion owner may be supplied") },
                             evidenceAdmission = coordinator::systemDeleteEvidenceAdmission)
+                        val responseLossJourney = if (responseLossScenario) DeleteResponseLossJourney(
+                            prefs, source, event, store, journal, factual, ::allowStore, ::values, ::nativeHash,
+                            { projection.writes.get() }, { deleteHistoryCount(app, prefix, source) }) else null
                         if (conflictScenario) {
                             runRemoteConflict(phase, token, expectedConflictZone, prefs, source, event, content, timestamp, store, journal,
                                 coordinator, operations, projection, factual, ::allowStore, ::values,
@@ -527,6 +556,10 @@ class CalendarDeleteGuardedJourneyLiveDeviceTest {
                             })
                             assertTrue("Local diagnosis has no remote or native write path", prepares == 0 && sends == 0 &&
                                 inspections == 0 && projection.writes.get() == 0 && actualPort == null)
+                            if (responseLossScenario) {
+                                checkNotNull(responseLossJourney).inspectLocal(retained)
+                                witness("guarded_delete_response_loss_local_unknown_unchanged")
+                            }
                             witness("guarded_delete_local_journal_only")
                             return@runBlocking
                         }
@@ -550,6 +583,9 @@ class CalendarDeleteGuardedJourneyLiveDeviceTest {
                                 }
                                 val evidenceShape = ProtonDeleteInspectionProbe.localEvidence(retained)
                                 val shape = ProtonDeleteInspectionProbe.inspect(app, retained, hash)
+                                if (responseLossScenario) assertTrue("Acceptance requires a separate authenticated absence observation",
+                                    shape?.result == DeleteReadResult.ABSENT && shape.contextMatched &&
+                                        frozen("response_loss_record_hash") == bytesHash(DeleteAttemptStorageCodec.encode(retained)))
                                 InstrumentationRegistry.getInstrumentation().sendStatus(0, Bundle().apply {
                                     putString("guarded_delete_evidence_shape", evidenceShape)
                                     putString("guarded_delete_read_shape", shape.toString())
@@ -583,6 +619,12 @@ class CalendarDeleteGuardedJourneyLiveDeviceTest {
                                     interrupted = true
                                 }
                                 assertTrue("Exactly one preparation and submission", prepares == 1 && sends == 1 && inspections == 0)
+                                if (responseLossScenario) {
+                                    checkNotNull(responseLossJourney).retainSend(local, responseLossObservation, verifiedReturned, wakes, dirty)
+                                    witness("guarded_delete_response_loss_dropped", "guarded_delete_response_loss_unknown_retained",
+                                        "guarded_delete_response_loss_no_proof_or_ack")
+                                    return@runBlocking
+                                }
                                 if (interruptionScenario) {
                                     assertTrue("Only the injected persistence cancellation escapes; no proof or native ACK", interrupted &&
                                         claims == 1 && evidenceCheckpoints == 1 && !verifiedReturned && wakes == 0 && projection.writes.get() == 0 && values() == dirty)
@@ -634,6 +676,7 @@ class CalendarDeleteGuardedJourneyLiveDeviceTest {
                             }
                             assertTrue(proofEdit.commit())
                             witness("guarded_delete_verified_absence", "guarded_delete_proof_survives_revocation", "guarded_delete_native_ack_deferred")
+                            if (responseLossScenario) witness("guarded_delete_response_loss_absence_verified")
                             if (interruptionScenario) {
                                 assertTrue("Inspection retains the only history", deleteHistoryCount(app, prefix, source) == 1)
                                 witness("guarded_delete_interruption_verified_absence", "guarded_delete_interruption_native_ack_deferred")

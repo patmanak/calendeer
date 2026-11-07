@@ -49,6 +49,12 @@ interface CalendarProjection {
     suspend fun acknowledgePersonalUpdate(receipt: PersonalUpdateAcknowledgementReceipt): AppliedPersonalUpdateAcknowledgement? = null
     /** Historical proof only; preserve later edits and children. */
     suspend fun inspectPersonalUpdateAcknowledgement(receipt: PersonalUpdateAcknowledgementReceipt): AppliedPersonalUpdateAcknowledgement? = null
+    /** Separate capability: inspect first, then conditionally finish an interrupted
+     * pending ACK using the same nonce and exact original raw native contents.
+     * It never inserts, overwrites a newer edit or enters a transport facade.
+     */
+    val personalUpdateAcknowledgementRecoveryProtocol: Int? get() = null
+    suspend fun resumePersonalUpdateAcknowledgement(receipt: PersonalUpdateAcknowledgementReceipt): AppliedPersonalUpdateAcknowledgement? = null
     val timeUpdateAcknowledgementProtocol: Int? get() = null
     /** Assert the exact raw native temporal edit and origin before clearing DIRTY on the same row.
      * Retain the desired time; only verified CRLF/LF text normalization and metadata may change.

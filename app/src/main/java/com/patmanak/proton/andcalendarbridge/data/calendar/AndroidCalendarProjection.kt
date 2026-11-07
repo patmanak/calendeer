@@ -144,6 +144,17 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
             attempt.format.id, attempt.format.version.toString(), attempt.intentFingerprint, attempt.payloadFingerprint)
     }
     override val personalUpdateAcknowledgementProtocol: Int? = 1
+    override val personalUpdateAcknowledgementRecoveryProtocol: Int? = 1
+    override suspend fun resumePersonalUpdateAcknowledgement(receipt: PersonalUpdateAcknowledgementReceipt): AppliedPersonalUpdateAcknowledgement? {
+        val caller = currentCoroutineContext()
+        caller.ensureActive()
+        val frozen = receipt.snapshot()
+        val recipe = NativeEditAcknowledgement.personal(frozen) { caller.ensureActive() }
+        return nativeEditAcknowledgementOperation(recipe) {
+            if (inspectNativeEditAcknowledgement(recipe) || acknowledgeNativeEdit(recipe))
+                AppliedPersonalUpdateAcknowledgement(frozen) else null
+        }
+    }
     override suspend fun acknowledgePersonalUpdate(receipt: PersonalUpdateAcknowledgementReceipt): AppliedPersonalUpdateAcknowledgement? {
         val caller = currentCoroutineContext()
         caller.ensureActive()
@@ -761,7 +772,7 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
             values.getAsInteger(Events.AVAILABILITY) != Events.AVAILABILITY_BUSY) return null
         val expectedColor = base.content.colorRgb?.or(0xFF000000.toInt())
         if (values.getAsInteger(Events.EVENT_COLOR) != expectedColor) return null
-        val time = readSimpleTime(values) ?: return null
+        val time = readSimpleTime(values, personalAllDayUtcAlias = personal) ?: return null
         val content = EventContent(values.getAsString(Events.TITLE) ?: "", time,
             values.getAsString(Events.DESCRIPTION) ?: "", values.getAsString(Events.EVENT_LOCATION) ?: "",
             base.content.colorRgb, details = base.content.details)
@@ -1375,14 +1386,20 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
         return flag == 0 || (column == Events.IS_ORGANIZER && flag == 1 && personalOwner)
     }
 
-    private fun readSimpleTime(values: ContentValues, localOwnerPlaceholder: Boolean = false): EventTime? {
+    private fun readSimpleTime(values: ContentValues, localOwnerPlaceholder: Boolean = false,
+        personalAllDayUtcAlias: Boolean = false): EventTime? {
         val start = values.getAsLong(Events.DTSTART) ?: return null
         val end = values.getAsLong(Events.DTEND) ?: return null
         if (end <= start || start % 1000L != 0L || end % 1000L != 0L) return null
         val zone = values.getAsString(Events.EVENT_TIMEZONE) ?: return null
         val endZone = values.getAsString(Events.EVENT_END_TIMEZONE)
-        if (endZone != zone && !(localOwnerPlaceholder && endZone == null)) return null
         return try {
+            // An editor can retain the timed endpoint's explicit UTC alias (for
+            // example Z) when converting to date-only UTC. Keep its raw token
+            // in the Provider assertion; only this personal all-day reader opts in.
+            val fixedUtcEnd = personalAllDayUtcAlias && values.getAsInteger(Events.ALL_DAY) == 1 &&
+                zone == "UTC" && endZone != null && ZoneId.of(endZone).normalized() == ZoneOffset.UTC
+            if (endZone != zone && !(localOwnerPlaceholder && endZone == null) && !fixedUtcEnd) return null
             when (values.getAsInteger(Events.ALL_DAY)) {
                 0 -> EventTime.Timed(Instant.ofEpochMilli(start), Instant.ofEpochMilli(end), ZoneId.of(zone))
                 1 -> {

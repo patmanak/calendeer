@@ -21,6 +21,60 @@ import org.junit.Test
 
 /** Isolated Provider fixtures; never accesses a Proton session or existing calendars. */
 class PersonalNativeProfileDeviceTest {
+    @Test fun personalAllDayAcceptsFixedUtcEndAliasesWithoutChangingRawZonesOrLegacyCapture() {
+        for (zone in listOf("Z", "Etc/UTC", "GMT")) fixture {
+            mutate(ContentValues().apply { put(Events.EVENT_END_TIMEZONE, zone) })
+            assertNull(projection.captureOwnedSimpleEdit(scope, base))
+            assertEquals(intent.content, projection.captureOwnedPersonalEdit(scope, base)?.content)
+            assertEquals(AppliedPersonalUpdateAcknowledgement(receipt), projection.acknowledgePersonalUpdate(receipt))
+            assertEquals(zone, field(Events.EVENT_END_TIMEZONE)); assertEquals("UTC", field(Events.EVENT_TIMEZONE))
+            assertEquals("0", field(Events.DIRTY))
+        }
+    }
+    @Test fun personalAllDayRejectsNonUtcSeasonalAndInvalidEndZones() = fixture {
+        for (zone in listOf("Europe/London", "Europe/Paris", "+01:00", "Invalid/Fixture")) {
+            mutate(ContentValues().apply { put(Events.EVENT_END_TIMEZONE, zone) })
+            assertNull(projection.captureOwnedPersonalEdit(scope, base))
+            assertNull(projection.acknowledgePersonalUpdate(receipt))
+            assertEquals("1", field(Events.DIRTY)); assertEquals(zone, field(Events.EVENT_END_TIMEZONE))
+        }
+        mutate(ContentValues().apply { putNull(Events.EVENT_END_TIMEZONE) })
+        assertNull(projection.captureOwnedPersonalEdit(scope, base))
+        assertEquals("1", field(Events.DIRTY))
+    }
+    @Test fun otherwiseQualifiedLegacySnapshotKeepsItsOriginalUtcAliasPolicy() = fixture(richMetadata = false) {
+        assertEquals(intent.content, projection.captureOwnedSimpleEdit(scope, base)?.content)
+        mutate(ContentValues().apply { put(Events.EVENT_END_TIMEZONE, "Z") })
+        assertNull(projection.captureOwnedSimpleEdit(scope, base))
+        assertEquals(intent.content, projection.captureOwnedPersonalEdit(scope, base)?.content)
+    }
+    @Test fun otherwiseQualifiedTimedPersonalSnapshotDoesNotGainTheAllDayException() = fixture {
+        val timed = original.time as EventTime.Timed
+        mutate(ContentValues().apply {
+            put(Events.ALL_DAY, 0); put(Events.DTSTART, timed.start.toEpochMilli()); put(Events.DTEND, timed.end.toEpochMilli())
+            put(Events.EVENT_TIMEZONE, "UTC"); put(Events.EVENT_END_TIMEZONE, "UTC")
+        })
+        assertNotNull(projection.captureOwnedPersonalEdit(scope, base))
+        mutate(ContentValues().apply { put(Events.EVENT_END_TIMEZONE, "Z") })
+        assertNull(projection.captureOwnedPersonalEdit(scope, base)); assertEquals("1", field(Events.DIRTY))
+    }
+    @Test fun interruptedPendingAckFinishesOnceThenPreservesLaterNativeEdit() = fixture {
+        assertEquals(1, projection.personalUpdateAcknowledgementRecoveryProtocol)
+        assertNull(projection.inspectPersonalUpdateAcknowledgement(receipt))
+        val children = reminders()
+        assertEquals(AppliedPersonalUpdateAcknowledgement(receipt), projection.resumePersonalUpdateAcknowledgement(receipt))
+        assertEquals("0", field(Events.DIRTY)); assertEquals(children, reminders())
+        mutate(ContentValues().apply { put(Events.TITLE, "Newer local content"); put(Events.DIRTY, 1) })
+        assertEquals(AppliedPersonalUpdateAcknowledgement(receipt), projection.resumePersonalUpdateAcknowledgement(receipt))
+        assertEquals("Newer local content", field(Events.TITLE)); assertEquals("1", field(Events.DIRTY))
+        assertEquals(children, reminders())
+    }
+    @Test fun interruptedPendingAckCannotConsumeAChangedNativeOwner() = fixture {
+        mutate(ContentValues().apply { put(Events.TITLE, "Different edit before ACK") })
+        assertNull(projection.resumePersonalUpdateAcknowledgement(receipt))
+        assertEquals("Different edit before ACK", field(Events.TITLE)); assertEquals("1", field(Events.DIRTY))
+        assertNull(projection.inspectPersonalUpdateAcknowledgement(receipt))
+    }
     @Test fun combinedKindChangeCapturesAndAcknowledgesWithoutReplacingReminders() = fixture {
         assertNull(projection.captureOwnedSimpleEdit(scope, base))
         assertEquals(intent.content, projection.captureOwnedPersonalEdit(scope, base)!!.content)
@@ -103,13 +157,13 @@ class PersonalNativeProfileDeviceTest {
         assertEquals("Personal\r\nedit", field(Events.TITLE)); assertEquals(1, reminders().size)
     }
 
-    private class Fixture(val context: Context) {
+    private class Fixture(val context: Context, richMetadata: Boolean = true) {
         val scope = CalendarScope(AccountId("personal-native-${UUID.randomUUID()}"), CalendarId("fixture"), 0)
         val projection = AndroidCalendarProjection(context)
         val format = AdapterFormat("synthetic-personal-native", 1)
         val original = EventContent("Original", EventTime.Timed(Instant.parse("2030-05-01T09:00:00Z"),
-            Instant.parse("2030-05-01T10:00:00Z"), ZoneId.of("Europe/Paris")), colorRgb = 0x123456,
-            details = EventDetails(reminders = listOf(EventReminder(10))))
+            Instant.parse("2030-05-01T10:00:00Z"), ZoneId.of("Europe/Paris")), colorRgb = if (richMetadata) 0x123456 else null,
+            details = EventDetails(reminders = if (richMetadata) listOf(EventReminder(10)) else emptyList()))
         val base = RemoteChange.Upsert(EventId("synthetic-event"), Revision("old"), original)
         val intent = LocalEditIntent(MutationId("local"), scope, format, base, original.copy(title = "Personal\r\nedit",
             description = "New detail", location = "New place", time = EventTime.AllDay(java.time.LocalDate.of(2030, 5, 2), java.time.LocalDate.of(2030, 5, 4))))
@@ -143,9 +197,9 @@ class PersonalNativeProfileDeviceTest {
             AccountManager.get(context).removeAccountExplicitly(projection.accountFor(scope.account))
         }
     }
-    private fun fixture(block: suspend Fixture.() -> Unit) = runBlocking {
+    private fun fixture(richMetadata: Boolean = true, block: suspend Fixture.() -> Unit) = runBlocking {
         assumeTrue(InstrumentationRegistry.getArguments().getString("providerFixture") == "true")
-        val fixture = Fixture(ApplicationProvider.getApplicationContext())
+        val fixture = Fixture(ApplicationProvider.getApplicationContext(), richMetadata)
         assumeTrue(fixture.projection.hasPermissions())
         try { fixture.seed(); fixture.block() } finally { fixture.close() }
     }

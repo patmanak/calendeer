@@ -79,6 +79,7 @@ object ProtonDeleteNetworkInterruptionProbe {
 
 internal fun OkHttpClient.Builder.withDeleteNetworkQualification(): OkHttpClient.Builder =
     eventListenerFactory(ProtonDeleteNetworkInterruptionProbe::listener)
+        .addNetworkInterceptor(ProtonDeleteResponseLossProbe::intercept)
 
 /** Internal seam also exercised with synthetic calls; no real network is used by host tests. */
 internal class DeleteNetworkObservationSession(private val url: HttpUrl, private val sessionId: String, expectedPayloadHash: ByteArray,

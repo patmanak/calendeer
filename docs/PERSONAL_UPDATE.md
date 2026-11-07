@@ -41,12 +41,28 @@ same Provider batch as the event row. Attendees and extended properties must be
 absent. Neither capture nor acknowledgement replaces reminder rows. A changed
 child ID with the same offset/count is still a failed comparison.
 
+For personal all-day capture, the start zone remains canonical `UTC`. An explicit
+fixed-zero-offset end-zone alias such as `Z`, `Etc/UTC` or `GMT` is accepted when
+an editor retains it during conversion. Midnight and exclusive-end checks still
+apply. The raw end-zone token stays in the conditional native assertion and is
+preserved by acknowledgement. Missing, malformed, seasonal or nonzero-offset
+end zones are refused. Timed, legacy and transferred-CREATE readers keep their
+existing stricter rules.
+
 The worker uses separate discovery, inspection and recovery cursor namespaces.
 Consent is checked for every changed field, including after asynchronous waits.
 An uncertain request is inspection-only. Retained verified facts may finish local
 acknowledgement with field sending disabled, under current general access; this
-never authorizes a new request. A reserved historical receipt only inspects the
-native marker, preserving a later dirty edit.
+never authorizes a new request. A reserved receipt first inspects the historical
+native marker, preserving a later dirty edit. The separate optional
+`personalUpdateAcknowledgementRecoveryProtocol == 1` capability can finish a
+pending receipt interrupted before the native write: the coordinator requalifies
+the exact SQL owner, preparation, handoff, current native content, durable result
+and unchanged receipt before calling it. The native implementation inspects again
+before the existing conditional Provider batch. It keeps the original nonce and
+never inserts, sends a request or replaces a changed local snapshot. Missing or
+unknown recovery capabilities remain inspection-only. Legacy families retain
+their original contracts.
 
 A fresh GET followed by PUT is not atomic server compare-and-swap. Trustworthy
 comparable edit timestamps remain unavailable, so processing or capture time is
