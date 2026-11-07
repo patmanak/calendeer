@@ -168,13 +168,14 @@ class SharedTimeOwnershipDeviceTest {
         assertTrue(store.remember(title, allow)); assertTrue(store.textJournal.remember(text, allow))
         assertTrue(store.textJournal.claim(text, allow))
         // Recreate the prior schema without touching either family's historical bytes.
+        store.writableDatabase.execSQL("DROP TABLE personal_update_attempts")
         store.writableDatabase.execSQL("DROP TABLE delete_attempts")
         store.writableDatabase.execSQL("DROP TABLE time_update_attempts")
         store.writableDatabase.version = 6
         store.close()
         val migrated = TitleUpdateAttemptStore(context, name)
         try {
-            assertEquals(9, migrated.readableDatabase.version)
+            assertEquals(10, migrated.readableDatabase.version)
             assertEquals(title, migrated.read(title.scope, title.id))
             assertEquals(text.copy(state = TextUpdateAttemptState.OUTCOME_UNKNOWN), migrated.textJournal.read(text.scope, text.id, allow))
             assertNull(migrated.timeJournal.read(scope, MutationId("missing"), allow))

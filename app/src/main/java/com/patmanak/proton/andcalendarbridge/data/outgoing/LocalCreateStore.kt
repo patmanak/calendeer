@@ -183,6 +183,26 @@ class LocalCreateStore(context: Context, name: String = "calendar-local-create-v
     private fun submissionAttemptExists(db: SQLiteDatabase, scope: CalendarScope, attempt: String) =
         db.query("local_create_submissions", arrayOf("attempt"), "account=? AND calendar=? AND generation=? AND attempt=?",
             arrayOf(scope.account.value, scope.calendar.value, scope.generation.toString(), attempt), null, null, null).use { it.count != 0 }
+    /** Indexed metadata-only traversal. Restart from null after the last page; no frozen snapshot. */
+    suspend fun historicalLocalIds(scope: CalendarScope, after: String?, limit: Int = 25): List<LocalEventId> =
+        guardedRead(scope) { db ->
+            require(limit in 1..50 && (after == null || after.length in 1..4096))
+            val selection = "account=? AND calendar=? AND generation=?" + if (after != null) " AND local_event>?" else ""
+            val args = arrayOf(scope.account.value, scope.calendar.value, scope.generation.toString()) +
+                (after?.let { arrayOf(it) } ?: emptyArray())
+            db.query("local_creates", arrayOf("local_event"), selection, args, null, null,
+                "local_event COLLATE BINARY ASC", limit.toString()).use { cursor ->
+                buildList {
+                    while (cursor.moveToNext()) {
+                        check(cursor.getType(0) == Cursor.FIELD_TYPE_STRING)
+                        val id = cursor.getString(0)
+                        check(id.length in 1..4096 && id.none(Char::isISOControl))
+                        add(LocalEventId(id))
+                    }
+                }
+            }
+        }
+
     suspend fun readReservation(scope: CalendarScope, localId: LocalEventId): LocalCreateReservation? =
         guardedRead(scope) { db -> read(db, scope, localId)?.reservation }
     suspend fun readIntent(scope: CalendarScope, localId: LocalEventId): LocalCreateIntent? =

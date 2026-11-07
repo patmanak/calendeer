@@ -48,7 +48,9 @@ internal class LocalChangeCapture(
                 return if (retained.state == LocalEditState.CONFLICT) LocalEditCaptureResult.CONFLICT else LocalEditCaptureResult.RETAINED
             }
             val base = baseline(eventId) ?: return LocalEditCaptureResult.UNQUALIFIED
-            val snapshot = projection.captureOwnedSimpleEdit(target, base) ?: return LocalEditCaptureResult.UNQUALIFIED
+            val snapshot = projection.captureOwnedSimpleEdit(target, base)
+                ?: projection.captureOwnedPersonalEdit(target, base)
+                ?: return LocalEditCaptureResult.UNQUALIFIED
             if (!current()) return LocalEditCaptureResult.INACTIVE
             beforeNewOwner()
             if (!current()) return LocalEditCaptureResult.INACTIVE

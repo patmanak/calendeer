@@ -131,6 +131,9 @@ class ProjectionRepresentationStoreDeviceTest {
         store.close()
         SQLiteDatabase.openDatabase(context.getDatabasePath(name).path, null, SQLiteDatabase.OPEN_READWRITE).use { db ->
             // Remove empty later tables to reconstruct the historical fixture.
+            db.execSQL("DROP TABLE personal_edit_preparations")
+            db.execSQL("DROP TABLE personal_update_acknowledgements")
+            db.execSQL("DROP TABLE personal_update_acknowledgement_history")
             db.execSQL("DROP TABLE delete_acknowledgements")
             db.execSQL("DROP TABLE local_time_edit_preparations")
             db.execSQL("DROP TABLE time_update_acknowledgements")
@@ -153,7 +156,7 @@ class ProjectionRepresentationStoreDeviceTest {
             db.version = 14
         }
         ImportStore(context, name).use { reopened ->
-            assertEquals(22, reopened.readableDatabase.version); assertEquals(receipt, reopened.projectionReceipt(scope, next.eventId))
+            assertEquals(23, reopened.readableDatabase.version); assertEquals(receipt, reopened.projectionReceipt(scope, next.eventId))
             assertEquals(basePayload, reopened.readableDatabase.rawQuery("SELECT payload FROM projection_bases", null).use { it.moveToFirst(); it.getString(0) })
             assertEquals(receiptPayload, reopened.readableDatabase.rawQuery("SELECT payload FROM projection_receipts", null).use { it.moveToFirst(); it.getString(0) })
             assertTrue(reopened.restoreProjection(AppliedProjectionWitness(receipt)))

@@ -41,6 +41,20 @@ internal class ProtonTitleUpdateDispatchAttempt(private val url: HttpUrl, payloa
     override fun toString() = "ProtonTitleUpdateDispatchAttempt(redacted)"
 }
 
+internal class ProtonPersonalEditV2DispatchAttempt(private val url: HttpUrl, payload: String) {
+    private val body = SingleDispatchBody(personalEventUpdateOnlyBytes(payload))
+    private val entered = AtomicBoolean()
+    private val exchanged = AtomicBoolean()
+    init { require(url.isCreateEndpoint()) { "Unsupported update endpoint" } }
+    val requestBody: RequestBody get() = body
+    fun request(): Request = Request.Builder().url(url).put(body)
+        .tag(ProtonPersonalEditV2DispatchAttempt::class.java, this).build()
+    internal fun enter(request: Request) = matches(request) && entered.compareAndSet(false, true)
+    internal fun exchange(request: Request) = matches(request) && entered.get() && exchanged.compareAndSet(false, true)
+    private fun matches(request: Request) = request.method == "PUT" && request.url == url && request.body === body && body.isOneShot()
+    override fun toString() = "ProtonPersonalEditV2DispatchAttempt(redacted)"
+}
+
 /** Never include the URL, body, headers or underlying transport exception in diagnostics. */
 internal class ProtonSingleDispatchDenied : IOException("CREATE_SINGLE_DISPATCH_DENIED")
 
@@ -95,12 +109,15 @@ internal class ProtonSingleDispatchApplicationGuard : Interceptor {
         val request = chain.request()
         val attempt = request.tag(ProtonSingleDispatchAttempt::class.java)
         val update = request.tag(ProtonTitleUpdateDispatchAttempt::class.java)
+        val personal = request.tag(ProtonPersonalEditV2DispatchAttempt::class.java)
         val deletion = request.tag(ProtonDeleteDispatchAttempt::class.java)
-        if (listOf(attempt, update, deletion).count { it != null } > 1) throw ProtonSingleDispatchDenied()
+        if (listOf(attempt, update, personal, deletion).count { it != null } > 1) throw ProtonSingleDispatchDenied()
         if (attempt != null) {
             if (!attempt.enter(request)) throw ProtonSingleDispatchDenied()
         } else if (update != null) {
             if (!update.enter(request)) throw ProtonSingleDispatchDenied()
+        } else if (personal != null) {
+            if (!personal.enter(request)) throw ProtonSingleDispatchDenied()
         } else if (deletion != null) {
             if (!deletion.enter(request)) throw ProtonSingleDispatchDenied()
         } else if (request.method == "PUT" && request.url.isCreateEndpoint()) throw ProtonSingleDispatchDenied()
@@ -114,12 +131,15 @@ internal class ProtonSingleDispatchNetworkGuard : Interceptor {
         val request = chain.request()
         val attempt = request.tag(ProtonSingleDispatchAttempt::class.java)
         val update = request.tag(ProtonTitleUpdateDispatchAttempt::class.java)
+        val personal = request.tag(ProtonPersonalEditV2DispatchAttempt::class.java)
         val deletion = request.tag(ProtonDeleteDispatchAttempt::class.java)
-        if (listOf(attempt, update, deletion).count { it != null } > 1) throw ProtonSingleDispatchDenied()
+        if (listOf(attempt, update, personal, deletion).count { it != null } > 1) throw ProtonSingleDispatchDenied()
         if (attempt != null) {
             if (!attempt.exchange(request)) throw ProtonSingleDispatchDenied()
         } else if (update != null) {
             if (!update.exchange(request)) throw ProtonSingleDispatchDenied()
+        } else if (personal != null) {
+            if (!personal.exchange(request)) throw ProtonSingleDispatchDenied()
         } else if (deletion != null) {
             if (!deletion.exchange(request)) throw ProtonSingleDispatchDenied()
         } else if (request.method == "PUT" && request.url.isCreateEndpoint()) throw ProtonSingleDispatchDenied()

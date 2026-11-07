@@ -25,8 +25,32 @@ class LocalEditIntentTest {
         refused { intent(local = base.content.copy(title = "Edited", colorRgb = null)) }
         refused { intent(local = base.content.copy(title = "Edited", colorRgb = 0xFFFFFF)) }
     }
-    @Test fun unsupportedDetailsAndRecurrenceAreNotDiscarded() {
-        refused { intent(base = base.copy(content = base.content.copy(details = EventDetails(reminders = listOf(EventReminder(10)))))) }
+    @Test fun unchangedPersonalRemindersAndColorArePreservedWithoutWideningLegacyPreparations() {
+        val details = EventDetails(reminders = listOf(EventReminder(10), EventReminder(30)))
+        val personal = base.copy(content = base.content.copy(details = details))
+        val edit = intent(base = personal)
+        assertEquals(personal, edit.base)
+        assertEquals(details, edit.content.details)
+        assertEquals(0x123456, edit.content.colorRgb)
+        assertEquals(edit, PersonalEditCandidate(edit).intent)
+        val changedTime = (personal.content.time as EventTime.AllDay).copy(endExclusive = LocalDate.of(2026, 10, 3))
+        val timeEdit = intent(personal, personal.content.copy(time = changedTime))
+        refused { LocalTimeEditCandidate(timeEdit) }
+        val textEdit = intent(personal, personal.content.copy(description = "New notes"))
+        refused { LocalTextEditPreparation(textEdit, java.time.Instant.parse("2026-10-01T00:00:00Z"), AdapterFormat("legacy-text", 1), "opaque") }
+        refused { LocalEditPreparation.freezeIntent(edit) }
+        refused { intent(personal, personal.content.copy(title = "Edited", details = EventDetails())) }
+        refused { intent(personal, personal.content.copy(title = "Edited", details = details.copy(reminders = listOf(EventReminder(20))))) }
+        refused { intent(personal, personal.content.copy(title = "Edited", details = null)) }
+    }
+    @Test fun organizersParticipantsMetadataChangesAndRecurrenceAreNotDiscarded() {
+        val person = EventPerson("fixture@example.invalid")
+        val organizer = EventDetails(organizer = person)
+        val attendees = EventDetails(attendees = listOf(EventAttendee(person, AttendanceRole.REQUIRED, AttendanceStatus.ACCEPTED)))
+        for (details in listOf(organizer, attendees)) {
+            refused { intent(base = base.copy(content = base.content.copy(details = details))) }
+            refused { intent(local = base.content.copy(title = "Edited", details = details)) }
+        }
         refused { intent(local = base.content.copy(title = "Edited", details = EventDetails())) }
         val recurrence = EventRecurrence("synthetic-uid", "FREQ=DAILY")
         refused { intent(base = base.copy(content = base.content.copy(recurrence = recurrence))) }

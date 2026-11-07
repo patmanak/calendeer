@@ -18,7 +18,7 @@ internal class BoundedAttemptBlobReader(
     private val checkCancelled: () -> Unit,
 ) {
     init {
-        require(table in setOf("text_update_attempts", "time_update_attempts", "delete_attempts"))
+        require(table in setOf("text_update_attempts", "time_update_attempts", "personal_update_attempts", "delete_attempts"))
     }
 
     /** Only bounded metadata and the capsule length enter this cursor. The typed caller

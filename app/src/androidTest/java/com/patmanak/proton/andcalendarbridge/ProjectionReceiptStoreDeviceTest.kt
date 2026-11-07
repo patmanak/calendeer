@@ -460,7 +460,7 @@ class ProjectionReceiptStoreDeviceTest {
                 db.version = 8
             }
             ImportStore(context, name).use { store ->
-                assertEquals(22, store.readableDatabase.version)
+                assertEquals(23, store.readableDatabase.version)
                 assertNull(store.projectionReceipt(scope, original.eventId))
                 assertEquals(original, store.projectedBaseline(scope, original.eventId))
                 assertEquals(LocalEditIntent(MutationId("local-fixture"), scope, format, original,

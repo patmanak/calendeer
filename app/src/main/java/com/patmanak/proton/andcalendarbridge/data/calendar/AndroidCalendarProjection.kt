@@ -50,6 +50,12 @@ import com.patmanak.proton.andcalendarbridge.sync.TitleUpdateAcknowledgementRece
 import com.patmanak.proton.andcalendarbridge.sync.AppliedTitleUpdateAcknowledgement
 import com.patmanak.proton.andcalendarbridge.sync.TextUpdateAcknowledgementReceipt
 import com.patmanak.proton.andcalendarbridge.sync.AppliedTextUpdateAcknowledgement
+import com.patmanak.proton.andcalendarbridge.sync.PersonalUpdateAcknowledgementReceipt
+import com.patmanak.proton.andcalendarbridge.sync.AppliedPersonalUpdateAcknowledgement
+import com.patmanak.proton.andcalendarbridge.sync.PersonalUpdateContentPolicy
+import com.patmanak.proton.andcalendarbridge.sync.PersonalEditCandidate
+import com.patmanak.proton.andcalendarbridge.sync.MutationId
+import com.patmanak.proton.andcalendarbridge.sync.AdapterFormat
 import com.patmanak.proton.andcalendarbridge.sync.TimeUpdateAcknowledgementReceipt
 import com.patmanak.proton.andcalendarbridge.sync.AppliedTimeUpdateAcknowledgement
 import com.patmanak.proton.andcalendarbridge.sync.LocalEditIntent
@@ -137,6 +143,25 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
             attempt.id.value, attempt.localIntentId.value, attempt.eventId.value, attempt.baseRevision.value,
             attempt.format.id, attempt.format.version.toString(), attempt.intentFingerprint, attempt.payloadFingerprint)
     }
+    override val personalUpdateAcknowledgementProtocol: Int? = 1
+    override suspend fun acknowledgePersonalUpdate(receipt: PersonalUpdateAcknowledgementReceipt): AppliedPersonalUpdateAcknowledgement? {
+        val caller = currentCoroutineContext()
+        caller.ensureActive()
+        val frozen = receipt.snapshot()
+        val recipe = NativeEditAcknowledgement.personal(frozen) { caller.ensureActive() }
+        return nativeEditAcknowledgementOperation(recipe) {
+            if (acknowledgeNativeEdit(recipe)) AppliedPersonalUpdateAcknowledgement(frozen) else null
+        }
+    }
+    override suspend fun inspectPersonalUpdateAcknowledgement(receipt: PersonalUpdateAcknowledgementReceipt): AppliedPersonalUpdateAcknowledgement? {
+        val caller = currentCoroutineContext()
+        caller.ensureActive()
+        val frozen = receipt.snapshot()
+        val recipe = NativeEditAcknowledgement.personal(frozen) { caller.ensureActive() }
+        return nativeEditAcknowledgementOperation(recipe) {
+            if (inspectNativeEditAcknowledgement(recipe)) AppliedPersonalUpdateAcknowledgement(frozen) else null
+        }
+    }
     override val timeUpdateAcknowledgementProtocol: Int? = 1
     override suspend fun acknowledgeTimeUpdate(receipt: TimeUpdateAcknowledgementReceipt): AppliedTimeUpdateAcknowledgement? {
         val caller = currentCoroutineContext()
@@ -195,7 +220,7 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
      */
     private class NativeEditAcknowledgement private constructor(val intent: LocalEditIntent,
         val projection: ProjectionReceipt, val handoff: CapturedCreateHandoffFrame?,
-        private val canonicalText: Boolean, val checkActive: () -> Unit) {
+        private val canonicalText: Boolean, val checkActive: () -> Unit, val personal: Boolean = false) {
         fun values(marker: String): ContentValues = ContentValues().apply {
             put(Events.DIRTY, 0)
             put(Events.SYNC_DATA2, digest("revision-v1", projection.change.revision.value))
@@ -211,11 +236,15 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
         companion object {
             fun title(receipt: TitleUpdateAcknowledgementReceipt): NativeEditAcknowledgement {
                 require(receipt.intent.content == receipt.projection.change.content)
-                return NativeEditAcknowledgement(receipt.intent, receipt.projection, receipt.handoff, false) {}
+                return NativeEditAcknowledgement(receipt.intent, receipt.projection, receipt.handoff, false, {})
             }
             fun text(receipt: TextUpdateAcknowledgementReceipt, checkActive: () -> Unit): NativeEditAcknowledgement {
                 require(TextUpdateContentPolicy.sameSubmittedContent(receipt.intent.content, receipt.projection.change.content))
                 return NativeEditAcknowledgement(receipt.intent, receipt.projection, receipt.handoff, true, checkActive)
+            }
+            fun personal(receipt: PersonalUpdateAcknowledgementReceipt, checkActive: () -> Unit): NativeEditAcknowledgement {
+                require(PersonalUpdateContentPolicy.sameSubmittedContent(receipt.intent.content, receipt.projection.change.content))
+                return NativeEditAcknowledgement(receipt.intent, receipt.projection, receipt.handoff, true, checkActive, personal = true)
             }
             fun time(receipt: TimeUpdateAcknowledgementReceipt, checkActive: () -> Unit): NativeEditAcknowledgement {
                 require(TimeUpdateContentPolicy.sameSubmittedContent(receipt.intent.content, receipt.projection.change.content))
@@ -249,7 +278,7 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
             return captureCapturedCurrent(original.baseline, expectedAck = original, handoff = frame,
                 editAcknowledgement = receipt) is CapturedCreateCurrentObservation.Supported
         }
-        return captureSimpleSnapshot(receipt.intent.scope, receipt.intent.base, deleted = false, acknowledgement = receipt) != null
+        return captureSimpleSnapshot(receipt.intent.scope, receipt.intent.base, deleted = false, acknowledgement = receipt, personal = receipt.personal) != null
     }
 
     private fun inspectNativeEditAcknowledgement(receipt: NativeEditAcknowledgement): Boolean {
@@ -665,20 +694,26 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
         captureSimpleSnapshot(scope, base, deleted = false)
     }
 
+    override suspend fun captureOwnedPersonalEdit(scope: CalendarScope, base: RemoteChange.Upsert): OwnedLocalEditSnapshot? = operation {
+        captureSimpleSnapshot(scope, base, deleted = false, personal = true)
+    }
+
     override suspend fun captureOwnedSimpleDelete(scope: CalendarScope, base: RemoteChange.Upsert): OwnedLocalEditSnapshot? = operation {
         captureSimpleSnapshot(scope, base, deleted = true)
     }
 
     private fun captureSimpleSnapshot(scope: CalendarScope, base: RemoteChange.Upsert, deleted: Boolean,
         acknowledgement: NativeEditAcknowledgement? = null, deleteAcknowledgement: DeleteAcknowledgementReceipt? = null,
-        checkDeleteActive: () -> Unit = {}): OwnedLocalEditSnapshot? {
+        checkDeleteActive: () -> Unit = {}, personal: Boolean = false): OwnedLocalEditSnapshot? {
         require(acknowledgement == null || deleteAcknowledgement == null)
         val acknowledging = acknowledgement != null || deleteAcknowledgement != null
         fun checkPermissions() {
             checkDeleteActive(); requireEditPermissions(acknowledgement); checkDeleteActive()
         }
-        if (base.content.recurrence != null ||
-            (base.content.details != null && base.content.details != EventDetails())) return null
+        if (base.content.recurrence != null) return null
+        if (personal) {
+            if (!knownPersonalEvent(base.content)) return null
+        } else if (base.content.details != null && base.content.details != EventDetails()) return null
         val account = accountFor(scope.account)
         val calendar = calendarRow(scope, account) ?: return null
         val remoteId = digest("event-v1", calendarSyncId(scope), base.eventId.value)
@@ -695,7 +730,7 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
             Events.ORIGINAL_ALL_DAY, Events.STATUS, Events.HAS_ATTENDEE_DATA, Events.ORGANIZER, Events.IS_ORGANIZER,
             Events.GUESTS_CAN_MODIFY, Events.GUESTS_CAN_INVITE_OTHERS, Events.GUESTS_CAN_SEE_GUESTS,
             Events.HAS_ALARM, Events.SELF_ATTENDEE_STATUS, Events.AVAILABILITY, Events.ACCESS_LEVEL,
-            Events.CUSTOM_APP_PACKAGE, Events.CUSTOM_APP_URI) + if (!acknowledging) emptyArray() else
+            Events.CUSTOM_APP_PACKAGE, Events.CUSTOM_APP_URI) + if (!acknowledging && !personal) emptyArray() else
                 arrayOf(Events.SYNC_DATA3, Events.SYNC_DATA8, Events.SYNC_DATA9, Events.SYNC_DATA10)
         val values = resolver.query(uri, columns, identity.sql, identity.args, null)?.use {
             if (it.count != 1 || !it.moveToFirst()) return null
@@ -707,18 +742,21 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
             CAPTURED_ORIGIN_COLUMNS.any { values[it] != null } ||
             values.getAsInteger(Events.DIRTY) != 1 || values.getAsInteger(Events.DELETED) != (if (deleted) 1 else 0))
             return null
-        if (acknowledging && (values.getAsString(Events.SYNC_DATA4) != remoteId ||
+        if ((acknowledging || personal) && (values.getAsString(Events.SYNC_DATA4) != remoteId ||
                 ORDINARY_RESERVED_COLUMNS.any { values[it] != null } ||
                 !ordinaryReceiptMarker(values.getAsString(Events.SYNC_DATA3)))) return null
         val unsupported = arrayOf(Events.RRULE, Events.RDATE, Events.EXRULE, Events.EXDATE, Events.DURATION,
             Events.ORIGINAL_ID, Events.ORIGINAL_SYNC_ID, Events.ORIGINAL_INSTANCE_TIME, Events.ORIGINAL_ALL_DAY,
             Events.ORGANIZER, Events.EVENT_COLOR_KEY, Events.CUSTOM_APP_PACKAGE, Events.CUSTOM_APP_URI)
-        val personalOwner = simplePersonalOwner(values, account, base.content)
+        val personalOwner = if (personal) knownPersonalOwner(values, account, base.content)
+            else simplePersonalOwner(values, account, base.content)
         if (unsupported.any { values[it] != null && !(it == Events.ORGANIZER && personalOwner) }) return null
         val emptyFlags = arrayOf(Events.HAS_ATTENDEE_DATA, Events.IS_ORGANIZER, Events.GUESTS_CAN_MODIFY,
             Events.GUESTS_CAN_INVITE_OTHERS, Events.GUESTS_CAN_SEE_GUESTS, Events.HAS_ALARM,
             Events.SELF_ATTENDEE_STATUS, Events.ACCESS_LEVEL)
-        if (emptyFlags.any { !simplePersonalFlag(values, it, personalOwner) } ||
+        if (emptyFlags.any { if (personal && it == Events.HAS_ALARM)
+                values.getAsInteger(it) != (if (base.content.details!!.reminders.isEmpty()) 0 else 1)
+                else !simplePersonalFlag(values, it, personalOwner) } ||
             values.getAsInteger(Events.STATUS) != Events.STATUS_CONFIRMED ||
             values.getAsInteger(Events.AVAILABILITY) != Events.AVAILABILITY_BUSY) return null
         val expectedColor = base.content.colorRgb?.or(0xFF000000.toInt())
@@ -727,6 +765,12 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
         val content = EventContent(values.getAsString(Events.TITLE) ?: "", time,
             values.getAsString(Events.DESCRIPTION) ?: "", values.getAsString(Events.EVENT_LOCATION) ?: "",
             base.content.colorRgb, details = base.content.details)
+        if (personal) {
+            try {
+                PersonalEditCandidate(LocalEditIntent(MutationId("native-personal-observation"), scope,
+                    AdapterFormat("native-personal-observation", 1), base, content))
+            } catch (_: IllegalArgumentException) { return null }
+        }
         if (!deleted && content == base.content) return null
         if (acknowledgement != null && content != acknowledgement.intent.content) return null
         if (deleteAcknowledgement != null && content != deleteAcknowledgement.intent.content) return null
@@ -737,14 +781,18 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
             ContentProviderOperation.newAssertQuery(uri).withSelection(identity.sql, identity.args)
                 .withValues(values).withExpectedCount(1).build())
         val expected = mutableListOf(1, 1, 1)
-        if (acknowledging) {
+        if (acknowledging || personal) {
             val syncIdentity = Selection("${Events.CALENDAR_ID}=? AND ${Events._SYNC_ID}=?", arrayOf(calendar.toString(), remoteId))
             if (ownedRow(uri, syncIdentity, Events.SYNC_DATA1) != row) return null
             checks += assertion(uri, syncIdentity, row)
             expected += 1
         }
-        for ((child, column) in listOf(Reminders.CONTENT_URI to Reminders.EVENT_ID,
-            Attendees.CONTENT_URI to Attendees.EVENT_ID, ExtendedProperties.CONTENT_URI to ExtendedProperties.EVENT_ID)) {
+        if (personal && !assertPersonalReminders(account, row, base.content, checks, expected)) return null
+        val absentChildren = if (personal) listOf(Attendees.CONTENT_URI to Attendees.EVENT_ID,
+            ExtendedProperties.CONTENT_URI to ExtendedProperties.EVENT_ID) else listOf(
+            Reminders.CONTENT_URI to Reminders.EVENT_ID, Attendees.CONTENT_URI to Attendees.EVENT_ID,
+            ExtendedProperties.CONTENT_URI to ExtendedProperties.EVENT_ID)
+        for ((child, column) in absentChildren) {
             val childrenAbsent = resolver.query(syncUri(child, account), arrayOf("_id"),
                 "$column=?", arrayOf(row.toString()), null)?.use { it.count == 0 }
                 ?: fail(CalendarProjectionFailure.PROVIDER_UNAVAILABLE)
@@ -789,6 +837,26 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
     override fun eventIdentityKey(scope: CalendarScope, event: EventId): String =
         digest("event-v1", calendarSyncId(scope), event.value)
 
+    override fun capturedIdentityKey(scope: CalendarScope, localId: LocalEventId): String =
+        digest("local-create-v1", calendarSyncId(scope), localId.value)
+
+    override suspend fun inspectCapturedIdentityRow(scope: CalendarScope, localId: LocalEventId, row: Long): Boolean = operation {
+        val account = accountFor(scope.account)
+        val calendar = calendarRow(scope, account) ?: return@operation false
+        val uri = syncUri(Events.CONTENT_URI, account)
+        val local = Selection("${Events.CALENDAR_ID}=? AND ${Events.SYNC_DATA5}=?",
+            arrayOf(calendar.toString(), capturedIdentityKey(scope, localId)))
+        val values = attachmentMetadata(uri, local) ?: return@operation false
+        if (values.getAsLong(Events._ID) != row) return@operation false
+        requirePermissions()
+        capturedBatch(arrayListOf(
+            assertion(syncUri(Calendars.CONTENT_URI, account), calendarSelection(scope, account), calendar),
+            ContentProviderOperation.newAssertQuery(uri).withSelection(local.sql, local.args)
+                .withValues(values).withExpectedCount(1).build()), intArrayOf(1, 1))
+        requirePermissions()
+        true
+    }
+
     /** Metadata-only discovery. Durable jobs and qualified capture, not this locator, authorize work. */
     override suspend fun discoverSystemChanges(scope: CalendarScope, afterRow: Long, limit: Int): SystemCalendarChangePage = operation {
         require(afterRow >= 0 && limit in 1..100)
@@ -819,7 +887,9 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
                 // Only the owner can resolve them against scoped, acknowledged canonical IDs.
                 changes += SystemCalendarChange(row, kind, deleted = deleted,
                     nativeKey = if (kind == SystemCalendarChangeKind.IMPORTED) remote else null,
-                    dirty = cursor.getInt(cursor.getColumnIndexOrThrow(Events.DIRTY)) != 0)
+                    dirty = cursor.getInt(cursor.getColumnIndexOrThrow(Events.DIRTY)) != 0,
+                    capturedKey = if (kind == SystemCalendarChangeKind.CAPTURED)
+                        value(Events.SYNC_DATA5)?.takeIf { it.matches(Regex("[a-f0-9]{64}")) } else null)
             }
         } ?: fail(CalendarProjectionFailure.PROVIDER_UNAVAILABLE)
         SystemCalendarChangePage(changes.toList(), changes.lastOrNull()?.row ?: afterRow, more)
@@ -1242,10 +1312,54 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
             listOf(Events.GUESTS_CAN_MODIFY, Events.HAS_ALARM, Events.SELF_ATTENDEE_STATUS,
                 Events.ACCESS_LEVEL).all { values.getAsInteger(it) == 0 }
 
-    /** Personal owner profile v1. This opaque local label carries no remote organizer
-     * identity. Only explicitly known-empty, non-recurring events qualify; calendar access
-     * remains the gate for read-only mode. Legacy zero flags remain readable without repair.
-     */
+    /** Personal owner profile v2: known unchanged reminders, no remote participants or recurrence.
+     * The opaque local owner label never represents a remote organizer. */
+    private fun knownPersonalEvent(content: EventContent): Boolean = content.recurrence == null &&
+        content.details?.let { it.organizer == null && it.attendees.isEmpty() } == true &&
+        (content.colorRgb == null || content.colorRgb in 0..0xffffff)
+
+    private fun knownPersonalOwner(values: ContentValues, account: Account, content: EventContent): Boolean =
+        knownPersonalEvent(content) && values.getAsString(Events.ORGANIZER) == account.name &&
+            values.getAsInteger(Events.IS_ORGANIZER) == 1 &&
+            values.getAsInteger(Events.HAS_ALARM) == (if (content.details!!.reminders.isEmpty()) 0 else 1) &&
+            listOf(Events.HAS_ATTENDEE_DATA, Events.GUESTS_CAN_MODIFY, Events.GUESTS_CAN_INVITE_OTHERS,
+                Events.GUESTS_CAN_SEE_GUESTS, Events.SELF_ATTENDEE_STATUS,
+                Events.ACCESS_LEVEL).all { values.getAsInteger(it) == 0 }
+
+    /** Child IDs, values and total count are asserted in the event CAS batch. Never replace rows. */
+    private fun assertPersonalReminders(account: Account, row: Long, content: EventContent,
+        checks: MutableList<ContentProviderOperation>, expected: MutableList<Int>): Boolean {
+        val uri = syncUri(Reminders.CONTENT_URI, account)
+        val selection = "${Reminders.EVENT_ID}=?"
+        val args = arrayOf(row.toString())
+        val reminders: List<ContentValues> = resolver.query(uri, arrayOf(Reminders._ID, Reminders.EVENT_ID, Reminders.MINUTES,
+            Reminders.METHOD), selection, args, null)?.use { cursor ->
+            if (cursor.count > 5) return false
+            buildList {
+                while (cursor.moveToNext()) add(ContentValues().apply {
+                    DatabaseUtils.cursorRowToContentValues(cursor, this)
+                })
+            }
+        } ?: fail(CalendarProjectionFailure.PROVIDER_UNAVAILABLE)
+        if (reminders.any { it.getAsLong(Reminders._ID)?.let { id -> id <= 0 } != false ||
+                it.getAsLong(Reminders.EVENT_ID) != row || it.getAsInteger(Reminders.METHOD) != Reminders.METHOD_ALERT ||
+                it.getAsInteger(Reminders.MINUTES) == null } ||
+            reminders.map { it.getAsInteger(Reminders.MINUTES)!! }.sorted() !=
+                content.details!!.reminders.map { it.minutesBefore }.sorted()) return false
+        checks += ContentProviderOperation.newAssertQuery(uri).withSelection(selection, args)
+            .withExpectedCount(reminders.size).build()
+        expected += reminders.size
+        for (reminder in reminders) {
+            checks += ContentProviderOperation.newAssertQuery(uri)
+                .withSelection("${Reminders._ID}=? AND ${Reminders.EVENT_ID}=?",
+                    arrayOf(reminder.getAsLong(Reminders._ID).toString(), row.toString()))
+                .withValues(reminder).withExpectedCount(1).build()
+            expected += 1
+        }
+        return true
+    }
+
+    /** The original empty-metadata profile remains strict for legacy capture and ACK families. */
     private fun simplePersonalEvent(content: EventContent): Boolean =
         content.recurrence == null && content.details == EventDetails()
 
@@ -1449,7 +1563,7 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
         val details = change.content.details
         put(Events.HAS_ATTENDEE_DATA, if (details?.organizer != null || !details?.attendees.isNullOrEmpty()) 1 else 0)
         val organizer = details?.organizer
-        val personalOwner = simplePersonalEvent(change.content)
+        val personalOwner = knownPersonalEvent(change.content)
         when {
             organizer != null -> put(Events.ORGANIZER, organizer.email)
             personalOwner -> put(Events.ORGANIZER, account.name)

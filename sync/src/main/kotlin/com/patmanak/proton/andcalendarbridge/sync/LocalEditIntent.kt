@@ -16,7 +16,7 @@ data class LocalEditIntent(
     val state: LocalEditState = LocalEditState.PAUSED,
 ) {
     init {
-        require(base.content.recurrence == null && (base.content.details == null || base.content.details == EventDetails()))
+        require(base.content.recurrence == null && (base.content.details == null || (base.content.details.organizer == null && base.content.details.attendees.isEmpty())))
         require(content.recurrence == null && content.details == base.content.details)
         require(content.colorRgb == base.content.colorRgb)
         require(content != base.content) { "Local edit has no supported change" }

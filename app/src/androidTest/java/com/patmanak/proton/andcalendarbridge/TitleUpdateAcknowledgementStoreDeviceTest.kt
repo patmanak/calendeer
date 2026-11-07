@@ -389,6 +389,9 @@ class TitleUpdateAcknowledgementStoreDeviceTest {
 
     @Test fun additiveVersionFifteenMigrationPreservesOriginalOwnerPreparationAndRemote() = fixture { store, name ->
         // Remove empty later tables to reconstruct the historical fixture.
+        store.writableDatabase.execSQL("DROP TABLE personal_edit_preparations")
+        store.writableDatabase.execSQL("DROP TABLE personal_update_acknowledgements")
+        store.writableDatabase.execSQL("DROP TABLE personal_update_acknowledgement_history")
         store.writableDatabase.execSQL("DROP TABLE delete_acknowledgements")
         store.writableDatabase.execSQL("DROP TABLE local_time_edit_preparations")
         store.writableDatabase.execSQL("DROP TABLE time_update_acknowledgements")
@@ -403,7 +406,7 @@ class TitleUpdateAcknowledgementStoreDeviceTest {
         store.writableDatabase.execSQL("DROP TABLE title_update_acknowledgements")
         store.writableDatabase.version = 15; store.close()
         ImportStore(context, name).use { reopened ->
-            assertEquals(22, reopened.readableDatabase.version)
+            assertEquals(23, reopened.readableDatabase.version)
             sourceIntact(reopened); assertEquals(base, reopened.transaction(scope) { remote(base.eventId) })
             assertNull(reopened.titleUpdateAcknowledgement(scope, base.eventId)); assertTrue(reserve(reopened).fresh)
         }

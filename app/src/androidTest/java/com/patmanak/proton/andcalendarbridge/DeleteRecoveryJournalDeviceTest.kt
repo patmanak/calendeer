@@ -115,6 +115,7 @@ class DeleteRecoveryJournalDeviceTest {
     @Test fun versionEightUpgradePreservesOpaqueUnknownBytesAndAddsNoProof() = fixture { context, name, store ->
         val bytes = DeleteAttemptStorageCodec.encode(unknown.copy(protectedEvidence = "opaque-evidence"))
         val db = store.writableDatabase
+        db.execSQL("DROP TABLE personal_update_attempts")
         db.execSQL("DROP TABLE delete_attempts")
         db.execSQL("CREATE TABLE delete_attempts(account TEXT,calendar TEXT,generation INTEGER,mutation TEXT,event TEXT,state TEXT,capsule BLOB, PRIMARY KEY(account,calendar,generation,mutation),UNIQUE(account,calendar,mutation))")
         db.execSQL("CREATE UNIQUE INDEX delete_unresolved_event ON delete_attempts(account,calendar,event)")
@@ -124,7 +125,7 @@ class DeleteRecoveryJournalDeviceTest {
         })
         db.version = 8; store.close()
         TitleUpdateAttemptStore(context, name).use { reopened ->
-            assertEquals(9, reopened.readableDatabase.version)
+            assertEquals(10, reopened.readableDatabase.version)
             reopened.readableDatabase.rawQuery("SELECT capsule,result,completion FROM delete_attempts", null).use { row ->
                 assertTrue(row.moveToFirst()); assertArrayEquals(bytes,row.getBlob(0)); assertTrue(row.isNull(1)); assertTrue(row.isNull(2))
             }

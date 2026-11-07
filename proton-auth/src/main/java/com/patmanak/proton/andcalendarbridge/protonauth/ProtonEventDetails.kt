@@ -140,7 +140,7 @@ internal object ProtonEventDetails {
         return minutes
     }
 
-    private fun durationSeconds(value: String): Long {
+    internal fun durationSeconds(value: String): Long {
         if (value.length > 64) unsupportedEvents()
         val match = Regex("^([+-]?)P(?:(\\d+)W|(?:(\\d+)D)?(?:T(?:(\\d+)H)?(?:(\\d+)M)?(?:(\\d+)S)?)?)$").matchEntire(value)
             ?: unsupportedEvents()

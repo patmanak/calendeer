@@ -228,6 +228,35 @@ internal class ProtonEventDecryptor(private val crypto: CryptoContext, private v
         return record
     }
 
+    suspend fun prepareAndSealPersonalEdit(session: CatalogSession, intent: LocalEditIntent,
+        uid: String, timestamp: Instant, metadata: JsonObject, bootstrap: JsonObject, row: JsonObject,
+        protector: EventPayloadProtector): PersonalEditPreparation {
+        val context = currentCoroutineContext()
+        context.ensureActive()
+        val frozen = try { PersonalEditCandidate(intent).intent }
+            catch (_: IllegalArgumentException) { context.ensureActive(); unsupportedEvents() }
+            catch (_: java.nio.charset.CharacterCodingException) { context.ensureActive(); unsupportedEvents() }
+        if (frozen.format != EVENT_FORMAT) unsupportedEvents()
+        ProtonPersonalEventWire.qualify(row)
+        // Reuse original signature verification, full-base decode, writer selection and the
+        // original shared session key. Only the plaintext policy and protected format differ.
+        val prepared = prepareSharedTextFragments(session, frozen.scope, frozen.base.eventId, frozen.base.revision,
+            uid, frozen.base.content.title, metadata, bootstrap, row, requireEmptyPersonal = true,
+            expectedBase = frozen.base) { basis ->
+            ProtonSharedTextPatcher.patchPersonalAt(basis.originalPlaintext, uid, frozen.base.content,
+                frozen.content, timestamp)
+        }
+        context.ensureActive()
+        val record = try {
+            ProtonPersonalPreparationCodec(protector).sealLocal(frozen, uid, timestamp,
+                ProtonTimestampedSharedPersonal(prepared.originalRow, prepared.clearSharedPart,
+                    prepared.encryptedSharedPart, prepared.changed))
+        } catch (cancelled: CancellationException) { throw cancelled }
+          catch (failure: Exception) { context.ensureActive(); throw failure }
+        context.ensureActive()
+        return record
+    }
+
     private suspend fun prepareSharedTitleFragments(session: CatalogSession, scope: CalendarScope, expectedEventId: EventId,
         expectedRevision: Revision, expectedUid: String, expectedTitle: String, newTitle: String,
         metadata: JsonObject, bootstrap: JsonObject, row: JsonObject, timestamp: Instant?,

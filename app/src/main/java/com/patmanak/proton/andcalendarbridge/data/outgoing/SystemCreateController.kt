@@ -68,12 +68,15 @@ class SystemCreateController(
     private val textUpdates: SystemUpdateController? = null,
     private val timeRecovery: SystemTitleRecoveryController? = null,
     private val timeUpdates: SystemUpdateController? = null,
+    private val personalRecovery: SystemTitleRecoveryController? = null,
+    private val personalUpdates: SystemUpdateController? = null,
     private val deleteRecovery: SystemTitleRecoveryController? = null,
     private val deleteUpdates: SystemUpdateController? = null,
 ) {
     private val context = context.applicationContext
     private val textSupportAvailable = textRecovery != null && textUpdates != null
     private val timeSupportAvailable = timeRecovery != null && timeUpdates != null
+    private val personalSupportAvailable = personalRecovery != null && personalUpdates != null
     private val deleteSupportAvailable = deleteRecovery != null && deleteUpdates != null
     private val mutableState = MutableStateFlow(SystemCreateUiState(textSupportAvailable = textSupportAvailable,
         timeSupportAvailable = timeSupportAvailable, deleteSupportAvailable = deleteSupportAvailable))
@@ -230,6 +233,8 @@ class SystemCreateController(
         textUpdates?.reset(target)
         timeRecovery?.reset(target)
         timeUpdates?.reset(target)
+        personalRecovery?.reset(target)
+        personalUpdates?.reset(target)
         deleteRecovery?.reset(target)
         deleteUpdates?.reset(target)
     }
@@ -249,6 +254,8 @@ class SystemCreateController(
                 val textProofAdmission = if (textSupportAvailable) imports.systemTextProofAdmission(target) else null
                 val timeAdmission = if (timeSupportAvailable) imports.systemTimeRunAdmission(target) else null
                 val timeProofAdmission = if (timeSupportAvailable) imports.systemTimeProofAdmission(target) else null
+                val personalAdmission = if (personalSupportAvailable) imports.systemPersonalRunAdmission(target) else null
+                val personalProofAdmission = if (personalSupportAvailable) imports.systemPersonalProofAdmission(target) else null
                 val deleteAdmission = if (deleteSupportAvailable) imports.systemDeleteRunAdmission(target) else null
                 val deleteProofAdmission = if (deleteSupportAvailable) imports.systemDeleteProofAdmission(target) else null
                 if (!active(target, epoch)) continue
@@ -271,6 +278,12 @@ class SystemCreateController(
                 } else null
                 if (recoveredTime?.failed == true) reportAttention(AttentionStage.TIME_RECOVERY)
                 more = more || recoveredTime?.more == true
+                if (!active(target, epoch)) continue
+                val recoveredPersonal = if (personalSupportAvailable) personalRecovery?.run(target, fresh) {
+                    active(target, epoch) && personalProofAdmission?.invoke(target) == true
+                } else null
+                if (recoveredPersonal?.failed == true) reportAttention(AttentionStage.PERSONAL_RECOVERY)
+                more = more || recoveredPersonal?.more == true
                 if (!active(target, epoch)) continue
                 // Retained deletion proof can finish locally after deletion sending is disabled.
                 val recoveredDelete = if (deleteSupportAvailable) deleteRecovery?.run(target, fresh) {
@@ -309,9 +322,22 @@ class SystemCreateController(
                         }
                         SystemCalendarChangeKind.CAPTURED -> {
                             // A stamped row without the identity journal is never adopted by row ID.
-                            val retained = work.read(target, change.row)
-                            if (retained == null) reportAttention(AttentionStage.CAPTURED_IDENTITY_UNRESOLVED)
-                            else if (retained.status == SystemCreateWorkStatus.COMPLETE) {
+                            var retained = work.read(target, change.row)
+                            if (retained == null) {
+                                val issue = work.historyIssue(target, change.row, change.capturedKey)
+                                val recovered = imports.recoverHistoricalSystemCreate(target, change.row,
+                                    change.capturedKey, issue?.after)
+                                if (!active(target, epoch)) break
+                                work.retainHistoricalRecovery(target, change.row, change.capturedKey, recovered)
+                                retained = work.read(target, change.row)
+                                if (retained == null && recovered.work != null)
+                                    work.retainHistoricalRecovery(target, change.row, change.capturedKey,
+                                        HistoricalCreateRecovery(reason = HistoricalCreateIssueReason.INCOMPLETE_PROOF))
+                                // A SEARCHING cursor resumes on the next bounded discovery pass.
+                                if (recovered.after != null) more = true
+                                if (retained == null) reportAttention(AttentionStage.CAPTURED_IDENTITY_UNRESOLVED)
+                            }
+                            if (retained?.status == SystemCreateWorkStatus.COMPLETE) {
                                 val result = imports.reconcileHandoffLocalCreate(target, retained.localId,
                                     retained.captureId, retained.attempt,
                                     beforeNewOwner = { rearmLocalOwnerDiscovery(target) })
@@ -354,6 +380,12 @@ class SystemCreateController(
                 if (times?.failed == true) reportAttention(AttentionStage.TIME_UPDATE)
                 more = more || times?.more == true
                 if (!active(target, epoch)) continue
+                val personal = if (personalSupportAvailable) personalUpdates?.run(target, network, fresh) {
+                    active(target, epoch) && personalAdmission?.invoke(target) == true
+                } else null
+                if (personal?.failed == true) reportAttention(AttentionStage.PERSONAL_UPDATE)
+                more = more || personal?.more == true
+                if (!active(target, epoch)) continue
                 val deletes = if (deleteSupportAvailable) deleteUpdates?.run(target, network, fresh) {
                     active(target, epoch) && work.deletesEnabled(target) && deleteAdmission?.invoke(target) == true
                 } else null
@@ -371,9 +403,9 @@ class SystemCreateController(
 
     // Closed stage codes only: no scope, row, event, payload, exception or account values.
     private enum class AttentionStage {
-        OBSERVATION_SETUP, CREATE_POLICY, TEXT_POLICY, TIME_POLICY, DELETE_POLICY, TITLE_POLICY, TITLE_RECOVERY, TEXT_RECOVERY, TIME_RECOVERY, DELETE_RECOVERY,
+        OBSERVATION_SETUP, CREATE_POLICY, TEXT_POLICY, TIME_POLICY, DELETE_POLICY, TITLE_POLICY, TITLE_RECOVERY, TEXT_RECOVERY, TIME_RECOVERY, PERSONAL_RECOVERY, DELETE_RECOVERY,
         NATIVE_IDENTITY_UNSUPPORTED, IMPORTED_IDENTITY_UNRESOLVED, IMPORTED_CAPTURE_UNQUALIFIED,
-        CAPTURED_IDENTITY_UNRESOLVED, TITLE_UPDATE, TEXT_UPDATE, TIME_UPDATE, DELETE_UPDATE, WORKER_FAILURE,
+        CAPTURED_IDENTITY_UNRESOLVED, TITLE_UPDATE, TEXT_UPDATE, TIME_UPDATE, PERSONAL_UPDATE, DELETE_UPDATE, WORKER_FAILURE,
     }
 
     private fun reportAttention(stage: AttentionStage) {
@@ -389,6 +421,7 @@ class SystemCreateController(
             titleUpdates?.localOwnerWillBeCaptured(target)
             textUpdates?.localOwnerWillBeCaptured(target)
             timeUpdates?.localOwnerWillBeCaptured(target)
+            personalUpdates?.localOwnerWillBeCaptured(target)
         }
         if (deleted != false) deleteUpdates?.localOwnerWillBeCaptured(target)
     }

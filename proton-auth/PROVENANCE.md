@@ -969,3 +969,28 @@ The debug-only inspection probe reports closed local/GET shapes and cannot send,
 retain a result or acknowledge Android. See
 [deletion submission](../docs/DELETE_SUBMISSION.md) for its interruption rules,
 observed-state limits and remaining qualification.
+
+## Personal-edit format 2 adaptation
+
+`ProtonSharedTextPatcher.patchPersonal` and `ProtonTimestampedSharedPersonal`
+extend the already attributed shared-field scanner/serializer adaptations above.
+They use the same pinned Web Calendar serialization/update references at commit
+`40cc08c12c8fbac7f66521186c7297ddf3e17861`, retaining GPL-3.0-only notices. No new
+upstream file or cryptographic implementation is copied for this family.
+
+The adaptation patches title, description/location and date fields in a single
+pass, advances sequence once, and retains unrelated shared ICS. Existing Proton
+Core session-key, signing, encryption, verification and local-protection paths
+remain the only cryptographic implementation. `ProtonPersonalMetadata` adds a
+closed explicit-personal metadata profile and preserves the original ordered
+Notifications JSON and color, including service email reminders not projected
+as Android display reminders.
+
+Preparation/request codecs, full-content fingerprints, dedicated dispatch permit,
+submission adapter and guarded facades are project integration adapted from the
+existing guarded time/text families. They use separate version-2 formats; old
+formats are not widened. UNKNOWN permits only inspection of the same event and
+request. Readback verifies renewed shared signatures, unchanged metadata, complete
+expected content and current membership. The GET/PUT concurrency limit above
+remains: no atomic remote precondition or general last-modification order is
+invented. See [personal edits](../docs/PERSONAL_UPDATE.md).

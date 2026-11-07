@@ -8,16 +8,18 @@ import kotlinx.serialization.json.JsonObject
 
 /** Readback interpretation only. Neither profile grants dispatch or upgrades a stored preparation. */
 internal enum class CreatedEventReadbackPolicy(val version: Int) {
-    SHARED_ONLY_V1(1), KNOWN_EMPTY_V2(2);
+    SHARED_ONLY_V1(1), KNOWN_EMPTY_V2(2), PERSONAL_EDIT_V2(3);
 
     /** Personal data is observed through the authenticated read, not signed by the shared parts. */
     fun accepts(row: JsonObject): Boolean = when (this) {
         SHARED_ONLY_V1 -> true
+        PERSONAL_EDIT_V2 -> try { ProtonPersonalEventWire.qualify(row); true } catch (_: Exception) { false }
         KNOWN_EMPTY_V2 -> (row["Notifications"] as? JsonArray)?.isEmpty() == true
     }
 
     fun acceptsExpected(content: EventContent): Boolean {
         val time = content.time
+        if (this == PERSONAL_EDIT_V2) return content.details != null && content.details!!.organizer == null && content.details!!.attendees.isEmpty() && content.recurrence == null && (content.colorRgb == null || content.colorRgb!! in 0..0xffffff)
         return this == SHARED_ONLY_V1 || (content.details == EventDetails() && content.recurrence == null && content.colorRgb == null &&
             (time !is EventTime.Timed || (time.start.nano == 0 && time.end.nano == 0)))
     }

@@ -28,6 +28,7 @@ import com.patmanak.proton.andcalendarbridge.data.outgoing.SystemTitleRecoveryCo
 import com.patmanak.proton.andcalendarbridge.data.outgoing.SystemUpdateController
 import com.patmanak.proton.andcalendarbridge.data.outgoing.CoordinatorSystemTitleOperations
 import com.patmanak.proton.andcalendarbridge.data.outgoing.CoordinatorSystemTextOperations
+import com.patmanak.proton.andcalendarbridge.data.outgoing.CoordinatorSystemPersonalOperations
 import com.patmanak.proton.andcalendarbridge.data.outgoing.CoordinatorSystemTimeOperations
 import com.patmanak.proton.andcalendarbridge.data.outgoing.CoordinatorSystemDeleteOperations
 import com.patmanak.proton.andcalendarbridge.sync.MutationKind
@@ -93,6 +94,23 @@ class BridgeApplication : Application() {
             AndroidTitleRecoveryCursorStore(this, "calendar-time-inspection-cursors"),
             timeOperations, { target -> timeRecovery.reset(target) })
     }
+    private val personalOperations: CoordinatorSystemPersonalOperations by lazy {
+        CoordinatorSystemPersonalOperations(imports, titleAttempts.personalJournal,
+            ProtonAuthentication.personalPreparations(this), ProtonAuthentication.personalUpdates(this))
+    }
+    private val personalRecovery by lazy {
+        SystemTitleRecoveryController(AndroidTitleRecoveryCursorStore(this, "calendar-personal-recovery-cursors"),
+            recover = { com.patmanak.proton.andcalendarbridge.sync.TitleUpdateOfflineRecoveryProgress(inactive = true) },
+            guardedRecover = { query, active ->
+                personalOperations.recoverOffline(query) { requested -> requested == query.scope && active() }
+            })
+    }
+    private val personalUpdates by lazy {
+        SystemUpdateController(
+            AndroidTitleRecoveryCursorStore(this, "calendar-personal-owner-cursors"),
+            AndroidTitleRecoveryCursorStore(this, "calendar-personal-inspection-cursors"),
+            personalOperations, { target -> personalRecovery.reset(target) })
+    }
     private val deleteOperations: CoordinatorSystemDeleteOperations by lazy {
         CoordinatorSystemDeleteOperations(imports, titleAttempts.deleteJournal,
             ProtonAuthentication.deletions(this))
@@ -117,6 +135,7 @@ class BridgeApplication : Application() {
         textUpdates = if (textSynchronizationQualified) textUpdates else null,
         timeRecovery = if (timeSynchronizationQualified) timeRecovery else null,
         timeUpdates = if (timeSynchronizationQualified) timeUpdates else null,
+        personalRecovery = personalRecovery, personalUpdates = personalUpdates,
         deleteRecovery = if (deleteSynchronizationQualified) deleteRecovery else null,
         deleteUpdates = if (deleteSynchronizationQualified) deleteUpdates else null) }
 
@@ -125,8 +144,8 @@ class BridgeApplication : Application() {
             nativeCalendar, authenticationScope, creates = createAttempts,
             localCreates = localCreateCaptures, systemCreatesEnabled = systemCreateWork::modeEnabled,
             systemTitlesEnabled = systemCreateWork::titlesEnabled,
-            systemTextsEnabled = systemCreateWork::textsEnabled,
-            systemTimesEnabled = systemCreateWork::timesEnabled,
+            systemTextsEnabled = { target -> textSynchronizationQualified && systemCreateWork.textsEnabled(target) },
+            systemTimesEnabled = { target -> timeSynchronizationQualified && systemCreateWork.timesEnabled(target) },
             systemDeletesEnabled = { target -> deleteSynchronizationQualified && systemCreateWork.deletesEnabled(target) })
     }
 

@@ -17,7 +17,7 @@ internal fun <T> readAttemptWorkRefs(
     db: SQLiteDatabase, table: String, scope: CalendarScope, afterEvent: EventId?, limit: Int,
     checkCancelled: () -> Unit, readRef: (MutationId, EventId, String) -> T,
 ): List<T> {
-    require(table in setOf("text_update_attempts", "time_update_attempts", "delete_attempts"))
+    require(table in setOf("text_update_attempts", "time_update_attempts", "personal_update_attempts", "delete_attempts"))
     fun text(column: String, max: Int) = "CASE WHEN typeof($column)='text' AND length(CAST($column AS BLOB)) BETWEEN 1 AND $max THEN CAST($column AS BLOB) END"
     val after = if (afterEvent == null) "" else " AND event COLLATE BINARY > ?"
     val args = buildList {

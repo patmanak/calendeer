@@ -188,11 +188,11 @@ class TextLocalPreparationStoreDeviceTest {
             capture(store)
             val tables = listOf("calendars", "records", "projection_bases", "local_edits", "conflict_archives", "conflict_observations")
             val before = tables.associateWith { rows(store.readableDatabase, it) }
-            for (table in listOf("delete_acknowledgements", "local_time_edit_preparations", "time_update_acknowledgements", "time_update_acknowledgement_history", "local_text_edit_preparations", "text_update_acknowledgements", "text_update_acknowledgement_history"))
+            for (table in listOf("personal_edit_preparations", "personal_update_acknowledgements", "personal_update_acknowledgement_history", "delete_acknowledgements", "local_time_edit_preparations", "time_update_acknowledgements", "time_update_acknowledgement_history", "local_text_edit_preparations", "text_update_acknowledgements", "text_update_acknowledgement_history"))
                 store.writableDatabase.execSQL("DROP TABLE $table")
             store.writableDatabase.version = version; store.close()
             ImportStore(context, name).use { reopened ->
-                assertEquals(22, reopened.readableDatabase.version)
+                assertEquals(23, reopened.readableDatabase.version)
                 assertEquals(before, tables.associateWith { rows(reopened.readableDatabase, it) })
                 for (table in listOf("local_text_edit_preparations", "text_update_acknowledgements", "text_update_acknowledgement_history"))
                     assertTrue(rows(reopened.readableDatabase, table).isEmpty())
@@ -202,6 +202,9 @@ class TextLocalPreparationStoreDeviceTest {
     }
     @Test fun failedAdditiveMigrationRollsBackVersionAndExistingBytes() = fixture { store, name ->
         capture(store); val before = rows(store.readableDatabase, "local_edits")
+        store.writableDatabase.execSQL("DROP TABLE personal_edit_preparations")
+        store.writableDatabase.execSQL("DROP TABLE personal_update_acknowledgements")
+        store.writableDatabase.execSQL("DROP TABLE personal_update_acknowledgement_history")
         store.writableDatabase.execSQL("DROP TABLE delete_acknowledgements")
         store.writableDatabase.execSQL("DROP TABLE local_time_edit_preparations")
         store.writableDatabase.execSQL("DROP TABLE time_update_acknowledgements")

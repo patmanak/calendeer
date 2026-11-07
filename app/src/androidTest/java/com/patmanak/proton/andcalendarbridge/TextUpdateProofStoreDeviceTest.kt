@@ -182,6 +182,7 @@ class TextUpdateProofStoreDeviceTest {
         val record = work(); assertTrue(store.textJournal.remember(record, allow)); store.close()
         val capsule = TextUpdateAttemptStorageCodec.encode(record)
         SQLiteDatabase.openDatabase(context.getDatabasePath(name).absolutePath, null, SQLiteDatabase.OPEN_READWRITE).use { db ->
+            db.execSQL("DROP TABLE personal_update_attempts")
             db.execSQL("DROP TABLE delete_attempts")
             db.execSQL("DROP TABLE time_update_attempts")
             db.execSQL("DROP TABLE text_update_attempts")
@@ -192,7 +193,7 @@ class TextUpdateProofStoreDeviceTest {
             }); db.version = 5
         }
         TitleUpdateAttemptStore(context, name).use { migrated ->
-            assertEquals(9, migrated.readableDatabase.version); assertEquals(record, migrated.textJournal.read(scope, record.id, allow))
+            assertEquals(10, migrated.readableDatabase.version); assertEquals(record, migrated.textJournal.read(scope, record.id, allow))
             migrated.readableDatabase.rawQuery("SELECT capsule,result,completion FROM text_update_attempts", null).use {
                 assertTrue(it.moveToFirst()); assertArrayEquals(capsule, it.getBlob(0)); assertTrue(it.isNull(1)); assertTrue(it.isNull(2))
             }
@@ -335,6 +336,7 @@ class TextUpdateProofStoreDeviceTest {
         val capsule = TextUpdateAttemptStorageCodec.encode(record)
         store.readableDatabase; store.close()
         SQLiteDatabase.openDatabase(context.getDatabasePath(name).absolutePath, null, SQLiteDatabase.OPEN_READWRITE).use { db ->
+            db.execSQL("DROP TABLE personal_update_attempts")
             db.execSQL("DROP TABLE delete_attempts")
             db.execSQL("DROP TABLE time_update_attempts")
             db.execSQL("DROP TABLE text_update_attempts")
@@ -367,7 +369,7 @@ class TextUpdateProofStoreDeviceTest {
             db.execSQL("DROP TABLE migration_index_collision")
         }
         TitleUpdateAttemptStore(context, name).use { migrated ->
-            assertEquals(9, migrated.readableDatabase.version)
+            assertEquals(10, migrated.readableDatabase.version)
             assertEquals(record, migrated.textJournal.read(scope, record.id, allow))
         }
     }

@@ -23,6 +23,11 @@ import kotlinx.coroutines.withContext
 
 enum class SystemCreateWorkStatus { PENDING, CAPTURED, WAITING, UNSUPPORTED, UNKNOWN, COMPLETE }
 
+data class HistoricalCreateIssue(val scope: CalendarScope, val row: Long, val marker: String,
+    val reason: HistoricalCreateIssueReason, val after: String?, val id: Long) {
+    override fun toString() = "HistoricalCreateIssue(REDACTED, reason=$reason)"
+}
+
 /** Row is an Android locator, never a durable identity for an outgoing request. */
 data class SystemCreateWork(
     val scope: CalendarScope,
@@ -48,7 +53,7 @@ data class SystemCreateWork(
  * established that it now belongs to a new, unstamped native event.
  */
 class SystemCreateWorkStore(context: Context, name: String = "system-creates.db") :
-    SQLiteOpenHelper(context, name, null, 1) {
+    SQLiteOpenHelper(context, name, null, 2) {
     private val lock = Mutex()
     private val modes = context.getSharedPreferences("system-create-modes", Context.MODE_PRIVATE)
 
@@ -70,10 +75,76 @@ class SystemCreateWorkStore(context: Context, name: String = "system-creates.db"
                 UNIQUE(local_id), UNIQUE(capture_id), UNIQUE(attempt)
             )
         """.trimIndent())
+        createHistoryIssues(db)
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        error("Explicit system create work migration required")
+        check(oldVersion == 1 && newVersion == 2) { "Explicit system create work migration required" }
+        createHistoryIssues(db)
+    }
+
+    private fun createHistoryIssues(db: SQLiteDatabase) {
+        db.execSQL("""
+        CREATE TABLE historical_create_issues (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            account TEXT NOT NULL, calendar TEXT NOT NULL, generation INTEGER NOT NULL CHECK(generation >= 0),
+            native_row INTEGER NOT NULL CHECK(native_row > 0), marker TEXT NOT NULL,
+            reason TEXT NOT NULL CHECK(reason IN ('SEARCHING','MISSING_HISTORY','INCOMPLETE_PROOF')),
+            after_local TEXT,
+            UNIQUE(account, calendar, generation, native_row, marker)
+        )
+        """.trimIndent())
+        db.execSQL("CREATE INDEX historical_create_issues_scope_id ON historical_create_issues(account, calendar, generation, id)")
+    }
+
+    suspend fun historyIssue(scope: CalendarScope, row: Long, marker: String?): HistoricalCreateIssue? = query { db ->
+        db.query("historical_create_issues", null, "$SCOPE_ROW AND marker=?", args(scope, row) + (marker ?: ""),
+            null, null, null).use { if (it.moveToFirst()) historyIssue(it) else null }
+    }
+
+    /** Indexed bounded metadata surface for inspection. No protected event contents are loaded. */
+    suspend fun historyIssues(scope: CalendarScope, afterId: Long = 0, limit: Int = 25): List<HistoricalCreateIssue> = query { db ->
+        require(afterId >= 0 && limit in 1..50)
+        db.query("historical_create_issues", null, "$SCOPE AND id>?", scopeArgs(scope) + afterId.toString(),
+            null, null, "id ASC", limit.toString()).use { cursor ->
+            buildList { while (cursor.moveToNext()) add(historyIssue(cursor)) }
+        }
+    }
+
+    /** Restoration inserts only an independently proven COMPLETE owner; an existing identity wins. */
+    suspend fun retainHistoricalRecovery(scope: CalendarScope, row: Long, marker: String?, result: HistoricalCreateRecovery): Boolean = transaction { db ->
+        require(row > 0 && (marker == null || marker.length <= 4096))
+        val restored = result.work
+        val prior = read(db, scope, row)
+        if (restored != null) {
+            require(restored.scope == scope && restored.row == row && restored.status == SystemCreateWorkStatus.COMPLETE)
+            if (prior != null && prior != restored) return@transaction false
+            if (prior == null) {
+                // No conflict replacement: uniqueness conflicts preserve every original identity.
+                if (db.insertWithOnConflict("system_creates", null, values(restored), SQLiteDatabase.CONFLICT_IGNORE) == -1L)
+                    return@transaction false
+            }
+            db.delete("historical_create_issues", "$SCOPE_ROW AND marker=?", args(scope, row) + (marker ?: ""))
+            true
+        } else {
+            if (prior != null) return@transaction false
+            val values = ContentValues().apply {
+                put("account", scope.account.value); put("calendar", scope.calendar.value); put("generation", scope.generation)
+                put("native_row", row); put("marker", marker ?: ""); put("reason", result.reason.name)
+                put("after_local", result.after)
+            }
+            if (db.update("historical_create_issues", values, "$SCOPE_ROW AND marker=?", args(scope, row) + (marker ?: "")) == 0)
+                db.insertOrThrow("historical_create_issues", null, values)
+            false
+        }
+    }
+
+    private fun historyIssue(cursor: Cursor): HistoricalCreateIssue {
+        fun text(name: String) = cursor.getString(cursor.getColumnIndexOrThrow(name))
+        return HistoricalCreateIssue(CalendarScope(AccountId(text("account")), CalendarId(text("calendar")),
+            cursor.getLong(cursor.getColumnIndexOrThrow("generation"))), cursor.getLong(cursor.getColumnIndexOrThrow("native_row")),
+            text("marker"), HistoricalCreateIssueReason.valueOf(text("reason")), text("after_local"),
+            cursor.getLong(cursor.getColumnIndexOrThrow("id")))
     }
 
     suspend fun reserve(scope: CalendarScope, row: Long): SystemCreateWork {
@@ -119,7 +190,9 @@ class SystemCreateWorkStore(context: Context, name: String = "system-creates.db"
     }
 
     suspend fun count(scope: CalendarScope): Int = query { db ->
-        db.rawQuery("SELECT COUNT(*) FROM system_creates WHERE $SCOPE AND status != 'COMPLETE'",
+        val pending = db.rawQuery("SELECT COUNT(*) FROM system_creates WHERE $SCOPE AND status != 'COMPLETE'",
+            scopeArgs(scope)).use { cursor -> check(cursor.moveToFirst()); cursor.getInt(0) }
+        pending + db.rawQuery("SELECT COUNT(*) FROM historical_create_issues WHERE $SCOPE",
             scopeArgs(scope)).use { cursor -> check(cursor.moveToFirst()); cursor.getInt(0) }
     }
 

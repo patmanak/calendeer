@@ -26,6 +26,7 @@ internal data class ProtonSharedTextChange(val expected: String?, val replacemen
     override fun toString() = "ProtonSharedTextChange(REDACTED)"
 }
 internal class ProtonTextPatchException : IllegalStateException("Shared text patch unavailable: UNSUPPORTED")
+internal class ProtonPersonalPatchException : IllegalStateException("Personal edit v2 patch unavailable: UNSUPPORTED")
 internal class ProtonTimePatchException : IllegalStateException("Shared time patch unavailable: UNSUPPORTED")
 
 /**
@@ -95,6 +96,81 @@ internal object ProtonSharedTextPatcher {
             throw ProtonTimePatchException()
         }
     }
+
+    fun patchPersonalAt(original: ProtonEventTextParts, expectedUid: String,
+        before: EventContent, after: EventContent, timestamp: Instant): ProtonEventTextParts {
+        try {
+            budget(original.clearShared, original.encryptedShared)
+            require(timestamp.nano == 0 && timestamp >= Instant.EPOCH && timestamp <= LAST_TIMESTAMP)
+            val clearIdentity = inspect(original.clearShared, false, emptySet())
+            val secretIdentity = inspect(original.encryptedShared, true, emptySet())
+            require(clearIdentity.uid == expectedUid && secretIdentity.uid == expectedUid &&
+                clearIdentity.stamp == secretIdentity.stamp)
+            require(before.details != null && before.details == after.details && before.colorRgb == after.colorRgb)
+            require(before.details!!.organizer == null && before.details!!.attendees.isEmpty())
+            require(before.recurrence == null && after.recurrence == null && before != after)
+            val expected = before.time
+            val replacement = after.time
+            for (time in listOf(expected, replacement)) if (time is EventTime.Timed) {
+                require(time.zone == ZoneOffset.UTC || time.zone.id in ZoneId.getAvailableZoneIds())
+                require(!time.zone.rules.isFixedOffset || time.zone.rules.getOffset(Instant.EPOCH) == ZoneOffset.UTC)
+            }
+            val sourceDates = temporalBlocks(original.clearShared, true)
+            temporalBlocks(original.encryptedShared, false)
+            require(decodeTime(sourceDates) == expected)
+            val serialized = serializeTime(replacement, timestamp)
+            // Qualify original endpoints too, including whole seconds and unambiguous zone offsets.
+            serializeTime(expected, timestamp)
+            val observed = observe(original, ProtonSharedTextProperty.entries.toSet(), expectedUid)
+            fun change(field: ProtonSharedTextProperty, old: String, next: String): ProtonSharedTextChange {
+                val actual = observed[field]
+                require(actual.orEmpty() == text(old))
+                return ProtonSharedTextChange(actual, if (old == next) actual else text(next))
+            }
+            val changes = mapOf(
+                ProtonSharedTextProperty.SUMMARY to change(ProtonSharedTextProperty.SUMMARY, before.title, after.title),
+                ProtonSharedTextProperty.DESCRIPTION to change(ProtonSharedTextProperty.DESCRIPTION, before.description, after.description),
+                ProtonSharedTextProperty.LOCATION to change(ProtonSharedTextProperty.LOCATION, before.location, after.location))
+            // Text patch has no clock or sequence side effects. Apply all changes before one metadata advance.
+            val textPatched = patch(original, changes, expectedUid)
+
+            val clear = metadata(original.clearShared, true)
+            val secret = metadata(textPatched.encryptedShared, false)
+            val oldStamp = metadataDate(clear.getValue("DTSTAMP"))
+            val created = metadataDate(clear.getValue("CREATED"))
+            val lastModified = metadataDate(clear.getValue("LAST-MODIFIED"))
+            require(created <= oldStamp && created <= lastModified && timestamp >= oldStamp && timestamp >= lastModified)
+            require(oldStamp == metadataDate(secret.getValue("DTSTAMP")))
+            val sequence = value(clear.getValue("SEQUENCE"))
+            require(sequence.matches(Regex("[0-9]+")))
+            val number = checkNotNull(sequence.trimStart('0').ifEmpty { "0" }.toLongOrNull())
+            require(number in 0 until Int.MAX_VALUE.toLong())
+            val stamp = STAMP.format(timestamp.atOffset(ZoneOffset.UTC))
+            fun replace(text: String, edits: List<Edit>): String {
+                var result = text
+                for (edit in edits.sortedByDescending { it.start })
+                    result = result.substring(0, edit.start) + edit.replacement + result.substring(edit.end)
+                return result
+            }
+            fun edit(block: Block, next: String) = Edit(block.start, block.end,
+                property(block.logical).second + ":" + next + "\r\n")
+            val nextClear = replace(textPatched.clearShared, sourceDates.map { (name, block) ->
+                Edit(block.start, block.end, serialized.getValue(name))
+            } + listOf(edit(clear.getValue("DTSTAMP"), stamp), edit(clear.getValue("LAST-MODIFIED"), stamp),
+                edit(clear.getValue("SEQUENCE"), (number + 1).toString())))
+            val nextSecret = replace(textPatched.encryptedShared, listOf(edit(secret.getValue("DTSTAMP"), stamp)))
+            budget(nextClear, nextSecret)
+            val checkedClear = inspect(nextClear, false, emptySet())
+            val checkedSecret = inspect(nextSecret, true, emptySet())
+            require(checkedClear.uid == expectedUid && checkedSecret.uid == expectedUid &&
+                checkedClear.stamp == stamp && checkedSecret.stamp == stamp)
+            require(decodeTime(temporalBlocks(nextClear, true)) == replacement)
+            return ProtonEventTextParts(nextClear, nextSecret)
+        } catch (_: Exception) {
+            throw ProtonPersonalPatchException()
+        }
+    }
+
 
     /** Framing has been checked. This profile refuses nested components and temporal ambiguity. */
     private fun temporalBlocks(text: String, clear: Boolean): Map<String, Block> {

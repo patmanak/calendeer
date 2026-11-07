@@ -45,6 +45,54 @@ class SystemCreateWorkStoreDeviceTest {
         finally { store.close(); base.deleteDatabase(name); base.deleteSharedPreferences(preferenceName) }
     }
 
+    @Test fun historicalIssuesSurviveRestartAndNeverReplaceAnExistingOwner() = fixture { context, name, store ->
+        val existing = store.reserve(scope, 5)
+        val unresolved = com.patmanak.proton.andcalendarbridge.data.outgoing.HistoricalCreateRecovery(
+            after = "retained-cursor", reason = com.patmanak.proton.andcalendarbridge.data.outgoing.HistoricalCreateIssueReason.SEARCHING)
+        assertFalse(store.retainHistoricalRecovery(scope, 5, "marker", unresolved))
+        assertTrue(store.historyIssues(scope).isEmpty())
+        assertFalse(store.retainHistoricalRecovery(scope, 7, "marker", unresolved))
+        assertFalse(store.retainHistoricalRecovery(scope, 7, "other-marker", unresolved))
+        val page = store.historyIssues(scope, limit = 1)
+        assertEquals(1, page.size)
+        assertEquals(1, store.historyIssues(scope, page.single().id, 1).size)
+        assertTrue(store.historyIssues(scope.copy(generation = 1)).isEmpty())
+        store.close()
+        SystemCreateWorkStore(context, name).use { reopened ->
+            assertEquals(existing, reopened.read(scope, 5))
+            assertEquals("retained-cursor", reopened.historyIssue(scope, 7, "marker")?.after)
+            assertNull(reopened.read(scope, 7))
+            val proven = existing.copy(row = 7, status = com.patmanak.proton.andcalendarbridge.data.outgoing.SystemCreateWorkStatus.COMPLETE)
+            // The same durable identities already belong to row 5: never move or replace them.
+            assertFalse(reopened.retainHistoricalRecovery(scope, 7, "marker",
+                com.patmanak.proton.andcalendarbridge.data.outgoing.HistoricalCreateRecovery(proven)))
+            assertEquals(existing, reopened.read(scope, 5))
+            assertNull(reopened.read(scope, 7))
+            assertNotNull(reopened.historyIssue(scope, 7, "marker"))
+        }
+    }
+
+    @Test fun historicalRecoveryMigratesVersionOneAndRetainsExactCompleteIdentity() = fixture { context, name, store ->
+        val existing = store.reserve(scope, 5)
+        store.writableDatabase.execSQL("DROP TABLE historical_create_issues")
+        store.writableDatabase.version = 1
+        store.close()
+        val recovered = existing.copy(row = 7, localId = com.patmanak.proton.andcalendarbridge.sync.LocalEventId("55555555-5555-5555-5555-555555555555"),
+            captureId = com.patmanak.proton.andcalendarbridge.sync.MutationId("33333333-3333-3333-3333-333333333333"),
+            attempt = com.patmanak.proton.andcalendarbridge.sync.MutationId("44444444-4444-4444-4444-444444444444"),
+            status = com.patmanak.proton.andcalendarbridge.data.outgoing.SystemCreateWorkStatus.COMPLETE)
+        SystemCreateWorkStore(context, name).use { migrated ->
+            assertEquals(existing, migrated.read(scope, 5))
+            assertTrue(migrated.historyIssues(scope).isEmpty())
+            assertTrue(migrated.retainHistoricalRecovery(scope, 7, "marker",
+                com.patmanak.proton.andcalendarbridge.data.outgoing.HistoricalCreateRecovery(recovered)))
+        }
+        SystemCreateWorkStore(context, name).use { reopened ->
+            assertEquals(existing, reopened.read(scope, 5)); assertEquals(recovered, reopened.read(scope, 7))
+            assertTrue(reopened.historyIssues(scope).isEmpty())
+        }
+    }
+
     @Test fun deletionConsentIsSeparateScopedAndDurable() = fixture { context, name, store ->
         store.setDeletesMode(scope, true); assertFalse(store.deletesEnabled(scope))
         store.setMode(scope, true); store.setTitlesMode(scope, true)
@@ -129,7 +177,7 @@ class SystemCreateWorkStoreDeviceTest {
             assertEquals(setOf("account", "calendar", "generation", "native_row", "local_id",
                 "capture_id", "attempt", "timestamp", "status"), columns)
         }
-        assertEquals(1, store.readableDatabase.version)
+        assertEquals(2, store.readableDatabase.version)
         store.close()
         SystemCreateWorkStore(context, name).use { reopened ->
             assertEquals(first, reopened.read(scope, 7))

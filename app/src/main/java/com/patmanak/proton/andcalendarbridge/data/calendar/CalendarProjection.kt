@@ -29,6 +29,8 @@ import com.patmanak.proton.andcalendarbridge.sync.TitleUpdateAcknowledgementRece
 import com.patmanak.proton.andcalendarbridge.sync.AppliedTitleUpdateAcknowledgement
 import com.patmanak.proton.andcalendarbridge.sync.TextUpdateAcknowledgementReceipt
 import com.patmanak.proton.andcalendarbridge.sync.AppliedTextUpdateAcknowledgement
+import com.patmanak.proton.andcalendarbridge.sync.PersonalUpdateAcknowledgementReceipt
+import com.patmanak.proton.andcalendarbridge.sync.AppliedPersonalUpdateAcknowledgement
 import com.patmanak.proton.andcalendarbridge.sync.TimeUpdateAcknowledgementReceipt
 import com.patmanak.proton.andcalendarbridge.sync.AppliedTimeUpdateAcknowledgement
 import com.patmanak.proton.andcalendarbridge.sync.catalog.CalendarSummary
@@ -42,6 +44,11 @@ interface CalendarProjection {
     suspend fun acknowledgeDelete(receipt: DeleteAcknowledgementReceipt): AppliedDeleteAcknowledgement? = null
     /** Historical marker/origin proof only; preserve later edits, flags and children. */
     suspend fun inspectDeleteAcknowledgement(receipt: DeleteAcknowledgementReceipt): AppliedDeleteAcknowledgement? = null
+    val personalUpdateAcknowledgementProtocol: Int? get() = null
+    /** Exact personal raw snapshot ACK; preserve time, metadata and reminder row identities. */
+    suspend fun acknowledgePersonalUpdate(receipt: PersonalUpdateAcknowledgementReceipt): AppliedPersonalUpdateAcknowledgement? = null
+    /** Historical proof only; preserve later edits and children. */
+    suspend fun inspectPersonalUpdateAcknowledgement(receipt: PersonalUpdateAcknowledgementReceipt): AppliedPersonalUpdateAcknowledgement? = null
     val timeUpdateAcknowledgementProtocol: Int? get() = null
     /** Assert the exact raw native temporal edit and origin before clearing DIRTY on the same row.
      * Retain the desired time; only verified CRLF/LF text normalization and metadata may change.
@@ -65,6 +72,9 @@ interface CalendarProjection {
     suspend fun inspectTitleUpdateAcknowledgement(receipt: TitleUpdateAcknowledgementReceipt): AppliedTitleUpdateAcknowledgement? = null
     /** Native lookup key only; never a remote identifier or ownership/capture proof. */
     fun eventIdentityKey(scope: CalendarScope, event: EventId): String? = null
+    /** Discovery key only; complete durable provenance and native assertions remain mandatory. */
+    fun capturedIdentityKey(scope: CalendarScope, localId: LocalEventId): String? = null
+    suspend fun inspectCapturedIdentityRow(scope: CalendarScope, localId: LocalEventId, row: Long): Boolean = false
     val capturedHandoffProtocol: Int? get() = null
     /** Assert the current clean reference and full origin in one batch; no future write lease. */
     suspend fun inspectCapturedHandoffBase(frame: CapturedCreateHandoffFrame): CapturedHandoffCleanWitness? = null
@@ -112,6 +122,8 @@ interface CalendarProjection {
     suspend fun inspectOwnedEvent(scope: CalendarScope, eventId: EventId, revision: Revision): OwnedEventWitness? = null
     /** Snapshot only; no acknowledgement or upload. Unsupported/changed rows are left untouched. */
     suspend fun captureOwnedSimpleEdit(scope: CalendarScope, base: RemoteChange.Upsert): OwnedLocalEditSnapshot? = null
+    /** Known personal metadata and exact unchanged reminders only; assertion-only observation. */
+    suspend fun captureOwnedPersonalEdit(scope: CalendarScope, base: RemoteChange.Upsert): OwnedLocalEditSnapshot? = null
     /** Present, dirty local tombstone only; absence never establishes deletion intent. No ACK. */
     suspend fun captureOwnedSimpleDelete(scope: CalendarScope, base: RemoteChange.Upsert): OwnedLocalEditSnapshot? = null
     /** One-shot identity stamp after a durable claim; preserves DIRTY and never assigns remote IDs. */

@@ -15,6 +15,8 @@ import com.patmanak.proton.andcalendarbridge.sync.CalendarLocalEditPreparationPo
 import com.patmanak.proton.andcalendarbridge.sync.CalendarLocalTextPreparationPort
 import com.patmanak.proton.andcalendarbridge.sync.CalendarLocalTimePreparationPort
 import com.patmanak.proton.andcalendarbridge.sync.CalendarTimeUpdateSubmissionPort
+import com.patmanak.proton.andcalendarbridge.sync.CalendarPersonalPreparationPort
+import com.patmanak.proton.andcalendarbridge.sync.CalendarPersonalUpdatePort
 import com.patmanak.proton.andcalendarbridge.sync.LocalEditPreparationFailure
 import com.patmanak.proton.andcalendarbridge.sync.AccountId
 import kotlinx.coroutines.flow.first
@@ -96,6 +98,8 @@ internal data class ProtonAuthenticationGraph(
     val localTimes: CalendarLocalTimePreparationPort = CalendarLocalTimePreparationPort { _, _ -> localEditUnavailable(LocalEditPreparationFailure.UNSUPPORTED) },
     val textUpdates: CalendarTextUpdateSubmissionPort? = null,
     val timeUpdates: CalendarTimeUpdateSubmissionPort? = null,
+    val personals: CalendarPersonalPreparationPort = CalendarPersonalPreparationPort { _, _ -> localEditUnavailable(LocalEditPreparationFailure.UNSUPPORTED) },
+    val personalUpdates: CalendarPersonalUpdatePort? = null,
     val deletions: CalendarDeleteSubmissionPort? = null,
     val connectedAccountLabel: suspend () -> String? = { null },
     val catalog: CalendarCatalogPort,
@@ -258,6 +262,13 @@ internal object ProtonAuthenticationRuntime {
                 guardedRefresh = localTitleContextRefresh(
                     { session -> userManager.getUser(session.userId, refresh = true) },
                     { session -> userManager.getAddresses(session.userId, refresh = true) }))
+            val personalPreparations = ProtonPersonalPreparationAdapter(readSession, contextRefresher,
+                calendarMetadata, eventRemote, LocalTitleEventRemote { session, scope, id ->
+                    ProtonChangeFeedRemote(network.apiProvider).event(session, scope.feedScope(), id.value).obj("Event")
+                }, localAddresses, personalCryptoPreparation(cryptoContext, eventProtector),
+                guardedRefresh = localTitleContextRefresh(
+                    { session -> userManager.getUser(session.userId, refresh = true) },
+                    { session -> userManager.getAddresses(session.userId, refresh = true) }))
             val titleContext = TitleUpdateContextQualification { session, scope, checkpoint ->
                 checkpoint()
                 // Keep each suspending read inside the caller's original access lease.
@@ -298,6 +309,9 @@ internal object ProtonAuthenticationRuntime {
             localEdits = titlePreparations,
             localTexts = textPreparations,
             localTimes = timePreparations,
+            personals = personalPreparations,
+            personalUpdates = ProtonPersonalUpdateSubmissionAdapter(personalPreparations, eventProtector, readSession, titleContext,
+                ProtonPersonalUpdateSubmissionRemote(network.apiProvider), eventRemote, eventDecoder::decodeCreated),
             titleUpdates = ProtonTitleUpdateSubmissionAdapter(titlePreparations, eventProtector, readSession, titleContext,
                 ProtonTitleUpdateSubmissionRemote(network.apiProvider), eventRemote, eventDecoder::decodeCreated),
             textUpdates = ProtonTextUpdateSubmissionAdapter(textPreparations, eventProtector, readSession, titleContext,

@@ -33,6 +33,8 @@ object ProtonAuthentication {
     fun createSubmissions(context: Context): CalendarCreateSubmissionPort = shared(context)
     fun localEditPreparations(context: Context): CalendarLocalEditPreparationPort = shared(context)
     fun localTextPreparations(context: Context): CalendarLocalTextPreparationPort = shared(context)
+    fun personalPreparations(context: Context): CalendarPersonalPreparationPort = shared(context)
+    fun personalUpdates(context: Context): CalendarPersonalUpdatePort = shared(context)
     fun localTimePreparations(context: Context): CalendarLocalTimePreparationPort = shared(context)
     fun titleUpdates(context: Context): CalendarTitleUpdateSubmissionPort = shared(context)
     fun textUpdates(context: Context): CalendarTextUpdateSubmissionPort = shared(context)
@@ -71,12 +73,14 @@ internal class SerializedAuthenticationPort(
     private val createGraph: () -> ProtonAuthenticationGraph,
     private val cancelVerification: () -> Unit,
     private val dispatcher: CoroutineDispatcher = Dispatchers.IO,
-) : AuthenticationFlowPort, CalendarCatalogPort, CalendarDeltaRemote, RollingCalendarRemote, ContentMappingRemote, CalendarCreatePreparationPort, CalendarCreateSubmissionPort, CalendarLocalEditPreparationPort, CalendarLocalTextPreparationPort, CalendarLocalTimePreparationPort, CalendarTitleUpdateSubmissionPort, CalendarTextUpdateSubmissionPort, CalendarTimeUpdateSubmissionPort, CalendarDeleteSubmissionPort {
+) : AuthenticationFlowPort, CalendarCatalogPort, CalendarDeltaRemote, RollingCalendarRemote, ContentMappingRemote, CalendarCreatePreparationPort, CalendarCreateSubmissionPort, CalendarLocalEditPreparationPort, CalendarLocalTextPreparationPort, CalendarLocalTimePreparationPort, CalendarTitleUpdateSubmissionPort, CalendarTextUpdateSubmissionPort, CalendarTimeUpdateSubmissionPort, CalendarPersonalPreparationPort, CalendarPersonalUpdatePort, CalendarDeleteSubmissionPort {
     override val contentMapping = EVENT_CONTENT_MAPPING
     override val localCreateFormat = LOCAL_CREATE_PREPARATION_FORMAT
     override val knownEmptySubmissionFormat = KNOWN_EMPTY_SUBMISSION_FORMAT
     override val localTitleFormat = LOCAL_TITLE_PREPARATION_FORMAT
     override val localTextFormat = LOCAL_TEXT_PREPARATION_FORMAT
+    override val personalFormat = PERSONAL_PREPARATION_FORMAT
+    override val personalUpdateFormat = PERSONAL_UPDATE_REQUEST_FORMAT
     override val localTimeFormat = LOCAL_TIME_PREPARATION_FORMAT
     override val titleUpdateFormat = TITLE_UPDATE_SUBMISSION_FORMAT
     override val textUpdateFormat = TEXT_UPDATE_REQUEST_FORMAT
@@ -173,6 +177,91 @@ internal class SerializedAuthenticationPort(
           finally { closed.set(true) }
     }
 
+    override suspend fun preparePersonal(intent: LocalEditIntent, timestamp: java.time.Instant): PersonalEditPreparation {
+        val caller = currentCoroutineContext()
+        caller.ensureActive()
+        return try {
+            // Freeze before dispatcher switching or waiting for the shared logout mutex.
+            val frozen = freezePersonalRequest(intent, timestamp)
+            val expectedFormat = personalFormat
+            withContext(dispatcher) {
+                val operation = currentCoroutineContext()
+                try {
+                    lock.withLock {
+                        operation.ensureActive()
+                        if (!authenticated) localEditUnavailable(LocalEditPreparationFailure.AUTHENTICATION)
+                        val runtime = graph?.personals ?: localEditUnavailable(LocalEditPreparationFailure.UNSUPPORTED)
+                        if (runtime.personalFormat != expectedFormat)
+                            localEditUnavailable(LocalEditPreparationFailure.UNSUPPORTED)
+                        val result = runtime.preparePersonal(frozen, timestamp)
+                        operation.ensureActive()
+                        if (!authenticated || runtime.personalFormat != expectedFormat || result.intent != frozen ||
+                            result.timestamp != timestamp || result.format != expectedFormat)
+                            localEditUnavailable(LocalEditPreparationFailure.CONTEXT)
+                        PersonalEditPreparation(frozen, timestamp, expectedFormat, result.protectedPayload)
+                    }
+                } catch (cancelled: CancellationException) { throw cancelled }
+                  catch (failure: Exception) { operation.ensureActive(); throw failure }
+            }
+        } catch (cancelled: CancellationException) { throw cancelled }
+          catch (failure: Exception) { caller.ensureActive(); throw failure }
+    }
+
+    override suspend fun preparePersonal(intent: LocalEditIntent, timestamp: java.time.Instant,
+        admit: (CalendarScope) -> Boolean): PersonalEditPreparation? {
+        val caller = currentCoroutineContext()
+        caller.ensureActive()
+        val closed = AtomicBoolean(false)
+        return try {
+            val frozen = freezePersonalRequest(intent, timestamp)
+            val expectedFormat = personalFormat
+            val lease = { scope: CalendarScope ->
+                if (scope != frozen.scope || closed.get()) false else {
+                    val allowed = personalFormat == expectedFormat && admit(scope)
+                    if (!allowed) closed.set(true)
+                    allowed && !closed.get()
+                }
+            }
+            suspend fun active(): Boolean {
+                currentCoroutineContext().ensureActive()
+                val allowed = lease(frozen.scope)
+                currentCoroutineContext().ensureActive()
+                return allowed
+            }
+            if (!active()) return null
+            withContext(dispatcher) {
+                val operation = currentCoroutineContext()
+                try {
+                    if (!active()) return@withContext null
+                    lock.withLock {
+                        operation.ensureActive()
+                        if (!authenticated || !active()) return@withLock null
+                        val runtime = graph?.personals ?: return@withLock null
+                        if (runtime.personalFormat != expectedFormat) return@withLock null
+                        val runtimeLease = { scope: CalendarScope ->
+                            if (scope != frozen.scope || closed.get()) false else {
+                                operation.ensureActive()
+                                val allowed = authenticated && runtime.personalFormat == expectedFormat && lease(scope)
+                                if (!allowed) closed.set(true)
+                                operation.ensureActive()
+                                allowed && !closed.get()
+                            }
+                        }
+                        // Guarded entry never falls back to the unrestricted preparation overload.
+                        val result = runtime.preparePersonal(frozen, timestamp, runtimeLease)
+                        operation.ensureActive()
+                        if (!active() || !authenticated || runtime.personalFormat != expectedFormat) return@withLock null
+                        result?.takeIf { it.intent == frozen && it.timestamp == timestamp && it.format == expectedFormat }
+                            ?.let { PersonalEditPreparation(frozen, timestamp, expectedFormat, it.protectedPayload) }
+                    }
+                } catch (cancelled: CancellationException) { throw cancelled }
+                  catch (failure: Exception) { operation.ensureActive(); throw failure }
+            }
+        } catch (cancelled: CancellationException) { throw cancelled }
+          catch (failure: Exception) { caller.ensureActive(); throw failure }
+          finally { closed.set(true) }
+    }
+
     private var graph: ProtonAuthenticationGraph? = null
     private var authenticated = false
     override suspend fun prepareSubmission(id: MutationId, preparation: LocalTimeEditPreparation,
@@ -230,6 +319,64 @@ internal class SerializedAuthenticationPort(
             if (observed is TimeUpdateSubmissionObservation.Verified && observed.record == frozen)
                 TimeUpdateSubmissionObservation.Verified(observed.record, observed.event)
             else TimeUpdateSubmissionObservation.Unknown
+        }
+    }
+
+    override suspend fun prepareSubmission(id: MutationId, preparation: PersonalEditPreparation,
+        admit: (CalendarScope) -> Boolean): PersonalUpdateAttemptRecord? {
+        currentCoroutineContext().ensureActive()
+        val frozen = PersonalEditPreparation(freezePersonalRequest(preparation.intent, preparation.timestamp),
+            preparation.timestamp, preparation.format, preparation.protectedPayload)
+        if (frozen.format != PERSONAL_PREPARATION_FORMAT) return null
+        return personalOperation(frozen.intent.scope, admit, { false }, null, preparation = true) { runtime, lease, _ ->
+            val result = runtime.prepareSubmission(id, frozen, lease::allows)
+            currentCoroutineContext().ensureActive()
+            result?.takeIf { it.id == id && it.format == personalUpdateFormat && it.state == PersonalUpdateAttemptState.PREPARED &&
+                it.protectedEvidence == null && it.preparation.intent == frozen.intent && it.preparation.timestamp == frozen.timestamp &&
+                it.preparation.format == frozen.format && it.preparation.protectedPayload == frozen.protectedPayload }?.frozen()
+        }
+    }
+
+    override suspend fun submit(record: PersonalUpdateAttemptRecord, journal: PersonalUpdateAttemptJournal,
+        admit: (CalendarScope) -> Boolean, qualifySource: suspend (CalendarScope) -> Boolean,
+        admitEvidence: (CalendarScope) -> Boolean): PersonalUpdateSubmissionObservation {
+        currentCoroutineContext().ensureActive()
+        val frozen = record.frozen()
+        if (frozen.format != personalUpdateFormat || frozen.state != PersonalUpdateAttemptState.PREPARED || frozen.protectedEvidence != null)
+            return PersonalUpdateSubmissionObservation.Unknown
+        return personalOperation(frozen.scope, admit, admitEvidence, PersonalUpdateSubmissionObservation.Unknown as PersonalUpdateSubmissionObservation) {
+                runtime, lease, evidence ->
+            val source: suspend (CalendarScope) -> Boolean = { requested ->
+                if (!lease.allows(requested)) false else {
+                    val qualified = try { qualifySource(requested) }
+                    catch (failure: Exception) { lease.close(); currentCoroutineContext().ensureActive(); throw failure }
+                    if (!qualified) lease.close()
+                    currentCoroutineContext().ensureActive()
+                    qualified && lease.allows(requested)
+                }
+            }
+            val observed = runtime.submit(frozen, journal, lease::allows, source, evidence::allows)
+            currentCoroutineContext().ensureActive()
+            if (observed is PersonalUpdateSubmissionObservation.Verified &&
+                observed.record.copy(state = PersonalUpdateAttemptState.PREPARED, protectedEvidence = null) == frozen)
+                PersonalUpdateSubmissionObservation.Verified(observed.record, observed.event)
+            else PersonalUpdateSubmissionObservation.Unknown
+        }
+    }
+
+    override suspend fun inspect(record: PersonalUpdateAttemptRecord, journal: PersonalUpdateAttemptJournal,
+        admit: (CalendarScope) -> Boolean): PersonalUpdateSubmissionObservation {
+        currentCoroutineContext().ensureActive()
+        val frozen = record.frozen()
+        if (frozen.format != personalUpdateFormat || frozen.state != PersonalUpdateAttemptState.OUTCOME_UNKNOWN)
+            return PersonalUpdateSubmissionObservation.Unknown
+        return personalOperation(frozen.scope, admit, { false }, PersonalUpdateSubmissionObservation.Unknown as PersonalUpdateSubmissionObservation) {
+                runtime, lease, _ ->
+            val observed = runtime.inspect(frozen, journal, lease::allows)
+            currentCoroutineContext().ensureActive()
+            if (observed is PersonalUpdateSubmissionObservation.Verified && observed.record == frozen)
+                PersonalUpdateSubmissionObservation.Verified(observed.record, observed.event)
+            else PersonalUpdateSubmissionObservation.Unknown
         }
     }
 
@@ -407,6 +554,12 @@ internal class SerializedAuthenticationPort(
         action: suspend (CalendarTimeUpdateSubmissionPort, UpdateLease, UpdateLease) -> T): T =
         updateOperation(scope, admit, admitEvidence, denied, preparation,
             { it.timeUpdates }, { it.timeUpdateFormat == timeUpdateFormat }, action)
+
+    private suspend fun <T> personalOperation(scope: CalendarScope, admit: (CalendarScope) -> Boolean,
+        admitEvidence: (CalendarScope) -> Boolean, denied: T, preparation: Boolean = false,
+        action: suspend (CalendarPersonalUpdatePort, UpdateLease, UpdateLease) -> T): T =
+        updateOperation(scope, admit, admitEvidence, denied, preparation,
+            { it.personalUpdates }, { it.personalUpdateFormat == personalUpdateFormat }, action)
 
     /** Common mutex/lease mechanics only; family-specific ports and records stay distinct. */
     private suspend fun <T, P> updateOperation(scope: CalendarScope, admit: (CalendarScope) -> Boolean,

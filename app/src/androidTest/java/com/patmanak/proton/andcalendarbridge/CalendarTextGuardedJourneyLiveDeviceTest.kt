@@ -35,7 +35,7 @@ import org.junit.Test
 /** Opt-in real text service journey, retaining a synthetic event and isolated journals.
  * Explicit composition uses the production owner, preparation, submission and offline recovery
  * boundaries while the application feature gate remains closed. This is an ordinary imported
- * timed event, not CREATE handoff, an editor journey or automatic worker qualification.
+ * timed or all-day event, not CREATE handoff, an editor journey or automatic worker qualification.
  * Recovery's sentinels forbid fixture-path preparation/transport; they do not measure traffic
  * from the independently running application. No account security or user mode is changed.
  */
@@ -87,7 +87,9 @@ class CalendarTextGuardedJourneyLiveDeviceTest {
             hash.matches(Regex("[a-f0-9]{64}")) && phase in setOf("submit", "recover"))
         val requestedCalendarName = "Calendeer QA Automatic Worker"
         val prefix = "calendar-text-guarded-v1-$token"
-        val timeProfile = TitleJourneyTimeProfile.create(null, false, false, null)
+        // A fresh token and the frozen content profile prevent replaying a timed fixture as all-day.
+        val timeProfile = TitleJourneyTimeProfile.create(args.getString("textAllDay"),
+            automaticSource = true, systemJourney = true, label = "guarded-text")
         val app = compose.activity.application as BridgeApplication
         compose.waitUntil(60_000) { app.imports.state.value.let {
             it.authenticated && it.selections.isNotEmpty() && !it.busy

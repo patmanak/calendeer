@@ -14,6 +14,9 @@ import com.patmanak.proton.andcalendarbridge.data.outgoing.SystemDeleteLocalOwne
 import com.patmanak.proton.andcalendarbridge.data.outgoing.SystemTimeLocalOwner
 import com.patmanak.proton.andcalendarbridge.data.outgoing.SystemTimeEditProfile
 import com.patmanak.proton.andcalendarbridge.data.outgoing.TimeLocalOwnerSnapshot
+import com.patmanak.proton.andcalendarbridge.data.outgoing.SystemPersonalLocalOwner
+import com.patmanak.proton.andcalendarbridge.data.outgoing.SystemPersonalEditProfile
+import com.patmanak.proton.andcalendarbridge.data.outgoing.PersonalLocalOwnerSnapshot
 import com.patmanak.proton.andcalendarbridge.sync.*
 import com.patmanak.proton.andcalendarbridge.sync.catalog.CalendarCatalogState
 import com.patmanak.proton.andcalendarbridge.sync.catalog.CalendarCatalogStatus
@@ -490,6 +493,121 @@ class ImportCoordinator(
         }
     }
 
+    fun systemPersonalRunAdmission(target: CalendarScope): (CalendarScope) -> Boolean = editAdmission.captureRun(target, true, ::personalSendingEnabled)
+
+    /** Freeze the policy epoch once, then require every field changed by this exact intent. */
+    fun systemPersonalConsentAdmission(target: CalendarScope): (LocalEditIntent) -> Boolean {
+        val active = systemPersonalRunAdmission(target)
+        return { intent -> intent.scope == target && active(target) && personalConsent(intent) && active(target) }
+    }
+
+    /** Historical proof recovery needs CREATE access, without field sending consent. */
+    fun systemPersonalProofAdmission(target: CalendarScope): (CalendarScope) -> Boolean = editAdmission.captureRun(target, false, ::personalSendingEnabled)
+
+    /** Factual response retention survives editing-policy loss, never logout or account replacement.
+     * The caller additionally bounds this lease to its exact invocation and UNKNOWN record.
+     */
+    fun systemPersonalEvidenceAdmission(target: CalendarScope): (CalendarScope) -> Boolean = editAdmission.captureEvidence(target)
+
+    /** Local-only gateway: callbacks can run while the Proton session mutex is already held. */
+    internal val personalOwners: SystemPersonalLocalOwner = object : SystemPersonalLocalOwner {
+        override suspend fun observe(scope: CalendarScope, event: EventId, owner: MutationId,
+            admit: (CalendarScope) -> Boolean): PersonalLocalOwnerSnapshot? =
+            withScopedPersonalOwner(scope, admit, consent = true, denied = null) { access ->
+                val intent = access.read { store.localEdit(scope, event) } ?: return@withScopedPersonalOwner null
+                if (intent.id != owner || !SystemPersonalEditProfile.accepts(intent)) return@withScopedPersonalOwner null
+                val frozen = PersonalEditCandidate(intent).intent
+                val preparation = access.read { store.personalEditPreparation(scope, event) }
+                if (!personalSource(frozen, preparation, access)) return@withScopedPersonalOwner null
+                PersonalLocalOwnerSnapshot(frozen, preparation)
+            }
+
+        override suspend fun retain(preparation: PersonalEditPreparation,
+            admit: (CalendarScope) -> Boolean): PersonalEditPreparation? {
+            currentCoroutineContext().ensureActive()
+            val frozen = freezePersonalPreparation(preparation)
+            return withScopedPersonalOwner(frozen.intent.scope, admit, consent = true, denied = null) { access ->
+                val retained = access.read { store.personalEditPreparation(frozen.intent.scope, frozen.intent.base.eventId) }
+                if (retained != null && !samePersonalPreparation(retained, frozen)) return@withScopedPersonalOwner null
+                if (!personalSource(frozen.intent, retained, access)) return@withScopedPersonalOwner null
+                val outcome = access.read { store.retainCurrentPersonalPreparation(frozen) }
+                if (outcome !in listOf(PersonalPreparationAdmission.STORED, PersonalPreparationAdmission.HISTORICAL))
+                    return@withScopedPersonalOwner null
+                val durable = access.read { store.personalEditPreparation(frozen.intent.scope, frozen.intent.base.eventId) }
+                if (!samePersonalPreparation(durable, frozen) || !personalSource(frozen.intent, frozen, access))
+                    return@withScopedPersonalOwner null
+                freezePersonalPreparation(requireNotNull(durable))
+            }
+        }
+
+        override suspend fun qualify(preparation: PersonalEditPreparation, admit: (CalendarScope) -> Boolean): Boolean {
+            currentCoroutineContext().ensureActive()
+            val frozen = freezePersonalPreparation(preparation)
+            return withScopedPersonalOwner(frozen.intent.scope, admit, consent = true, denied = false) { access ->
+                personalSource(frozen.intent, frozen, access)
+            }
+        }
+
+        override suspend fun submit(record: PersonalUpdateAttemptRecord, journal: PersonalUpdateRecoveryJournal,
+            port: CalendarPersonalUpdatePort, admit: (CalendarScope) -> Boolean,
+            admitEvidence: (CalendarScope) -> Boolean): PersonalUpdateSubmissionObservation {
+            val operation = currentCoroutineContext()
+            operation.ensureActive()
+            val frozen = record.frozen()
+            val target = frozen.scope
+            val accountEvidence = systemPersonalEvidenceAdmission(target)
+            val lease = EditSubmissionLease(target, operation, accountEvidence, admitEvidence)
+            val evidence = lease.evidence
+            try {
+                if (frozen.state != PersonalUpdateAttemptState.PREPARED || frozen.protectedEvidence != null ||
+                    port.personalUpdateFormat != frozen.format ||
+                    frozen.id != PersonalUpdateAttemptIdentity.requestId(frozen.preparation, frozen.format))
+                    return PersonalUpdateSubmissionObservation.Unknown
+                return withScopedPersonalOwner(target, admit, consent = true, denied = PersonalUpdateSubmissionObservation.Unknown,
+                    finalAccessRequired = false) { access ->
+                    val sending = lease.sending(access::active) { port.personalUpdateFormat == frozen.format }
+                    suspend fun source(requested: CalendarScope): Boolean = lease.source(requested, sending) {
+                        personalSource(frozen.preparation.intent, frozen.preparation, access)
+                    }
+                    if (!sending(target) || access.read { journal.read(target, frozen.id, sending) } != frozen ||
+                        !source(target)) return@withScopedPersonalOwner PersonalUpdateSubmissionObservation.Unknown
+                    // Lock order is import then authenticated adapter. The callback never retakes the import lock.
+                    val observation = port.submit(frozen, journal, sending, ::source, evidence)
+                    operation.ensureActive()
+                    if (observation !is PersonalUpdateSubmissionObservation.Verified || !evidence(target) ||
+                        observation.record.copy(state = PersonalUpdateAttemptState.PREPARED, protectedEvidence = null) != frozen ||
+                        observation.record.protectedEvidence == null) return@withScopedPersonalOwner PersonalUpdateSubmissionObservation.Unknown
+                    // Response facts survive editing-policy revocation. No ACK authority is derived here.
+                    val durable = journal.read(target, frozen.id, evidence)
+                    operation.ensureActive()
+                    if (!evidence(target) || durable == null || durable != observation.record)
+                        return@withScopedPersonalOwner PersonalUpdateSubmissionObservation.Unknown
+                    PersonalUpdateSubmissionObservation.Verified(durable, observation.event)
+                }
+            } finally {
+                lease.close()
+            }
+        }
+
+        override suspend fun acknowledge(result: PersonalUpdateVerifiedResult, journal: PersonalUpdateRecoveryJournal,
+            admit: (CalendarScope) -> Boolean): Boolean {
+            currentCoroutineContext().ensureActive()
+            val frozen = result.snapshot()
+            return withScopedPersonalOwner(frozen.record.scope, admit, consent = false, denied = false) { access ->
+                acknowledgePersonal(frozen, journal, access)
+            }
+        }
+
+        override suspend fun complete(result: PersonalUpdateVerifiedResult, journal: PersonalUpdateRecoveryJournal,
+            admit: (CalendarScope) -> Boolean): Boolean {
+            currentCoroutineContext().ensureActive()
+            val frozen = result.snapshot()
+            return withScopedPersonalOwner(frozen.record.scope, admit, consent = false, denied = false) { access ->
+                completePersonal(frozen, journal, access)
+            }
+        }
+    }
+
     fun systemDeleteRunAdmission(target: CalendarScope): (CalendarScope) -> Boolean = deleteAdmission(target, true)
     fun systemDeleteProofAdmission(target: CalendarScope): (CalendarScope) -> Boolean = deleteAdmission(target, false)
     fun systemDeleteEvidenceAdmission(target: CalendarScope): (CalendarScope) -> Boolean = systemTimeEvidenceAdmission(target)
@@ -680,7 +798,7 @@ class ImportCoordinator(
         val event = intent.base.eventId
         val hold = access.read { capturedRawHold(target) }
         if (hold.scopeBlocked || (role == null && hold.holds(event))) return false
-        val content = if (role == null) access.read { projection.captureOwnedSimpleEdit(target, intent.base) }?.content else {
+        val content = if (role == null) access.read { if (SystemPersonalEditProfile.accepts(intent)) projection.captureOwnedPersonalEdit(target, intent.base) else projection.captureOwnedSimpleEdit(target, intent.base) }?.content else {
             if (!access.read { currentSystemTitleHandoff(role, intent, access::active) }) return false
             val observed = access.read { projection.captureCapturedHandoffCurrent(role.frame) }
                 as? CapturedHandoffCurrentObservation.Supported
@@ -885,6 +1003,124 @@ class ImportCoordinator(
         return access.read { journal.readCompletion(target, attempt, access.admit) } == completion &&
             access.read { store.timeUpdateAcknowledgement(target, event, attempt) } == acknowledgement &&
             currentTimeResult(result, journal, access)
+    }
+
+    private fun personalSendingEnabled(scope: CalendarScope): Boolean =
+        systemTitlesEnabled(scope) || systemTextsEnabled(scope) || systemTimesEnabled(scope)
+
+    private fun personalConsent(intent: LocalEditIntent): Boolean = try {
+        PersonalEditCandidate(intent).requiredConsent.all { field -> when (field) {
+            PersonalEditField.TITLE -> systemTitlesEnabled(intent.scope)
+            PersonalEditField.TEXT -> systemTextsEnabled(intent.scope)
+            PersonalEditField.TIME -> systemTimesEnabled(intent.scope)
+        } }
+    } catch (_: Exception) { false }
+
+    private suspend fun <T> withScopedPersonalOwner(target: CalendarScope, admit: (CalendarScope) -> Boolean,
+        consent: Boolean, denied: T, finalAccessRequired: Boolean = true,
+        action: suspend (ScopedEditOwnerAccess) -> T): T =
+        withScopedEditOwner(target, admit, consent, denied, finalAccessRequired, ::personalSendingEnabled, action)
+
+    private fun freezePersonalPreparation(value: PersonalEditPreparation) =
+        PersonalEditPreparation(value.intent, value.timestamp, value.format, value.protectedPayload)
+
+    private fun samePersonalPreparation(left: PersonalEditPreparation?, right: PersonalEditPreparation?): Boolean =
+        if (left == null || right == null) left == null && right == null else
+            left.intent == right.intent && left.timestamp == right.timestamp && left.format == right.format &&
+                left.protectedPayload == right.protectedPayload
+
+    /** Exact SQL and native source, including complete immutable origin for a handed-off CREATE. */
+    private suspend fun personalSource(intent: LocalEditIntent, preparation: PersonalEditPreparation?,
+        access: ScopedEditOwnerAccess): Boolean {
+        val target = access.target
+        val event = intent.base.eventId
+        if (intent.scope != target || !SystemPersonalEditProfile.accepts(intent) || !personalConsent(intent) || intent.format != remote.format) return false
+        suspend fun sql(): Boolean {
+            if (remote.format != intent.format) return false
+            if (access.read { store.localEdit(target, event) } != intent) return false
+            val eligibility = access.read { store.assessPersonalPreparation(intent) }
+            if (eligibility != if (preparation == null) PersonalPreparationAdmission.ELIGIBLE
+                else PersonalPreparationAdmission.HISTORICAL) return false
+            return samePersonalPreparation(access.read { store.personalEditPreparation(target, event) }, preparation) &&
+                remote.format == intent.format
+        }
+        return currentEditSource(intent, access, ::sql)
+    }
+
+    private suspend fun currentPersonalResult(result: PersonalUpdateVerifiedResult, journal: PersonalUpdateRecoveryJournal,
+        access: ScopedEditOwnerAccess): Boolean {
+        val record = result.record
+        if (record.scope != access.target || record.state != PersonalUpdateAttemptState.OUTCOME_UNKNOWN ||
+            record.preparation.intent.format != remote.format ||
+            access.read { store.transaction(access.target) { checkpoint?.format } } != record.preparation.intent.format)
+            return false
+        val durable = access.read { journal.read(access.target, record.id, access.admit) } ?: return false
+        return durable.copy(protectedEvidence = null) == record &&
+            access.read { journal.readVerified(access.target, record.id, access.admit) } == result &&
+            access.read { store.transaction(access.target) { checkpoint?.format } } == record.preparation.intent.format &&
+            remote.format == record.preparation.intent.format
+    }
+
+    private suspend fun acknowledgePersonal(result: PersonalUpdateVerifiedResult, journal: PersonalUpdateRecoveryJournal,
+        access: ScopedEditOwnerAccess): Boolean {
+        if (projection.personalUpdateAcknowledgementProtocol != 1 || !currentPersonalResult(result, journal, access)) return false
+        val target = access.target
+        val attempt = result.record.id
+        val intent = result.record.preparation.intent
+        val event = result.event.eventId
+        val existing = access.read { store.personalUpdateAcknowledgement(target, event, attempt) }
+        if (existing != null && !existing.receipt.matches(result)) return false
+        if (existing?.state == PersonalUpdateAcknowledgementState.RESTORED)
+            return currentPersonalResult(result, journal, access)
+        val reservation = if (existing != null) PersonalUpdateAcknowledgementReservation(existing, false) else {
+            val role = access.read { store.capturedHandoff(target, event) }
+            if (!currentEditNativeSource(intent, role, access) || !currentPersonalResult(result, journal, access)) return false
+            access.read { store.preparePersonalUpdateAcknowledgement(result, role?.frame) } ?: return false
+        }
+        val retained = reservation.record
+        if (!retained.receipt.matches(result) ||
+            access.read { store.personalUpdateAcknowledgement(target, event, attempt) } != retained ||
+            !currentPersonalResult(result, journal, access)) return false
+        if (reservation.fresh) {
+            val owner = access.read { store.localEdit(target, event) }
+            val echoedOwner = owner?.state == LocalEditState.CONFLICT && owner.copy(state = LocalEditState.PAUSED) == intent
+            if ((owner != intent && !echoedOwner) || !samePersonalPreparation(
+                    access.read { store.personalEditPreparation(target, event) }, result.record.preparation)) return false
+            if (!currentEditAcknowledgementRole(intent, retained.receipt.handoff, access)) return false
+        }
+        val historicalFrame = retained.receipt.handoff
+        if (historicalFrame != null && !access.read { handoffSource(historicalFrame, access::active) }) return false
+        // A retained pending receipt only inspects. An interrupted batch is never replayed.
+        val witness = access.read {
+            if (reservation.fresh) projection.acknowledgePersonalUpdate(retained.receipt)
+            else projection.inspectPersonalUpdateAcknowledgement(retained.receipt)
+        } ?: return false
+        if (witness.receipt.snapshot() != retained.receipt || !currentPersonalResult(result, journal, access) ||
+            access.read { store.personalUpdateAcknowledgement(target, event, attempt) } != retained) return false
+        if (historicalFrame != null && !access.read { handoffSource(historicalFrame, access::active) }) return false
+        if (!access.read { store.restorePersonalUpdateAcknowledgement(witness) }) return false
+        return access.read { store.personalUpdateAcknowledgement(target, event, attempt) } ==
+            PersonalUpdateAcknowledgementRecord(retained.receipt, PersonalUpdateAcknowledgementState.RESTORED) &&
+            currentPersonalResult(result, journal, access)
+    }
+
+    private suspend fun completePersonal(result: PersonalUpdateVerifiedResult, journal: PersonalUpdateRecoveryJournal,
+        access: ScopedEditOwnerAccess): Boolean {
+        if (journal.completionProtocol != 1 || !currentPersonalResult(result, journal, access)) return false
+        val target = access.target
+        val event = result.event.eventId
+        val attempt = result.record.id
+        val acknowledgement = access.read { store.personalUpdateAcknowledgement(target, event, attempt) } ?: return false
+        if (acknowledgement.state != PersonalUpdateAcknowledgementState.RESTORED || !acknowledgement.receipt.matches(result)) return false
+        val completion = PersonalUpdateCompletion.of(result, acknowledgement)
+        val retained = access.read { journal.readCompletion(target, attempt, access.admit) }
+        if (retained != null && retained != completion) return false
+        if (!currentPersonalResult(result, journal, access) ||
+            access.read { store.personalUpdateAcknowledgement(target, event, attempt) } != acknowledgement) return false
+        if (retained == null && !access.read { journal.retainCompletion(completion, access.admit) }) return false
+        return access.read { journal.readCompletion(target, attempt, access.admit) } == completion &&
+            access.read { store.personalUpdateAcknowledgement(target, event, attempt) } == acknowledgement &&
+            currentPersonalResult(result, journal, access)
     }
 
     suspend fun configureSystemCalendar(target: CalendarScope): Boolean = mutex.withLock {
@@ -1596,7 +1832,9 @@ class ImportCoordinator(
         if (!active()) return false
         val hold = capturedRawHold(target)
         if (!active() || hold.scopeBlocked || (role == null && hold.holds(event))) return false
-        val content = if (role == null) projection.captureOwnedSimpleEdit(target, intent.base)?.content else {
+        val content = if (role == null) (if (SystemPersonalEditProfile.accepts(intent))
+            projection.captureOwnedPersonalEdit(target, intent.base)
+            else projection.captureOwnedSimpleEdit(target, intent.base))?.content else {
             if (!currentSystemTitleHandoff(role, intent, active)) return false
             val observed = projection.captureCapturedHandoffCurrent(role.frame) as? CapturedHandoffCurrentObservation.Supported
             observed?.snapshot?.takeIf { it.frame == role.frame && !it.deleted }?.content
@@ -2102,6 +2340,68 @@ class ImportCoordinator(
             currentFormat = { remote.format },
             active = { authenticated && generation == expected && createPolicyRevision.get() == policy && hasCalendarPermissions() },
             currentAccount = { isCurrent(expected, target.account) })
+    }
+
+    /** Reconstruct only a fully proven historical queue association; never prepare, send or ACK. */
+    suspend fun recoverHistoricalSystemCreate(target: CalendarScope, row: Long, marker: String?, after: String?):
+        com.patmanak.proton.andcalendarbridge.data.outgoing.HistoricalCreateRecovery = mutex.withLock {
+        val unresolved = com.patmanak.proton.andcalendarbridge.data.outgoing.HistoricalCreateRecovery(
+            reason = com.patmanak.proton.andcalendarbridge.data.outgoing.HistoricalCreateIssueReason.INCOMPLETE_PROOF)
+        val captures = localCreates ?: return@withLock unresolved
+        val journal = creates ?: return@withLock unresolved
+        ensureCreateLifecycle()
+        val expected = generation
+        val policy = createPolicyRevision.get()
+        val active = { authenticated && generation == expected && createPolicyRevision.get() == policy &&
+            hasCalendarPermissions() && systemCreatesEnabled(target) }
+        suspend fun available() = active() && isCurrent(expected, target.account) &&
+            store.selections(target.account).singleOrNull { it.scope == target }?.let { it.enabled && it.available } == true && active()
+        try {
+            if (!available()) return@withLock unresolved
+            captures.admitCapture = { it == target && active() }
+            store.admitTransaction = { it == target && active() }
+            projection.admitOperation = active
+            val candidates = captures.historicalLocalIds(target, after)
+            val recovered = com.patmanak.proton.andcalendarbridge.data.outgoing.recoverHistoricalCreatePage(
+                target, row, marker, candidates, 25, { projection.capturedIdentityKey(target, it) }) qualify@ { localId ->
+                val submission = captures.readSubmission(target, localId) ?: return@qualify null
+                val reservation = submission.reservation.intent.reservation
+                if (reservation.scope != target || reservation.localId != localId || reservation.format != remote.format ||
+                    captures.readReservation(target, localId) != reservation ||
+                    captures.readIntent(target, localId) != submission.reservation.intent ||
+                    captures.readSubmissionReservation(target, localId) != submission.reservation) return@qualify null
+                val identity = CapturedCreateDispatchIdentity.of(submission)
+                val attempt = journal.read(target, identity.attempt.id) ?: return@qualify null
+                if (attempt.state != CreateAttemptState.OUTCOME_UNKNOWN || CreateAttemptIdentity.of(attempt) != identity.attempt ||
+                    journal.capturedIdentity(target, attempt.id) != identity) return@qualify null
+                val binding = journal.capturedBinding(identity) ?: return@qualify null
+                val attachment = journal.capturedAttachment(binding) ?: return@qualify null
+                val original = CapturedCreateBaseline(attachment, RemoteChange.Upsert(binding.eventId,
+                    binding.verifiedRevision, submission.reservation.intent.content))
+                // This accessor validates the retained historical baseline and PROVEN ACK too.
+                // The pre-handoff baseline accessor deliberately refuses every transferred event.
+                val role = store.capturedHandoff(target, binding.eventId) ?: return@qualify null
+                if (role.frame.receipt.acknowledgement.baseline != original ||
+                    role.state != CapturedCreateHandoffState.RELEASED || !handoffSource(role.frame, active)) return@qualify null
+                val clean = projection.inspectCapturedHandoffBase(role.frame)?.frame == role.frame
+                val dirty = if (!clean) projection.captureCapturedHandoffCurrent(role.frame) as?
+                    CapturedHandoffCurrentObservation.Supported else null
+                if ((!clean && dirty?.snapshot?.frame != role.frame) ||
+                    !projection.inspectCapturedIdentityRow(target, localId, row) || !available() ||
+                    captures.readSubmission(target, localId) != submission ||
+                    store.capturedHandoff(target, binding.eventId) != role || !handoffSource(role.frame, active)) return@qualify null
+                com.patmanak.proton.andcalendarbridge.data.outgoing.SystemCreateWork(target, row, localId,
+                    reservation.id, submission.reservation.attempt, reservation.timestamp,
+                    com.patmanak.proton.andcalendarbridge.data.outgoing.SystemCreateWorkStatus.COMPLETE)
+            }
+            if (available()) recovered else unresolved
+        } catch (cancelled: CancellationException) { throw cancelled }
+        catch (_: Exception) { unresolved }
+        finally {
+            captures.admitCapture = { false }
+            store.admitTransaction = { false }
+            projection.admitOperation = { false }
+        }
     }
 
     /** Retain only the first authenticated captured identity. No original-row ACK or projection. */

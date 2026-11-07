@@ -33,6 +33,54 @@ import org.junit.runner.RunWith
 /** Native Provider and three real journals; controlled incoming data, no network upload. */
 @RunWith(AndroidJUnit4::class)
 class CapturedHandoffIntegrationDeviceTest {
+    @Test fun missingSystemWorkCanRecoverOnlyTheCompleteHistoricalCreationAndSurviveRestart() = fixture {
+        transferred(); titleMode = true
+        val marker = field(Events.SYNC_DATA5)
+        val before = providerSnapshot(); val original = record(); val savedRole = role()
+        val recovered = coordinator.recoverHistoricalSystemCreate(target, row, marker, null)
+        assertNotNull(recovered.work)
+        assertEquals(localId, recovered.work!!.localId); assertEquals(id, recovered.work!!.captureId)
+        assertEquals(attempt, recovered.work!!.attempt)
+        assertEquals(com.patmanak.proton.andcalendarbridge.data.outgoing.SystemCreateWorkStatus.COMPLETE, recovered.work!!.status)
+        assertEquals(before, providerSnapshot()); assertEquals(original, record()); assertEquals(savedRole, role())
+        reopen(); titleMode = true
+        assertEquals(recovered, coordinator.recoverHistoricalSystemCreate(target, row, marker, null))
+        assertEquals(1, sends); assertEquals(1, ackAttempts); assertEquals(before, providerSnapshot())
+    }
+
+    @Test fun historicalRecoveryRefusesUnrelatedMarkerRowAndScopeWithoutChangingAnything() = fixture {
+        transferred(); titleMode = true
+        val marker = field(Events.SYNC_DATA5); val before = providerSnapshot(); val original = record()
+        assertNull(coordinator.recoverHistoricalSystemCreate(target, row, "unrelated", null).work)
+        assertNull(coordinator.recoverHistoricalSystemCreate(target, row + 1, marker, null).work)
+        assertNull(coordinator.recoverHistoricalSystemCreate(target.copy(generation = target.generation + 1), row, marker, null).work)
+        assertEquals(before, providerSnapshot()); assertEquals(original, record()); assertEquals(1, sends)
+    }
+
+    @Test fun partialAndMissingHistoricalProofRemainHeldAcrossReopen() = fixture {
+        ready(); titleMode = true
+        val marker = field(Events.SYNC_DATA5); val before = providerSnapshot(); val original = record()
+        assertNull(coordinator.recoverHistoricalSystemCreate(target, row, marker, null).work)
+        acknowledge(); handoff(); loseDispatch(); val captured = providerSnapshot()
+        assertNull(coordinator.recoverHistoricalSystemCreate(target, row, marker, null).work)
+        reopen(); titleMode = true
+        val result = coordinator.recoverHistoricalSystemCreate(target, row, marker, null)
+        assertNull(result.work)
+        assertEquals(com.patmanak.proton.andcalendarbridge.data.outgoing.HistoricalCreateIssueReason.INCOMPLETE_PROOF, result.reason)
+        assertEquals(captured, providerSnapshot()); assertNull(record()); assertNotNull(original); assertEquals(1, sends)
+        assertNotEquals(before, captured)
+    }
+
+    @Test fun corruptHistoricalSubmissionCannotRepairWorkOrIssueAnotherRequest() = fixture {
+        transferred(); titleMode = true
+        val before = providerSnapshot(); val original = record()
+        journal.writableDatabase.execSQL("UPDATE local_create_submissions SET captured_content='corrupt'")
+        val result = coordinator.recoverHistoricalSystemCreate(target, row, field(Events.SYNC_DATA5), null)
+        assertNull(result.work)
+        assertEquals(com.patmanak.proton.andcalendarbridge.data.outgoing.HistoricalCreateIssueReason.INCOMPLETE_PROOF, result.reason)
+        assertEquals(before, providerSnapshot()); assertEquals(original, record()); assertEquals(1, sends)
+    }
+
     private class TitlePreparationPort(private val wire: TitleUpdateAttemptRecord,
         private val duringPreparation: suspend () -> Unit = {}) : CalendarTitleUpdateSubmissionPort {
         var calls = 0
@@ -297,7 +345,7 @@ class CapturedHandoffIntegrationDeviceTest {
         var currentFormat = format
         val preparationFormat = AdapterFormat("controlled-known-empty-submission", 2)
         val localId = LocalEventId(UUID.randomUUID().toString())
-        val id = MutationId("create")
+        val id = MutationId(UUID.randomUUID().toString())
         val attempt = MutationId(UUID.randomUUID().toString())
         val timestamp = Instant.parse("2030-10-01T12:00:00Z")
         val content = EventContent("Preparation integration fixture",

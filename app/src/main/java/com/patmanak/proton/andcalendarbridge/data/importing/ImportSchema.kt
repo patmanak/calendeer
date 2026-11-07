@@ -37,11 +37,14 @@ internal object ImportSchema {
         createTitleUpdateAcknowledgementHistory(db)
         createTextPreparationAndAcknowledgements(db)
         createTimePreparationAndAcknowledgements(db)
+        createPersonalPreparationAndAcknowledgements(db)
         createConflictArchives(db)
         createDeleteAcknowledgements(db)
     }
     fun upgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int, checkCapacity: (SQLiteDatabase) -> Unit) {
-        check(oldVersion in 1..21 && newVersion == 22) { "Explicit import schema migration required" }
+        check(oldVersion in 1..22 && newVersion == 23) { "Explicit import schema migration required" }
+        createPersonalPreparationAndAcknowledgements(db)
+        if (oldVersion == 22) return
         createDeleteAcknowledgements(db)
         if (oldVersion == 21) return
         createTimePreparationAndAcknowledgements(db)
@@ -199,6 +202,35 @@ internal object ImportSchema {
     }
     private fun createLocalTimeEditPreparations(db: SQLiteDatabase) {
         db.execSQL("""CREATE TABLE local_time_edit_preparations (
+            scope TEXT NOT NULL, mutation TEXT NOT NULL, event TEXT NOT NULL,
+            adapter TEXT NOT NULL, version INTEGER NOT NULL CHECK(version > 0),
+            base TEXT NOT NULL, local TEXT NOT NULL, state TEXT NOT NULL CHECK(state = 'PAUSED'),
+            timestamp TEXT NOT NULL, prep_adapter TEXT NOT NULL,
+            prep_version INTEGER NOT NULL CHECK(prep_version > 0), payload TEXT NOT NULL,
+            PRIMARY KEY(scope,mutation), UNIQUE(scope,event)
+        )""".trimIndent())
+    }
+    private fun createPersonalPreparationAndAcknowledgements(db: SQLiteDatabase) {
+        createPersonalEditPreparations(db)
+        createPersonalUpdateAcknowledgements(db)
+        createPersonalUpdateAcknowledgementHistory(db)
+    }
+    private fun createPersonalUpdateAcknowledgements(db: SQLiteDatabase) {
+        db.execSQL("""CREATE TABLE personal_update_acknowledgements (
+            scope TEXT NOT NULL, event TEXT NOT NULL, nonce TEXT NOT NULL UNIQUE,
+            receipt TEXT NOT NULL, state TEXT NOT NULL CHECK(state IN ('PENDING','RESTORED')),
+            PRIMARY KEY(scope,event)
+        )""".trimIndent())
+    }
+    private fun createPersonalUpdateAcknowledgementHistory(db: SQLiteDatabase) {
+        db.execSQL("""CREATE TABLE personal_update_acknowledgement_history (
+            scope TEXT NOT NULL, event TEXT NOT NULL, attempt TEXT NOT NULL,
+            nonce TEXT NOT NULL UNIQUE, receipt TEXT NOT NULL,
+            PRIMARY KEY(scope,event,attempt), UNIQUE(scope,attempt)
+        )""".trimIndent())
+    }
+    private fun createPersonalEditPreparations(db: SQLiteDatabase) {
+        db.execSQL("""CREATE TABLE personal_edit_preparations (
             scope TEXT NOT NULL, mutation TEXT NOT NULL, event TEXT NOT NULL,
             adapter TEXT NOT NULL, version INTEGER NOT NULL CHECK(version > 0),
             base TEXT NOT NULL, local TEXT NOT NULL, state TEXT NOT NULL CHECK(state = 'PAUSED'),

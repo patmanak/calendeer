@@ -28,6 +28,7 @@ import com.patmanak.proton.andcalendarbridge.data.importing.ImportSqlValues.stag
 import com.patmanak.proton.andcalendarbridge.data.serialization.DeleteAcknowledgementCodec
 import com.patmanak.proton.andcalendarbridge.data.serialization.TextUpdateAcknowledgementCodec
 import com.patmanak.proton.andcalendarbridge.data.serialization.TimeUpdateAcknowledgementCodec
+import com.patmanak.proton.andcalendarbridge.data.serialization.PersonalUpdateAcknowledgementCodec
 import com.patmanak.proton.andcalendarbridge.data.serialization.TitleUpdateAcknowledgementCodec
 import com.patmanak.proton.andcalendarbridge.sync.*
 import com.patmanak.proton.andcalendarbridge.sync.catalog.CalendarSummary
@@ -49,9 +50,10 @@ import org.json.JSONObject
 enum class LocalTitlePreparationAdmission { ELIGIBLE, STORED, HISTORICAL, INACTIVE, UNQUALIFIED, CONFLICT }
 enum class LocalTextPreparationAdmission { ELIGIBLE, STORED, HISTORICAL, INACTIVE, UNQUALIFIED, CONFLICT }
 enum class LocalTimePreparationAdmission { ELIGIBLE, STORED, HISTORICAL, INACTIVE, UNQUALIFIED, CONFLICT }
+enum class PersonalPreparationAdmission { ELIGIBLE, STORED, HISTORICAL, INACTIVE, UNQUALIFIED, CONFLICT }
 
 class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
-    SQLiteOpenHelper(context, name, null, 22), SyncStore {
+    SQLiteOpenHelper(context, name, null, 23), SyncStore {
     private val lock = Mutex()
     /** Check the run lease both before its transaction and before durable commit. */
     @Volatile var admitTransaction: (CalendarScope) -> Boolean = { true }
@@ -1962,8 +1964,359 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
         catch (failure: SQLiteException) { throw failure }
         catch (_: Exception) { throw IllegalStateException("Invalid retained time preparation") }
     /** Admission is shared; protected capsule formats and histories remain family-specific. */
+    suspend fun assessPersonalPreparation(intent: LocalEditIntent): PersonalPreparationAdmission {
+        currentCoroutineContext().ensureActive()
+        val frozen = supportedPersonalIntent(intent) ?: return PersonalPreparationAdmission.UNQUALIFIED
+        return guardedEditMutation(frozen.scope) { db -> personalPreparationAdmission(db, frozen) }
+    }
+
+    /** First admission rechecks the owner, checkpoint, baseline and remote in the insertion transaction. */
+    suspend fun retainCurrentPersonalPreparation(value: PersonalEditPreparation): PersonalPreparationAdmission {
+        currentCoroutineContext().ensureActive()
+        val frozen = PersonalEditPreparation(value.intent, value.timestamp, value.format, value.protectedPayload)
+        val base = encodeChange(frozen.intent.base).also(::requirePreparationSnapshotBudget)
+        val local = encodeChange(frozen.intent.base.copy(content = frozen.intent.content)).also(::requirePreparationSnapshotBudget)
+        return guardedEditMutation(frozen.intent.scope) { db ->
+            val admission = personalPreparationAdmission(db, frozen.intent)
+            if (admission == PersonalPreparationAdmission.HISTORICAL) {
+                val retained = readPersonalEditPreparation(db, frozen.intent.scope, frozen.intent.base.eventId)
+                return@guardedEditMutation if (retained != null && samePersonalPreparation(retained, frozen)) admission
+                    else PersonalPreparationAdmission.UNQUALIFIED
+            }
+            if (admission != PersonalPreparationAdmission.ELIGIBLE) return@guardedEditMutation admission
+            insertPersonalPreparation(db, frozen, base, local)
+            PersonalPreparationAdmission.STORED
+        }
+    }
+    /** Monotone exact-owner transition after a remote conflict; original snapshots/evidence stay intact. */
+    suspend fun conflictPersonalPreparation(intent: LocalEditIntent): PersonalPreparationAdmission {
+        currentCoroutineContext().ensureActive()
+        val frozen = supportedPersonalIntent(intent) ?: return PersonalPreparationAdmission.UNQUALIFIED
+        return guardedEditMutation(frozen.scope) { db ->
+            val intent = frozen
+            val admission = personalPreparationAdmission(db, intent)
+            if (admission !in listOf(PersonalPreparationAdmission.ELIGIBLE, PersonalPreparationAdmission.HISTORICAL))
+                return@guardedEditMutation admission
+            check(db.update("local_edits", ContentValues().apply { put("state", LocalEditState.CONFLICT.name) },
+                "scope=? AND event=? AND mutation=? AND kind='UPDATE'",
+                arrayOf(key(intent.scope), intent.base.eventId.value, intent.id.value)) == 1)
+            conflicts(db).ensure(intent.scope, intent.base.eventId)
+            PersonalPreparationAdmission.CONFLICT
+        }
+    }
+    private fun personalPreparationAdmission(db: SQLiteDatabase, intent: LocalEditIntent): PersonalPreparationAdmission {
+        if (supportedPersonalIntent(intent) == null) return PersonalPreparationAdmission.UNQUALIFIED
+        val target = intent.scope
+        if (!activeProjectionScope(db, target)) return PersonalPreparationAdmission.INACTIVE
+        if (hasForeignLocalPreparation(db, target, intent.base.eventId, "personal_edit_preparations"))
+            return PersonalPreparationAdmission.UNQUALIFIED
+        val format = db.rawQuery("SELECT checkpoint FROM calendars WHERE scope=?", arrayOf(key(target))).use {
+            if (!it.moveToFirst() || it.isNull(0)) null else decodeCheckpoint(target, it.getString(0)).format
+        }
+        if (format != intent.format) return PersonalPreparationAdmission.UNQUALIFIED
+        val owner = readLocalPreparationOwner(db, target, intent.base.eventId) ?: return PersonalPreparationAdmission.UNQUALIFIED
+        if (owner != intent) return if (owner.state == LocalEditState.CONFLICT && owner.copy(state = LocalEditState.PAUSED) == intent)
+            PersonalPreparationAdmission.CONFLICT else PersonalPreparationAdmission.UNQUALIFIED
+        if (owner.state == LocalEditState.CONFLICT) return PersonalPreparationAdmission.CONFLICT
+        if (readBaseline(db, target, intent.base.eventId) != intent.base) return PersonalPreparationAdmission.UNQUALIFIED
+        val remote = stagedQuery(db, "SELECT payload FROM records WHERE scope=? AND event=?",
+            arrayOf(key(target), intent.base.eventId.value)).use { if (it.moveToFirst()) decodeChange(it.getString(0)) else null }
+        if (remote != intent.base || hasRawEventRow(db, "deferred_events", target, intent.base.eventId))
+            return PersonalPreparationAdmission.CONFLICT
+        // A cache hit is historical evidence, never a fresh crypto/access qualification.
+        if (readPersonalEditPreparation(db, target, intent.base.eventId) != null) return PersonalPreparationAdmission.HISTORICAL
+        return PersonalPreparationAdmission.ELIGIBLE
+    }
+    private fun insertPersonalPreparation(db: SQLiteDatabase, value: PersonalEditPreparation, base: String, local: String) {
+        val intent = value.intent
+        db.insertOrThrow("personal_edit_preparations", null, ContentValues().apply {
+            put("scope", key(intent.scope)); put("mutation", intent.id.value); put("event", intent.base.eventId.value)
+            put("adapter", intent.format.id); put("version", intent.format.version)
+            put("base", base); put("local", local); put("state", intent.state.name)
+            put("timestamp", value.timestamp.toString()); put("prep_adapter", value.format.id)
+            put("prep_version", value.format.version); put("payload", value.protectedPayload)
+        })
+        checkStagingCapacity(db)
+    }
+    private fun samePersonalPreparation(a: PersonalEditPreparation, b: PersonalEditPreparation) =
+        a.intent == b.intent && a.timestamp == b.timestamp && a.format == b.format && a.protectedPayload == b.protectedPayload
+
+    private fun supportedPersonalIntent(intent: LocalEditIntent): LocalEditIntent? = try {
+        PersonalEditCandidate(intent).intent.takeIf {
+            !PersonalUpdateContentPolicy.sameSubmittedContent(it.base.content, it.content)
+        }
+    } catch (_: IllegalArgumentException) { null }
+      catch (_: java.nio.charset.CharacterCodingException) { null }
+
+    /** Reserve the immutable personal receipt before the one fresh native personal/metadata acknowledgement.
+     * The coordinator owns verified-result admission; this transaction qualifies only its SQL source.
+     */
+    suspend fun preparePersonalUpdateAcknowledgement(result: PersonalUpdateVerifiedResult,
+        handoff: CapturedCreateHandoffFrame? = null): PersonalUpdateAcknowledgementReservation? {
+        currentCoroutineContext().ensureActive()
+        val frozen = result.snapshot()
+        val proposed = PersonalUpdateAcknowledgementReceipt.of(frozen, UUID.randomUUID().toString(), handoff)
+        val encoded = encodePersonalUpdateAcknowledgement(proposed)
+        return guardedEditMutation(proposed.intent.scope) { db ->
+            val scope = proposed.intent.scope
+            val event = proposed.intent.base.eventId
+            val historical = readPersonalUpdateAcknowledgementHistory(db, scope, event, proposed.attempt.id)
+            val existing = if (historical == null) readPersonalUpdateAcknowledgement(db, scope, event) else null
+            val exact = if (historical != null) readPersonalUpdateAcknowledgement(db, scope, event, proposed.attempt.id)
+                else existing?.takeIf { it.receipt.attempt.id == proposed.attempt.id }
+            if (exact != null) {
+                check(exact.receipt.matches(frozen) && exact.receipt.handoff == proposed.handoff) {
+                    "Personal acknowledgement receipt is immutable"
+                }
+                return@guardedEditMutation PersonalUpdateAcknowledgementReservation(exact, fresh = false)
+            }
+            check(existing == null || existing.state == PersonalUpdateAcknowledgementState.RESTORED) {
+                "Pending personal acknowledgement receipt is immutable"
+            }
+            requireUnusedPersonalAcknowledgementIdentity(db, proposed)
+            if (!personalAcknowledgementSource(db, proposed) ||
+                !directUpdateAcknowledgementBase(db, scope, event))
+                return@guardedEditMutation null
+            val owner = editAcknowledgementOwner(db, scope, event)
+            val historicalAdmission = owner == proposed.intent &&
+                personalPreparationAdmission(db, proposed.intent) == PersonalPreparationAdmission.HISTORICAL
+            if (!historicalAdmission && !exactUpdateResultEcho(db, proposed.intent, proposed.projection, owner))
+                return@guardedEditMutation null
+            val preparation = readPersonalEditPreparation(db, scope, event) ?: return@guardedEditMutation null
+            if (!samePersonalPreparation(preparation, frozen.record.preparation) || !proposed.attempt.matchesPreparation(preparation))
+                return@guardedEditMutation null
+            if (existing != null) {
+                archivePersonalUpdateAcknowledgement(db, existing)
+                check(db.delete("personal_update_acknowledgements", "scope=? AND event=? AND nonce=? AND receipt=? AND state='RESTORED'",
+                    arrayOf(key(scope), event.value, existing.receipt.projection.nonce,
+                        encodePersonalUpdateAcknowledgement(existing.receipt))) == 1) { "Personal acknowledgement slot changed" }
+            }
+            check(!db.rawQuery("SELECT 1 FROM personal_update_acknowledgement_history WHERE nonce=?",
+                arrayOf(proposed.projection.nonce)).use { it.moveToFirst() }) { "Personal acknowledgement nonce is already retained" }
+            db.insertOrThrow("personal_update_acknowledgements", null, ContentValues().apply {
+                put("scope", key(scope)); put("event", event.value); put("nonce", proposed.projection.nonce)
+                put("receipt", encoded); put("state", PersonalUpdateAcknowledgementState.PENDING.name)
+            })
+            checkStagingCapacity(db)
+            PersonalUpdateAcknowledgementReservation(PersonalUpdateAcknowledgementRecord(proposed,
+                PersonalUpdateAcknowledgementState.PENDING), fresh = true)
+        }
+    }
+
+    /** Historical leased inspection, including inactive scopes; never permission for a native write. */
+    suspend fun personalUpdateAcknowledgement(scope: CalendarScope, event: EventId,
+        attempt: MutationId? = null): PersonalUpdateAcknowledgementRecord? =
+        guardedEditMutation(scope) { db -> readPersonalUpdateAcknowledgement(db, scope, event, attempt) }
+
+    /** Close only the exact historically acknowledged owner. New remote/deferred work survives.
+     * A RESTORED replay is read-only and cannot consume a subsequent intent or preparation.
+     */
+    suspend fun restorePersonalUpdateAcknowledgement(witness: AppliedPersonalUpdateAcknowledgement): Boolean {
+        currentCoroutineContext().ensureActive()
+        val receipt = witness.receipt.snapshot()
+        val intent = receipt.intent
+        val scope = intent.scope
+        val event = intent.base.eventId
+        return guardedEditMutation(scope) { db ->
+            val retained = readPersonalUpdateAcknowledgement(db, scope, event, receipt.attempt.id) ?: return@guardedEditMutation false
+            if (retained.receipt != receipt) return@guardedEditMutation false
+            if (retained.state == PersonalUpdateAcknowledgementState.RESTORED) return@guardedEditMutation true
+            if (!activeProjectionScope(db, scope) || !acknowledgementFormatMatches(db, scope, intent.format) ||
+                !personalAcknowledgementSource(db, receipt) || !directUpdateAcknowledgementBase(db, scope, event))
+                return@guardedEditMutation false
+            val owner = editAcknowledgementOwner(db, scope, event) ?: return@guardedEditMutation false
+            if (owner.copy(state = LocalEditState.PAUSED) != intent) return@guardedEditMutation false
+            val preparation = readPersonalEditPreparation(db, scope, event) ?: return@guardedEditMutation false
+            if (preparation.intent != intent || !receipt.attempt.matchesPreparation(preparation)) return@guardedEditMutation false
+            if (readBaseline(db, scope, event) != intent.base) return@guardedEditMutation false
+            // The native ACK is now proven. Retire only a still-redundant ordinary
+            // plan, atomically with baseline/owner restoration; never claim its apply succeeded.
+            if (receipt.handoff == null) retireRedundantUpdateProjection(db, receipt.intent, receipt.handoff)
+            val oldBase = encodeChange(intent.base)
+            val newBase = encodeChange(receipt.projection.change)
+            val local = encodeChange(intent.base.copy(content = intent.content))
+            check(db.update("projection_bases", ContentValues().apply { put("payload", newBase) },
+                "scope=? AND event=? AND payload=? AND representation IS NULL", arrayOf(key(scope), event.value, oldBase)) == 1)
+            receipt.handoff?.let { frame ->
+                check(db.update("captured_create_handoffs", ContentValues().apply {
+                    put("last_projection", encodeHandoffProjection(receipt.projection)); put("waiting", 0)
+                }, "scope=? AND event=? AND nonce=? AND protocol=? AND ack_nonce=? AND ack_fingerprint=? " +
+                    "AND fingerprint=? AND state='RELEASED' AND waiting=1 AND last_projection IS ?",
+                    arrayOf(key(scope), event.value, frame.receipt.nonce, frame.receipt.protocol.toString(),
+                        frame.receipt.acknowledgement.nonce, frame.receipt.acknowledgement.fingerprint(), frame.receipt.fingerprint(),
+                        frame.lastProjection?.let(::encodeHandoffProjection))) == 1) {
+                    "Transferred personal acknowledgement source changed"
+                }
+            }
+            check(db.delete("personal_edit_preparations", "scope=? AND event=? AND mutation=? AND adapter=? AND version=? " +
+                "AND base=? AND local=? AND state=? AND timestamp=? AND prep_adapter=? AND prep_version=? AND payload=?",
+                arrayOf(key(scope), event.value, intent.id.value, intent.format.id, intent.format.version.toString(), oldBase,
+                    local, LocalEditState.PAUSED.name, preparation.timestamp.toString(), preparation.format.id,
+                    preparation.format.version.toString(), preparation.protectedPayload)) == 1)
+            check(db.delete("local_edits", "scope=? AND event=? AND mutation=? AND adapter=? AND version=? " +
+                "AND base=? AND local=? AND state=? AND kind='UPDATE'",
+                arrayOf(key(scope), event.value, intent.id.value, intent.format.id, intent.format.version.toString(),
+                    oldBase, local, owner.state.name)) == 1)
+            // Advance only an exact old cache; a concurrent/newer update, deletion or absence survives.
+            db.update("records", ContentValues().apply { put("payload", newBase); put("pending", 0) },
+                "scope=? AND event=? AND payload=?", arrayOf(key(scope), event.value, oldBase))
+            db.update("records", ContentValues().apply { put("pending", 0) },
+                "scope=? AND event=? AND payload=? AND pending=1", arrayOf(key(scope), event.value, newBase))
+            requeueDistinctUpdateObservation(db, receipt.intent, receipt.handoff, newBase)
+            check(db.update("personal_update_acknowledgements", ContentValues().apply {
+                put("state", PersonalUpdateAcknowledgementState.RESTORED.name)
+            }, "scope=? AND event=? AND nonce=? AND receipt=? AND state=?",
+                arrayOf(key(scope), event.value, receipt.projection.nonce, encodePersonalUpdateAcknowledgement(receipt),
+                    PersonalUpdateAcknowledgementState.PENDING.name)) == 1)
+            archivePersonalUpdateAcknowledgement(db, PersonalUpdateAcknowledgementRecord(receipt,
+                PersonalUpdateAcknowledgementState.RESTORED))
+            true
+        }
+    }
+
+    private fun personalAcknowledgementSource(db: SQLiteDatabase, receipt: PersonalUpdateAcknowledgementReceipt): Boolean {
+        val scope = receipt.intent.scope
+        val event = receipt.intent.base.eventId
+        if (hasForeignLocalPreparation(db, scope, event, "personal_edit_preparations")) return false
+        val frame = receipt.handoff ?: return ordinaryUpdateAcknowledgement(db, receipt.intent, receipt.handoff)
+        if (!activeProjectionScope(db, scope) || !acknowledgementFormatMatches(db, scope, receipt.intent.format) ||
+            hasRawEventRow(db, "projection_receipts", scope, event)) return false
+        // This reader validates the full immutable origin/PROVEN acknowledgement and current base.
+        // The ordinary handoff clean guard cannot be reused while this exact local intent is held.
+        val current = readCapturedHandoff(db, scope, event) ?: return false
+        return current.state == CapturedCreateHandoffState.RELEASED && current.waiting && current.frame == frame
+    }
+
+    private fun readPersonalUpdateAcknowledgement(db: SQLiteDatabase, scope: CalendarScope, event: EventId,
+        attempt: MutationId? = null): PersonalUpdateAcknowledgementRecord? {
+        if (attempt == null) return readCurrentPersonalUpdateAcknowledgement(db, scope, event)
+        val historical = readPersonalUpdateAcknowledgementHistory(db, scope, event, attempt)
+        if (historical != null) {
+            // A later slot is unrelated to historical recovery. Only qualify it if it claims
+            // the archived identity/nonce; never decode its mutable handoff or projection frame.
+            val sameIdentity = stagedQuery(db, "SELECT ${archiveText("nonce", 128)},${archiveText("receipt")} FROM personal_update_acknowledgements WHERE scope=? AND event=?",
+                arrayOf(key(scope), event.value)).use { row ->
+                if (!row.moveToFirst()) false else archiveString(row, 0) == historical.receipt.projection.nonce || try {
+                    requirePreparationSnapshotBudget(archiveString(row, 1))
+                    JSONObject(archiveString(row, 1)).getJSONObject("attempt").get("id") == attempt.value
+                } catch (failure: CancellationException) { throw failure }
+                catch (failure: SQLiteException) { throw failure }
+                catch (_: Exception) { false }
+            }
+            if (sameIdentity) check(readCurrentPersonalUpdateAcknowledgement(db, scope, event) == historical) {
+                "Personal acknowledgement history diverged"
+            }
+            return historical
+        }
+        return readCurrentPersonalUpdateAcknowledgement(db, scope, event)?.takeIf { it.receipt.attempt.id == attempt }
+    }
+
+    private fun readCurrentPersonalUpdateAcknowledgement(db: SQLiteDatabase, scope: CalendarScope, event: EventId): PersonalUpdateAcknowledgementRecord? =
+        stagedQuery(db, "SELECT ${archiveText("nonce", 128)},${archiveText("receipt")},${archiveText("state", 16)} FROM personal_update_acknowledgements WHERE scope=? AND event=?",
+            arrayOf(key(scope), event.value)).use { row ->
+            if (!row.moveToFirst()) null else try {
+                val receipt = decodePersonalUpdateAcknowledgement(archiveString(row, 1))
+                require(receipt.intent.scope == scope && receipt.intent.base.eventId == event && receipt.projection.nonce == archiveString(row, 0))
+                PersonalUpdateAcknowledgementRecord(receipt, PersonalUpdateAcknowledgementState.valueOf(archiveString(row, 2)))
+            } catch (failure: CancellationException) { throw failure }
+            catch (failure: SQLiteException) { throw failure }
+            catch (_: Exception) { throw IllegalStateException("Invalid retained personal acknowledgement") }
+        }
+
+    private fun readPersonalUpdateAcknowledgementHistory(db: SQLiteDatabase, scope: CalendarScope, event: EventId,
+        attempt: MutationId): PersonalUpdateAcknowledgementRecord? =
+        stagedQuery(db, "SELECT ${archiveText("attempt", 4096)},${archiveText("nonce", 128)},${archiveText("receipt")} FROM personal_update_acknowledgement_history WHERE scope=? AND event=? AND attempt=?",
+            arrayOf(key(scope), event.value, attempt.value)).use { row ->
+            if (!row.moveToFirst()) null else decodePersonalUpdateAcknowledgementHistory(scope, event,
+                archiveString(row, 0), archiveString(row, 1), archiveString(row, 2))
+        }
+
+    private fun decodePersonalUpdateAcknowledgementHistory(scope: CalendarScope, event: EventId,
+        attempt: String, nonce: String, payload: String): PersonalUpdateAcknowledgementRecord = try {
+        val receipt = decodePersonalUpdateAcknowledgement(payload)
+        require(receipt.intent.scope == scope && receipt.intent.base.eventId == event &&
+            receipt.attempt.id.value == attempt && receipt.projection.nonce == nonce)
+        PersonalUpdateAcknowledgementRecord(receipt, PersonalUpdateAcknowledgementState.RESTORED)
+    } catch (failure: CancellationException) { throw failure }
+    catch (failure: SQLiteException) { throw failure }
+    catch (_: Exception) { throw IllegalStateException("Invalid personal acknowledgement history") }
+
+    private fun archivePersonalUpdateAcknowledgement(db: SQLiteDatabase, record: PersonalUpdateAcknowledgementRecord) {
+        check(record.state == PersonalUpdateAcknowledgementState.RESTORED)
+        val receipt = record.receipt
+        val scope = receipt.intent.scope
+        val event = receipt.intent.base.eventId
+        val existing = readPersonalUpdateAcknowledgementHistory(db, scope, event, receipt.attempt.id)
+        if (existing != null) {
+            check(existing == record) { "Personal acknowledgement history is immutable" }
+            return
+        }
+        db.insertOrThrow("personal_update_acknowledgement_history", null, ContentValues().apply {
+            put("scope", key(scope)); put("event", event.value); put("attempt", receipt.attempt.id.value)
+            put("nonce", receipt.projection.nonce); put("receipt", encodePersonalUpdateAcknowledgement(receipt))
+        })
+        checkStagingCapacity(db)
+    }
+
+    /** An immutable attempt or local intent cannot be rebound to a new cycle/event in this scope. */
+    private fun requireUnusedPersonalAcknowledgementIdentity(db: SQLiteDatabase, proposed: PersonalUpdateAcknowledgementReceipt) {
+        val scope = proposed.intent.scope
+        fun unused(retained: PersonalUpdateAcknowledgementReceipt) {
+            check(retained.attempt.id != proposed.attempt.id && retained.intent.id != proposed.intent.id) {
+                "Personal acknowledgement identity is already retained"
+            }
+        }
+        stagedQuery(db, "SELECT ${archiveText("event", 4096)} FROM personal_update_acknowledgements WHERE scope=?", arrayOf(key(scope))).use { rows ->
+            while (rows.moveToNext()) unused(checkNotNull(readCurrentPersonalUpdateAcknowledgement(db, scope, EventId(archiveString(rows, 0)))).receipt)
+        }
+        stagedQuery(db, "SELECT ${archiveText("event", 4096)},${archiveText("attempt", 4096)},${archiveText("nonce", 128)},${archiveText("receipt")} FROM personal_update_acknowledgement_history WHERE scope=?", arrayOf(key(scope))).use { rows ->
+            while (rows.moveToNext()) unused(decodePersonalUpdateAcknowledgementHistory(scope, EventId(archiveString(rows, 0)),
+                archiveString(rows, 1), archiveString(rows, 2), archiveString(rows, 3)).receipt)
+        }
+    }
+
+    private fun encodePersonalUpdateAcknowledgement(value: PersonalUpdateAcknowledgementReceipt): String =
+        PersonalUpdateAcknowledgementCodec.encode(value)
+
+    private fun decodePersonalUpdateAcknowledgement(payload: String): PersonalUpdateAcknowledgementReceipt =
+        PersonalUpdateAcknowledgementCodec.decode(payload)
+
+    /** Historical inspection only. Retained capsules never grant current submission authority. */
+    suspend fun personalEditPreparation(scope: CalendarScope, eventId: EventId): PersonalEditPreparation? =
+        guardedEditMutation(scope) { db -> readPersonalEditPreparation(db, scope, eventId) }
+
+    private fun readPersonalEditPreparation(db: SQLiteDatabase, scope: CalendarScope, eventId: EventId): PersonalEditPreparation? =
+        try {
+            stagedQuery(db, "SELECT ${archiveText("mutation", 4096)},${archiveText("adapter", 4096)},version," +
+                "${archiveText("base")},${archiveText("local")},${archiveText("state", 16)},${archiveText("timestamp", 40)}," +
+                "${archiveText("prep_adapter", 4096)},prep_version,${archiveText("payload")} FROM personal_edit_preparations WHERE scope=? AND event=?",
+                arrayOf(key(scope), eventId.value)).use { row ->
+                if (!row.moveToFirst()) null else {
+                    val baseJson = archiveString(row, 3).also(::requirePreparationSnapshotBudget)
+                    val localJson = archiveString(row, 4).also(::requirePreparationSnapshotBudget)
+                    val base = decodeChange(baseJson) as RemoteChange.Upsert
+                    val local = decodeChange(localJson) as RemoteChange.Upsert
+                    require(base.eventId == eventId && local.eventId == eventId && local.revision == base.revision)
+                    val frozen = LocalEditIntent(MutationId(archiveString(row, 0)), scope,
+                        AdapterFormat(archiveString(row, 1), preparationVersion(row, 2)), base, local.content,
+                        LocalEditState.valueOf(archiveString(row, 5)))
+                    val timestamp = Instant.parse(archiveString(row, 6))
+                    require(timestamp.toString() == archiveString(row, 6)) { "Noncanonical local preparation time" }
+                    val preparation = PersonalEditPreparation(frozen, timestamp,
+                        AdapterFormat(archiveString(row, 7), preparationVersion(row, 8)), archiveString(row, 9))
+                    require(supportedPersonalIntent(preparation.intent) != null)
+                    val owner = readLocalPreparationOwner(db, scope, eventId)
+                    require(owner?.copy(state = LocalEditState.PAUSED) == frozen) { "Local preparation owner mismatch" }
+                    preparation
+                }
+            }
+        } catch (failure: CancellationException) { throw failure }
+        catch (failure: SQLiteException) { throw failure }
+        catch (_: Exception) { throw IllegalStateException("Invalid retained personal preparation") }
+    /** Admission is shared; protected capsule formats and histories remain family-specific. */
+
     private fun hasForeignLocalPreparation(db: SQLiteDatabase, scope: CalendarScope, event: EventId,
-        ownTable: String?): Boolean = listOf("local_edit_preparations", "local_text_edit_preparations", "local_time_edit_preparations")
+        ownTable: String?): Boolean = listOf("local_edit_preparations", "local_text_edit_preparations", "local_time_edit_preparations", "personal_edit_preparations")
         .any { it != ownTable && hasRawEventRow(db, it, scope, event) }
 
     private fun readLocalPreparationOwner(db: SQLiteDatabase, scope: CalendarScope, eventId: EventId): LocalEditIntent? =
@@ -2745,6 +3098,8 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
             " + COALESCE((SELECT SUM(length(CAST(receipt AS BLOB))+16384) FROM text_update_acknowledgements WHERE state='PENDING'),0)" +
             " + COALESCE((SELECT SUM(length(CAST(payload AS BLOB))+length(CAST(base AS BLOB))+length(CAST(local AS BLOB))+16384) FROM local_time_edit_preparations),0)" +
             " + COALESCE((SELECT SUM(length(CAST(receipt AS BLOB))+16384) FROM time_update_acknowledgements WHERE state='PENDING'),0)" +
+            " + COALESCE((SELECT SUM(length(CAST(payload AS BLOB))+length(CAST(base AS BLOB))+length(CAST(local AS BLOB))+16384) FROM personal_edit_preparations),0)" +
+            " + COALESCE((SELECT SUM(length(CAST(receipt AS BLOB))+16384) FROM personal_update_acknowledgements WHERE state='PENDING'),0)" +
             " + COALESCE((SELECT SUM(length(CAST(payload AS BLOB))+16384) FROM delete_acknowledgements WHERE state='PENDING'),0)" +
             " + COALESCE((SELECT SUM(length(CAST(scope AS BLOB))+length(CAST(event AS BLOB))+length(CAST(mutation AS BLOB))+length(CAST(adapter AS BLOB))+length(CAST(base AS BLOB))+length(CAST(local AS BLOB))+64) FROM conflict_archives),0)" +
             " + COALESCE((SELECT SUM(COALESCE(length(CAST(payload AS BLOB)),0)+COALESCE(length(CAST(adapter AS BLOB)),0)+COALESCE(length(CAST(revision AS BLOB)),0)+128) FROM conflict_observations),0)", null).use {
