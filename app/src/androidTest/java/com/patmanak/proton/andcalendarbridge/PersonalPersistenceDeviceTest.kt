@@ -129,11 +129,12 @@ class PersonalPersistenceDeviceTest {
         assertTrue(before.getValue("text_update_attempts").isNotEmpty())
         assertTrue(before.getValue("time_update_attempts").isNotEmpty())
         assertTrue(before.getValue("delete_attempts").isNotEmpty())
-        // The v9 definitions are unchanged: remove the entire v10 addition, including its index.
+        // Reconstruct v9: remove later additions, including their indexes.
         store.writableDatabase.execSQL("DROP TABLE personal_update_attempts")
+        store.writableDatabase.execSQL("DROP TABLE conflict_resolution_fences")
         store.writableDatabase.version = 9; store.close()
         TitleUpdateAttemptStore(context, name).use { reopened ->
-            assertEquals(10, reopened.readableDatabase.version)
+            assertEquals(11, reopened.readableDatabase.version)
             assertEquals(before, snapshot(reopened.readableDatabase, old))
             assertTrue(bytes(reopened.readableDatabase, "personal_update_attempts").isEmpty())
             assertTrue(reopened.personalJournal.remember(personal(), allow))

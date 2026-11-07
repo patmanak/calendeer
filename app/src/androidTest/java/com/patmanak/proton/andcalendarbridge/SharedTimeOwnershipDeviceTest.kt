@@ -171,11 +171,12 @@ class SharedTimeOwnershipDeviceTest {
         store.writableDatabase.execSQL("DROP TABLE personal_update_attempts")
         store.writableDatabase.execSQL("DROP TABLE delete_attempts")
         store.writableDatabase.execSQL("DROP TABLE time_update_attempts")
+        store.writableDatabase.execSQL("DROP TABLE conflict_resolution_fences")
         store.writableDatabase.version = 6
         store.close()
         val migrated = TitleUpdateAttemptStore(context, name)
         try {
-            assertEquals(10, migrated.readableDatabase.version)
+        assertEquals(11, migrated.readableDatabase.version)
             assertEquals(title, migrated.read(title.scope, title.id))
             assertEquals(text.copy(state = TextUpdateAttemptState.OUTCOME_UNKNOWN), migrated.textJournal.read(text.scope, text.id, allow))
             assertNull(migrated.timeJournal.read(scope, MutationId("missing"), allow))

@@ -295,7 +295,7 @@ class TitleUpdateResultStoreDeviceTest {
         seedVersionOne(context, name)
         TitleUpdateAttemptStore(context, name).use { migrated ->
             val work = prepared.copy(state = TitleUpdateAttemptState.OUTCOME_UNKNOWN, protectedEvidence = evidence)
-            assertEquals(10, migrated.readableDatabase.version)
+            assertEquals(11, migrated.readableDatabase.version)
             assertEquals(work, migrated.read(scope, work.id))
             assertNull(migrated.readVerified(scope, work.id))
             migrated.admitDispatch = { true }

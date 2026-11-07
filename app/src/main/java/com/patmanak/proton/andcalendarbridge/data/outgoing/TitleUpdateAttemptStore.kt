@@ -26,7 +26,7 @@ import org.json.JSONObject
  * Payload/evidence are opaque protected strings; this store grants no HTTP or Provider capability.
  */
 class TitleUpdateAttemptStore(context: Context, name: String = "calendar-title-update-attempt-v1.db") :
-    SQLiteOpenHelper(context, name, null, 10), TitleUpdateRecoveryJournal, TitleUpdatePreparationJournal {
+    SQLiteOpenHelper(context, name, null, 11), TitleUpdateRecoveryJournal, TitleUpdatePreparationJournal {
     private val lock = Mutex()
     /** Text history shares the same connection and reciprocal ownership transaction. */
     internal val textJournal: TextUpdateRecoveryJournal = SqlTextUpdateAttemptJournal(object : TextAttemptDatabase {
@@ -108,6 +108,7 @@ class TitleUpdateAttemptStore(context: Context, name: String = "calendar-title-u
         TimeUpdateAttemptSql.createTable(db)
         PersonalUpdateAttemptSql.createTable(db)
         DeleteAttemptSql.createTable(db)
+        ConflictResolutionFenceSql.createTable(db)
     }
 
     private fun createReservationTable(db: SQLiteDatabase) {
@@ -122,7 +123,9 @@ class TitleUpdateAttemptStore(context: Context, name: String = "calendar-title-u
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        check(oldVersion in 1..9 && newVersion == 10) { "Explicit title update journal migration required" }
+        check(oldVersion in 1..10 && newVersion == 11) { "Explicit title update journal migration required" }
+        if (oldVersion >= 3) ConflictResolutionFenceSql.createTable(db)
+        if (oldVersion == 10) return
         if (oldVersion >= 3) {
             PersonalUpdateAttemptSql.createTable(db)
             if (oldVersion == 9) return
@@ -147,6 +150,98 @@ class TitleUpdateAttemptStore(context: Context, name: String = "calendar-title-u
         db.execSQL("DROP TABLE title_update_attempts_legacy")
     }
 
+    /** Opt-in exclusion only. No attempt is retired and no native/import state is changed. */
+    suspend fun beginConflictResolutionFence(fence: ConflictResolutionFence,
+        admit: (CalendarScope) -> Boolean): Boolean = access { db ->
+        if (!admit(fence.scope)) false else transaction(db, beforeCommit = {
+            check(admit(fence.scope)) { "Conflict resolution lease is not current" }
+        }) {
+            qualifiedOwnership({}) {
+                val sql = ConflictResolutionFenceSql(db)
+                val retained = sql.history(fence.scope, fence.eventId, listOf(fence.localMutationId, fence.resolutionId))
+                val exact = retained.singleOrNull { it.fence == fence }
+                // Never admit a new row that its own bounded recovery reader
+                // could not subsequently read or finalize.
+                if (exact == null && retained.size >= 128) return@qualifiedOwnership false
+                if (exact?.proof != null) return@qualifiedOwnership false
+                if (retained.filter { it != exact }.any { it.proof == null || it.fence.localMutationId == fence.localMutationId ||
+                        it.fence.resolutionId == fence.resolutionId || it.fence.localMutationId == fence.resolutionId ||
+                        it.fence.resolutionId == fence.localMutationId }) return@qualifiedOwnership false
+                // Bound discovery before any full title capsule is materialized. The family
+                // readers independently validate all bytes, proofs and reverse identity links.
+                boundConflictHistory(db, fence)
+                val title = titleConflictsWithFence(db, fence)
+                val text = TextUpdateAttemptSql(db, {}).conflictsWithFence(fence)
+                val time = TimeUpdateAttemptSql(db, {}).conflictsWithFence(fence)
+                val personal = PersonalUpdateAttemptSql(db, {}).conflictsWithFence(fence)
+                val delete = DeleteAttemptSql(db, {}).conflictsWithFence(fence)
+                if (title || text || time || personal || delete) false
+                else { if (exact == null) sql.insert(fence); true }
+            }
+        }
+    }
+
+    /** The active event fence spans generations. Released history remains private and permanent. */
+    suspend fun readConflictResolutionFence(scope: CalendarScope, eventId: EventId): ConflictResolutionFence? =
+        access { db -> transaction(db) { qualifiedOwnership({}) {
+            requireAttemptJournalReference(scope, MutationId(eventId.value), 4096)
+            ConflictResolutionFenceSql(db).history(scope, eventId).singleOrNull { it.proof == null }?.fence
+        } } }
+
+    /** Caller supplies proof only after its durable finalization protocol has completed. */
+    suspend fun releaseConflictResolutionFence(finalization: ConflictResolutionFinalization,
+        admit: (CalendarScope) -> Boolean): Boolean = access { db ->
+        if (!admit(finalization.fence.scope)) false else transaction(db, beforeCommit = {
+            check(admit(finalization.fence.scope)) { "Conflict resolution finalization lease is not current" }
+        }) { qualifiedOwnership({}) { ConflictResolutionFenceSql(db).release(finalization) } }
+    }
+
+    private fun boundConflictHistory(db: SQLiteDatabase, fence: ConflictResolutionFence) {
+        val tables = listOf(TABLE, RESERVATIONS, "text_update_attempts", "time_update_attempts",
+            "personal_update_attempts", "delete_attempts")
+        for (table in tables) {
+            val where = "account=? AND calendar=?"
+            val args = arrayOf(fence.scope.account.value, fence.scope.calendar.value)
+            db.rawQuery("SELECT count(*) FROM (SELECT 1 FROM $table WHERE $where LIMIT 129)", args).use {
+                check(it.moveToFirst() && it.getLong(0) <= 128) { "Conflict history exceeds qualification budget" }
+            }
+            if (table == TABLE || table == RESERVATIONS) {
+                val fields = if (table == TABLE) listOf("mutation", "event", "preparation", "adapter", "payload", "state", "evidence", "result", "completion")
+                    else listOf("mutation", "event", "preparation", "adapter")
+                val invalid = fields.joinToString(" OR ") { column ->
+                    val limit = if (column in listOf("mutation", "event", "adapter", "state")) 4096 else LocalEditPreparation.MAX_PAYLOAD_BYTES
+                    "($column IS NOT NULL AND (typeof($column)!='text' OR length(CAST($column AS BLOB))>$limit))"
+                }
+                db.rawQuery("SELECT 1 FROM $table WHERE $where AND ($invalid) LIMIT 1", args).use {
+                    check(!it.moveToFirst()) { "Conflict history exceeds capsule budget" }
+                }
+            }
+        }
+    }
+
+    /** Full request/local identity comparison, including reverse collisions on other events.
+     * boundConflictHistory has already bounded every selected title/reservation metadata cell.
+     */
+    private fun titleConflictsWithFence(db: SQLiteDatabase, fence: ConflictResolutionFence): Boolean {
+        val args = arrayOf(fence.scope.account.value, fence.scope.calendar.value)
+        val events = db.rawQuery("SELECT CAST(event AS BLOB) FROM $TABLE WHERE account=? AND calendar=? UNION " +
+            "SELECT CAST(event AS BLOB) FROM $RESERVATIONS WHERE account=? AND calendar=?", args + args).use { rows -> buildList {
+            while (rows.moveToNext()) {
+                require(size < 256 && rows.getType(0) == Cursor.FIELD_TYPE_BLOB)
+                add(EventId(Charsets.UTF_8.newDecoder().onMalformedInput(CodingErrorAction.REPORT)
+                    .onUnmappableCharacter(CodingErrorAction.REPORT)
+                    .decode(java.nio.ByteBuffer.wrap(rows.getBlob(0))).toString()))
+            }
+        } }
+        val ids = listOf(fence.localMutationId, fence.resolutionId)
+        // Materialize qualification outcomes before any Boolean short circuit.
+        return events.map { event ->
+            ownershipHistory(db, fence.scope, event).any {
+                (!it.completed && event == fence.eventId) || it.id in ids || it.localIntentId in ids
+            }
+        }.any { it }
+    }
+
     override suspend fun reservePreparation(candidate: TitleUpdatePreparationReservation,
         admit: (CalendarScope) -> Boolean): TitleUpdatePreparationReservation? {
         val frozen = candidate.frozen()
@@ -155,7 +250,7 @@ class TitleUpdateAttemptStore(context: Context, name: String = "calendar-title-u
             if (!admit(frozen.scope)) null else transaction(db, beforeCommit = {
                 check(admit(frozen.scope)) { "Title preparation reservation lease is not current" }
             }) {
-                if (otherFamilyOwns(db, frozen.scope, frozen.eventId, frozen.id) { operation.ensureActive() })
+                if (otherFamilyOwns(db, frozen.scope, frozen.eventId, frozen.id, frozen.preparation.intent.id) { operation.ensureActive() })
                     return@transaction null
                 val history = ownershipHistory(db, frozen.scope, frozen.eventId)
                 val owner = history.singleOrNull { !it.completed }
@@ -176,7 +271,7 @@ class TitleUpdateAttemptStore(context: Context, name: String = "calendar-title-u
                     frozen
                 }
                 // A proposal may adopt an earlier title UUID. Qualify that identity separately.
-                if (otherFamilyOwns(db, canonical.scope, canonical.eventId, canonical.id) { operation.ensureActive() })
+                if (otherFamilyOwns(db, canonical.scope, canonical.eventId, canonical.id, canonical.preparation.intent.id) { operation.ensureActive() })
                     return@transaction null
                 if (readReservation(db, canonical.scope, canonical.id) == null) {
                     // Adoption of legacy PREPARED work keeps its ID and first wire intact.
@@ -222,7 +317,7 @@ class TitleUpdateAttemptStore(context: Context, name: String = "calendar-title-u
             if (!admit(frozen.scope)) false else transaction(db, beforeCommit = {
                 check(admit(frozen.scope)) { "Title preparation lease is not current" }
             }) {
-                val blocked = otherFamilyOwns(db, frozen.scope, frozen.preparation.intent.base.eventId, frozen.id) {
+                val blocked = otherFamilyOwns(db, frozen.scope, frozen.preparation.intent.base.eventId, frozen.id, frozen.preparation.intent.id) {
                     operation.ensureActive()
                 }
                 if (guarded && blocked) return@transaction false
@@ -438,7 +533,7 @@ class TitleUpdateAttemptStore(context: Context, name: String = "calendar-title-u
                 operationContext.ensureActive()
                 check(stillAllowed) { "Title update dispatch lease is not current" }
             }) {
-                if (otherFamilyOwns(db, frozen.scope, frozen.preparation.intent.base.eventId, frozen.id) {
+                if (otherFamilyOwns(db, frozen.scope, frozen.preparation.intent.base.eventId, frozen.id, frozen.preparation.intent.id) {
                         operationContext.ensureActive()
                     }) return@transaction false
                 val history = ownershipHistory(db, frozen.scope, frozen.preparation.intent.base.eventId)
@@ -487,13 +582,14 @@ class TitleUpdateAttemptStore(context: Context, name: String = "calendar-title-u
         val localIntentId: MutationId, val completed: Boolean)
 
     /** All families are fully qualified before deciding; a hold cannot hide another corrupt history. */
-    private fun otherFamilyOwns(db: SQLiteDatabase, scope: CalendarScope, event: EventId, id: MutationId,
+    private fun otherFamilyOwns(db: SQLiteDatabase, scope: CalendarScope, event: EventId, id: MutationId, localId: MutationId,
         checkCancelled: () -> Unit): Boolean = qualifiedOwnership(checkCancelled) {
         val text = TextUpdateAttemptSql(db, checkCancelled).hasOwner(scope, event, id)
         val time = TimeUpdateAttemptSql(db, checkCancelled).hasOwner(scope, event, id)
         val delete = DeleteAttemptSql(db, checkCancelled).hasOwner(scope, event, id)
         val personal = PersonalUpdateAttemptSql(db, checkCancelled).hasOwner(scope, event, id)
-        text || time || delete || personal
+        val fenced = ConflictResolutionFenceSql(db).blocks(scope, event, id, localId)
+        text || time || delete || personal || fenced
     }
 
     private fun canTextOwn(db: SQLiteDatabase, work: TextUpdateAttemptRecord, checkCancelled: () -> Unit): Boolean =
@@ -503,7 +599,8 @@ class TitleUpdateAttemptStore(context: Context, name: String = "calendar-title-u
             val time = TimeUpdateAttemptSql(db, checkCancelled).hasOwner(work.scope, work.eventId, work.id)
             val delete = DeleteAttemptSql(db, checkCancelled).hasOwner(work.scope, work.eventId, work.id)
             val personal = PersonalUpdateAttemptSql(db, checkCancelled).hasOwner(work.scope, work.eventId, work.id)
-            history.all { it.completed } && !usedIdentity && !time && !delete && !personal
+            val fenced = ConflictResolutionFenceSql(db).blocks(work.scope, work.eventId, work.id, work.preparation.intent.id)
+            history.all { it.completed } && !usedIdentity && !time && !delete && !personal && !fenced
         }
 
     private fun canTimeOwn(db: SQLiteDatabase, work: TimeUpdateAttemptRecord, checkCancelled: () -> Unit): Boolean =
@@ -513,7 +610,8 @@ class TitleUpdateAttemptStore(context: Context, name: String = "calendar-title-u
             val text = TextUpdateAttemptSql(db, checkCancelled).hasOwner(work.scope, work.eventId, work.id)
             val delete = DeleteAttemptSql(db, checkCancelled).hasOwner(work.scope, work.eventId, work.id)
             val personal = PersonalUpdateAttemptSql(db, checkCancelled).hasOwner(work.scope, work.eventId, work.id)
-            history.all { it.completed } && !usedIdentity && !text && !delete && !personal
+            val fenced = ConflictResolutionFenceSql(db).blocks(work.scope, work.eventId, work.id, work.preparation.intent.id)
+            history.all { it.completed } && !usedIdentity && !text && !delete && !personal && !fenced
         }
 
     private fun canDeleteOwn(db: SQLiteDatabase, work: DeleteAttemptRecord, checkCancelled: () -> Unit): Boolean =
@@ -523,7 +621,8 @@ class TitleUpdateAttemptStore(context: Context, name: String = "calendar-title-u
             val text = TextUpdateAttemptSql(db, checkCancelled).hasOwner(work.scope, work.eventId, work.id)
             val time = TimeUpdateAttemptSql(db, checkCancelled).hasOwner(work.scope, work.eventId, work.id)
             val personal = PersonalUpdateAttemptSql(db, checkCancelled).hasOwner(work.scope, work.eventId, work.id)
-            history.all { it.completed } && !usedIdentity && !text && !time && !personal
+            val fenced = ConflictResolutionFenceSql(db).blocks(work.scope, work.eventId, work.id, work.intent.id)
+            history.all { it.completed } && !usedIdentity && !text && !time && !personal && !fenced
         }
 
     private fun canPersonalOwn(db: SQLiteDatabase, work: PersonalUpdateAttemptRecord, checkCancelled: () -> Unit): Boolean =
@@ -533,7 +632,8 @@ class TitleUpdateAttemptStore(context: Context, name: String = "calendar-title-u
             val text = TextUpdateAttemptSql(db, checkCancelled).hasOwner(work.scope, work.eventId, work.id)
             val time = TimeUpdateAttemptSql(db, checkCancelled).hasOwner(work.scope, work.eventId, work.id)
             val delete = DeleteAttemptSql(db, checkCancelled).hasOwner(work.scope, work.eventId, work.id)
-            history.all { it.completed } && !usedIdentity && !text && !time && !delete
+            val fenced = ConflictResolutionFenceSql(db).blocks(work.scope, work.eventId, work.id, work.preparation.intent.id)
+            history.all { it.completed } && !usedIdentity && !text && !time && !delete && !fenced
         }
 
     private fun titleRequestExists(db: SQLiteDatabase, scope: CalendarScope, id: MutationId,

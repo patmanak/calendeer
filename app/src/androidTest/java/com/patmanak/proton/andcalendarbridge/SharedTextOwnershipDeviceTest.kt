@@ -266,10 +266,11 @@ class SharedTextOwnershipDeviceTest {
             legacy.execSQL("DROP TABLE text_update_attempts")
             legacy.execSQL("DROP TABLE personal_update_attempts")
             legacy.execSQL("DROP TABLE delete_attempts")
-            legacy.execSQL("DROP TABLE time_update_attempts"); legacy.version = 4
+            legacy.execSQL("DROP TABLE time_update_attempts")
+            legacy.execSQL("DROP TABLE conflict_resolution_fences"); legacy.version = 4
         }
         TitleUpdateAttemptStore(context, name).use { migrated ->
-            assertEquals(10, migrated.readableDatabase.version)
+            assertEquals(11, migrated.readableDatabase.version)
             assertEquals(before, historicalSnapshot(migrated.readableDatabase))
             assertEquals(proof, migrated.readCompletion(scope, title.id))
             assertEquals(bare, migrated.readPreparationReservation(bare.scope, bare.eventId))
@@ -295,6 +296,7 @@ class SharedTextOwnershipDeviceTest {
             it.execSQL("DROP TABLE personal_update_attempts")
             it.execSQL("DROP TABLE delete_attempts")
             it.execSQL("DROP TABLE time_update_attempts")
+            it.execSQL("DROP TABLE conflict_resolution_fences")
             it.version = 4 // Unexpected pre-existing nonempty text table must not be silently adopted.
         }
         TitleUpdateAttemptStore(context, name).use { migration ->

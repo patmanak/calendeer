@@ -47,10 +47,13 @@ class CalendarPersonalGuardedJourneyLiveDeviceTest {
         private val logical: CalendarScope, private val physical: CalendarScope,
         private val access: () -> Boolean) : CalendarProjection {
         val writes = AtomicInteger()
+        val resumes = AtomicInteger()
+        var beforeNativeAcknowledgement: suspend (PersonalUpdateAcknowledgementReceipt) -> Unit = {}
         override var admitOperation: () -> Boolean
             get() = native.admitOperation
             set(value) { native.admitOperation = { access() && value() } }
         override val personalUpdateAcknowledgementProtocol get() = native.personalUpdateAcknowledgementProtocol
+        override val personalUpdateAcknowledgementRecoveryProtocol get() = native.personalUpdateAcknowledgementRecoveryProtocol
         override fun hasPermissions() = native.hasPermissions()
         override fun accountFor(accountId: AccountId) = native.accountFor(accountId)
         override suspend fun ensureCalendarState(scope: CalendarScope, summary: CalendarSummary): EnsuredCalendar =
@@ -66,9 +69,16 @@ class CalendarPersonalGuardedJourneyLiveDeviceTest {
                 intent = receipt.intent.copy(scope = physical), projection = receipt.projection.copy(scope = physical))
         }
         override suspend fun acknowledgePersonalUpdate(receipt: PersonalUpdateAcknowledgementReceipt): AppliedPersonalUpdateAcknowledgement? {
+            beforeNativeAcknowledgement(receipt)
             writes.incrementAndGet()
             val expected = mapped(receipt)
             return native.acknowledgePersonalUpdate(expected)?.takeIf { it.receipt == expected }
+                ?.let { AppliedPersonalUpdateAcknowledgement(receipt) }
+        }
+        override suspend fun resumePersonalUpdateAcknowledgement(receipt: PersonalUpdateAcknowledgementReceipt): AppliedPersonalUpdateAcknowledgement? {
+            resumes.incrementAndGet()
+            val expected = mapped(receipt)
+            return native.resumePersonalUpdateAcknowledgement(expected)?.takeIf { it.receipt == expected }
                 ?.let { AppliedPersonalUpdateAcknowledgement(receipt) }
         }
         override suspend fun inspectPersonalUpdateAcknowledgement(receipt: PersonalUpdateAcknowledgementReceipt): AppliedPersonalUpdateAcknowledgement? {
@@ -85,7 +95,7 @@ class CalendarPersonalGuardedJourneyLiveDeviceTest {
         val hash = args.getString("personalAccountHash").orEmpty()
         val phase = args.getString("personalGuardedPhase").orEmpty()
         assertTrue("Explicit fixture, account and phase are required", token.matches(Regex("[a-f0-9]{12}")) &&
-            hash.matches(Regex("[a-f0-9]{64}")) && phase in setOf("submit", "recover"))
+            hash.matches(Regex("[a-f0-9]{64}")) && phase in setOf("submit", "interrupt", "recover"))
         val requestedCalendarName = "Calendeer QA Automatic Worker"
         val prefix = "calendar-personal-guarded-v2-$token"
         val app = compose.activity.application as BridgeApplication
@@ -93,6 +103,7 @@ class CalendarPersonalGuardedJourneyLiveDeviceTest {
             it.authenticated && it.selections.isNotEmpty() && !it.busy
         } }
         val prefs = app.getSharedPreferences(prefix, Context.MODE_PRIVATE)
+        val processJourney = PersonalAcknowledgementProcessJourney.enroll(prefs, args, phase)
         val selected = app.imports.state.value.selections.filter { it.enabled && it.available &&
             it.summary.title == requestedCalendarName }
         assertTrue("An accessible existing calendar is required", selected.isNotEmpty())
@@ -482,13 +493,19 @@ class CalendarPersonalGuardedJourneyLiveDeviceTest {
                                 prefs.getString("result_hash", null) == resultHash(result))
                             val proofAdmission = coordinator.systemPersonalProofAdmission(source)
                             if (prefs.getBoolean("ack_completed", false)) {
+                                if (processJourney.enabled) {
+                                    allowStore()
+                                    processJourney.verifyCompleted(checkNotNull(store.personalUpdateAcknowledgement(source, event, attempt)),
+                                        original, result, capsuleCalls == 0 && prepareCalls == 0 && submitCalls == 0 && inspectCalls == 0 &&
+                                            actualRemote == null && actualCapsule == null && actualPort == null)
+                                }
                                 val completion = checkNotNull(journal.readCompletion(source, attempt, factual))
                                 val row = values()
                                 assertTrue("A repeated recovery preserves completed history and newer local content",
                                     prefs.getString("completion_hash", null) == bytesHash(PersonalUpdateProofStorageCodec.encodeCompletion(completion)) &&
                                         row[Events.TITLE] == "Calendeer QA - personal newer local $token" && row[Events.DIRTY] == "1" &&
                                         operations.recoverOffline(TitleUpdateWorkQuery(source), proofAdmission) == TitleUpdateOfflineRecoveryProgress() &&
-                                        values() == row && projection.writes.get() == 0)
+                                        values() == row && projection.writes.get() == 0 && projection.resumes.get() == 0)
                                 witness("personal_guarded_recover_new_process", "personal_guarded_offline_completed",
                                     "personal_guarded_no_repeat_submission", "personal_guarded_newer_edit_preserved")
                                 return@runBlocking
@@ -497,7 +514,25 @@ class CalendarPersonalGuardedJourneyLiveDeviceTest {
                             val wasComplete = journal.readCompletion(source, attempt, factual) != null
                             allowStore()
                             val prior = store.personalUpdateAcknowledgement(source, event, attempt)
+                            if (phase == "interrupt") {
+                                assertTrue("Only the fresh opt-in interrupt may reserve the first receipt",
+                                    processJourney.enabled && prior == null && !wasComplete &&
+                                        textsMatch(dirty, changed) && timesMatch(dirty, changed) && dirty[Events.DIRTY] == "1")
+                                projection.beforeNativeAcknowledgement = { receipt ->
+                                    allowStore()
+                                    processJourney.awaitHostDeath(receipt,
+                                        checkNotNull(store.personalUpdateAcknowledgement(source, event, attempt)),
+                                        checkNotNull(journal.read(source, attempt, factual)),
+                                        checkNotNull(journal.readVerified(source, attempt, factual)), values(), dirty,
+                                        journal.readCompletion(source, attempt, factual) == null && projection.writes.get() == 0,
+                                        capsuleCalls == 0 && prepareCalls == 0 && submitCalls == 0 && inspectCalls == 0 &&
+                                            actualRemote == null && actualCapsule == null && actualPort == null)
+                                }
+                            } else if (processJourney.enabled) {
+                                processJourney.verifyRestart(checkNotNull(prior), original, result, dirty, !wasComplete)
+                            }
                             val progress = operations.recoverOffline(TitleUpdateWorkQuery(source), proofAdmission)
+                            assertTrue("The host must kill the interrupt process before native ACK", phase != "interrupt")
                             assertTrue("Recover the single retained personal attempt without transport",
                                 progress == if (wasComplete) TitleUpdateOfflineRecoveryProgress()
                                     else TitleUpdateOfflineRecoveryProgress(completed = 1))
@@ -514,6 +549,11 @@ class CalendarPersonalGuardedJourneyLiveDeviceTest {
                                 dirty[Events.DIRTY] == "1" && clean[Events.DIRTY] == "0" &&
                                     textsMatch(clean, canonical) && timesMatch(clean, changed) &&
                                     (dirty - ACK_FIELDS) == (clean - ACK_FIELDS) && projection.writes.get() == 1)
+                            else if (processJourney.enabled && !wasComplete) assertTrue("The original pending nonce resumes once through the real native CAS",
+                                prior != null && prior.state == PersonalUpdateAcknowledgementState.PENDING && receipt.receipt == prior.receipt &&
+                                    dirty[Events.DIRTY] == "1" && clean[Events.DIRTY] == "0" &&
+                                    textsMatch(clean, canonical) && timesMatch(clean, changed) &&
+                                    (dirty - ACK_FIELDS) == (clean - ACK_FIELDS) && projection.writes.get() == 0 && projection.resumes.get() == 1)
                             else assertTrue("A retained receipt never repeats the native write", clean == dirty && projection.writes.get() == 0)
                             assertTrue("Restored receipt binds exact revision and nonce",
                                 clean[Events.SYNC_DATA2] == digest("revision-v1", result.event.revision.value) &&
@@ -521,14 +561,14 @@ class CalendarPersonalGuardedJourneyLiveDeviceTest {
                             assertTrue("The verified personal v2 result becomes the clean baseline",
                                 textsMatch(clean, canonical) && timesMatch(clean, changed) && clean[Events.DIRTY] == "0" &&
                                     store.localEdit(source, event) == null)
-                            val writes = projection.writes.get()
+                            val writes = projection.writes.get() + projection.resumes.get()
                             assertTrue("Completed pages never rediscover closed personal v2 work",
                                 operations.recoverOffline(TitleUpdateWorkQuery(source), proofAdmission) == TitleUpdateOfflineRecoveryProgress())
                             assertTrue("Historical typed ACK and completion are idempotent",
                                 owners.acknowledge(result, journal, proofAdmission) && owners.complete(result, journal, proofAdmission))
                             allowStore()
                             assertTrue("Preserve the first request, proof, completion and clean row",
-                                values() == clean && projection.writes.get() == writes &&
+                                values() == clean && projection.writes.get() + projection.resumes.get() == writes &&
                                     journal.read(source, attempt, factual) == original &&
                                     journal.readVerified(source, attempt, factual) == result &&
                                     journal.readCompletion(source, attempt, factual) == completion)
@@ -537,6 +577,9 @@ class CalendarPersonalGuardedJourneyLiveDeviceTest {
                                     actualRemote == null && actualCapsule == null && actualPort == null)
                             assertTrue("No new attempt is allocated during offline completion or replay", prefs.getString("attempt_id", null) == attempt.value &&
                                 journal.page(PersonalUpdateWorkQuery(source), factual)?.entries?.isEmpty() == true)
+                            if (processJourney.enabled) processJourney.verifyCompleted(receipt, original, result,
+                                capsuleCalls == 0 && prepareCalls == 0 && submitCalls == 0 && inspectCalls == 0 &&
+                                    actualRemote == null && actualCapsule == null && actualPort == null)
                             val newerTitle = "Calendeer QA - personal newer local $token"
                             assertTrue("Create a newer local fixture edit only after exact ACK completion", app.contentResolver.update(uri,
                                 ContentValues().apply { put(Events.TITLE, newerTitle); put(Events.DIRTY, 1) },
@@ -547,7 +590,7 @@ class CalendarPersonalGuardedJourneyLiveDeviceTest {
                                 newer[Events.DIRTY] == "1" && newer[Events.DESCRIPTION] == canonical.description && timesMatch(newer, changed))
                             assertTrue("Historical completion cannot consume newer content",
                                 operations.recoverOffline(TitleUpdateWorkQuery(source), proofAdmission) == TitleUpdateOfflineRecoveryProgress() &&
-                                    values() == newer && projection.writes.get() == writes &&
+                                    values() == newer && projection.writes.get() + projection.resumes.get() == writes &&
                                     journal.readCompletion(source, attempt, factual) == completion)
                             val completionHash = bytesHash(PersonalUpdateProofStorageCodec.encodeCompletion(completion))
                             assertTrue("Freeze deterministic completion history", !prefs.contains("completion_hash") ||

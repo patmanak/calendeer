@@ -123,9 +123,10 @@ class DeleteRecoveryJournalDeviceTest {
             put("account",scope.account.value); put("calendar",scope.calendar.value); put("generation",scope.generation)
             put("mutation",prepared.id.value); put("event",base.eventId.value); put("state","OUTCOME_UNKNOWN"); put("capsule",bytes)
         })
+        db.execSQL("DROP TABLE conflict_resolution_fences")
         db.version = 8; store.close()
         TitleUpdateAttemptStore(context, name).use { reopened ->
-            assertEquals(10, reopened.readableDatabase.version)
+            assertEquals(11, reopened.readableDatabase.version)
             reopened.readableDatabase.rawQuery("SELECT capsule,result,completion FROM delete_attempts", null).use { row ->
                 assertTrue(row.moveToFirst()); assertArrayEquals(bytes,row.getBlob(0)); assertTrue(row.isNull(1)); assertTrue(row.isNull(2))
             }

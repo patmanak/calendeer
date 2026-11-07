@@ -14,6 +14,24 @@ import com.patmanak.proton.andcalendarbridge.sync.*
 internal class TimeUpdateAttemptSql(private val db: SQLiteDatabase, private val checkCancelled: () -> Unit) {
     private val blobs = BoundedAttemptBlobReader(db, TABLE, checkCancelled)
 
+    /** Local IDs live inside capsules, so fence acquisition qualifies bounded calendar history.
+     * Decode every row before deciding: an unrelated hold cannot hide corrupt ownership.
+     */
+    fun conflictsWithFence(fence: ConflictResolutionFence): Boolean {
+        val ids = listOf(fence.localMutationId, fence.resolutionId)
+        val conflicts = db.rawQuery("SELECT rowid FROM $TABLE WHERE account=? AND calendar=? LIMIT 129",
+            arrayOf(fence.scope.account.value, fence.scope.calendar.value)).use { rows -> buildList {
+            while (rows.moveToNext()) {
+                checkCancelled(); require(size < 128 && rows.getType(0) == Cursor.FIELD_TYPE_INTEGER)
+                val stored = requireNotNull(readStored("rowid=?", arrayOf(rows.getLong(0).toString())))
+                val completed = readCompletion(stored) != null
+                val collision = stored.record.id in ids || stored.record.preparation.intent.id in ids
+                add((!completed && stored.record.eventId == fence.eventId) || collision)
+            }
+        } }
+        return conflicts.any { it }
+    }
+
     fun hasOwner(scope: CalendarScope, event: EventId, id: MutationId): Boolean =
         owners(scope, event, id).any { !it.completed || it.id == id }
     fun read(scope: CalendarScope, id: MutationId): TimeUpdateAttemptRecord? = readStored(scope, id)?.record

@@ -190,10 +190,11 @@ class TextUpdateProofStoreDeviceTest {
             db.insertOrThrow("text_update_attempts", null, ContentValues().apply {
                 put("account", scope.account.value); put("calendar", scope.calendar.value); put("generation", scope.generation)
                 put("mutation", record.id.value); put("event", record.eventId.value); put("state", record.state.name); put("capsule", capsule)
-            }); db.version = 5
+            })
+            db.execSQL("DROP TABLE conflict_resolution_fences"); db.version = 5
         }
         TitleUpdateAttemptStore(context, name).use { migrated ->
-            assertEquals(10, migrated.readableDatabase.version); assertEquals(record, migrated.textJournal.read(scope, record.id, allow))
+            assertEquals(11, migrated.readableDatabase.version); assertEquals(record, migrated.textJournal.read(scope, record.id, allow))
             migrated.readableDatabase.rawQuery("SELECT capsule,result,completion FROM text_update_attempts", null).use {
                 assertTrue(it.moveToFirst()); assertArrayEquals(capsule, it.getBlob(0)); assertTrue(it.isNull(1)); assertTrue(it.isNull(2))
             }
@@ -344,6 +345,7 @@ class TextUpdateProofStoreDeviceTest {
             // Force CREATE INDEX failure after the migration has renamed and rebuilt the attempt table.
             db.execSQL("CREATE TABLE migration_index_collision(value TEXT)")
             db.execSQL("CREATE INDEX text_update_unresolved_event ON migration_index_collision(value)")
+            db.execSQL("DROP TABLE conflict_resolution_fences")
             db.version = 5
         }
         try {
@@ -369,7 +371,7 @@ class TextUpdateProofStoreDeviceTest {
             db.execSQL("DROP TABLE migration_index_collision")
         }
         TitleUpdateAttemptStore(context, name).use { migrated ->
-            assertEquals(10, migrated.readableDatabase.version)
+            assertEquals(11, migrated.readableDatabase.version)
             assertEquals(record, migrated.textJournal.read(scope, record.id, allow))
         }
     }
