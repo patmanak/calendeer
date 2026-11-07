@@ -69,3 +69,7 @@ session/permission invalidation, and never put into saved instance state.
 This feature preserves observed evidence. General conflict resolution, trustworthy
 comparable edit timestamps and server-side atomic concurrency guarantees remain
 separate release work.
+
+The [shared-journal exclusion primitive](CONFLICT_RESOLUTION.md) is the first
+internal concurrency step for that work. It is not connected to a resolution
+action and does not change this archive's read-only contract.

@@ -45,13 +45,45 @@ a later stable/OEM build or the API-37 4 KiB profile. Existing real API-35 servi
 journeys are retained separately below. See [personal edits](PERSONAL_UPDATE.md)
 and [Android qualification](ANDROID_17_QUALIFICATION.md).
 
+## Shared-journal conflict exclusion and migration
+
+PASS on the enrolled API 35 phone: all 180 selected Android cases without skips.
+They comprise twelve new fence cases, ten personal Provider cases, four reopened-
+SQL recovery coordinator cases and 154 existing ownership/storage/migration
+regressions. App JVM (236) and domain (444) suites also pass without skips;
+strict offline debug/test/release builds and app lint pass.
+
+The opt-in fence qualifies same-event and cross-event identity ownership in all
+five shared mutation families and title preparation reservations, across
+generations. It covers exact/idempotent reopen, retained tombstones, denied and
+cancelled admission, two-helper races, malformed evidence, bounded history and
+additive schema 10-to-11 migration preserving old opaque bytes. Twenty-four
+cross-event identity combinations are exercised inside one fence test.
+
+The retention-boundary regression first fails on the phone: after 128 released
+fences for one event, acquisition admits a 129th that its recovery reader cannot
+read. Refusing before that insertion fixes the original reproduction; all 180
+cases then pass. Another test admits 128 valid unrelated work records, refuses
+acquisition after the 129th and proves no work was evicted. Historical migration
+fixtures reconstruct the pre-fence schema by removing the new table before
+setting an old version, rather than weakening the production migration.
+
+No production/UI resolver uses this primitive yet. CREATE, quarantined standalone
+stores, import/native finalization and PREPARED retirement remain outside it.
+See [the exact protocol and limits](CONFLICT_RESOLUTION.md).
+
 ## Signed release update and reboot on Android 17 / 16 KiB
 
 PASS for the corrected internal candidate: strict offline unsigned release build,
 app lint, external signature/certificate/package/version checks, actual DEX
-definition inspection and 64-bit ELF/RELRO/16 KiB ZIP alignment. These static
-results do not repeat the baseline-to-candidate runtime update/reboot below on
-this newer APK and do not qualify an authenticated release session.
+definition inspection and 64-bit ELF/RELRO/16 KiB ZIP alignment. The same signed
+candidate (version code 8) also passes a subsequent actual in-place same-key
+release update and emulator reboot. A fresh token-isolated fixture preserves
+exact synthetic SQL/Provider state, a retained UNKNOWN and its Keystore challenge.
+All 20 selected startup, native crypto, personal Provider and persistence tests
+pass after that reboot without skips. Cleanup runs only after verification.
+This does not qualify an authenticated Proton session or the newer schema-11
+code; the latter has separate debug-device evidence below.
 
 PASS: all 73 current host-tool tests without skips, including actual symlink and
 hardlink output-alias checks for the bounded Go metadata inspector. Its real
@@ -109,9 +141,26 @@ the separate opt-in personal pending-ACK recovery capability. A durable receipt
 reserved before the native write can resume the same conditional batch after
 requalifying the exact owner, preparation and proof. Historical native markers
 are inspected first; missing/unknown capability, changed state and cancellation
-remain guarded. These are synthetic callback/reopened-database cases, not a
-measured process kill at this new checkpoint. The six JVM cases fail three times
+remain guarded. These callback/reopened-database cases are distinct from the
+actual process-death journey below. The six JVM cases fail three times
 under the old inspect-only behavior and pass with the correction.
+
+PASS on API 35: another fresh authenticated personal fixture retains verified
+combined text/kind-transition proof, then a local-only invocation reserves its
+original PENDING native receipt. Before any native delegate, it commits the
+nonce and exact request/result/receipt/native fingerprints and waits. The host
+matches READY to the actual app PID, force-stops it and subsequently confirms
+that original PID is gone with no instrumentation runner left. READY alone is
+not reported as a test PASS. Two earlier host-launch failures are checked against
+read-only isolated database snapshots with zero ACK receipts before relaunch;
+the original remote submission is never repeated.
+
+A new process verifies the same PENDING receipt, dirty row and full immutable
+history, then completes the real conditional native/SQL ACK with the original
+nonce and no remote ports. A further new-process replay retains the completion
+and a newer dirty local edit without another native write or send. This qualifies
+the isolated coordinator checkpoint, not production WorkManager death, reboot
+or power loss. The synthetic service example remains retained.
 
 PASS on the enrolled API 35 target: a new isolated real-service fixture sends one
 combined title/description/location change and a timed-to-three-day-all-day
@@ -149,18 +198,18 @@ example remains visible; production settings and network state are unchanged.
 
 ## Natural periodic observation
 
-SEEDED on the enrolled API 35 phone: a read-only fixture freezes the existing
+PASS on the enrolled API 35 phone: a read-only fixture freezes the existing
 production six-hour work identity/generation, completed-period counter and future
 due time after workers settle. It also freezes installed APK bytes, mode signature,
 boot count and elapsed/wall clocks. No work is forced, replaced or cancelled;
 neither clock, radios, battery settings nor consent are changed. The original
-enrollment remains available for later verification.
+enrollment is retained without rebasing.
 
-Natural execution is NOT YET qualified. Verification requires the same settled
-work's actual period count and compatible enqueue time to advance; an unchanged
-counter is reported NOT_YET/skipped, never PASS. Even a future observer PASS will
-not prove content convergence, battery behavior, Samsung compatibility or that
-this worker exclusively caused synchronization.
+A later verification observes an actual period-count increase and compatible
+enqueue time on that same work, with unchanged APK, modes and boot and compatible
+elapsed/wall clocks. This qualifies natural period progression, not content
+convergence, battery behavior, Samsung compatibility or exclusive worker
+causality. An unchanged counter would be NOT_YET/skipped rather than PASS.
 
 ## Accepted DELETE with an actual discarded network response
 

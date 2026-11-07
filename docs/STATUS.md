@@ -30,7 +30,7 @@ uncertain writes are retained, never silently discarded or resent.
 | Outgoing text | Default-off description/location option, optionally with simultaneous title change. Separate capsules, wire/proofs, cursors and consent; raw CRLF intent is distinct from canonical LF readback. | [Text delivery](SHARED_TEXT_PREPARATION.md). Creation mode must be enabled; narrow simple-event profile, unchanged dates and metadata. |
 | Outgoing time | Default-off date/duration option for simple timed/all-day events, retaining kind, zone and all other fields. Protected preparation, guarded readback, separate durable history and native completion. | [Temporal delivery](TEMPORAL_UPDATE.md). All-day metadata uses UTC midnight and exclusive end dates. This legacy family excludes transitions/combined edits; the separate personal-v2 family handles its qualified profile. |
 | Outgoing personal edit | Combined title/text/date edits, timed/all-day and named-zone transitions, preserving unchanged known personal reminders and event color. Separate v2 capsules/proofs, worker cursors and per-changed-field consent; legacy families stay strict. | [Personal edits](PERSONAL_UPDATE.md). Combined text and timed-to-all-day actual system-editor/production-worker delivery passes with empty metadata. Pending native ACK can resume with its exact durable receipt and requalified owner/proof. Invitations, recurrence, changed reminders/colors and ambiguous DST endpoints stay held; richer service metadata and other editors remain unqualified. |
-| Outgoing DELETE | Default-off option with separate worker/consent, protected first request, authenticated inspection, durable results/completion and exact native/SQL ACK. Shared schema 10 and import schema 23 retain a permanent incoming barrier. | [Deletion submission](DELETE_SUBMISSION.md). Ordinary timed and one/multiple-day service/editor/production-worker RUN and restarted REPLAY pass. Timed offline capture/restart and reconnect completion pass. A controlled real preclaim conflict and offline replay retain the full variant. Simple imported events only; uncertain results never trigger another send. |
+| Outgoing DELETE | Default-off option with separate worker/consent, protected first request, authenticated inspection, durable results/completion and exact native/SQL ACK. Shared schema 11 and import schema 23 retain a permanent incoming barrier. | [Deletion submission](DELETE_SUBMISSION.md). Ordinary timed and one/multiple-day service/editor/production-worker RUN and restarted REPLAY pass. Timed offline capture/restart and reconnect completion pass. A controlled real preclaim conflict and offline replay retain the full variant. Simple imported events only; uncertain results never trigger another send. |
 | Recovery/conflicts | UNKNOWN is inspect-only. Native writes are guarded and receipts precede acknowledgement; newer local edits survive. A shared title/text/time/personal/deletion journal prevents competing owners across generations. Local conflict dossiers preserve observed variants. | [Capture](LOCAL_EDIT_CAPTURE.md), [conflicts](CONFLICT_ARCHIVE.md). Trustworthy edit timestamps and general conflict resolution remain unfinished. |
 
 A refresh with no checkpoint commits its first staged page before draining queued
@@ -53,6 +53,13 @@ A stamped creation without its durable work identity receives a bounded historic
 proof search. Only its exact retained CREATE, binding, proven ACK, released handoff
 and unique matching Provider identity can restore completed work. Missing or corrupt
 proof remains a metadata-only issue; no row-ID adoption or new request is allowed.
+
+Shared schema 11 adds an opt-in durable exclusion primitive for future conflict
+resolution. It blocks shared-family claims across generations and retains identity
+tombstones after exact finalization. It refuses existing unresolved work and
+bounded-history overflow. No production/UI resolver acquires it yet; import/native
+finalization, PREPARED retirement and CREATE/legacy-store qualification remain
+separate work. See [the protocol](CONFLICT_RESOLUTION.md).
 
 ## Evidence and remaining RC work
 
@@ -162,12 +169,19 @@ The [qualification plan](ANDROID_17_QUALIFICATION.md) separates static APK check
 from the Android 17 and 16 KiB device journeys still required.
 See [build security](BUILD_SECURITY.md) for qualification and trust limits.
 
-A read-only natural-periodic observation is seeded against the existing six-hour
-work after restoring all temporary test modes. No period was forced or replaced;
-actual future advancement, content convergence and battery/OEM behavior remain
-unqualified. The corrected signed candidate passes static APK checks, while its
-authenticated release-session update remains separate from earlier synthetic-state
-update/reboot evidence.
+A read-only observation verifies actual advancement of the existing six-hour
+periodic work with unchanged APK, modes and boot. No period was forced or replaced;
+content convergence and battery/OEM behavior remain separate. Signed internal
+candidate 8 also passes an in-place same-key update, actual emulator reboot,
+synthetic retained-state checks and 20 selected API-37/16-KiB runtime cases.
+Authenticated release-session retention and the newer schema-11 release runtime
+remain unqualified.
+
+A separate API-35 journey qualifies actual host-verified process death after the
+personal PENDING ACK reservation but before the native delegate. Local-only
+recovery finishes the same nonce, then restarted replay preserves immutable
+history and a newer dirty edit without another send or native write. This is an
+isolated coordinator checkpoint, not production WorkManager death or power loss.
 
 For a useful bidirectional RC, finish:
 
