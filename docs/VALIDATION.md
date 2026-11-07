@@ -2,7 +2,7 @@
 
 ## Personal-edit v2 integration and Android 17 / 16 KiB fixtures
 
-PASS: 444 domain, 907 backend and 230 app JVM tests, without skips. New coverage
+PASS: 444 domain, 907 backend and 236 app JVM tests, without skips. New coverage
 includes complete raw metadata/identity lifecycles, bounded work pages, disjoint
 legacy formats, full personal storage/proofs, consent revocation, cancellation,
 UNKNOWN inspection and historical CREATE recovery. The unchanged authentication
@@ -47,6 +47,18 @@ and [Android qualification](ANDROID_17_QUALIFICATION.md).
 
 ## Signed release update and reboot on Android 17 / 16 KiB
 
+PASS for the corrected internal candidate: strict offline unsigned release build,
+app lint, external signature/certificate/package/version checks, actual DEX
+definition inspection and 64-bit ELF/RELRO/16 KiB ZIP alignment. These static
+results do not repeat the baseline-to-candidate runtime update/reboot below on
+this newer APK and do not qualify an authenticated release session.
+
+PASS: all 73 current host-tool tests without skips, including actual symlink and
+hardlink output-alias checks for the bounded Go metadata inspector. Its real
+four-ABI run parses the pinned inventory and reports applicability UNRESOLVED.
+The notice audit still reports the same four unresolved native distribution
+gates; no license or advisory is silently waived.
+
 PASS: a fresh isolated API 37 / x86_64 / 16384-byte-page emulator installs the
 actual non-debuggable release APK, signed offline with the project release key.
 The baseline and candidate have the same verified certificate and increasing
@@ -71,6 +83,35 @@ Samsung/One UI, ARM64, API 37 / 4 KiB or a stable later image. The independent
 native source/license and advisory-applicability release gates remain open.
 
 ## Authenticated combined personal edit and local recovery
+
+PASS on the enrolled API 35 phone with `foundation.e.calendar` 1.0.47: the actual
+system editor changes title, description and location together and converts a
+timed event to three consecutive all-day dates. The ordinary refresh/production
+workers capture the edit, obtain authenticated personal-v2 proof and acknowledge
+the same Android row with matching native nonce, revision, text and bounds.
+Fresh-process replay preserves the request/result/completion hashes and observes
+no additional attempt. The temporary field/general modes are restored exactly.
+This service event has explicit known-empty reminders/color. It does not qualify
+rich service metadata, transferred-CREATE editing, other editors or Samsung.
+
+The editor retains raw `Z` in the end-zone column while setting the all-day start
+zone to `UTC`. The original journey fails capture before the narrow personal-only
+fixed-UTC-alias correction; the same saved edit then completes without another
+editor save or a replacement request. A separate actual Provider regression also
+fails before the fix. The 56-case physical suite passes: ten personal Provider,
+eight persistence, four coordinator recovery and 34 legacy time ACK cases.
+It covers fixed-UTC aliases and raw-token preservation, rejected absent/invalid/
+seasonal/nonzero aliases, and otherwise-eligible timed/legacy readers remaining
+strict. No skipped tests are counted as passing.
+
+PASS: six app JVM recovery cases and four reopened-SQL coordinator cases qualify
+the separate opt-in personal pending-ACK recovery capability. A durable receipt
+reserved before the native write can resume the same conditional batch after
+requalifying the exact owner, preparation and proof. Historical native markers
+are inspected first; missing/unknown capability, changed state and cancellation
+remain guarded. These are synthetic callback/reopened-database cases, not a
+measured process kill at this new checkpoint. The six JVM cases fail three times
+under the old inspect-only behavior and pass with the correction.
 
 PASS on the enrolled API 35 target: a new isolated real-service fixture sends one
 combined title/description/location change and a timed-to-three-day-all-day
@@ -105,6 +146,45 @@ preserves the later dirty local edit, original request/result/completion hashes
 and no-repeat-send witnesses. This is an isolated coordinator/Provider journey,
 not an all-day system-editor or production-worker test. The retained synthetic
 example remains visible; production settings and network state are unchanged.
+
+## Natural periodic observation
+
+SEEDED on the enrolled API 35 phone: a read-only fixture freezes the existing
+production six-hour work identity/generation, completed-period counter and future
+due time after workers settle. It also freezes installed APK bytes, mode signature,
+boot count and elapsed/wall clocks. No work is forced, replaced or cancelled;
+neither clock, radios, battery settings nor consent are changed. The original
+enrollment remains available for later verification.
+
+Natural execution is NOT YET qualified. Verification requires the same settled
+work's actual period count and compatible enqueue time to advance; an unchanged
+counter is reported NOT_YET/skipped, never PASS. Even a future observer PASS will
+not prove content convergence, battery behavior, Samsung compatibility or that
+this worker exclusively caused synchronization.
+
+## Accepted DELETE with an actual discarded network response
+
+PASS on the enrolled API 35 phone: the actual system editor deletes one fresh
+isolated disposable event. A debug-only, exact authenticated-call interceptor
+closes its real matching response before the application consumes it and raises
+a transport exception. The original request durably remains OUTCOME_UNKNOWN
+with actual protected NO_RESPONSE evidence, a pending receipt and the unchanged
+dirty tombstone; there is no result, completion or native ACK. Two fresh-process
+local-only inspections preserve the same request bytes and nonce, without ports
+that can prepare, send, inspect remotely or write native state.
+
+The dropped response, regardless of HTTP status, is never acceptance evidence.
+Only a later independent authenticated read proves ABSENT with matched context.
+The normal adapter then retains verified absence, a new process finishes native/
+SQL ACK once, and another process verifies immutable history and no resend.
+An old incoming upsert remains suppressed. All phases pass without skipped tests.
+
+The fixture closes its consent only after committing actual NO_RESPONSE, to keep
+the adapter from immediately inspecting in the same invocation. This is an
+isolated coordinator/transport qualification, not production WorkManager response
+loss, device reboot, power loss, radio loss or a claim about every server failure.
+No response/proof is fabricated, and release transport is unchanged. Seven host
+probe cases plus 24 existing relevant transport cases pass without skips.
 
 ## Process death after durable proof and native acknowledgement
 

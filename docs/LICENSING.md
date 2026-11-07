@@ -53,8 +53,8 @@ and multiplatform variants conservatively. 217 have reviewed license evidence;
 the remaining native coordinate/source limitation below still blocks distribution.
 JSR305 is no longer assigned to the resolved app release runtime; its separate
 compiler/tooling evidence is retained under `nonPackagedComponents` rather than
-included in the APK notice bundle. Final DEX absence and runtime qualification
-still require the rebuilt signed APK.
+included in the APK notice bundle. Actual signed APK DEX-definition inspection
+and targeted release runtime qualification pass; see [validation](VALIDATION.md).
 
 Every POM's bytes match the cached SHA-256 and both public repository endpoints
 (Maven Central canonical/mirror, or Google's canonical/redirect endpoint). This
@@ -80,7 +80,7 @@ it with `python tools/release_notices.py --bundle-assets` after an evidence chan
 
 ## Concrete distribution blockers
 
-- JSR305 packaging qualification (pending): `com.google.code.findbugs:jsr305:3.0.2`
+- JSR305 packaging mitigation (qualified for the measured APK): `com.google.code.findbugs:jsr305:3.0.2`
   contains four published source files under
   `javax.annotation.concurrent` retain Brian Goetz's CC-BY-2.5 grant. The
   [author's current documentation](https://jcip.net/annotations/doc/net/jcip/annotations/package-summary.html)
@@ -93,9 +93,10 @@ it with `python tools/release_notices.py --bundle-assets` after an evidence chan
   All four
   problematic classes have `RetentionPolicy.CLASS`; inspected published dependency
   sources use JSR305 through annotation imports/documentation, without an executable
-  reference found. Resolved exclusion is not APK evidence. Keep this qualification
-  unresolved until final APK DEX-definition inspection
-  (`tools/check_release_annotations.py`) and release runtime checks pass. The
+  reference found. Actual signed APK DEX-definition inspection
+  (`tools/check_release_annotations.py`) confirms absence and targeted release
+  runtime checks pass. This is a packaged-artifact mitigation, not a reclassification
+  of the original source grant. The
   runtime notice inventory now follows the verified 218-coordinate resolved snapshot.
 - `me.proton.crypto:android-golib:2.10.0-2`: all four pinned ELF libraries expose
   the same Go 1.23.12 build information and exact 25-module dependency/version/h1

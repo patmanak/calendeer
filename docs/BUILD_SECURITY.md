@@ -136,6 +136,31 @@ still lists the pinned 2.10.0-2 as latest at this review; no newer patched aggre
 was identified. No advisory is suppressed and no cryptography is rewritten to
 make this gate appear green.
 
+A bounded follow-up inspects the four pinned ELF files' validated Go function-name
+tables and the exact recovered module sources. The specific `MultiScalarMult`,
+CIRCL `ecc/p384` and protobuf JSON names are not identified in those tables;
+this corroborates source inspection for those precise paths, not an exhaustive
+absence or a module-wide safety claim. Standard-library ASN.1/X509 and a KT JNI
+entry are present. The inspected Core detached-PGP-verification path reaches
+OpenPGP packet signature verification; no ASN.1/X509 attack path is established
+for that reviewed entry. Other entries and inlining remain separate questions.
+
+`python tools/check_go_native_scope.py --aar CACHED_AAR --output REPORT.json`
+reproduces the bounded binary-name inspection against the inventory's exact AAR
+and ELF hashes. It parses validated function metadata without extracting or
+executing native code. Offsets are relative to `runtime.text`, not resolved runtime
+addresses. Its successful result explicitly leaves applicability unresolved;
+it cannot suppress an advisory or supply missing corresponding source.
+
+Compiler advisories remain unresolved. The official fixes for
+[overlapping array assignment](https://github.com/golang/go/commit/3985ca0b6264835c049e601900a8072b5d1b13b4)
+and [incorrect bounds-check elimination](https://github.com/golang/go/commit/f5b77a7e2fa0f7ff346c665974a8eded367b1bc2)
+concern emitted code. Absence of compiler symbols from a runtime library cannot
+exclude them, and none of the four ABIs is excluded by the reviewed advisory
+constraints. No affected instruction or exhaustive exclusion has been proved.
+The generated root/build mapping and precise compiler inputs remain missing;
+symbol inspection and crypto smoke tests do not close those gates.
+
 ## Android API 37 baseline
 
 Both Android modules compile against API 37; the app targets 37 and retains

@@ -29,7 +29,7 @@ uncertain writes are retained, never silently discarded or resent.
 | Outgoing title | Default-off option for title-only edits of qualified ordinary or fully handed-off created timed/all-day events. Durable request ownership, inspection and native/SQL completion. | [Title submission](TITLE_UPDATE_SUBMISSION.md). Known-empty details, no recurrence/color; other fields must stay unchanged. |
 | Outgoing text | Default-off description/location option, optionally with simultaneous title change. Separate capsules, wire/proofs, cursors and consent; raw CRLF intent is distinct from canonical LF readback. | [Text delivery](SHARED_TEXT_PREPARATION.md). Creation mode must be enabled; narrow simple-event profile, unchanged dates and metadata. |
 | Outgoing time | Default-off date/duration option for simple timed/all-day events, retaining kind, zone and all other fields. Protected preparation, guarded readback, separate durable history and native completion. | [Temporal delivery](TEMPORAL_UPDATE.md). All-day metadata uses UTC midnight and exclusive end dates. This legacy family excludes transitions/combined edits; the separate personal-v2 family handles its qualified profile. |
-| Outgoing personal edit | Combined title/text/date edits, timed/all-day and named-zone transitions, preserving unchanged known personal reminders and event color. Separate v2 capsules/proofs, worker cursors and per-changed-field consent; legacy families stay strict. | [Personal edits](PERSONAL_UPDATE.md). Combined text and timed-to-all-day service/restarted local recovery pass with empty metadata. Invitations, recurrence, changed reminders/colors and ambiguous DST endpoints stay held; richer service/editor qualification remains open. |
+| Outgoing personal edit | Combined title/text/date edits, timed/all-day and named-zone transitions, preserving unchanged known personal reminders and event color. Separate v2 capsules/proofs, worker cursors and per-changed-field consent; legacy families stay strict. | [Personal edits](PERSONAL_UPDATE.md). Combined text and timed-to-all-day actual system-editor/production-worker delivery passes with empty metadata. Pending native ACK can resume with its exact durable receipt and requalified owner/proof. Invitations, recurrence, changed reminders/colors and ambiguous DST endpoints stay held; richer service metadata and other editors remain unqualified. |
 | Outgoing DELETE | Default-off option with separate worker/consent, protected first request, authenticated inspection, durable results/completion and exact native/SQL ACK. Shared schema 10 and import schema 23 retain a permanent incoming barrier. | [Deletion submission](DELETE_SUBMISSION.md). Ordinary timed and one/multiple-day service/editor/production-worker RUN and restarted REPLAY pass. Timed offline capture/restart and reconnect completion pass. A controlled real preclaim conflict and offline replay retain the full variant. Simple imported events only; uncertain results never trigger another send. |
 | Recovery/conflicts | UNKNOWN is inspect-only. Native writes are guarded and receipts precede acknowledgement; newer local edits survive. A shared title/text/time/personal/deletion journal prevents competing owners across generations. Local conflict dossiers preserve observed variants. | [Capture](LOCAL_EDIT_CAPTURE.md), [conflicts](CONFLICT_ARCHIVE.md). Trustworthy edit timestamps and general conflict resolution remain unfinished. |
 
@@ -95,8 +95,9 @@ UNKNOWN recoveries. After reconnection, authenticated inspection finds the origi
 event still present and safely holds the unchanged request without resend or ACK;
 another local replay preserves it. Network settings are restored. This uses the
 evidence-persistence cancellation checkpoint too. The separate production-worker
-profile below does not inject that cancellation; server-accepted/lost-response
-interruptions remain unqualified.
+profile below does not inject that cancellation. The later isolated discarded-
+response journey qualifies accepted deletion separately; its production-worker
+equivalent remains unqualified.
 
 The normal WorkManager profile also qualifies real Wi-Fi loss at its authenticated
 DELETE body start, without an evidence-persistence cancellation or substituted
@@ -137,7 +138,14 @@ request/result/completion hashes and suppress old incoming upserts. All existing
 production DELETE rows remain unchanged. These qualify integrated recovery
 boundaries, not the corresponding WorkManager checkpoints.
 
-Current host suites pass 444 domain, 20 authentication, 907 backend and 230 app JVM cases without
+An isolated system-editor/coordinator journey now also qualifies an actual
+discarded network response. Two new-process local recoveries retain NO_RESPONSE
+and the same UNKNOWN without ACK. Only separate authenticated absence permits
+native/SQL completion; final restarted replay is immutable and sends nothing.
+The debug transport seam drops a real matched response and never manufactures
+acceptance. The corresponding production WorkManager checkpoint remains open.
+
+Current host suites pass 444 domain, 20 authentication, 907 backend and 236 app JVM cases without
 skips. The authentication suite is unchanged from its earlier measured baseline. Physical crypto, SQL/migration, Provider, worker/recovery and option UI
 checks pass; APK builds and app lint pass. Scope-specific evidence and remaining
 qualification are in [validation](VALIDATION.md) and the linked contracts.
@@ -154,6 +162,13 @@ The [qualification plan](ANDROID_17_QUALIFICATION.md) separates static APK check
 from the Android 17 and 16 KiB device journeys still required.
 See [build security](BUILD_SECURITY.md) for qualification and trust limits.
 
+A read-only natural-periodic observation is seeded against the existing six-hour
+work after restoring all temporary test modes. No period was forced or replaced;
+actual future advancement, content convergence and battery/OEM behavior remain
+unqualified. The corrected signed candidate passes static APK checks, while its
+authenticated release-session update remains separate from earlier synthetic-state
+update/reboot evidence.
+
 For a useful bidirectional RC, finish:
 
 1. Extend [temporal delivery](TEMPORAL_UPDATE.md): same-kind timed/all-day changes
@@ -161,7 +176,8 @@ For a useful bidirectional RC, finish:
    native completion and worker/UI consent. Listed all-day and zone/DST service
    and production Provider/worker profiles, offline ACK and restarted replay pass.
    Extend editor/OEM qualification beyond the measured all-day and Paris cases,
-   then qualify kind/zone transitions and combined edits; ambiguous local hours
+   then extend kind/zone and combined-edit profiles beyond the measured three-day
+   all-day transition with combined text in the FOSS system editor; ambiguous local hours
    remain held rather than guessed.
 2. Extend [outgoing DELETE](DELETE_SUBMISSION.md): ordinary timed service/editor/
    production-worker and restarted recovery journeys pass, including single-day and
@@ -170,15 +186,16 @@ For a useful bidirectional RC, finish:
    submission. Isolated real-service recovery also passes after injected evidence-
    persistence cancellation. Real production-worker radio loss at body start also
    retains UNKNOWN without fabricated transport/results. Extend worker conflict,
-   partial upload, server-accepted/network-response loss and worker death later
+   partial upload, production-worker server-accepted/network-response loss and death later
    in submission, proof retention or acknowledgement, reboot and power loss,
    then richer events and OEM behavior.
    Current source checks and permanent incoming barriers remain required; UNKNOWN
    is never reset or resent.
 3. The personal-v2 family now preserves unchanged known personal reminders/colors
    during supported combined edits. A combined text/kind-transition service journey
-   and restarted local recovery pass with known-empty metadata. Extend this to
-   richer service metadata and system-editor journeys; metadata changes stay held.
+   and actual system-editor/production-worker journey pass with known-empty metadata.
+   Extend this to richer service metadata, transferred events and other editors;
+   metadata changes stay held.
 4. Safe handling of incomplete historical creation associations and actionable
    conflicts. Last-modification-wins requires trustworthy comparable edit times;
    capture/processing time is insufficient. Otherwise preserve variants.
