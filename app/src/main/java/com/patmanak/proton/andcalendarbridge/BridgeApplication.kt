@@ -34,6 +34,15 @@ import com.patmanak.proton.andcalendarbridge.data.outgoing.CoordinatorSystemDele
 import com.patmanak.proton.andcalendarbridge.sync.MutationKind
 
 class BridgeApplication : Application() {
+    // A process started solely for an URI wake must not schedule ordinary fresh recovery
+    // as a side effect of restoring authentication/selections. UI and normal workers opt in.
+    private val normalScheduling = java.util.concurrent.atomic.AtomicBoolean(false)
+    internal val normalSchedulingAllowed: Boolean get() = normalScheduling.get()
+    internal fun allowNormalScheduling() { normalScheduling.set(true) }
+    internal val providerWake: com.patmanak.proton.andcalendarbridge.data.importing.AndroidProviderWake by lazy {
+        com.patmanak.proton.andcalendarbridge.data.importing.AndroidProviderWake(this)
+    }
+
     // Per-calendar explicit consent remains required for this restricted experimental profile.
     private val textSynchronizationQualified = true
     // Timed service readback qualified; each calendar still requires separate time consent.

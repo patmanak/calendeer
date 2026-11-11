@@ -868,6 +868,72 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
         true
     }
 
+    /** Scheduling hint, not ownership evidence. Use a dedicated reader instance, never the
+     * coordinator's shared mutable admission guard. Include child tables and full dirty values:
+     * DIRTY alone cannot distinguish a new edit from an unchanged held event.
+     */
+    internal suspend fun providerDirtyFingerprint(scopes: List<CalendarScope>): ProviderDirtyFingerprint = operation {
+        try {
+            val hash = ProviderWakeDigest()
+            hash.text("provider-dirty-v1")
+            var dirty = 0
+            fun appendRows(uri: Uri, selection: String, args: Array<String>, eventRows: Boolean) {
+                requirePermissions()
+                resolver.query(uri, null, selection, args, "_id ASC")?.use { cursor ->
+                    val columns = cursor.columnNames.sorted()
+                    while (cursor.moveToNext()) {
+                        requirePermissions(); hash.row()
+                        if (eventRows) dirty++
+                        hash.text("ROW")
+                        for (column in columns) {
+                            val index = cursor.getColumnIndexOrThrow(column)
+                            hash.text(column)
+                            val type = cursor.getType(index)
+                            hash.text(type.toString())
+                            when (type) {
+                                android.database.Cursor.FIELD_TYPE_NULL -> Unit
+                                android.database.Cursor.FIELD_TYPE_BLOB -> hash.value(cursor.getBlob(index))
+                                android.database.Cursor.FIELD_TYPE_INTEGER -> hash.text(cursor.getLong(index).toString())
+                                android.database.Cursor.FIELD_TYPE_FLOAT -> hash.text(java.lang.Double.toHexString(cursor.getDouble(index)))
+                                else -> hash.text(cursor.getString(index))
+                            }
+                        }
+                    }
+                    hash.text("END")
+                } ?: fail(CalendarProjectionFailure.PROVIDER_UNAVAILABLE)
+            }
+            for (target in scopes.sortedWith(compareBy({ it.account.value }, { it.calendar.value }, { it.generation }))) {
+                requirePermissions()
+                hash.text(target.account.value); hash.text(target.calendar.value); hash.text(target.generation.toString())
+                val account = accountFor(target.account)
+                val calendar = calendarRow(target, account)
+                if (calendar == null) { hash.text("MISSING"); continue }
+                val selection = "${Events.CALENDAR_ID}=? AND (${Events.DIRTY}=1 OR ${Events.DELETED}=1)"
+                val args = arrayOf(calendar.toString())
+                appendRows(syncUri(Events.CONTENT_URI, account), selection, args, true)
+                // Read only children of this calendar's dirty events; no unrelated account content.
+                // Query each dirty parent's children through the public Provider API.
+                resolver.query(syncUri(Events.CONTENT_URI, account), arrayOf(Events._ID), selection, args,
+                    "${Events._ID} ASC")?.use { events ->
+                    while (events.moveToNext()) {
+                        val id = events.getLong(0).toString()
+                        hash.text("CHILDREN"); hash.text(id)
+                        for (table in listOf(Reminders.CONTENT_URI, Attendees.CONTENT_URI, ExtendedProperties.CONTENT_URI)) {
+                            hash.text(table.lastPathSegment.orEmpty())
+                            appendRows(syncUri(table, account), "event_id=?", arrayOf(id), false)
+                        }
+                    }
+                } ?: fail(CalendarProjectionFailure.PROVIDER_UNAVAILABLE)
+            }
+            requirePermissions()
+            ProviderDirtyFingerprint(hash.finish(), dirty)
+        } catch (_: ProviderWakeSnapshotLimit) {
+            // A large held row must not starve ordinary dirty events. Fall back to bounded
+            // paginated capture without caching a partial/constant content fingerprint.
+            ProviderDirtyFingerprint(null, 1)
+        }
+    }
+
     /** Metadata-only discovery. Durable jobs and qualified capture, not this locator, authorize work. */
     override suspend fun discoverSystemChanges(scope: CalendarScope, afterRow: Long, limit: Int): SystemCalendarChangePage = operation {
         require(afterRow >= 0 && limit in 1..100)

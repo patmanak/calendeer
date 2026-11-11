@@ -87,36 +87,47 @@ class SystemCreateController(
     private val cursors = this.context.getSharedPreferences("system-create-cursors", Context.MODE_PRIVATE)
     private var observing = false
     private val observer = object : ContentObserver(Handler(Looper.getMainLooper())) {
-        override fun onChange(selfChange: Boolean) { request() }
+        override fun onChange(selfChange: Boolean) {
+            // The durable URI watcher coalesces writes, including our own ACK/imports.
+            // This observer repairs its registration without scheduling a normal network run.
+            scope.launch {
+                try { updateObserver() }
+                catch (cancelled: CancellationException) { throw cancelled }
+                catch (_: Exception) { reportAttention(AttentionStage.OBSERVATION_SETUP) }
+            }
+        }
     }
 
     private data class ScopeSignal(val scope: CalendarScope, val selected: Boolean,
         val available: Boolean, val mode: Boolean)
     private data class Signal(val authenticated: Boolean, val permission: Boolean,
-        val selections: List<ScopeSignal>)
+        val selections: List<ScopeSignal>, val loaded: Boolean)
 
     fun start() {
         if (!started.compareAndSet(false, true)) return
         scope.launch {
             var previous: Signal? = null
             imports.state.map { current -> Signal(current.authenticated, current.hasPermission,
-                current.selections.map { ScopeSignal(it.scope, it.enabled, it.available, work.modeEnabled(it.scope)) }) }
+                current.selections.map { ScopeSignal(it.scope, it.enabled, it.available, work.modeEnabled(it.scope)) },
+                current.selectionsLoaded) }
                 .distinctUntilChanged().collect { signal ->
                     try {
-                        // Initial session/catalog hydration must preserve a restarted traversal.
-                        // A subsequently revoked selection abandons its old page position only.
-                        fun Signal.active() = if (authenticated && permission) selections
-                            .filter { it.selected && it.available && it.mode }.map { it.scope }.toSet()
-                            else emptySet()
-                        val revoked = previous?.active().orEmpty() - signal.active()
-                        previous = signal
-                        for (target in revoked) {
-                            resetEditingTraversal(target)
+                        observeCurrentCalendarSignal {
+                            // Initial session/catalog hydration must preserve a restarted traversal.
+                            // A subsequently revoked selection abandons its old page position only.
+                            fun Signal.active() = if (authenticated && permission) selections
+                                .filter { it.selected && it.available && it.mode }.map { it.scope }.toSet()
+                                else emptySet()
+                            val revoked = previous?.active().orEmpty() - signal.active()
+                            previous = signal
+                            for (target in revoked) {
+                                resetEditingTraversal(target)
+                            }
+                            updateObserver()
+                            imports.reconcileSystemCalendarAccess()
+                            publish()
+                            request()
                         }
-                        updateObserver()
-                        imports.reconcileSystemCalendarAccess()
-                        publish()
-                        request()
                     } catch (cancelled: CancellationException) { throw cancelled }
                     catch (_: Exception) { reportAttention(AttentionStage.OBSERVATION_SETUP) }
                 }
@@ -240,7 +251,7 @@ class SystemCreateController(
     }
 
     /** One bounded page per selected scope; unknown outcomes never cause immediate retry loops. */
-    suspend fun run(network: Boolean, fresh: Boolean = true): ImportRunResult = mutex.withLock {
+    suspend fun run(network: Boolean, fresh: Boolean = true, providerWake: Boolean = false): ImportRunResult = mutex.withLock {
         mutableState.update { it.copy(busy = true, failed = false) }
         var more = false
         var retry = false
@@ -355,7 +366,7 @@ class SystemCreateController(
                 for (retained in pending) {
                     if (!active(target, epoch)) break
                     if (retained.status == SystemCreateWorkStatus.UNSUPPORTED) continue
-                    if (process(retained, network, epoch)) retry = true
+                    if (process(retained, network, epoch, providerWake)) retry = true
                 }
                 if (!active(target, epoch)) continue
                 val after = pending.lastOrNull()?.row ?: 0
@@ -427,7 +438,7 @@ class SystemCreateController(
     }
 
     /** True requests backoff only for a known transient failure, never for UNKNOWN alone. */
-    private suspend fun process(retained: SystemCreateWork, network: Boolean, epoch: Long): Boolean {
+    private suspend fun process(retained: SystemCreateWork, network: Boolean, epoch: Long, providerWake: Boolean): Boolean {
         val target = retained.scope
         if (!active(target, epoch)) return false
         val priorAttempt = attempts.read(target, retained.attempt)
@@ -469,7 +480,7 @@ class SystemCreateController(
                 else -> { work.status(retained, SystemCreateWorkStatus.WAITING); return false }
             }
             if (!active(target, epoch)) return false
-            when (imports.resumePreparedLocalCreate(target, retained.localId, retained.captureId, retained.attempt, guarded)) {
+            when (imports.resumePreparedLocalCreate(target, retained.localId, retained.captureId, retained.attempt, guarded, allowPaused = !providerWake)) {
                 LocalCreateSubmissionResult.RETAINED -> Unit
                 LocalCreateSubmissionResult.UNAVAILABLE -> { work.status(retained, SystemCreateWorkStatus.WAITING); return true }
                 else -> { work.status(retained, SystemCreateWorkStatus.WAITING); return false }
@@ -552,7 +563,8 @@ class SystemCreateController(
             timeSupportAvailable = timeSupportAvailable, deletesEnabled = deletes, deleteSupportAvailable = deleteSupportAvailable, pending = pending) }
     }
 
-    @Synchronized private fun updateObserver() {
+    private val observationMutex = Mutex()
+    private suspend fun updateObserver(): Unit = observationMutex.withLock {
         val wanted = activeScopes().isNotEmpty()
         if (wanted && !observing) {
             context.contentResolver.registerContentObserver(CalendarContract.Events.CONTENT_URI, true, observer)
@@ -561,7 +573,11 @@ class SystemCreateController(
             context.contentResolver.unregisterContentObserver(observer)
             observing = false
         }
+        val app = context as? com.patmanak.proton.andcalendarbridge.BridgeApplication
+        if (app != null && imports.state.value.selectionsLoaded) app.providerWake.setEnabled(wanted)
     }
+
+    internal fun providerWakeScopes(): List<CalendarScope> = activeScopes()
 
     private fun cursor(target: CalendarScope, kind: String): Long = cursors.getLong(key(target, kind), 0)
     private fun saveCursor(target: CalendarScope, kind: String, row: Long) {

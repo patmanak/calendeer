@@ -556,7 +556,7 @@ class CreateAttemptStore(context: Context, name: String = "calendar-create-attem
     /** Fresh owner qualification may resume only this exact unsent captured payload.
      * UNKNOWN, generic parents and orphan provenance never regain a dispatch right.
      */
-    suspend fun resumeCapturedPrepared(submission: LocalCreateSubmission): Boolean {
+    suspend fun resumeCapturedPrepared(submission: LocalCreateSubmission, allowPaused: Boolean = true): Boolean {
         val link = CapturedCreateDispatchIdentity.of(submission)
         val expected = CreateAttemptRecord(link.attempt.id, link.attempt.scope, link.attempt.format, submission.protectedPayload)
         return access { db -> dispatchTransaction(db, expected.scope, { false }) {
@@ -573,6 +573,11 @@ class CreateAttemptStore(context: Context, name: String = "calendar-create-attem
                 })
                 db.insertOrThrow("captured_create_links", null, capturedValues(link))
             } else {
+                // A Provider notification cannot revoke a durable pause. Check in the same
+                // transaction as deletion/claim eligibility, not in a preflight read.
+                if (!allowPaused && db.query("create_pauses", arrayOf("mutation"), IDENTITY,
+                        identity(expected.scope, expected.id), null, null, null).use { it.count != 0 })
+                    return@dispatchTransaction false
                 if (parent != expected || readCapturedIdentity(db, expected.scope, expected.id, parent) != link ||
                     hasCapturedBinding(db, expected.scope, expected.id) || hasCapturedAttachment(db, expected.scope, expected.id))
                     return@dispatchTransaction false

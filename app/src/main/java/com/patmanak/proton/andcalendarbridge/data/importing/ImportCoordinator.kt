@@ -34,7 +34,8 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
 data class ImportUiState(val selections: List<ImportStore.Selection> = emptyList(),
-    val hasPermission: Boolean = false, val authenticated: Boolean = false, val busy: Boolean = false)
+    val hasPermission: Boolean = false, val authenticated: Boolean = false, val busy: Boolean = false,
+    val selectionsLoaded: Boolean = false)
 enum class CreateAssociationResult { INACTIVE, UNRESOLVED, WAITING_IMPORT, WAITING_PROVIDER, ASSOCIATED }
 enum class LocalEditCaptureResult { INACTIVE, UNQUALIFIED, RETAINED, CONFLICT, UNAVAILABLE }
 sealed interface RetainedLocalChangeListing {
@@ -1363,7 +1364,7 @@ class ImportCoordinator(
             catch (cancelled: CancellationException) { throw cancelled }
             catch (_: Exception) { /* Writes remain closed; the next explicit command retries initialization. */ }
         }
-        mutableState.value = ImportUiState(hasPermission = hasCalendarPermissions(), authenticated = value)
+        mutableState.value = ImportUiState(hasPermission = hasCalendarPermissions(), authenticated = value, selectionsLoaded = !value)
         if (!value) {
             scheduler.cancel()
         } else {
@@ -2194,7 +2195,8 @@ class ImportCoordinator(
 
     /** Opt-in automatic path requalifies the same unsent payload; UNKNOWN remains inspect-only. */
     suspend fun resumePreparedLocalCreate(target: CalendarScope, localId: LocalEventId, id: MutationId,
-        attempt: MutationId, port: CalendarCreateSubmissionPort): LocalCreateSubmissionResult = mutex.withLock {
+        attempt: MutationId, port: CalendarCreateSubmissionPort,
+        allowPaused: Boolean = true): LocalCreateSubmissionResult = mutex.withLock {
         val captures = localCreates ?: return@withLock LocalCreateSubmissionResult.UNRESOLVED
         val journal = creates ?: return@withLock LocalCreateSubmissionResult.UNRESOLVED
         ensureCreateLifecycle()
@@ -2236,7 +2238,7 @@ class ImportCoordinator(
             retainedLease = lease
             freshCapturedSubmissions[key] = lease
             journal.admitDispatch = { it == target && active() && freshCapturedSubmissions[key] == lease }
-            if (!journal.resumeCapturedPrepared(submission)) {
+            if (!journal.resumeCapturedPrepared(submission, allowPaused)) {
                 freshCapturedSubmissions.remove(key, lease)
                 return@withLock LocalCreateSubmissionResult.UNQUALIFIED
             }
@@ -3085,11 +3087,14 @@ class ImportCoordinator(
         }
     }
 
+    /** Session restoration is separate from resolved empty selections. No network is performed. */
+    internal suspend fun refreshProviderWakeState() = mutex.withLock { refreshState() }
+
     private suspend fun refreshState() {
         val expected = generation
         val account = if (authenticated) currentObservedAccount() else null
         val selections = if (account == null) emptyList() else store.selections(account)
         if (generation == expected) mutableState.value = state.value.copy(selections = selections,
-            authenticated = authenticated, hasPermission = hasCalendarPermissions())
+            authenticated = authenticated, hasPermission = hasCalendarPermissions(), selectionsLoaded = true)
     }
 }

@@ -39,6 +39,7 @@ import java.time.LocalDate
 import java.time.ZoneId
 import java.util.UUID
 import kotlinx.coroutines.runBlocking
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertNotNull
@@ -77,6 +78,31 @@ class LocalEditProviderDeviceTest {
             assertEquals("fixture local edit", field(row, Events.TITLE))
             assertEquals("1", field(row, Events.DIRTY))
             assertEquals(row, eventRow(calendar))
+        }
+    }
+
+    @Test fun wakeFingerprintTracksDirtyBodyAndRelatedRowsWithoutReadingCleanImports() = runBlocking {
+        withFixture { scope, calendar ->
+            projection.apply(ProjectionIntent(scope, timed()))
+            val row = eventRow(calendar)
+            val clean = projection.providerDirtyFingerprint(listOf(scope))
+            assertEquals(0, clean.dirtyRows)
+            dirty(scope, row)
+            val first = projection.providerDirtyFingerprint(listOf(scope))
+            assertEquals(1, first.dirtyRows)
+            assertNotNull(first.hash)
+            assertEquals(first.hash, projection.providerDirtyFingerprint(listOf(scope)).hash)
+            mutate(scope, row, ContentValues().apply { put(Events.TITLE, "fixture second dirty body") })
+            val second = projection.providerDirtyFingerprint(listOf(scope))
+            assertFalse("DIRTY remains set but body changed", first.hash == second.hash)
+            context.contentResolver.insert(syncUri(scope, Reminders.CONTENT_URI), ContentValues().apply {
+                put(Reminders.EVENT_ID, row); put(Reminders.METHOD, Reminders.METHOD_ALERT); put(Reminders.MINUTES, 15)
+            }) ?: error("Synthetic reminder insert failed")
+            assertFalse("Child rows affect wake deduplication",
+                second.hash == projection.providerDirtyFingerprint(listOf(scope)).hash)
+            mutate(scope, row, ContentValues().apply { put(Events.DIRTY, 0) })
+            assertEquals(0, projection.providerDirtyFingerprint(listOf(scope)).dirtyRows)
+            assertEquals(clean.hash, projection.providerDirtyFingerprint(listOf(scope)).hash)
         }
     }
 

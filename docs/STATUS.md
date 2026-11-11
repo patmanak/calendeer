@@ -25,6 +25,7 @@ uncertain writes are retained, never silently discarded or resent.
 | Interface | Violet deer identity; separate calendar/settings/login screens; eight languages and light/dark/system themes. Calendar options expose pending work, conflicts, independent write consent and the concurrent-write warning. The bridge has no event editor or reminder notifications. | [Design](DESIGN.md), [permissions](PERMISSIONS.md). System calendar apps deliver local reminders. |
 | Incoming sync | Scoped mirrors; paginated sealed staging, offline decode with retained keys, durable coverage and change-feed reconciliation. Near-term dates load first, then the wider horizon; compatible scans extend newly entered dates. | [Import](READ_ONLY_IMPORT.md), [behavior](SYNCHRONIZATION_BEHAVIOR.md). Gaps/deferred content stay visible; missing records are not deletion evidence. |
 | Incoming contents | Supported timed/all-day events, exclusive all-day end, text, event colors with calendar fallback, supported personal display reminders and read-only participants. Supported recurrence projection and exceptions have dedicated mapping rules. | [Recurrence](research/ANDROID_RECURRENCE.md), [projection](PROJECTION_REPRESENTATION.md). Unsupported/untrusted content is deferred. |
+| Background Android edits | Persistent one-shot URI watcher, explicitly rearmed before capture; bounded batching, scoped dirty-content deduplication, offline capture and network-constrained outgoing continuations. Existing per-calendar admissions apply; uncertain requests remain inspect-only and paused CREATEs stay paused. | [Scheduling](SYNC_SCHEDULING.md). One cold-process system-editor title journey passes on API 35; offline, bursts, reboot and other platforms remain separate qualification. No instant-delivery guarantee or new incoming cadence. |
 | Outgoing CREATE | System editor discovery, immutable offline capture, guarded Proton submission/readback, same-row acknowledgement and durable handoff. | [Local capture](LOCAL_CREATE_CAPTURE.md). Simple events only; reminders, guests, recurrence and custom colors remain outside the send profile. |
 | Outgoing title | Default-off option for title-only edits of qualified ordinary or fully handed-off created timed/all-day events. Durable request ownership, inspection and native/SQL completion. | [Title submission](TITLE_UPDATE_SUBMISSION.md). Known-empty details, no recurrence/color; other fields must stay unchanged. |
 | Outgoing text | Default-off description/location option, optionally with simultaneous title change. Separate capsules, wire/proofs, cursors and consent; raw CRLF intent is distinct from canonical LF readback. | [Text delivery](SHARED_TEXT_PREPARATION.md). Creation mode must be enabled; narrow simple-event profile, unchanged dates and metadata. |
@@ -44,7 +45,8 @@ visible as incomplete and is reobserved on a fresh refresh without clearing
 native flags or historical receipts. Completed text/time/deletion proofs remain
 retained outside the active staging budget. New local owners rearm only outgoing
 discovery before capture, including later native pages and restarted continuations;
-existing/uncertain owners never gain a new send or inspection attempt from this wake.
+this discovery-index rearm resets neither send ownership nor the separate
+inspection cursor of existing or uncertain requests.
 
 Synchronization attention offers Retry through the existing workers and expandable
 explanations; it does not change consent or reset requests. Closed `CalendeerSync`

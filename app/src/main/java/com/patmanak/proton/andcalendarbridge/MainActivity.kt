@@ -51,6 +51,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        (application as BridgeApplication).allowNormalScheduling()
         enableEdgeToEdge()
         val preferences = application as BridgeApplication
         val authentication = preferences.authentication

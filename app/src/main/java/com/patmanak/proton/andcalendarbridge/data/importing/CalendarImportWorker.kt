@@ -13,6 +13,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 class CalendarImportWorker(context: Context, parameters: WorkerParameters) : CoroutineWorker(context, parameters) {
     override suspend fun doWork(): Result {
         val app = applicationContext as BridgeApplication
+        app.allowNormalScheduling()
         val network = inputData.getBoolean("network", false)
         val result = executeImportWork(ready = { withContext(Dispatchers.Main.immediate) {
             val controller = app.authentication

@@ -72,6 +72,33 @@ class CapturedCreateAttemptStoreDeviceTest {
             SQLiteDatabase.OPEN_READWRITE).use(block)
     }
 
+    @Test fun providerWakeNeverLiftsADurableCreatePause() = fixture { context, name, store ->
+        val link = store.rememberCaptured(submission)
+        store.pausePrepared(CreatePauseReason.PROCESS_RESTART, target = scope)
+        assertFalse(store.resumeCapturedPrepared(submission, allowPaused = false))
+        assertEquals(CreatePauseReason.PROCESS_RESTART, store.pauseReason(scope, record().id))
+        assertEquals(record(), store.read(scope, record().id))
+        assertFalse(store.claimCaptured(record(), link))
+        store.close()
+        CreateAttemptStore(context, name).use { reopened ->
+            assertFalse(reopened.resumeCapturedPrepared(submission, allowPaused = false))
+            assertEquals(CreatePauseReason.PROCESS_RESTART, reopened.pauseReason(scope, record().id))
+            // The explicit normal qualification route retains its previous behavior.
+            assertTrue(reopened.resumeCapturedPrepared(submission))
+            assertNull(reopened.pauseReason(scope, record().id))
+            assertTrue(reopened.claimCaptured(record(), link))
+        }
+    }
+
+    @Test fun providerWakeCanAdmitAnUnpausedNewCreateOnlyOnce() = fixture { _, _, store ->
+        assertTrue(store.resumeCapturedPrepared(submission, allowPaused = false))
+        val link = CapturedCreateDispatchIdentity.of(submission)
+        assertTrue(store.claimCaptured(record(), link))
+        assertFalse(store.resumeCapturedPrepared(submission, allowPaused = false))
+        assertFalse(store.claimCaptured(record(), link))
+        assertEquals(record().copy(state = CreateAttemptState.OUTCOME_UNKNOWN), store.read(scope, record().id))
+    }
+
     @Test fun linkAndPreparedParentAreImmutableAndSurviveReopen() = fixture { context, name, store ->
         val wanted = CapturedCreateDispatchIdentity.of(submission)
         assertEquals(wanted, store.rememberCaptured(submission))

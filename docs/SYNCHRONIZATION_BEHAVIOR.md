@@ -71,7 +71,9 @@ counts remain separate from this record of queried dates.
 The provider and private database do not share a transaction. Capture a stable
 local identity, base remote revision/snapshot, changed fields and a local edit
 generation before scheduling an upload. Reconcile provider dirty/deleted state
-on restart and periodically; an observer only accelerates discovery. Qualify the
+on restart and periodically; a persistent URI watcher accelerates local discovery
+even without a running app process. See [scheduling](SYNC_SCHEDULING.md) for its
+batching, admissions, deduplication and qualification limits. Qualify the
 target provider's tombstone and sync-adapter behavior before enabling deletion.
 The [Android provider documentation](https://developer.android.com/identity/providers/calendar-provider)
 and [event columns](https://developer.android.com/reference/android/provider/CalendarContract.EventsColumns)

@@ -1,5 +1,40 @@
 # Validation
 
+## Persistent Android change wake
+
+The complete host suites pass 444 domain, 20 authentication, 922 backend and 256
+app tests, without failures or skips, plus debug lint and app/instrumentation
+builds. Twenty new app cases cover registration persistence/rearming, stale and
+concurrent signals, disabled observation, failed capture/handoff, unchanged dirty
+contents, uncached oversized snapshots and continuations, and observer survival
+after operation-lease revocation versus genuine coroutine cancellation.
+
+Four targeted tests pass on the enrolled API 35 device: paused CREATE refusal
+survives a store reopen, a new unpaused CREATE can be admitted once with UNKNOWN
+permanently protected, dirty body/reminder values change the real Provider
+fingerprint while clean rows do not, and restored writable selections have an
+actual system JobScheduler content trigger. The last witness originally timed
+out; an operation-lease cancellation was terminating the long-lived collector.
+Preserving that collector while propagating real cancellation makes the same
+unchanged-timeout device witness pass.
+
+An ordinary synthetic title edit in the installed calendar editor passes with
+Calendeer absent before Save and its package not force-stopped. ActivityManager
+also records the new application process starting after the Save interval.
+Normal import/periodic work history stays unchanged. The retained verified service
+completion, changed canonical revision, same clean native row and unchanged dates
+pass a subsequent read-only check. Capture and network passes finish within
+32.792 and 184.211 seconds of the pre-Save phone timestamp; the automation's Save
+interval spans 2.861 seconds. These are conservative whole-pass upper bounds,
+not per-request HTTP timings or delivery guarantees. Original calendar options
+are restored; the synthetic edited event remains available for inspection.
+
+Offline reconnection, twenty-edit bursts, large incoming
+imports, reboot, permission revocation and Samsung/Doze qualification remain
+separate device cases. The initial URI-to-local enqueue failure still needs normal
+startup/periodic catch-up; only the durably transferred local job retries without
+depending on a new content notification. See [scheduling](SYNC_SCHEDULING.md).
+
 ## Selected source-native aggregate
 
 The project-owned `android-golib:2.10.0-2-go1.27.1-16k-linux1` is built from

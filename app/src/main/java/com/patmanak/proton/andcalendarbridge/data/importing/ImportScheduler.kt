@@ -16,11 +16,15 @@ class WorkManagerImportScheduler(context: Context) : ImportScheduler {
     private val context = context.applicationContext
     private val manager get() = WorkManager.getInstance(context)
     override fun cancel() { manager.cancelAllWorkByTag(WORK_TAG) }
+    private val normalAllowed get() =
+        (context as? com.patmanak.proton.andcalendarbridge.BridgeApplication)?.normalSchedulingAllowed != false
     override fun requestLocal() {
+        if (!normalAllowed) return
         manager.enqueueUniqueWork(LOCAL_WORK, ExistingWorkPolicy.KEEP,
             OneTimeWorkRequestBuilder<CalendarImportWorker>().addTag(WORK_TAG).build())
     }
     override fun requestNetwork() {
+        if (!normalAllowed) return
         manager.enqueueUniqueWork(NETWORK_WORK, ExistingWorkPolicy.KEEP,
             OneTimeWorkRequestBuilder<CalendarImportWorker>()
                 .setInputData(workDataOf("network" to true))
@@ -34,6 +38,7 @@ class WorkManagerImportScheduler(context: Context) : ImportScheduler {
                 .addTag(WORK_TAG).build())
     }
     override fun continueWork(network: Boolean) {
+        if (!normalAllowed) return
         val request = OneTimeWorkRequestBuilder<CalendarImportWorker>()
             .setInputData(workDataOf("network" to network, "resume" to true)).addTag(WORK_TAG)
         if (network) request.setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
