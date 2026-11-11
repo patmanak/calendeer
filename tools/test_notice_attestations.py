@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+import zipfile
 
 from release_notices import bundle, capture, check, evidence_digest, sha
 
@@ -109,6 +110,36 @@ class NoticeAttestationTest(unittest.TestCase):
             package = captured["packages"][0]
             self.assertFalse(package["reviewed"])
             self.assertIn("no-release-artifact-explicit-verified-metadata-only-review-required", package["problems"])
+
+    def test_capture_reads_source_built_native_from_local_repository_and_retains_patents(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root, _, _ = self.fixture(folder)
+            version = "2.10.0-2-go1.27.1-16k-linux1"
+            group = "com.patmanak.calendeer.crypto"
+            coordinate = f"{group}:android-golib:{version}"
+            for module in ("app", "auth", "sync", "proton-auth"):
+                (root / module / "gradle.lockfile").write_text(coordinate + "=releaseRuntimeClasspath\n")
+            repository = root / "proton-auth/native/build/maven" / group.replace(".", "/") / "android-golib" / version
+            repository.mkdir(parents=True)
+            pom = repository / f"android-golib-{version}.pom"
+            pom.write_bytes(b'<project xmlns="http://maven.apache.org/POM/4.0.0"><packaging>aar</packaging>'
+                            b'<licenses><license><name>GPLv3</name></license></licenses></project>')
+            aar = pom.with_suffix(".aar")
+            with zipfile.ZipFile(aar, "w") as archive:
+                archive.writestr("legal/Go/PATENTS", b"Fixture patent grant")
+                archive.writestr("legal/saferith/LICENSE_go", b"Fixture BSD grant")
+            artifacts = "".join(f'<artifact name="{file.name}"><sha256 value="{sha(file.read_bytes())}"/></artifact>'
+                                for file in (pom, aar))
+            (root / "gradle/verification-metadata.xml").write_text(
+                f'<verification-metadata><components><component group="{group}" name="android-golib" '
+                f'version="{version}">{artifacts}</component></components></verification-metadata>')
+            captured = capture(root, root / "empty-cache", root / "captured.json")
+            entry = captured["packages"][0]
+            self.assertEqual([], entry["problems"])
+            self.assertEqual(sha(aar.read_bytes()), entry["artifacts"][0]["sha256"])
+            self.assertEqual({"Fixture patent grant", "Fixture BSD grant"},
+                             {(root / notice["file"]).read_text() for notice in entry["notices"]})
+            self.assertFalse(entry["reviewed"])
 
 
 if __name__ == "__main__":

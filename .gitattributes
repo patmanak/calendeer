@@ -6,6 +6,12 @@
 *.json text eol=lf
 *.py text eol=lf
 *.lockfile text eol=lf
+*.sh text eol=lf
+*.go text eol=lf
+*.mod text eol=lf
+*.sum text eol=lf
+*.pom text eol=lf
+gradle/version.properties text eol=lf
 gradlew text eol=lf
 gradlew.bat text eol=crlf
 proton-auth/licenses/biweekly.license -whitespace

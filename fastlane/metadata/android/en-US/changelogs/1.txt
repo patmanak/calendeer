@@ -1,0 +1,1 @@
+Development baseline: bridge selected Proton calendars to Android calendar apps. Read-only is the default; separate experimental options cover supported creation, title, description/location, date and deletion operations. This entry does not announce a published release.

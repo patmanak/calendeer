@@ -1,56 +1,548 @@
 {
   "schemaVersion": 1,
   "scope": "app:releaseRuntimeClasspath",
-  "lockSha256": "5e62cb9978f15cf1728bfd9ebaba32e117c3c609f6f001d5cb4977b825905b29",
+  "lockSha256": "f37b6c968b67ce3062e765109c0d576f0bfb1c2185f488f5a61562be275bc89b",
   "nativeSourceReview": {
-    "reviewed": false,
-    "reason": "Exact native dependency graph recovered and all25 module sums verified; pm-key-transparency-go-client v0.0.1 lacks a source license; generated root gobind build source/revision is not recorded in the binary.",
+    "reviewed": true,
+    "sourceRevision": "sha256:cc83a777182a25a2eabfad5036576dd8ff72d7873517a4a6470b96b369580a04",
+    "reviewEvidence": "Selected unmodified Proton crypto and current mobile binding sources reconstructed under the checked-in recipe. All 12 exact linked module archives independently recompute to embedded h1 sums; compatible source grants, additional notices and headers retained. Unused KT module and untraceable upstream aggregate root are not part of this replacement. Original aggregate evidence remains archived separately.",
     "buildMapping": {
-      "artifactSha256": "f64705f4ae14dde5c619d03a3a7fc2e8d747fb2803c4b5da01b0c38dac7884c9",
+      "artifactSha256": "41253b873c64e9dceec6c21b12d9a2e3a8152cb4f52957a67d43d9d77753171f",
+      "pomSha256": "3d87f9ed87559c39ee12252f94537a143472c2b9ee06980c53cf1f54661b87bb",
+      "sourceDescriptors": {
+        "go.mod": "1aa0b4ee39976d09b967a21e56911d8bfdf0c0f8724e7ca6ce034740a3ee9ce9",
+        "go.sum": "2e6ec8297605f1caea038ce48d4daa4420a4c279192fcb81c00a5d64cfff3b81",
+        "dependencies.go": "e766531b25cbb0b96155d8db40a4febfdd13f0f06947315121d4325a3672b615",
+        "build.ps1": "9178db31c7ed2c8decb4d82aedf32bb6c59ac272a97b9005fe0b66318c21318d",
+        "build.sh": "9f0f79f862c49323477aeaa9540aaa29f0fb287ab2c43d18d52c98e62401d0ab",
+        "package-aar.py": "ab3ee4a4aeb968853c35d0e43cfd40cb99f8d296ae94f475f6c1e81c387cdcb5",
+        "golib.pom": "3d87f9ed87559c39ee12252f94537a143472c2b9ee06980c53cf1f54661b87bb"
+      },
+      "upstreamReferenceSha256": "f64705f4ae14dde5c619d03a3a7fc2e8d747fb2803c4b5da01b0c38dac7884c9",
+      "publicJavaApiSha256": "aab64fa635f9a1fc0c6d6609bcb5a31b671578670082d3c196632c65494d8b55",
       "abis": [
         {
-          "path": "jni/armeabi-v7a/libgojni.so",
-          "sha256": "887446bc742535067944c3b1be9d8f31df94f6d0201f6f0dd2de40ecbeaf61fe",
-          "goVersion": "go1.23.12",
-          "buildInfo": "path\tgobind/gobind\nmod\tgobind\t(devel)\t\ndep\tfilippo.io/edwards25519\tv1.0.0-rc.1\th1:m0VOOB23frXZvAOK44usCgLWvtsxIoMCTBGJZlpmGfU=\ndep\tgithub.com/ProtonMail/bcrypt\tv0.0.0-20210511135022-227b4adcab57\th1:pHA4K54ifoogVLunGGHi3xyF5Nz4x+Uh3dJuy3NwGQQ=\ndep\tgithub.com/ProtonMail/go-crypto\tv1.4.1-proton\th1:I4nanwGUmEeu7bTP9pkVWBbebGaxGyeMPnPRKmL++DY=\ndep\tgithub.com/ProtonMail/go-ecvrf\tv0.0.1\th1:wv45+kZ0mG4G9oSTMjAlbgKqa4tPbNr4WLoCWqz5/bo=\ndep\tgithub.com/ProtonMail/go-mime\tv0.0.0-20230322103455-7d82a3887f2f\th1:tCbYj7/299ekTTXpdwKYF8eBlsYsDVoggDAuAjoK66k=\ndep\tgithub.com/ProtonMail/go-srp\tv0.0.7\th1:Sos3Qk+th4tQR64vsxGIxYpN3rdnG9Wf9K4ZloC1JrI=\ndep\tgithub.com/ProtonMail/gopenpgp/v2\tv2.10.0-proton\th1:d9EdXObucN2CNY1XGONJQH0+5q0q1+zTdxPhdF70C6w=\ndep\tgithub.com/ProtonMail/gopenpgp/v3\tv3.4.1-proton\th1:46o1vZSU7lYZTkaNO0ukWZxqneePs/NIwmptF8Q6l1c=\ndep\tgithub.com/ProtonMail/pm-key-transparency-go-client\tv0.0.1\th1:Vv74zVFkPgzGeCElvDO4t+/oHDyJAJ/XS42h7KTqdR4=\ndep\tgithub.com/cloudflare/circl\tv1.6.2\th1:hL7VBpHHKzrV5WTfHCaBsgx/HGbBYlgrwvNXEVDYYsQ=\ndep\tgithub.com/cronokirby/saferith\tv0.33.0\th1:TgoQlfsD4LIwx71+ChfRcIpjkw+RPOapDEVxa+LhwLo=\ndep\tgithub.com/golang/glog\tv0.0.0-20160126235308-23def4e6c14b\th1:VKtxabqXZkF25pY9ekfRL6a582T4P37/31XEstQ5p58=\ndep\tgithub.com/golang/mock\tv1.4.4\th1:l75CXGRSwbaYNpl/Z2X1XIIAMSCquvXgpVZDhwEIJsc=\ndep\tgithub.com/golang/protobuf\tv1.4.2\th1:+Z5KGCizgyZCbGh1KZqA0fcLLkwbsjIzS4aV2v7wJX0=\ndep\tgithub.com/google/certificate-transparency-go\tv1.1.1\th1:6JHXZhXEvilMcTjR4MGZn5KV0IRkcFl4CJx5iHVhjFE=\ndep\tgithub.com/google/trillian\tv1.3.11\th1:pPzJPkK06mvXId1LHEAJxIegGgHzzp/FUnycPYfoCMI=\ndep\tgithub.com/pkg/errors\tv0.9.1\th1:FEBLx1zS214owpjy7qsBeixbURkuhQAwrK5UwLGTwt4=\ndep\tgolang.org/x/crypto\tv0.41.0\th1:WKYxWedPGCTVVl5+WHSSrOBT0O8lx32+zxmHxijgXp4=\ndep\tgolang.org/x/mobile\tv0.0.0-20201217150744-e6ae53a27f4f\th1:kgfVkAEEQXXQ0qc6dH7n6y37NAYmTFmz0YRwrRjgxKw=\ndep\tgolang.org/x/net\tv0.42.0\th1:jzkYrhi3YQWD6MLBJcsklgQsoAcw89EcZbJw8Z614hs=\ndep\tgolang.org/x/sys\tv0.35.0\th1:vz1N37gP5bs89s7He8XuIYXpyY0+QlsKmzipCbUtyxI=\ndep\tgolang.org/x/text\tv0.28.0\th1:rhazDwis8INMIwQ4tpjLDzUhx6RlXqZNPEM0huQojng=\ndep\tgoogle.golang.org/genproto\tv0.0.0-20200707001353-8e8330bf89df\th1:HWF6nM8ruGdu1K8IXFR+i2oT3YP+iBfZzCbC9zUfcWo=\ndep\tgoogle.golang.org/grpc\tv1.29.1\th1:EC2SB8S04d2r73uptxphDSUG+kTKVgjRPF+N3xpxRB4=\ndep\tgoogle.golang.org/protobuf\tv1.25.0\th1:Ejskq+SyPohKW+1uil0JJMtmHCgJPJ/qWTxr8qp+R4c=\nbuild\t-buildmode=c-shared\nbuild\t-compiler=gc\nbuild\t-tags=mobile\nbuild\t-trimpath=true\nbuild\tCGO_ENABLED=1\nbuild\tGOARCH=arm\nbuild\tGOOS=android\nbuild\tGOARM=7\n"
+          "entry": "jni/arm64-v8a/libgojni.so",
+          "sha256": "7d7d025089bd929db56a734bc1ff9cc1e1e7fcf4bb57dc585648089001057622",
+          "go": "1.27.1",
+          "minimum_load_alignment": 16384,
+          "relro_16k_compatible": true
         },
         {
-          "path": "jni/arm64-v8a/libgojni.so",
-          "sha256": "92e70099f0bcf4d4b21f41d1a88032b3aaf8a95528040b185bfe479ea2994e3e",
-          "goVersion": "go1.23.12",
-          "buildInfo": "path\tgobind/gobind\nmod\tgobind\t(devel)\t\ndep\tfilippo.io/edwards25519\tv1.0.0-rc.1\th1:m0VOOB23frXZvAOK44usCgLWvtsxIoMCTBGJZlpmGfU=\ndep\tgithub.com/ProtonMail/bcrypt\tv0.0.0-20210511135022-227b4adcab57\th1:pHA4K54ifoogVLunGGHi3xyF5Nz4x+Uh3dJuy3NwGQQ=\ndep\tgithub.com/ProtonMail/go-crypto\tv1.4.1-proton\th1:I4nanwGUmEeu7bTP9pkVWBbebGaxGyeMPnPRKmL++DY=\ndep\tgithub.com/ProtonMail/go-ecvrf\tv0.0.1\th1:wv45+kZ0mG4G9oSTMjAlbgKqa4tPbNr4WLoCWqz5/bo=\ndep\tgithub.com/ProtonMail/go-mime\tv0.0.0-20230322103455-7d82a3887f2f\th1:tCbYj7/299ekTTXpdwKYF8eBlsYsDVoggDAuAjoK66k=\ndep\tgithub.com/ProtonMail/go-srp\tv0.0.7\th1:Sos3Qk+th4tQR64vsxGIxYpN3rdnG9Wf9K4ZloC1JrI=\ndep\tgithub.com/ProtonMail/gopenpgp/v2\tv2.10.0-proton\th1:d9EdXObucN2CNY1XGONJQH0+5q0q1+zTdxPhdF70C6w=\ndep\tgithub.com/ProtonMail/gopenpgp/v3\tv3.4.1-proton\th1:46o1vZSU7lYZTkaNO0ukWZxqneePs/NIwmptF8Q6l1c=\ndep\tgithub.com/ProtonMail/pm-key-transparency-go-client\tv0.0.1\th1:Vv74zVFkPgzGeCElvDO4t+/oHDyJAJ/XS42h7KTqdR4=\ndep\tgithub.com/cloudflare/circl\tv1.6.2\th1:hL7VBpHHKzrV5WTfHCaBsgx/HGbBYlgrwvNXEVDYYsQ=\ndep\tgithub.com/cronokirby/saferith\tv0.33.0\th1:TgoQlfsD4LIwx71+ChfRcIpjkw+RPOapDEVxa+LhwLo=\ndep\tgithub.com/golang/glog\tv0.0.0-20160126235308-23def4e6c14b\th1:VKtxabqXZkF25pY9ekfRL6a582T4P37/31XEstQ5p58=\ndep\tgithub.com/golang/mock\tv1.4.4\th1:l75CXGRSwbaYNpl/Z2X1XIIAMSCquvXgpVZDhwEIJsc=\ndep\tgithub.com/golang/protobuf\tv1.4.2\th1:+Z5KGCizgyZCbGh1KZqA0fcLLkwbsjIzS4aV2v7wJX0=\ndep\tgithub.com/google/certificate-transparency-go\tv1.1.1\th1:6JHXZhXEvilMcTjR4MGZn5KV0IRkcFl4CJx5iHVhjFE=\ndep\tgithub.com/google/trillian\tv1.3.11\th1:pPzJPkK06mvXId1LHEAJxIegGgHzzp/FUnycPYfoCMI=\ndep\tgithub.com/pkg/errors\tv0.9.1\th1:FEBLx1zS214owpjy7qsBeixbURkuhQAwrK5UwLGTwt4=\ndep\tgolang.org/x/crypto\tv0.41.0\th1:WKYxWedPGCTVVl5+WHSSrOBT0O8lx32+zxmHxijgXp4=\ndep\tgolang.org/x/mobile\tv0.0.0-20201217150744-e6ae53a27f4f\th1:kgfVkAEEQXXQ0qc6dH7n6y37NAYmTFmz0YRwrRjgxKw=\ndep\tgolang.org/x/net\tv0.42.0\th1:jzkYrhi3YQWD6MLBJcsklgQsoAcw89EcZbJw8Z614hs=\ndep\tgolang.org/x/sys\tv0.35.0\th1:vz1N37gP5bs89s7He8XuIYXpyY0+QlsKmzipCbUtyxI=\ndep\tgolang.org/x/text\tv0.28.0\th1:rhazDwis8INMIwQ4tpjLDzUhx6RlXqZNPEM0huQojng=\ndep\tgoogle.golang.org/genproto\tv0.0.0-20200707001353-8e8330bf89df\th1:HWF6nM8ruGdu1K8IXFR+i2oT3YP+iBfZzCbC9zUfcWo=\ndep\tgoogle.golang.org/grpc\tv1.29.1\th1:EC2SB8S04d2r73uptxphDSUG+kTKVgjRPF+N3xpxRB4=\ndep\tgoogle.golang.org/protobuf\tv1.25.0\th1:Ejskq+SyPohKW+1uil0JJMtmHCgJPJ/qWTxr8qp+R4c=\nbuild\t-buildmode=c-shared\nbuild\t-compiler=gc\nbuild\t-tags=mobile\nbuild\t-trimpath=true\nbuild\tCGO_ENABLED=1\nbuild\tGOARCH=arm64\nbuild\tGOOS=android\nbuild\tGOARM64=v8.0\n"
+          "entry": "jni/armeabi-v7a/libgojni.so",
+          "sha256": "edf2f2c0ba9b81929e00f1aecedc7f36ed50a8e23d86ca5b98eecb6667adb584",
+          "go": "1.27.1",
+          "minimum_load_alignment": 16384,
+          "relro_16k_compatible": true
         },
         {
-          "path": "jni/x86/libgojni.so",
-          "sha256": "8385948389276baeae720b4a04906fdeeef3923b0bea583d68d54c60ecf1d728",
-          "goVersion": "go1.23.12",
-          "buildInfo": "path\tgobind/gobind\nmod\tgobind\t(devel)\t\ndep\tfilippo.io/edwards25519\tv1.0.0-rc.1\th1:m0VOOB23frXZvAOK44usCgLWvtsxIoMCTBGJZlpmGfU=\ndep\tgithub.com/ProtonMail/bcrypt\tv0.0.0-20210511135022-227b4adcab57\th1:pHA4K54ifoogVLunGGHi3xyF5Nz4x+Uh3dJuy3NwGQQ=\ndep\tgithub.com/ProtonMail/go-crypto\tv1.4.1-proton\th1:I4nanwGUmEeu7bTP9pkVWBbebGaxGyeMPnPRKmL++DY=\ndep\tgithub.com/ProtonMail/go-ecvrf\tv0.0.1\th1:wv45+kZ0mG4G9oSTMjAlbgKqa4tPbNr4WLoCWqz5/bo=\ndep\tgithub.com/ProtonMail/go-mime\tv0.0.0-20230322103455-7d82a3887f2f\th1:tCbYj7/299ekTTXpdwKYF8eBlsYsDVoggDAuAjoK66k=\ndep\tgithub.com/ProtonMail/go-srp\tv0.0.7\th1:Sos3Qk+th4tQR64vsxGIxYpN3rdnG9Wf9K4ZloC1JrI=\ndep\tgithub.com/ProtonMail/gopenpgp/v2\tv2.10.0-proton\th1:d9EdXObucN2CNY1XGONJQH0+5q0q1+zTdxPhdF70C6w=\ndep\tgithub.com/ProtonMail/gopenpgp/v3\tv3.4.1-proton\th1:46o1vZSU7lYZTkaNO0ukWZxqneePs/NIwmptF8Q6l1c=\ndep\tgithub.com/ProtonMail/pm-key-transparency-go-client\tv0.0.1\th1:Vv74zVFkPgzGeCElvDO4t+/oHDyJAJ/XS42h7KTqdR4=\ndep\tgithub.com/cloudflare/circl\tv1.6.2\th1:hL7VBpHHKzrV5WTfHCaBsgx/HGbBYlgrwvNXEVDYYsQ=\ndep\tgithub.com/cronokirby/saferith\tv0.33.0\th1:TgoQlfsD4LIwx71+ChfRcIpjkw+RPOapDEVxa+LhwLo=\ndep\tgithub.com/golang/glog\tv0.0.0-20160126235308-23def4e6c14b\th1:VKtxabqXZkF25pY9ekfRL6a582T4P37/31XEstQ5p58=\ndep\tgithub.com/golang/mock\tv1.4.4\th1:l75CXGRSwbaYNpl/Z2X1XIIAMSCquvXgpVZDhwEIJsc=\ndep\tgithub.com/golang/protobuf\tv1.4.2\th1:+Z5KGCizgyZCbGh1KZqA0fcLLkwbsjIzS4aV2v7wJX0=\ndep\tgithub.com/google/certificate-transparency-go\tv1.1.1\th1:6JHXZhXEvilMcTjR4MGZn5KV0IRkcFl4CJx5iHVhjFE=\ndep\tgithub.com/google/trillian\tv1.3.11\th1:pPzJPkK06mvXId1LHEAJxIegGgHzzp/FUnycPYfoCMI=\ndep\tgithub.com/pkg/errors\tv0.9.1\th1:FEBLx1zS214owpjy7qsBeixbURkuhQAwrK5UwLGTwt4=\ndep\tgolang.org/x/crypto\tv0.41.0\th1:WKYxWedPGCTVVl5+WHSSrOBT0O8lx32+zxmHxijgXp4=\ndep\tgolang.org/x/mobile\tv0.0.0-20201217150744-e6ae53a27f4f\th1:kgfVkAEEQXXQ0qc6dH7n6y37NAYmTFmz0YRwrRjgxKw=\ndep\tgolang.org/x/net\tv0.42.0\th1:jzkYrhi3YQWD6MLBJcsklgQsoAcw89EcZbJw8Z614hs=\ndep\tgolang.org/x/sys\tv0.35.0\th1:vz1N37gP5bs89s7He8XuIYXpyY0+QlsKmzipCbUtyxI=\ndep\tgolang.org/x/text\tv0.28.0\th1:rhazDwis8INMIwQ4tpjLDzUhx6RlXqZNPEM0huQojng=\ndep\tgoogle.golang.org/genproto\tv0.0.0-20200707001353-8e8330bf89df\th1:HWF6nM8ruGdu1K8IXFR+i2oT3YP+iBfZzCbC9zUfcWo=\ndep\tgoogle.golang.org/grpc\tv1.29.1\th1:EC2SB8S04d2r73uptxphDSUG+kTKVgjRPF+N3xpxRB4=\ndep\tgoogle.golang.org/protobuf\tv1.25.0\th1:Ejskq+SyPohKW+1uil0JJMtmHCgJPJ/qWTxr8qp+R4c=\nbuild\t-buildmode=c-shared\nbuild\t-compiler=gc\nbuild\t-tags=mobile\nbuild\t-trimpath=true\nbuild\tCGO_ENABLED=1\nbuild\tGOARCH=386\nbuild\tGOOS=android\nbuild\tGO386=sse2\n"
+          "entry": "jni/x86/libgojni.so",
+          "sha256": "f3331014c34603fdbc8cefe06eefc1f2e29b427b9fe6025b281d5d3c8d67edd0",
+          "go": "1.27.1",
+          "minimum_load_alignment": 16384,
+          "relro_16k_compatible": true
         },
         {
-          "path": "jni/x86_64/libgojni.so",
-          "sha256": "1b4c00b51fdde590671ade2fa3d5adf744fe15b2ba324c1b4e2cf1a393dde1f5",
-          "goVersion": "go1.23.12",
-          "buildInfo": "path\tgobind/gobind\nmod\tgobind\t(devel)\t\ndep\tfilippo.io/edwards25519\tv1.0.0-rc.1\th1:m0VOOB23frXZvAOK44usCgLWvtsxIoMCTBGJZlpmGfU=\ndep\tgithub.com/ProtonMail/bcrypt\tv0.0.0-20210511135022-227b4adcab57\th1:pHA4K54ifoogVLunGGHi3xyF5Nz4x+Uh3dJuy3NwGQQ=\ndep\tgithub.com/ProtonMail/go-crypto\tv1.4.1-proton\th1:I4nanwGUmEeu7bTP9pkVWBbebGaxGyeMPnPRKmL++DY=\ndep\tgithub.com/ProtonMail/go-ecvrf\tv0.0.1\th1:wv45+kZ0mG4G9oSTMjAlbgKqa4tPbNr4WLoCWqz5/bo=\ndep\tgithub.com/ProtonMail/go-mime\tv0.0.0-20230322103455-7d82a3887f2f\th1:tCbYj7/299ekTTXpdwKYF8eBlsYsDVoggDAuAjoK66k=\ndep\tgithub.com/ProtonMail/go-srp\tv0.0.7\th1:Sos3Qk+th4tQR64vsxGIxYpN3rdnG9Wf9K4ZloC1JrI=\ndep\tgithub.com/ProtonMail/gopenpgp/v2\tv2.10.0-proton\th1:d9EdXObucN2CNY1XGONJQH0+5q0q1+zTdxPhdF70C6w=\ndep\tgithub.com/ProtonMail/gopenpgp/v3\tv3.4.1-proton\th1:46o1vZSU7lYZTkaNO0ukWZxqneePs/NIwmptF8Q6l1c=\ndep\tgithub.com/ProtonMail/pm-key-transparency-go-client\tv0.0.1\th1:Vv74zVFkPgzGeCElvDO4t+/oHDyJAJ/XS42h7KTqdR4=\ndep\tgithub.com/cloudflare/circl\tv1.6.2\th1:hL7VBpHHKzrV5WTfHCaBsgx/HGbBYlgrwvNXEVDYYsQ=\ndep\tgithub.com/cronokirby/saferith\tv0.33.0\th1:TgoQlfsD4LIwx71+ChfRcIpjkw+RPOapDEVxa+LhwLo=\ndep\tgithub.com/golang/glog\tv0.0.0-20160126235308-23def4e6c14b\th1:VKtxabqXZkF25pY9ekfRL6a582T4P37/31XEstQ5p58=\ndep\tgithub.com/golang/mock\tv1.4.4\th1:l75CXGRSwbaYNpl/Z2X1XIIAMSCquvXgpVZDhwEIJsc=\ndep\tgithub.com/golang/protobuf\tv1.4.2\th1:+Z5KGCizgyZCbGh1KZqA0fcLLkwbsjIzS4aV2v7wJX0=\ndep\tgithub.com/google/certificate-transparency-go\tv1.1.1\th1:6JHXZhXEvilMcTjR4MGZn5KV0IRkcFl4CJx5iHVhjFE=\ndep\tgithub.com/google/trillian\tv1.3.11\th1:pPzJPkK06mvXId1LHEAJxIegGgHzzp/FUnycPYfoCMI=\ndep\tgithub.com/pkg/errors\tv0.9.1\th1:FEBLx1zS214owpjy7qsBeixbURkuhQAwrK5UwLGTwt4=\ndep\tgolang.org/x/crypto\tv0.41.0\th1:WKYxWedPGCTVVl5+WHSSrOBT0O8lx32+zxmHxijgXp4=\ndep\tgolang.org/x/mobile\tv0.0.0-20201217150744-e6ae53a27f4f\th1:kgfVkAEEQXXQ0qc6dH7n6y37NAYmTFmz0YRwrRjgxKw=\ndep\tgolang.org/x/net\tv0.42.0\th1:jzkYrhi3YQWD6MLBJcsklgQsoAcw89EcZbJw8Z614hs=\ndep\tgolang.org/x/sys\tv0.35.0\th1:vz1N37gP5bs89s7He8XuIYXpyY0+QlsKmzipCbUtyxI=\ndep\tgolang.org/x/text\tv0.28.0\th1:rhazDwis8INMIwQ4tpjLDzUhx6RlXqZNPEM0huQojng=\ndep\tgoogle.golang.org/genproto\tv0.0.0-20200707001353-8e8330bf89df\th1:HWF6nM8ruGdu1K8IXFR+i2oT3YP+iBfZzCbC9zUfcWo=\ndep\tgoogle.golang.org/grpc\tv1.29.1\th1:EC2SB8S04d2r73uptxphDSUG+kTKVgjRPF+N3xpxRB4=\ndep\tgoogle.golang.org/protobuf\tv1.25.0\th1:Ejskq+SyPohKW+1uil0JJMtmHCgJPJ/qWTxr8qp+R4c=\nbuild\t-buildmode=c-shared\nbuild\t-compiler=gc\nbuild\t-tags=mobile\nbuild\t-trimpath=true\nbuild\tCGO_ENABLED=1\nbuild\tGOARCH=amd64\nbuild\tGOOS=android\nbuild\tGOAMD64=v1\n"
+          "entry": "jni/x86_64/libgojni.so",
+          "sha256": "e14207416d14dc88c1e7b693e083f5f7749725fe11a1aac21d968a452e8ec4a0",
+          "go": "1.27.1",
+          "minimum_load_alignment": 16384,
+          "relro_16k_compatible": true
         }
-      ]
+      ],
+      "modules": [
+        {
+          "path": "github.com/ProtonMail/bcrypt",
+          "version": "v0.0.0-20210511135022-227b4adcab57",
+          "sum": "h1:pHA4K54ifoogVLunGGHi3xyF5Nz4x+Uh3dJuy3NwGQQ="
+        },
+        {
+          "path": "github.com/ProtonMail/go-crypto",
+          "version": "v1.4.1-proton",
+          "sum": "h1:I4nanwGUmEeu7bTP9pkVWBbebGaxGyeMPnPRKmL++DY="
+        },
+        {
+          "path": "github.com/ProtonMail/go-mime",
+          "version": "v0.0.0-20230322103455-7d82a3887f2f",
+          "sum": "h1:tCbYj7/299ekTTXpdwKYF8eBlsYsDVoggDAuAjoK66k="
+        },
+        {
+          "path": "github.com/ProtonMail/go-srp",
+          "version": "v0.0.7",
+          "sum": "h1:Sos3Qk+th4tQR64vsxGIxYpN3rdnG9Wf9K4ZloC1JrI="
+        },
+        {
+          "path": "github.com/ProtonMail/gopenpgp/v2",
+          "version": "v2.10.0-proton",
+          "sum": "h1:d9EdXObucN2CNY1XGONJQH0+5q0q1+zTdxPhdF70C6w="
+        },
+        {
+          "path": "github.com/cloudflare/circl",
+          "version": "v1.6.2",
+          "sum": "h1:hL7VBpHHKzrV5WTfHCaBsgx/HGbBYlgrwvNXEVDYYsQ="
+        },
+        {
+          "path": "github.com/cronokirby/saferith",
+          "version": "v0.33.0",
+          "sum": "h1:TgoQlfsD4LIwx71+ChfRcIpjkw+RPOapDEVxa+LhwLo="
+        },
+        {
+          "path": "github.com/pkg/errors",
+          "version": "v0.9.1",
+          "sum": "h1:FEBLx1zS214owpjy7qsBeixbURkuhQAwrK5UwLGTwt4="
+        },
+        {
+          "path": "golang.org/x/crypto",
+          "version": "v0.41.0",
+          "sum": "h1:WKYxWedPGCTVVl5+WHSSrOBT0O8lx32+zxmHxijgXp4="
+        },
+        {
+          "path": "golang.org/x/mobile",
+          "version": "v0.0.0-20260908204917-8b95e45f8d3e",
+          "sum": "h1:zYnHsDmxfxKH/x9DjYNAdoIdMsP8enB1Ncb10b3pdHk="
+        },
+        {
+          "path": "golang.org/x/sys",
+          "version": "v0.48.0",
+          "sum": "h1:bbX/i/6MgT9BVLM9RT1thmxL04yeTAhbEz4SyadbXoo="
+        },
+        {
+          "path": "golang.org/x/text",
+          "version": "v0.28.0",
+          "sum": "h1:rhazDwis8INMIwQ4tpjLDzUhx6RlXqZNPEM0huQojng="
+        }
+      ],
+      "recipe": "proton-auth/native/golib/build.sh",
+      "apiScope": "Every public com.proton class and method except the omitted ktclient subtree, compared per declaring class; API identity is not runtime qualification.",
+      "reproducibility": "Two independent Linux source/work/module/compiler-cache builds with identical final AAR/POM; packaging corrections applied separately to their independently compiled libraries."
     },
-    "reviewEvidence": "Go inline build info embedded in all4 pinned ELF libraries agrees on 25 dependencies and exact Go module h1 sums; downloaded versioned module archives recompute to those sums.",
+    "dependencies": [
+      {
+        "coordinate": "github.com/ProtonMail/bcrypt@v0.0.0-20210511135022-227b4adcab57",
+        "licenseExpression": "BSD-3-Clause",
+        "reviewed": true,
+        "reviewEvidence": {
+          "module": "github.com/ProtonMail/bcrypt",
+          "version": "v0.0.0-20210511135022-227b4adcab57",
+          "goSum": "h1:pHA4K54ifoogVLunGGHi3xyF5Nz4x+Uh3dJuy3NwGQQ=",
+          "url": "https://proxy.golang.org/github.com/!proton!mail/bcrypt/@v/v0.0.0-20210511135022-227b4adcab57.zip",
+          "sha256": "1d1863b5730eaae0b67c20af78e1cf4fe8eb2a8a207a24df7350472385281dce",
+          "goSumVerified": true,
+          "basis": "Exact archive h1 recomputed and linked graph checked across four ABIs; source grants, supplementary notices and copyright headers preserved. x/mobile OpenGL Khronos MIT notice is retained conservatively with the complete module notices."
+        },
+        "notices": [
+          {
+            "origin": "https://proxy.golang.org/github.com/!proton!mail/bcrypt/@v/v0.0.0-20210511135022-227b4adcab57.zip!/github.com/ProtonMail/bcrypt@v0.0.0-20210511135022-227b4adcab57/LICENSE",
+            "file": "dependency-notices/da4b77ea67eea3548aac445741cd70cfbd87e2a5bcbb03a2bb85abda0e2fa3c1.txt",
+            "sha256": "da4b77ea67eea3548aac445741cd70cfbd87e2a5bcbb03a2bb85abda0e2fa3c1"
+          },
+          {
+            "origin": "https://proxy.golang.org/github.com/!proton!mail/bcrypt/@v/v0.0.0-20210511135022-227b4adcab57.zip!/copyright-headers",
+            "file": "dependency-notices/9793fc237364b9bb3eed0b3e190e6d48635a80a989db4515ece7af937dc1770e.txt",
+            "sha256": "9793fc237364b9bb3eed0b3e190e6d48635a80a989db4515ece7af937dc1770e"
+          }
+        ],
+        "problems": [],
+        "reviewAttestation": {
+          "sha256": "eb118d965ec66d48f487787bbaac563c866f5f0deb4eec7d496058c0de1a60e5",
+          "basis": "Source grants reviewed against exact linked module archives; unchanged grants retain prior evidence and all notices."
+        }
+      },
+      {
+        "coordinate": "github.com/ProtonMail/go-crypto@v1.4.1-proton",
+        "licenseExpression": "BSD-3-Clause",
+        "reviewed": true,
+        "reviewEvidence": {
+          "module": "github.com/ProtonMail/go-crypto",
+          "version": "v1.4.1-proton",
+          "goSum": "h1:I4nanwGUmEeu7bTP9pkVWBbebGaxGyeMPnPRKmL++DY=",
+          "url": "https://proxy.golang.org/github.com/!proton!mail/go-crypto/@v/v1.4.1-proton.zip",
+          "sha256": "88477259036cc73b735a2e3bae409e8edf85df4e1432fb276b67fafebc004fd6",
+          "goSumVerified": true,
+          "basis": "Exact archive h1 recomputed and linked graph checked across four ABIs; source grants, supplementary notices and copyright headers preserved. x/mobile OpenGL Khronos MIT notice is retained conservatively with the complete module notices."
+        },
+        "notices": [
+          {
+            "origin": "https://proxy.golang.org/github.com/!proton!mail/go-crypto/@v/v1.4.1-proton.zip!/github.com/ProtonMail/go-crypto@v1.4.1-proton/AUTHORS",
+            "file": "dependency-notices/5aa3167c44245f0b12b27195d85c6a8c8e067cfdd511059daa4d7b3c5b232129.txt",
+            "sha256": "5aa3167c44245f0b12b27195d85c6a8c8e067cfdd511059daa4d7b3c5b232129"
+          },
+          {
+            "origin": "https://proxy.golang.org/github.com/!proton!mail/go-crypto/@v/v1.4.1-proton.zip!/github.com/ProtonMail/go-crypto@v1.4.1-proton/LICENSE",
+            "file": "dependency-notices/2d36597f7117c38b006835ae7f537487207d8ec407aa9d9980794b2030cbc067.txt",
+            "sha256": "2d36597f7117c38b006835ae7f537487207d8ec407aa9d9980794b2030cbc067"
+          },
+          {
+            "origin": "https://proxy.golang.org/github.com/!proton!mail/go-crypto/@v/v1.4.1-proton.zip!/github.com/ProtonMail/go-crypto@v1.4.1-proton/PATENTS",
+            "file": "dependency-notices/96f408bfae65bf137fc2525d3ecb030271c50c1e90799f87abf8846d8dd505cc.txt",
+            "sha256": "96f408bfae65bf137fc2525d3ecb030271c50c1e90799f87abf8846d8dd505cc"
+          },
+          {
+            "origin": "https://proxy.golang.org/github.com/!proton!mail/go-crypto/@v/v1.4.1-proton.zip!/copyright-headers",
+            "file": "dependency-notices/c1f5969de383753d0664c9e420ada8cba0e6c0580914bcd8f2a6909dbf7f76ce.txt",
+            "sha256": "c1f5969de383753d0664c9e420ada8cba0e6c0580914bcd8f2a6909dbf7f76ce"
+          }
+        ],
+        "problems": [],
+        "reviewAttestation": {
+          "sha256": "e49a04d1fde7c48f4ae183c082ade58f9f63615c0f00b4fb61ef5fc0dfb54c4a",
+          "basis": "Source grants reviewed against exact linked module archives; unchanged grants retain prior evidence and all notices."
+        }
+      },
+      {
+        "coordinate": "github.com/ProtonMail/go-mime@v0.0.0-20230322103455-7d82a3887f2f",
+        "licenseExpression": "MIT",
+        "reviewed": true,
+        "reviewEvidence": {
+          "module": "github.com/ProtonMail/go-mime",
+          "version": "v0.0.0-20230322103455-7d82a3887f2f",
+          "goSum": "h1:tCbYj7/299ekTTXpdwKYF8eBlsYsDVoggDAuAjoK66k=",
+          "url": "https://proxy.golang.org/github.com/!proton!mail/go-mime/@v/v0.0.0-20230322103455-7d82a3887f2f.zip",
+          "sha256": "89bf28de3cc4549f6982eb8431f33185d6be88eb6e1f165f2bfb69888fdf4ce0",
+          "goSumVerified": true,
+          "basis": "Exact archive h1 recomputed and linked graph checked across four ABIs; source grants, supplementary notices and copyright headers preserved. x/mobile OpenGL Khronos MIT notice is retained conservatively with the complete module notices."
+        },
+        "notices": [
+          {
+            "origin": "https://proxy.golang.org/github.com/!proton!mail/go-mime/@v/v0.0.0-20230322103455-7d82a3887f2f.zip!/github.com/ProtonMail/go-mime@v0.0.0-20230322103455-7d82a3887f2f/LICENSE",
+            "file": "dependency-notices/503bdcb689e2033376caa35eb66f170920221e96706da77be941804bc4f36422.txt",
+            "sha256": "503bdcb689e2033376caa35eb66f170920221e96706da77be941804bc4f36422"
+          }
+        ],
+        "problems": [],
+        "reviewAttestation": {
+          "sha256": "52ad27bd7c451bfdcbb717f0688b119fdadefbd53e1fedacef7ac01aaa0eb9d6",
+          "basis": "Source grants reviewed against exact linked module archives; unchanged grants retain prior evidence and all notices."
+        }
+      },
+      {
+        "coordinate": "github.com/ProtonMail/go-srp@v0.0.7",
+        "licenseExpression": "MIT",
+        "reviewed": true,
+        "reviewEvidence": {
+          "module": "github.com/ProtonMail/go-srp",
+          "version": "v0.0.7",
+          "goSum": "h1:Sos3Qk+th4tQR64vsxGIxYpN3rdnG9Wf9K4ZloC1JrI=",
+          "url": "https://proxy.golang.org/github.com/!proton!mail/go-srp/@v/v0.0.7.zip",
+          "sha256": "aaac72038a9ee29162137acf24e1c17ef0c2601d5fcaefd434c3da57be4471b8",
+          "goSumVerified": true,
+          "basis": "Exact archive h1 recomputed and linked graph checked across four ABIs; source grants, supplementary notices and copyright headers preserved. x/mobile OpenGL Khronos MIT notice is retained conservatively with the complete module notices."
+        },
+        "notices": [
+          {
+            "origin": "https://proxy.golang.org/github.com/!proton!mail/go-srp/@v/v0.0.7.zip!/github.com/ProtonMail/go-srp@v0.0.7/LICENSE.txt",
+            "file": "dependency-notices/7b3f092184869028bb9706f902c60e45fe53bbad504fa8fefa54e9119d0571a0.txt",
+            "sha256": "7b3f092184869028bb9706f902c60e45fe53bbad504fa8fefa54e9119d0571a0"
+          },
+          {
+            "origin": "https://proxy.golang.org/github.com/!proton!mail/go-srp/@v/v0.0.7.zip!/copyright-headers",
+            "file": "dependency-notices/ba3337b4de334ce9ba100413b15b34066aba56326fb4170ab68d89c7205c15f2.txt",
+            "sha256": "ba3337b4de334ce9ba100413b15b34066aba56326fb4170ab68d89c7205c15f2"
+          }
+        ],
+        "problems": [],
+        "reviewAttestation": {
+          "sha256": "f97fb23248766c60a12f895fcfc7623daac00b6a40b7eff052d3a5ee589cee3f",
+          "basis": "Source grants reviewed against exact linked module archives; unchanged grants retain prior evidence and all notices."
+        }
+      },
+      {
+        "coordinate": "github.com/ProtonMail/gopenpgp/v2@v2.10.0-proton",
+        "licenseExpression": "MIT",
+        "reviewed": true,
+        "reviewEvidence": {
+          "module": "github.com/ProtonMail/gopenpgp/v2",
+          "version": "v2.10.0-proton",
+          "goSum": "h1:d9EdXObucN2CNY1XGONJQH0+5q0q1+zTdxPhdF70C6w=",
+          "url": "https://proxy.golang.org/github.com/!proton!mail/gopenpgp/v2/@v/v2.10.0-proton.zip",
+          "sha256": "671f8e6cc670b92ed65e3344b7bfd79816b17820fee12ee3eac2d090175081ae",
+          "goSumVerified": true,
+          "basis": "Exact archive h1 recomputed and linked graph checked across four ABIs; source grants, supplementary notices and copyright headers preserved. x/mobile OpenGL Khronos MIT notice is retained conservatively with the complete module notices."
+        },
+        "notices": [
+          {
+            "origin": "https://proxy.golang.org/github.com/!proton!mail/gopenpgp/v2/@v/v2.10.0-proton.zip!/github.com/ProtonMail/gopenpgp/v2@v2.10.0-proton/LICENSE",
+            "file": "dependency-notices/503bdcb689e2033376caa35eb66f170920221e96706da77be941804bc4f36422.txt",
+            "sha256": "503bdcb689e2033376caa35eb66f170920221e96706da77be941804bc4f36422"
+          }
+        ],
+        "problems": [],
+        "reviewAttestation": {
+          "sha256": "cf079fa1f46c85b0d41a104bf9e201191e94f7e9b45b18d887419084269604b1",
+          "basis": "Source grants reviewed against exact linked module archives; unchanged grants retain prior evidence and all notices."
+        }
+      },
+      {
+        "coordinate": "github.com/cloudflare/circl@v1.6.2",
+        "licenseExpression": "BSD-3-Clause",
+        "reviewed": true,
+        "reviewEvidence": {
+          "module": "github.com/cloudflare/circl",
+          "version": "v1.6.2",
+          "goSum": "h1:hL7VBpHHKzrV5WTfHCaBsgx/HGbBYlgrwvNXEVDYYsQ=",
+          "url": "https://proxy.golang.org/github.com/cloudflare/circl/@v/v1.6.2.zip",
+          "sha256": "07400ed2808f2324faf1aeca9b5f5539de884d6820ad36453bcefbd96bfd7fc4",
+          "goSumVerified": true,
+          "basis": "Exact archive h1 recomputed and linked graph checked across four ABIs; source grants, supplementary notices and copyright headers preserved. x/mobile OpenGL Khronos MIT notice is retained conservatively with the complete module notices."
+        },
+        "notices": [
+          {
+            "origin": "https://proxy.golang.org/github.com/cloudflare/circl/@v/v1.6.2.zip!/github.com/cloudflare/circl@v1.6.2/LICENSE",
+            "file": "dependency-notices/b0da1764fe4d13d610b695536fc3f2ebc362482d053a1cd258e36975bc6b97a7.txt",
+            "sha256": "b0da1764fe4d13d610b695536fc3f2ebc362482d053a1cd258e36975bc6b97a7"
+          },
+          {
+            "origin": "https://proxy.golang.org/github.com/cloudflare/circl/@v/v1.6.2.zip!/github.com/cloudflare/circl@v1.6.2/ecc/p384/LICENSE",
+            "file": "dependency-notices/18951c084f68bce792efa2037685466628ebc1c67f4bff8b7147f3d5050e50a4.txt",
+            "sha256": "18951c084f68bce792efa2037685466628ebc1c67f4bff8b7147f3d5050e50a4"
+          },
+          {
+            "origin": "https://proxy.golang.org/github.com/cloudflare/circl/@v/v1.6.2.zip!/copyright-headers",
+            "file": "dependency-notices/5fbe6046490938f10a11000979c2b022c72c03b686cf613c53ceb91d01f26398.txt",
+            "sha256": "5fbe6046490938f10a11000979c2b022c72c03b686cf613c53ceb91d01f26398"
+          }
+        ],
+        "problems": [],
+        "reviewAttestation": {
+          "sha256": "41127a90d02e5e4e046230b9f1bcfcf53e169771f0ee7f12b0f8fa26b74e28a6",
+          "basis": "Source grants reviewed against exact linked module archives; unchanged grants retain prior evidence and all notices."
+        }
+      },
+      {
+        "coordinate": "github.com/cronokirby/saferith@v0.33.0",
+        "licenseExpression": "MIT AND BSD-3-Clause",
+        "reviewed": true,
+        "reviewEvidence": {
+          "module": "github.com/cronokirby/saferith",
+          "version": "v0.33.0",
+          "goSum": "h1:TgoQlfsD4LIwx71+ChfRcIpjkw+RPOapDEVxa+LhwLo=",
+          "url": "https://proxy.golang.org/github.com/cronokirby/saferith/@v/v0.33.0.zip",
+          "sha256": "140b09e60685914ce1b7398d0c77bc5f2b527f96c26a837f97b683f97d6410e8",
+          "goSumVerified": true,
+          "basis": "Exact archive h1 recomputed and linked graph checked across four ABIs; source grants, supplementary notices and copyright headers preserved. x/mobile OpenGL Khronos MIT notice is retained conservatively with the complete module notices."
+        },
+        "notices": [
+          {
+            "origin": "https://proxy.golang.org/github.com/cronokirby/saferith/@v/v0.33.0.zip!/github.com/cronokirby/saferith@v0.33.0/LICENSE",
+            "file": "dependency-notices/6d18204bd2f491153e8ad86767bdccedaf238e2a7bc2a1fee592888dfcfe2735.txt",
+            "sha256": "6d18204bd2f491153e8ad86767bdccedaf238e2a7bc2a1fee592888dfcfe2735"
+          },
+          {
+            "origin": "https://proxy.golang.org/github.com/cronokirby/saferith/@v/v0.33.0.zip!/github.com/cronokirby/saferith@v0.33.0/LICENSE_go",
+            "file": "dependency-notices/2d36597f7117c38b006835ae7f537487207d8ec407aa9d9980794b2030cbc067.txt",
+            "sha256": "2d36597f7117c38b006835ae7f537487207d8ec407aa9d9980794b2030cbc067"
+          },
+          {
+            "origin": "https://proxy.golang.org/github.com/cronokirby/saferith/@v/v0.33.0.zip!/copyright-headers",
+            "file": "dependency-notices/a0dfe03b6d5dffef847e2ec49896d23f6bed383630fb5603b79eb7d3eccd3cc8.txt",
+            "sha256": "a0dfe03b6d5dffef847e2ec49896d23f6bed383630fb5603b79eb7d3eccd3cc8"
+          }
+        ],
+        "problems": [],
+        "reviewAttestation": {
+          "sha256": "4a0b58e6e60a5290da09847d38cfbd2677d16ff9ac4a45e36cda3312b278886a",
+          "basis": "Source grants reviewed against exact linked module archives; unchanged grants retain prior evidence and all notices."
+        }
+      },
+      {
+        "coordinate": "github.com/pkg/errors@v0.9.1",
+        "licenseExpression": "BSD-2-Clause",
+        "reviewed": true,
+        "reviewEvidence": {
+          "module": "github.com/pkg/errors",
+          "version": "v0.9.1",
+          "goSum": "h1:FEBLx1zS214owpjy7qsBeixbURkuhQAwrK5UwLGTwt4=",
+          "url": "https://proxy.golang.org/github.com/pkg/errors/@v/v0.9.1.zip",
+          "sha256": "d4c36b8bcd0616290a3913215e0f53b931bd6e00670596f2960df1b44af2bd07",
+          "goSumVerified": true,
+          "basis": "Exact archive h1 recomputed and linked graph checked across four ABIs; source grants, supplementary notices and copyright headers preserved. x/mobile OpenGL Khronos MIT notice is retained conservatively with the complete module notices."
+        },
+        "notices": [
+          {
+            "origin": "https://proxy.golang.org/github.com/pkg/errors/@v/v0.9.1.zip!/github.com/pkg/errors@v0.9.1/LICENSE",
+            "file": "dependency-notices/8d427fd87bc9579ea368fde3d49f9ca22eac857f91a9dec7e3004bdfab7dee86.txt",
+            "sha256": "8d427fd87bc9579ea368fde3d49f9ca22eac857f91a9dec7e3004bdfab7dee86"
+          }
+        ],
+        "problems": [],
+        "reviewAttestation": {
+          "sha256": "1887c74cd3a95b679a69c385df9d4bf688fd6685753629db13ee5bdc7f0da428",
+          "basis": "Source grants reviewed against exact linked module archives; unchanged grants retain prior evidence and all notices."
+        }
+      },
+      {
+        "coordinate": "golang.org/x/crypto@v0.41.0",
+        "licenseExpression": "BSD-3-Clause",
+        "reviewed": true,
+        "reviewEvidence": {
+          "module": "golang.org/x/crypto",
+          "version": "v0.41.0",
+          "goSum": "h1:WKYxWedPGCTVVl5+WHSSrOBT0O8lx32+zxmHxijgXp4=",
+          "url": "https://proxy.golang.org/golang.org/x/crypto/@v/v0.41.0.zip",
+          "sha256": "7da981b09d79d021f79ea2953637a85e3c72e43fc88b6a3230e7976fbbeec2de",
+          "goSumVerified": true,
+          "basis": "Exact archive h1 recomputed and linked graph checked across four ABIs; source grants, supplementary notices and copyright headers preserved. x/mobile OpenGL Khronos MIT notice is retained conservatively with the complete module notices."
+        },
+        "notices": [
+          {
+            "origin": "https://proxy.golang.org/golang.org/x/crypto/@v/v0.41.0.zip!/golang.org/x/crypto@v0.41.0/LICENSE",
+            "file": "dependency-notices/911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad.txt",
+            "sha256": "911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad"
+          },
+          {
+            "origin": "https://proxy.golang.org/golang.org/x/crypto/@v/v0.41.0.zip!/golang.org/x/crypto@v0.41.0/PATENTS",
+            "file": "dependency-notices/96f408bfae65bf137fc2525d3ecb030271c50c1e90799f87abf8846d8dd505cc.txt",
+            "sha256": "96f408bfae65bf137fc2525d3ecb030271c50c1e90799f87abf8846d8dd505cc"
+          },
+          {
+            "origin": "https://proxy.golang.org/golang.org/x/crypto/@v/v0.41.0.zip!/copyright-headers",
+            "file": "dependency-notices/d7af58a5f7d2b8221680d8475f6a9817707ad23ab4e449c73779b90bd040e726.txt",
+            "sha256": "d7af58a5f7d2b8221680d8475f6a9817707ad23ab4e449c73779b90bd040e726"
+          }
+        ],
+        "problems": [],
+        "reviewAttestation": {
+          "sha256": "86d82718b9462067fc2ae6ca34920123b743690cd608556652448d11e4901e39",
+          "basis": "Source grants reviewed against exact linked module archives; unchanged grants retain prior evidence and all notices."
+        }
+      },
+      {
+        "coordinate": "golang.org/x/mobile@v0.0.0-20260908204917-8b95e45f8d3e",
+        "licenseExpression": "BSD-3-Clause AND MIT",
+        "reviewed": true,
+        "reviewEvidence": {
+          "module": "golang.org/x/mobile",
+          "version": "v0.0.0-20260908204917-8b95e45f8d3e",
+          "goSum": "h1:zYnHsDmxfxKH/x9DjYNAdoIdMsP8enB1Ncb10b3pdHk=",
+          "url": "https://proxy.golang.org/golang.org/x/mobile/@v/v0.0.0-20260908204917-8b95e45f8d3e.zip",
+          "sha256": "cff623409ada423ce6769efb09ceef4f16a39ac6f022ba8d44f4c8e2fd665d5d",
+          "goSumVerified": true,
+          "basis": "Exact archive h1 recomputed and linked graph checked across four ABIs; source grants, supplementary notices and copyright headers preserved. x/mobile OpenGL Khronos MIT notice is retained conservatively with the complete module notices."
+        },
+        "notices": [
+          {
+            "origin": "https://proxy.golang.org/golang.org/x/mobile/@v/v0.0.0-20260908204917-8b95e45f8d3e.zip!/golang.org/x/mobile@v0.0.0-20260908204917-8b95e45f8d3e/LICENSE",
+            "file": "dependency-notices/911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad.txt",
+            "sha256": "911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad"
+          },
+          {
+            "origin": "https://proxy.golang.org/golang.org/x/mobile/@v/v0.0.0-20260908204917-8b95e45f8d3e.zip!/golang.org/x/mobile@v0.0.0-20260908204917-8b95e45f8d3e/PATENTS",
+            "file": "dependency-notices/96f408bfae65bf137fc2525d3ecb030271c50c1e90799f87abf8846d8dd505cc.txt",
+            "sha256": "96f408bfae65bf137fc2525d3ecb030271c50c1e90799f87abf8846d8dd505cc"
+          },
+          {
+            "origin": "https://proxy.golang.org/golang.org/x/mobile/@v/v0.0.0-20260908204917-8b95e45f8d3e.zip!/copyright-headers",
+            "file": "dependency-notices/05cb04a1bf34fee46125dd18cd1fe8d7e218005e87a60a1e782ef02afb9a1c17.txt",
+            "sha256": "05cb04a1bf34fee46125dd18cd1fe8d7e218005e87a60a1e782ef02afb9a1c17"
+          }
+        ],
+        "problems": [],
+        "reviewAttestation": {
+          "sha256": "95f8ee55e945622c2c2788083552368c39299e946d03eb06629de6d23ed9a691",
+          "basis": "Source grants reviewed against exact linked module archives; unchanged grants retain prior evidence and all notices."
+        }
+      },
+      {
+        "coordinate": "golang.org/x/sys@v0.48.0",
+        "licenseExpression": "BSD-3-Clause",
+        "reviewed": true,
+        "reviewEvidence": {
+          "module": "golang.org/x/sys",
+          "version": "v0.48.0",
+          "goSum": "h1:bbX/i/6MgT9BVLM9RT1thmxL04yeTAhbEz4SyadbXoo=",
+          "url": "https://proxy.golang.org/golang.org/x/sys/@v/v0.48.0.zip",
+          "sha256": "3a47e06431ba1e24d5b2aca3a7ce31fd13faff34df3e5d8e63f105ff9d0c1786",
+          "goSumVerified": true,
+          "basis": "Exact archive h1 recomputed and linked graph checked across four ABIs; source grants, supplementary notices and copyright headers preserved. x/mobile OpenGL Khronos MIT notice is retained conservatively with the complete module notices."
+        },
+        "notices": [
+          {
+            "origin": "https://proxy.golang.org/golang.org/x/sys/@v/v0.48.0.zip!/golang.org/x/sys@v0.48.0/LICENSE",
+            "file": "dependency-notices/911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad.txt",
+            "sha256": "911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad"
+          },
+          {
+            "origin": "https://proxy.golang.org/golang.org/x/sys/@v/v0.48.0.zip!/golang.org/x/sys@v0.48.0/PATENTS",
+            "file": "dependency-notices/96f408bfae65bf137fc2525d3ecb030271c50c1e90799f87abf8846d8dd505cc.txt",
+            "sha256": "96f408bfae65bf137fc2525d3ecb030271c50c1e90799f87abf8846d8dd505cc"
+          },
+          {
+            "origin": "https://proxy.golang.org/golang.org/x/sys/@v/v0.48.0.zip!/copyright-headers",
+            "file": "dependency-notices/f220a848d909168f57119b0c5ebb67049501ca7f8b275955df4fb30dc7fbedba.txt",
+            "sha256": "f220a848d909168f57119b0c5ebb67049501ca7f8b275955df4fb30dc7fbedba"
+          }
+        ],
+        "problems": [],
+        "reviewAttestation": {
+          "sha256": "50985244646e1b11c8b6cabb1cf4e8587366f440955f4df495ccf30d658c98bd",
+          "basis": "Source grants reviewed against exact linked module archives; unchanged grants retain prior evidence and all notices."
+        }
+      },
+      {
+        "coordinate": "golang.org/x/text@v0.28.0",
+        "licenseExpression": "BSD-3-Clause",
+        "reviewed": true,
+        "reviewEvidence": {
+          "module": "golang.org/x/text",
+          "version": "v0.28.0",
+          "goSum": "h1:rhazDwis8INMIwQ4tpjLDzUhx6RlXqZNPEM0huQojng=",
+          "url": "https://proxy.golang.org/golang.org/x/text/@v/v0.28.0.zip",
+          "sha256": "46259e1416ae7ec6adf1867c5f9fab32af0476a148e3c95f1dfbb134f4acf48d",
+          "goSumVerified": true,
+          "basis": "Exact archive h1 recomputed and linked graph checked across four ABIs; source grants, supplementary notices and copyright headers preserved. x/mobile OpenGL Khronos MIT notice is retained conservatively with the complete module notices."
+        },
+        "notices": [
+          {
+            "origin": "https://proxy.golang.org/golang.org/x/text/@v/v0.28.0.zip!/golang.org/x/text@v0.28.0/LICENSE",
+            "file": "dependency-notices/911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad.txt",
+            "sha256": "911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad"
+          },
+          {
+            "origin": "https://proxy.golang.org/golang.org/x/text/@v/v0.28.0.zip!/golang.org/x/text@v0.28.0/PATENTS",
+            "file": "dependency-notices/96f408bfae65bf137fc2525d3ecb030271c50c1e90799f87abf8846d8dd505cc.txt",
+            "sha256": "96f408bfae65bf137fc2525d3ecb030271c50c1e90799f87abf8846d8dd505cc"
+          },
+          {
+            "origin": "https://proxy.golang.org/golang.org/x/text/@v/v0.28.0.zip!/copyright-headers",
+            "file": "dependency-notices/29be77e49b58b460a475890155b5158f99cf56c59fa90933e4bac4dd195957f3.txt",
+            "sha256": "29be77e49b58b460a475890155b5158f99cf56c59fa90933e4bac4dd195957f3"
+          }
+        ],
+        "problems": [],
+        "reviewAttestation": {
+          "sha256": "cd48f037a7da070fb2f68c8abccf91d6ee3be7417bb040c5b3930a5ec47e7669",
+          "basis": "Source grants reviewed against exact linked module archives; unchanged grants retain prior evidence and all notices."
+        }
+      },
+      {
+        "coordinate": "Go standard library/runtime@go1.27.1",
+        "licenseExpression": "BSD-3-Clause",
+        "reviewed": true,
+        "reviewEvidence": {
+          "sourceTag": "go1.27.1",
+          "source": "https://go.googlesource.com/go/+/refs/tags/go1.27.1/",
+          "basis": "Root BSD-3-Clause grant and PATENTS retained from the exact Go source toolchain that built all four native libraries; ELF build metadata independently reports go1.27.1."
+        },
+        "notices": [
+          {
+            "origin": "https://raw.githubusercontent.com/golang/go/go1.27.1/LICENSE",
+            "file": "dependency-notices/911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad.txt",
+            "sha256": "911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad"
+          },
+          {
+            "origin": "https://raw.githubusercontent.com/golang/go/go1.27.1/PATENTS",
+            "file": "dependency-notices/96f408bfae65bf137fc2525d3ecb030271c50c1e90799f87abf8846d8dd505cc.txt",
+            "sha256": "96f408bfae65bf137fc2525d3ecb030271c50c1e90799f87abf8846d8dd505cc"
+          }
+        ],
+        "problems": [],
+        "reviewAttestation": {
+          "sha256": "29a2d17e241836edf15ceaf22702611e4f6f851cba0a9b84d9ce1779fd2056dc",
+          "basis": "Go1.27.1 root source license and patent grant reviewed; four ABI build version and native hashes are bound below."
+        }
+      }
+    ],
     "notices": [
-      {
-        "origin": "https://raw.githubusercontent.com/golang/go/go1.23.12/LICENSE",
-        "file": "dependency-notices/2d36597f7117c38b006835ae7f537487207d8ec407aa9d9980794b2030cbc067.txt",
-        "sha256": "2d36597f7117c38b006835ae7f537487207d8ec407aa9d9980794b2030cbc067"
-      },
-      {
-        "origin": "https://proxy.golang.org/filippo.io/edwards25519/@v/v1.0.0-rc.1.zip!/filippo.io/edwards25519@v1.0.0-rc.1/LICENSE",
-        "file": "dependency-notices/2d36597f7117c38b006835ae7f537487207d8ec407aa9d9980794b2030cbc067.txt",
-        "sha256": "2d36597f7117c38b006835ae7f537487207d8ec407aa9d9980794b2030cbc067"
-      },
-      {
-        "origin": "https://proxy.golang.org/filippo.io/edwards25519/@v/v1.0.0-rc.1.zip!/copyright-headers",
-        "file": "dependency-notices/4f4dbb7e4065cccfabaa25216b5d2f19fecaf34d52645e2e5aa351ac996003e0.txt",
-        "sha256": "4f4dbb7e4065cccfabaa25216b5d2f19fecaf34d52645e2e5aa351ac996003e0"
-      },
       {
         "origin": "https://proxy.golang.org/github.com/!proton!mail/bcrypt/@v/v0.0.0-20210511135022-227b4adcab57.zip!/github.com/ProtonMail/bcrypt@v0.0.0-20210511135022-227b4adcab57/LICENSE",
         "file": "dependency-notices/da4b77ea67eea3548aac445741cd70cfbd87e2a5bcbb03a2bb85abda0e2fa3c1.txt",
@@ -82,11 +574,6 @@
         "sha256": "c1f5969de383753d0664c9e420ada8cba0e6c0580914bcd8f2a6909dbf7f76ce"
       },
       {
-        "origin": "https://proxy.golang.org/github.com/!proton!mail/go-ecvrf/@v/v0.0.1.zip!/github.com/ProtonMail/go-ecvrf@v0.0.1/LICENSE",
-        "file": "dependency-notices/770da99dbb5ebdc0169a3b5cae7ae6b3bce381a0a01653a868774de108af873a.txt",
-        "sha256": "770da99dbb5ebdc0169a3b5cae7ae6b3bce381a0a01653a868774de108af873a"
-      },
-      {
         "origin": "https://proxy.golang.org/github.com/!proton!mail/go-mime/@v/v0.0.0-20230322103455-7d82a3887f2f.zip!/github.com/ProtonMail/go-mime@v0.0.0-20230322103455-7d82a3887f2f/LICENSE",
         "file": "dependency-notices/503bdcb689e2033376caa35eb66f170920221e96706da77be941804bc4f36422.txt",
         "sha256": "503bdcb689e2033376caa35eb66f170920221e96706da77be941804bc4f36422"
@@ -103,11 +590,6 @@
       },
       {
         "origin": "https://proxy.golang.org/github.com/!proton!mail/gopenpgp/v2/@v/v2.10.0-proton.zip!/github.com/ProtonMail/gopenpgp/v2@v2.10.0-proton/LICENSE",
-        "file": "dependency-notices/503bdcb689e2033376caa35eb66f170920221e96706da77be941804bc4f36422.txt",
-        "sha256": "503bdcb689e2033376caa35eb66f170920221e96706da77be941804bc4f36422"
-      },
-      {
-        "origin": "https://proxy.golang.org/github.com/!proton!mail/gopenpgp/v3/@v/v3.4.1-proton.zip!/github.com/ProtonMail/gopenpgp/v3@v3.4.1-proton/LICENSE",
         "file": "dependency-notices/503bdcb689e2033376caa35eb66f170920221e96706da77be941804bc4f36422.txt",
         "sha256": "503bdcb689e2033376caa35eb66f170920221e96706da77be941804bc4f36422"
       },
@@ -142,86 +624,6 @@
         "sha256": "a0dfe03b6d5dffef847e2ec49896d23f6bed383630fb5603b79eb7d3eccd3cc8"
       },
       {
-        "origin": "https://proxy.golang.org/github.com/golang/glog/@v/v0.0.0-20160126235308-23def4e6c14b.zip!/github.com/golang/glog@v0.0.0-20160126235308-23def4e6c14b/LICENSE",
-        "file": "dependency-notices/73ba74dfaa520b49a401b5d21459a8523a146f3b7518a833eea5efa85130bf68.txt",
-        "sha256": "73ba74dfaa520b49a401b5d21459a8523a146f3b7518a833eea5efa85130bf68"
-      },
-      {
-        "origin": "https://proxy.golang.org/github.com/golang/glog/@v/v0.0.0-20160126235308-23def4e6c14b.zip!/copyright-headers",
-        "file": "dependency-notices/a954691034dbdff9f20b9a378875ab829b647fe72382d858b46b62818468be20.txt",
-        "sha256": "a954691034dbdff9f20b9a378875ab829b647fe72382d858b46b62818468be20"
-      },
-      {
-        "origin": "https://proxy.golang.org/github.com/golang/mock/@v/v1.4.4.zip!/github.com/golang/mock@v1.4.4/AUTHORS",
-        "file": "dependency-notices/638fe32585f50191c76b3f7ccfc0e0710c7bcd9f11620709bcc705083395b913.txt",
-        "sha256": "638fe32585f50191c76b3f7ccfc0e0710c7bcd9f11620709bcc705083395b913"
-      },
-      {
-        "origin": "https://proxy.golang.org/github.com/golang/mock/@v/v1.4.4.zip!/github.com/golang/mock@v1.4.4/LICENSE",
-        "file": "dependency-notices/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30.txt",
-        "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
-      },
-      {
-        "origin": "https://proxy.golang.org/github.com/golang/mock/@v/v1.4.4.zip!/github.com/golang/mock@v1.4.4/mockgen/internal/tests/copyright_file/mock_copyright_header",
-        "file": "dependency-notices/823dcea7fae12387eb0e45de41cb4f815c4fe34276fd633c6fe29279a6311e63.txt",
-        "sha256": "823dcea7fae12387eb0e45de41cb4f815c4fe34276fd633c6fe29279a6311e63"
-      },
-      {
-        "origin": "https://proxy.golang.org/github.com/golang/mock/@v/v1.4.4.zip!/copyright-headers",
-        "file": "dependency-notices/c419d3aeaf283ecfd51de7d76e5a9a9a94b043e9d03b8020f2462e2d5e0de98e.txt",
-        "sha256": "c419d3aeaf283ecfd51de7d76e5a9a9a94b043e9d03b8020f2462e2d5e0de98e"
-      },
-      {
-        "origin": "https://proxy.golang.org/github.com/golang/protobuf/@v/v1.4.2.zip!/github.com/golang/protobuf@v1.4.2/AUTHORS",
-        "file": "dependency-notices/b82446c166daa6932dc33418961ed7a7f06c5a9fee17e9d214e16079e3442757.txt",
-        "sha256": "b82446c166daa6932dc33418961ed7a7f06c5a9fee17e9d214e16079e3442757"
-      },
-      {
-        "origin": "https://proxy.golang.org/github.com/golang/protobuf/@v/v1.4.2.zip!/github.com/golang/protobuf@v1.4.2/LICENSE",
-        "file": "dependency-notices/8778a9fc1eaffb03ab873caae251df2d224f6b5502be8777d3cd573a4dd43903.txt",
-        "sha256": "8778a9fc1eaffb03ab873caae251df2d224f6b5502be8777d3cd573a4dd43903"
-      },
-      {
-        "origin": "https://proxy.golang.org/github.com/golang/protobuf/@v/v1.4.2.zip!/copyright-headers",
-        "file": "dependency-notices/467e419dbabc24523a7ced77c5f6dcc7ef9a5a79c2016c1ea1693714c464b761.txt",
-        "sha256": "467e419dbabc24523a7ced77c5f6dcc7ef9a5a79c2016c1ea1693714c464b761"
-      },
-      {
-        "origin": "https://proxy.golang.org/github.com/google/certificate-transparency-go/@v/v1.1.1.zip!/github.com/google/certificate-transparency-go@v1.1.1/AUTHORS",
-        "file": "dependency-notices/53c0f3e7d60e6ace0bc60d758934de419c87a91075033d32f12b20e37f6cc69d.txt",
-        "sha256": "53c0f3e7d60e6ace0bc60d758934de419c87a91075033d32f12b20e37f6cc69d"
-      },
-      {
-        "origin": "https://proxy.golang.org/github.com/google/certificate-transparency-go/@v/v1.1.1.zip!/github.com/google/certificate-transparency-go@v1.1.1/LICENSE",
-        "file": "dependency-notices/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30.txt",
-        "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
-      },
-      {
-        "origin": "https://proxy.golang.org/github.com/google/certificate-transparency-go/@v/v1.1.1.zip!/github.com/google/certificate-transparency-go@v1.1.1/third_party/prometheus/LICENSE",
-        "file": "dependency-notices/c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4.txt",
-        "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
-      },
-      {
-        "origin": "https://proxy.golang.org/github.com/google/certificate-transparency-go/@v/v1.1.1.zip!/copyright-headers",
-        "file": "dependency-notices/70f84fac2b1e656668c2c020a564b56792f808d4b98feede456dbd4011e1085f.txt",
-        "sha256": "70f84fac2b1e656668c2c020a564b56792f808d4b98feede456dbd4011e1085f"
-      },
-      {
-        "origin": "https://proxy.golang.org/github.com/google/trillian/@v/v1.3.11.zip!/github.com/google/trillian@v1.3.11/AUTHORS",
-        "file": "dependency-notices/0bfaa1f982bf2e7b89370edcd64b5b7e98a6ee0051ed0040a7a197b4e8283719.txt",
-        "sha256": "0bfaa1f982bf2e7b89370edcd64b5b7e98a6ee0051ed0040a7a197b4e8283719"
-      },
-      {
-        "origin": "https://proxy.golang.org/github.com/google/trillian/@v/v1.3.11.zip!/github.com/google/trillian@v1.3.11/LICENSE",
-        "file": "dependency-notices/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30.txt",
-        "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
-      },
-      {
-        "origin": "https://proxy.golang.org/github.com/google/trillian/@v/v1.3.11.zip!/copyright-headers",
-        "file": "dependency-notices/c8012890b91115e76c8f8b48b7708e9243cec90c023a7aae0c41454bc02679cc.txt",
-        "sha256": "c8012890b91115e76c8f8b48b7708e9243cec90c023a7aae0c41454bc02679cc"
-      },
-      {
         "origin": "https://proxy.golang.org/github.com/pkg/errors/@v/v0.9.1.zip!/github.com/pkg/errors@v0.9.1/LICENSE",
         "file": "dependency-notices/8d427fd87bc9579ea368fde3d49f9ca22eac857f91a9dec7e3004bdfab7dee86.txt",
         "sha256": "8d427fd87bc9579ea368fde3d49f9ca22eac857f91a9dec7e3004bdfab7dee86"
@@ -242,54 +644,34 @@
         "sha256": "d7af58a5f7d2b8221680d8475f6a9817707ad23ab4e449c73779b90bd040e726"
       },
       {
-        "origin": "https://proxy.golang.org/golang.org/x/mobile/@v/v0.0.0-20201217150744-e6ae53a27f4f.zip!/golang.org/x/mobile@v0.0.0-20201217150744-e6ae53a27f4f/AUTHORS",
-        "file": "dependency-notices/b82446c166daa6932dc33418961ed7a7f06c5a9fee17e9d214e16079e3442757.txt",
-        "sha256": "b82446c166daa6932dc33418961ed7a7f06c5a9fee17e9d214e16079e3442757"
-      },
-      {
-        "origin": "https://proxy.golang.org/golang.org/x/mobile/@v/v0.0.0-20201217150744-e6ae53a27f4f.zip!/golang.org/x/mobile@v0.0.0-20201217150744-e6ae53a27f4f/LICENSE",
-        "file": "dependency-notices/2d36597f7117c38b006835ae7f537487207d8ec407aa9d9980794b2030cbc067.txt",
-        "sha256": "2d36597f7117c38b006835ae7f537487207d8ec407aa9d9980794b2030cbc067"
-      },
-      {
-        "origin": "https://proxy.golang.org/golang.org/x/mobile/@v/v0.0.0-20201217150744-e6ae53a27f4f.zip!/golang.org/x/mobile@v0.0.0-20201217150744-e6ae53a27f4f/PATENTS",
-        "file": "dependency-notices/96f408bfae65bf137fc2525d3ecb030271c50c1e90799f87abf8846d8dd505cc.txt",
-        "sha256": "96f408bfae65bf137fc2525d3ecb030271c50c1e90799f87abf8846d8dd505cc"
-      },
-      {
-        "origin": "https://proxy.golang.org/golang.org/x/mobile/@v/v0.0.0-20201217150744-e6ae53a27f4f.zip!/copyright-headers",
-        "file": "dependency-notices/c2fed1ca89483811878281b9f82f39709c50692e4950f4c567239b5ec3349055.txt",
-        "sha256": "c2fed1ca89483811878281b9f82f39709c50692e4950f4c567239b5ec3349055"
-      },
-      {
-        "origin": "https://proxy.golang.org/golang.org/x/net/@v/v0.42.0.zip!/golang.org/x/net@v0.42.0/LICENSE",
+        "origin": "https://proxy.golang.org/golang.org/x/mobile/@v/v0.0.0-20260908204917-8b95e45f8d3e.zip!/golang.org/x/mobile@v0.0.0-20260908204917-8b95e45f8d3e/LICENSE",
         "file": "dependency-notices/911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad.txt",
         "sha256": "911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad"
       },
       {
-        "origin": "https://proxy.golang.org/golang.org/x/net/@v/v0.42.0.zip!/golang.org/x/net@v0.42.0/PATENTS",
+        "origin": "https://proxy.golang.org/golang.org/x/mobile/@v/v0.0.0-20260908204917-8b95e45f8d3e.zip!/golang.org/x/mobile@v0.0.0-20260908204917-8b95e45f8d3e/PATENTS",
         "file": "dependency-notices/96f408bfae65bf137fc2525d3ecb030271c50c1e90799f87abf8846d8dd505cc.txt",
         "sha256": "96f408bfae65bf137fc2525d3ecb030271c50c1e90799f87abf8846d8dd505cc"
       },
       {
-        "origin": "https://proxy.golang.org/golang.org/x/net/@v/v0.42.0.zip!/copyright-headers",
-        "file": "dependency-notices/b1d73a5ee886c6aa8f457fe15536ddc132f79201a1c5704d6f1b5b5edb3babe2.txt",
-        "sha256": "b1d73a5ee886c6aa8f457fe15536ddc132f79201a1c5704d6f1b5b5edb3babe2"
+        "origin": "https://proxy.golang.org/golang.org/x/mobile/@v/v0.0.0-20260908204917-8b95e45f8d3e.zip!/copyright-headers",
+        "file": "dependency-notices/05cb04a1bf34fee46125dd18cd1fe8d7e218005e87a60a1e782ef02afb9a1c17.txt",
+        "sha256": "05cb04a1bf34fee46125dd18cd1fe8d7e218005e87a60a1e782ef02afb9a1c17"
       },
       {
-        "origin": "https://proxy.golang.org/golang.org/x/sys/@v/v0.35.0.zip!/golang.org/x/sys@v0.35.0/LICENSE",
+        "origin": "https://proxy.golang.org/golang.org/x/sys/@v/v0.48.0.zip!/golang.org/x/sys@v0.48.0/LICENSE",
         "file": "dependency-notices/911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad.txt",
         "sha256": "911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad"
       },
       {
-        "origin": "https://proxy.golang.org/golang.org/x/sys/@v/v0.35.0.zip!/golang.org/x/sys@v0.35.0/PATENTS",
+        "origin": "https://proxy.golang.org/golang.org/x/sys/@v/v0.48.0.zip!/golang.org/x/sys@v0.48.0/PATENTS",
         "file": "dependency-notices/96f408bfae65bf137fc2525d3ecb030271c50c1e90799f87abf8846d8dd505cc.txt",
         "sha256": "96f408bfae65bf137fc2525d3ecb030271c50c1e90799f87abf8846d8dd505cc"
       },
       {
-        "origin": "https://proxy.golang.org/golang.org/x/sys/@v/v0.35.0.zip!/copyright-headers",
-        "file": "dependency-notices/0836b57d510b5fa976a4a3280a74a522717b007716fd6d69ee949d5bf9a8e539.txt",
-        "sha256": "0836b57d510b5fa976a4a3280a74a522717b007716fd6d69ee949d5bf9a8e539"
+        "origin": "https://proxy.golang.org/golang.org/x/sys/@v/v0.48.0.zip!/copyright-headers",
+        "file": "dependency-notices/f220a848d909168f57119b0c5ebb67049501ca7f8b275955df4fb30dc7fbedba.txt",
+        "sha256": "f220a848d909168f57119b0c5ebb67049501ca7f8b275955df4fb30dc7fbedba"
       },
       {
         "origin": "https://proxy.golang.org/golang.org/x/text/@v/v0.28.0.zip!/golang.org/x/text@v0.28.0/LICENSE",
@@ -307,904 +689,131 @@
         "sha256": "29be77e49b58b460a475890155b5158f99cf56c59fa90933e4bac4dd195957f3"
       },
       {
-        "origin": "https://proxy.golang.org/google.golang.org/genproto/@v/v0.0.0-20200707001353-8e8330bf89df.zip!/google.golang.org/genproto@v0.0.0-20200707001353-8e8330bf89df/LICENSE",
-        "file": "dependency-notices/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30.txt",
-        "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+        "origin": "https://raw.githubusercontent.com/golang/go/go1.27.1/LICENSE",
+        "file": "dependency-notices/911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad.txt",
+        "sha256": "911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad"
       },
       {
-        "origin": "https://proxy.golang.org/google.golang.org/genproto/@v/v0.0.0-20200707001353-8e8330bf89df.zip!/copyright-headers",
-        "file": "dependency-notices/5619ac973639a0ebc0acd04a7c6b743d4b356e614170591218892014ab548309.txt",
-        "sha256": "5619ac973639a0ebc0acd04a7c6b743d4b356e614170591218892014ab548309"
-      },
-      {
-        "origin": "https://proxy.golang.org/google.golang.org/grpc/@v/v1.29.1.zip!/google.golang.org/grpc@v1.29.1/AUTHORS",
-        "file": "dependency-notices/627c695f80fdac6412d66e6ad4160a4acb41923ca7ee3fd7e112e105f0ff46b9.txt",
-        "sha256": "627c695f80fdac6412d66e6ad4160a4acb41923ca7ee3fd7e112e105f0ff46b9"
-      },
-      {
-        "origin": "https://proxy.golang.org/google.golang.org/grpc/@v/v1.29.1.zip!/google.golang.org/grpc@v1.29.1/LICENSE",
-        "file": "dependency-notices/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30.txt",
-        "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
-      },
-      {
-        "origin": "https://proxy.golang.org/google.golang.org/grpc/@v/v1.29.1.zip!/copyright-headers",
-        "file": "dependency-notices/db7dc28ab5b18fdb65eb1b4c24beee7de08da7b3bc859ddc6771f24ed2e3c05c.txt",
-        "sha256": "db7dc28ab5b18fdb65eb1b4c24beee7de08da7b3bc859ddc6771f24ed2e3c05c"
-      },
-      {
-        "origin": "https://proxy.golang.org/google.golang.org/protobuf/@v/v1.25.0.zip!/google.golang.org/protobuf@v1.25.0/AUTHORS",
-        "file": "dependency-notices/5aa3167c44245f0b12b27195d85c6a8c8e067cfdd511059daa4d7b3c5b232129.txt",
-        "sha256": "5aa3167c44245f0b12b27195d85c6a8c8e067cfdd511059daa4d7b3c5b232129"
-      },
-      {
-        "origin": "https://proxy.golang.org/google.golang.org/protobuf/@v/v1.25.0.zip!/google.golang.org/protobuf@v1.25.0/LICENSE",
-        "file": "dependency-notices/4835612df0098ca95f8e7d9e3bffcb02358d435dbb38057c844c99d7f725eb20.txt",
-        "sha256": "4835612df0098ca95f8e7d9e3bffcb02358d435dbb38057c844c99d7f725eb20"
-      },
-      {
-        "origin": "https://proxy.golang.org/google.golang.org/protobuf/@v/v1.25.0.zip!/google.golang.org/protobuf@v1.25.0/PATENTS",
+        "origin": "https://raw.githubusercontent.com/golang/go/go1.27.1/PATENTS",
         "file": "dependency-notices/96f408bfae65bf137fc2525d3ecb030271c50c1e90799f87abf8846d8dd505cc.txt",
         "sha256": "96f408bfae65bf137fc2525d3ecb030271c50c1e90799f87abf8846d8dd505cc"
       },
       {
-        "origin": "https://proxy.golang.org/google.golang.org/protobuf/@v/v1.25.0.zip!/copyright-headers",
-        "file": "dependency-notices/dd2320a0f2a74ef211b5a46604ec092948eed865e5f8b086ffc6b779cda70db9.txt",
-        "sha256": "dd2320a0f2a74ef211b5a46604ec092948eed865e5f8b086ffc6b779cda70db9"
+        "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/Go/LICENSE",
+        "file": "dependency-notices/911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad.txt",
+        "sha256": "911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad"
+      },
+      {
+        "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/Go/PATENTS",
+        "file": "dependency-notices/96f408bfae65bf137fc2525d3ecb030271c50c1e90799f87abf8846d8dd505cc.txt",
+        "sha256": "96f408bfae65bf137fc2525d3ecb030271c50c1e90799f87abf8846d8dd505cc"
+      },
+      {
+        "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/github.com_ProtonMail_bcrypt/LICENSE",
+        "file": "dependency-notices/da4b77ea67eea3548aac445741cd70cfbd87e2a5bcbb03a2bb85abda0e2fa3c1.txt",
+        "sha256": "da4b77ea67eea3548aac445741cd70cfbd87e2a5bcbb03a2bb85abda0e2fa3c1"
+      },
+      {
+        "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/github.com_ProtonMail_go-crypto/AUTHORS",
+        "file": "dependency-notices/5aa3167c44245f0b12b27195d85c6a8c8e067cfdd511059daa4d7b3c5b232129.txt",
+        "sha256": "5aa3167c44245f0b12b27195d85c6a8c8e067cfdd511059daa4d7b3c5b232129"
+      },
+      {
+        "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/github.com_ProtonMail_go-crypto/LICENSE",
+        "file": "dependency-notices/2d36597f7117c38b006835ae7f537487207d8ec407aa9d9980794b2030cbc067.txt",
+        "sha256": "2d36597f7117c38b006835ae7f537487207d8ec407aa9d9980794b2030cbc067"
+      },
+      {
+        "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/github.com_ProtonMail_go-crypto/PATENTS",
+        "file": "dependency-notices/96f408bfae65bf137fc2525d3ecb030271c50c1e90799f87abf8846d8dd505cc.txt",
+        "sha256": "96f408bfae65bf137fc2525d3ecb030271c50c1e90799f87abf8846d8dd505cc"
+      },
+      {
+        "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/github.com_ProtonMail_go-mime/LICENSE",
+        "file": "dependency-notices/503bdcb689e2033376caa35eb66f170920221e96706da77be941804bc4f36422.txt",
+        "sha256": "503bdcb689e2033376caa35eb66f170920221e96706da77be941804bc4f36422"
+      },
+      {
+        "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/github.com_ProtonMail_go-srp/LICENSE.txt",
+        "file": "dependency-notices/7b3f092184869028bb9706f902c60e45fe53bbad504fa8fefa54e9119d0571a0.txt",
+        "sha256": "7b3f092184869028bb9706f902c60e45fe53bbad504fa8fefa54e9119d0571a0"
+      },
+      {
+        "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/github.com_ProtonMail_gopenpgp_v2/LICENSE",
+        "file": "dependency-notices/503bdcb689e2033376caa35eb66f170920221e96706da77be941804bc4f36422.txt",
+        "sha256": "503bdcb689e2033376caa35eb66f170920221e96706da77be941804bc4f36422"
+      },
+      {
+        "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/github.com_cloudflare_circl/LICENSE",
+        "file": "dependency-notices/b0da1764fe4d13d610b695536fc3f2ebc362482d053a1cd258e36975bc6b97a7.txt",
+        "sha256": "b0da1764fe4d13d610b695536fc3f2ebc362482d053a1cd258e36975bc6b97a7"
+      },
+      {
+        "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/github.com_cloudflare_circl/ecc/p384/LICENSE",
+        "file": "dependency-notices/18951c084f68bce792efa2037685466628ebc1c67f4bff8b7147f3d5050e50a4.txt",
+        "sha256": "18951c084f68bce792efa2037685466628ebc1c67f4bff8b7147f3d5050e50a4"
+      },
+      {
+        "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/github.com_cronokirby_saferith/LICENSE",
+        "file": "dependency-notices/6d18204bd2f491153e8ad86767bdccedaf238e2a7bc2a1fee592888dfcfe2735.txt",
+        "sha256": "6d18204bd2f491153e8ad86767bdccedaf238e2a7bc2a1fee592888dfcfe2735"
+      },
+      {
+        "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/github.com_cronokirby_saferith/LICENSE_go",
+        "file": "dependency-notices/2d36597f7117c38b006835ae7f537487207d8ec407aa9d9980794b2030cbc067.txt",
+        "sha256": "2d36597f7117c38b006835ae7f537487207d8ec407aa9d9980794b2030cbc067"
+      },
+      {
+        "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/github.com_pkg_errors/LICENSE",
+        "file": "dependency-notices/8d427fd87bc9579ea368fde3d49f9ca22eac857f91a9dec7e3004bdfab7dee86.txt",
+        "sha256": "8d427fd87bc9579ea368fde3d49f9ca22eac857f91a9dec7e3004bdfab7dee86"
+      },
+      {
+        "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/golang.org_x_crypto/LICENSE",
+        "file": "dependency-notices/911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad.txt",
+        "sha256": "911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad"
+      },
+      {
+        "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/golang.org_x_crypto/PATENTS",
+        "file": "dependency-notices/96f408bfae65bf137fc2525d3ecb030271c50c1e90799f87abf8846d8dd505cc.txt",
+        "sha256": "96f408bfae65bf137fc2525d3ecb030271c50c1e90799f87abf8846d8dd505cc"
+      },
+      {
+        "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/golang.org_x_mobile/LICENSE",
+        "file": "dependency-notices/911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad.txt",
+        "sha256": "911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad"
+      },
+      {
+        "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/golang.org_x_mobile/PATENTS",
+        "file": "dependency-notices/96f408bfae65bf137fc2525d3ecb030271c50c1e90799f87abf8846d8dd505cc.txt",
+        "sha256": "96f408bfae65bf137fc2525d3ecb030271c50c1e90799f87abf8846d8dd505cc"
+      },
+      {
+        "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/golang.org_x_sys/LICENSE",
+        "file": "dependency-notices/911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad.txt",
+        "sha256": "911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad"
+      },
+      {
+        "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/golang.org_x_sys/PATENTS",
+        "file": "dependency-notices/96f408bfae65bf137fc2525d3ecb030271c50c1e90799f87abf8846d8dd505cc.txt",
+        "sha256": "96f408bfae65bf137fc2525d3ecb030271c50c1e90799f87abf8846d8dd505cc"
+      },
+      {
+        "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/golang.org_x_text/LICENSE",
+        "file": "dependency-notices/911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad.txt",
+        "sha256": "911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad"
+      },
+      {
+        "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/golang.org_x_text/PATENTS",
+        "file": "dependency-notices/96f408bfae65bf137fc2525d3ecb030271c50c1e90799f87abf8846d8dd505cc.txt",
+        "sha256": "96f408bfae65bf137fc2525d3ecb030271c50c1e90799f87abf8846d8dd505cc"
       }
     ],
-    "dependencies": [
-      {
-        "coordinate": "filippo.io/edwards25519@v1.0.0-rc.1",
-        "licenseExpression": "BSD-3-Clause",
-        "reviewed": true,
-        "reviewEvidence": {
-          "module": "filippo.io/edwards25519",
-          "version": "v1.0.0-rc.1",
-          "goSum": "h1:m0VOOB23frXZvAOK44usCgLWvtsxIoMCTBGJZlpmGfU=",
-          "url": "https://proxy.golang.org/filippo.io/edwards25519/@v/v1.0.0-rc.1.zip",
-          "sha256": "4cb7dbdf5de3495c2308a2e97322bfc34aa0bd4cd84b980a3801b31c50830448",
-          "goSumVerified": true
-        },
-        "notices": [
-          {
-            "origin": "https://proxy.golang.org/filippo.io/edwards25519/@v/v1.0.0-rc.1.zip!/filippo.io/edwards25519@v1.0.0-rc.1/LICENSE",
-            "file": "dependency-notices/2d36597f7117c38b006835ae7f537487207d8ec407aa9d9980794b2030cbc067.txt",
-            "sha256": "2d36597f7117c38b006835ae7f537487207d8ec407aa9d9980794b2030cbc067"
-          },
-          {
-            "origin": "https://proxy.golang.org/filippo.io/edwards25519/@v/v1.0.0-rc.1.zip!/copyright-headers",
-            "file": "dependency-notices/4f4dbb7e4065cccfabaa25216b5d2f19fecaf34d52645e2e5aa351ac996003e0.txt",
-            "sha256": "4f4dbb7e4065cccfabaa25216b5d2f19fecaf34d52645e2e5aa351ac996003e0"
-          }
-        ],
-        "problems": [],
-        "reviewAttestation": {
-          "sha256": "42bed04d6efd6952a664145ce433f53af89050dc6bc894e6b963e803c5334e7e",
-          "basis": "Previously reviewed exact source archive/license evidence, with preserved notices verified unchanged."
-        }
-      },
-      {
-        "coordinate": "github.com/ProtonMail/bcrypt@v0.0.0-20210511135022-227b4adcab57",
-        "licenseExpression": "BSD-3-Clause",
-        "reviewed": true,
-        "reviewEvidence": {
-          "module": "github.com/ProtonMail/bcrypt",
-          "version": "v0.0.0-20210511135022-227b4adcab57",
-          "goSum": "h1:pHA4K54ifoogVLunGGHi3xyF5Nz4x+Uh3dJuy3NwGQQ=",
-          "url": "https://proxy.golang.org/github.com/!proton!mail/bcrypt/@v/v0.0.0-20210511135022-227b4adcab57.zip",
-          "sha256": "1d1863b5730eaae0b67c20af78e1cf4fe8eb2a8a207a24df7350472385281dce",
-          "goSumVerified": true
-        },
-        "notices": [
-          {
-            "origin": "https://proxy.golang.org/github.com/!proton!mail/bcrypt/@v/v0.0.0-20210511135022-227b4adcab57.zip!/github.com/ProtonMail/bcrypt@v0.0.0-20210511135022-227b4adcab57/LICENSE",
-            "file": "dependency-notices/da4b77ea67eea3548aac445741cd70cfbd87e2a5bcbb03a2bb85abda0e2fa3c1.txt",
-            "sha256": "da4b77ea67eea3548aac445741cd70cfbd87e2a5bcbb03a2bb85abda0e2fa3c1"
-          },
-          {
-            "origin": "https://proxy.golang.org/github.com/!proton!mail/bcrypt/@v/v0.0.0-20210511135022-227b4adcab57.zip!/copyright-headers",
-            "file": "dependency-notices/9793fc237364b9bb3eed0b3e190e6d48635a80a989db4515ece7af937dc1770e.txt",
-            "sha256": "9793fc237364b9bb3eed0b3e190e6d48635a80a989db4515ece7af937dc1770e"
-          }
-        ],
-        "problems": [],
-        "reviewAttestation": {
-          "sha256": "1b0c9255eb2565d4310e56e657bde50691fb307d2ef7edeceeaf94539d9478ff",
-          "basis": "Previously reviewed exact source archive/license evidence, with preserved notices verified unchanged."
-        }
-      },
-      {
-        "coordinate": "github.com/ProtonMail/go-crypto@v1.4.1-proton",
-        "licenseExpression": "BSD-3-Clause",
-        "reviewed": true,
-        "reviewEvidence": {
-          "module": "github.com/ProtonMail/go-crypto",
-          "version": "v1.4.1-proton",
-          "goSum": "h1:I4nanwGUmEeu7bTP9pkVWBbebGaxGyeMPnPRKmL++DY=",
-          "url": "https://proxy.golang.org/github.com/!proton!mail/go-crypto/@v/v1.4.1-proton.zip",
-          "sha256": "88477259036cc73b735a2e3bae409e8edf85df4e1432fb276b67fafebc004fd6",
-          "goSumVerified": true
-        },
-        "notices": [
-          {
-            "origin": "https://proxy.golang.org/github.com/!proton!mail/go-crypto/@v/v1.4.1-proton.zip!/github.com/ProtonMail/go-crypto@v1.4.1-proton/AUTHORS",
-            "file": "dependency-notices/5aa3167c44245f0b12b27195d85c6a8c8e067cfdd511059daa4d7b3c5b232129.txt",
-            "sha256": "5aa3167c44245f0b12b27195d85c6a8c8e067cfdd511059daa4d7b3c5b232129"
-          },
-          {
-            "origin": "https://proxy.golang.org/github.com/!proton!mail/go-crypto/@v/v1.4.1-proton.zip!/github.com/ProtonMail/go-crypto@v1.4.1-proton/LICENSE",
-            "file": "dependency-notices/2d36597f7117c38b006835ae7f537487207d8ec407aa9d9980794b2030cbc067.txt",
-            "sha256": "2d36597f7117c38b006835ae7f537487207d8ec407aa9d9980794b2030cbc067"
-          },
-          {
-            "origin": "https://proxy.golang.org/github.com/!proton!mail/go-crypto/@v/v1.4.1-proton.zip!/github.com/ProtonMail/go-crypto@v1.4.1-proton/PATENTS",
-            "file": "dependency-notices/96f408bfae65bf137fc2525d3ecb030271c50c1e90799f87abf8846d8dd505cc.txt",
-            "sha256": "96f408bfae65bf137fc2525d3ecb030271c50c1e90799f87abf8846d8dd505cc"
-          },
-          {
-            "origin": "https://proxy.golang.org/github.com/!proton!mail/go-crypto/@v/v1.4.1-proton.zip!/copyright-headers",
-            "file": "dependency-notices/c1f5969de383753d0664c9e420ada8cba0e6c0580914bcd8f2a6909dbf7f76ce.txt",
-            "sha256": "c1f5969de383753d0664c9e420ada8cba0e6c0580914bcd8f2a6909dbf7f76ce"
-          }
-        ],
-        "problems": [],
-        "reviewAttestation": {
-          "sha256": "534a3597f826404e32448764fc65122d93219af707d7118ef4cdc9167060753b",
-          "basis": "Previously reviewed exact source archive/license evidence, with preserved notices verified unchanged."
-        }
-      },
-      {
-        "coordinate": "github.com/ProtonMail/go-ecvrf@v0.0.1",
-        "licenseExpression": "MIT",
-        "reviewed": true,
-        "reviewEvidence": {
-          "module": "github.com/ProtonMail/go-ecvrf",
-          "version": "v0.0.1",
-          "goSum": "h1:wv45+kZ0mG4G9oSTMjAlbgKqa4tPbNr4WLoCWqz5/bo=",
-          "url": "https://proxy.golang.org/github.com/!proton!mail/go-ecvrf/@v/v0.0.1.zip",
-          "sha256": "99db7d57b9ff10e481ddd3616083a20b810ade93ff7e87f63cee40ae29fe75c4",
-          "goSumVerified": true
-        },
-        "notices": [
-          {
-            "origin": "https://proxy.golang.org/github.com/!proton!mail/go-ecvrf/@v/v0.0.1.zip!/github.com/ProtonMail/go-ecvrf@v0.0.1/LICENSE",
-            "file": "dependency-notices/770da99dbb5ebdc0169a3b5cae7ae6b3bce381a0a01653a868774de108af873a.txt",
-            "sha256": "770da99dbb5ebdc0169a3b5cae7ae6b3bce381a0a01653a868774de108af873a"
-          }
-        ],
-        "problems": [],
-        "reviewAttestation": {
-          "sha256": "fdd9757beeb9b2ae6c82c39077182ba5b446e9eb46617a23594f82a2f7292ac1",
-          "basis": "Previously reviewed exact source archive/license evidence, with preserved notices verified unchanged."
-        }
-      },
-      {
-        "coordinate": "github.com/ProtonMail/go-mime@v0.0.0-20230322103455-7d82a3887f2f",
-        "licenseExpression": "MIT",
-        "reviewed": true,
-        "reviewEvidence": {
-          "module": "github.com/ProtonMail/go-mime",
-          "version": "v0.0.0-20230322103455-7d82a3887f2f",
-          "goSum": "h1:tCbYj7/299ekTTXpdwKYF8eBlsYsDVoggDAuAjoK66k=",
-          "url": "https://proxy.golang.org/github.com/!proton!mail/go-mime/@v/v0.0.0-20230322103455-7d82a3887f2f.zip",
-          "sha256": "89bf28de3cc4549f6982eb8431f33185d6be88eb6e1f165f2bfb69888fdf4ce0",
-          "goSumVerified": true
-        },
-        "notices": [
-          {
-            "origin": "https://proxy.golang.org/github.com/!proton!mail/go-mime/@v/v0.0.0-20230322103455-7d82a3887f2f.zip!/github.com/ProtonMail/go-mime@v0.0.0-20230322103455-7d82a3887f2f/LICENSE",
-            "file": "dependency-notices/503bdcb689e2033376caa35eb66f170920221e96706da77be941804bc4f36422.txt",
-            "sha256": "503bdcb689e2033376caa35eb66f170920221e96706da77be941804bc4f36422"
-          }
-        ],
-        "problems": [],
-        "reviewAttestation": {
-          "sha256": "917b50c49fad4bb5cbcdb144ab0bbc6d2fd8ae8f3c8b665f0990ed28eceb79fe",
-          "basis": "Previously reviewed exact source archive/license evidence, with preserved notices verified unchanged."
-        }
-      },
-      {
-        "coordinate": "github.com/ProtonMail/go-srp@v0.0.7",
-        "licenseExpression": "MIT",
-        "reviewed": true,
-        "reviewEvidence": {
-          "module": "github.com/ProtonMail/go-srp",
-          "version": "v0.0.7",
-          "goSum": "h1:Sos3Qk+th4tQR64vsxGIxYpN3rdnG9Wf9K4ZloC1JrI=",
-          "url": "https://proxy.golang.org/github.com/!proton!mail/go-srp/@v/v0.0.7.zip",
-          "sha256": "aaac72038a9ee29162137acf24e1c17ef0c2601d5fcaefd434c3da57be4471b8",
-          "goSumVerified": true
-        },
-        "notices": [
-          {
-            "origin": "https://proxy.golang.org/github.com/!proton!mail/go-srp/@v/v0.0.7.zip!/github.com/ProtonMail/go-srp@v0.0.7/LICENSE.txt",
-            "file": "dependency-notices/7b3f092184869028bb9706f902c60e45fe53bbad504fa8fefa54e9119d0571a0.txt",
-            "sha256": "7b3f092184869028bb9706f902c60e45fe53bbad504fa8fefa54e9119d0571a0"
-          },
-          {
-            "origin": "https://proxy.golang.org/github.com/!proton!mail/go-srp/@v/v0.0.7.zip!/copyright-headers",
-            "file": "dependency-notices/ba3337b4de334ce9ba100413b15b34066aba56326fb4170ab68d89c7205c15f2.txt",
-            "sha256": "ba3337b4de334ce9ba100413b15b34066aba56326fb4170ab68d89c7205c15f2"
-          }
-        ],
-        "problems": [],
-        "reviewAttestation": {
-          "sha256": "a298899572e7a8ff5794baa15b508c2a7652939f7850d9db3d44e96937a42089",
-          "basis": "Previously reviewed exact source archive/license evidence, with preserved notices verified unchanged."
-        }
-      },
-      {
-        "coordinate": "github.com/ProtonMail/gopenpgp/v2@v2.10.0-proton",
-        "licenseExpression": "MIT",
-        "reviewed": true,
-        "reviewEvidence": {
-          "module": "github.com/ProtonMail/gopenpgp/v2",
-          "version": "v2.10.0-proton",
-          "goSum": "h1:d9EdXObucN2CNY1XGONJQH0+5q0q1+zTdxPhdF70C6w=",
-          "url": "https://proxy.golang.org/github.com/!proton!mail/gopenpgp/v2/@v/v2.10.0-proton.zip",
-          "sha256": "671f8e6cc670b92ed65e3344b7bfd79816b17820fee12ee3eac2d090175081ae",
-          "goSumVerified": true
-        },
-        "notices": [
-          {
-            "origin": "https://proxy.golang.org/github.com/!proton!mail/gopenpgp/v2/@v/v2.10.0-proton.zip!/github.com/ProtonMail/gopenpgp/v2@v2.10.0-proton/LICENSE",
-            "file": "dependency-notices/503bdcb689e2033376caa35eb66f170920221e96706da77be941804bc4f36422.txt",
-            "sha256": "503bdcb689e2033376caa35eb66f170920221e96706da77be941804bc4f36422"
-          }
-        ],
-        "problems": [],
-        "reviewAttestation": {
-          "sha256": "3fb1fa59ed462a0ed153b32185b8bcab96e22418db7a06d6bc5a2b367830d78d",
-          "basis": "Previously reviewed exact source archive/license evidence, with preserved notices verified unchanged."
-        }
-      },
-      {
-        "coordinate": "github.com/ProtonMail/gopenpgp/v3@v3.4.1-proton",
-        "licenseExpression": "MIT",
-        "reviewed": true,
-        "reviewEvidence": {
-          "module": "github.com/ProtonMail/gopenpgp/v3",
-          "version": "v3.4.1-proton",
-          "goSum": "h1:46o1vZSU7lYZTkaNO0ukWZxqneePs/NIwmptF8Q6l1c=",
-          "url": "https://proxy.golang.org/github.com/!proton!mail/gopenpgp/v3/@v/v3.4.1-proton.zip",
-          "sha256": "0cd1f75863058ce0717af984b8f6a7953ca671ccdeecafc4c10a20e0c84d06d5",
-          "goSumVerified": true
-        },
-        "notices": [
-          {
-            "origin": "https://proxy.golang.org/github.com/!proton!mail/gopenpgp/v3/@v/v3.4.1-proton.zip!/github.com/ProtonMail/gopenpgp/v3@v3.4.1-proton/LICENSE",
-            "file": "dependency-notices/503bdcb689e2033376caa35eb66f170920221e96706da77be941804bc4f36422.txt",
-            "sha256": "503bdcb689e2033376caa35eb66f170920221e96706da77be941804bc4f36422"
-          }
-        ],
-        "problems": [],
-        "reviewAttestation": {
-          "sha256": "8a060a16d4f342954fdc83a8b420276f475af5044c72eeb6482de29aa8e80695",
-          "basis": "Previously reviewed exact source archive/license evidence, with preserved notices verified unchanged."
-        }
-      },
-      {
-        "coordinate": "github.com/ProtonMail/pm-key-transparency-go-client@v0.0.1",
-        "licenseExpression": "NOASSERTION",
-        "reviewed": false,
-        "reviewEvidence": {
-          "module": "github.com/ProtonMail/pm-key-transparency-go-client",
-          "version": "v0.0.1",
-          "goSum": "h1:Vv74zVFkPgzGeCElvDO4t+/oHDyJAJ/XS42h7KTqdR4=",
-          "url": "https://proxy.golang.org/github.com/!proton!mail/pm-key-transparency-go-client/@v/v0.0.1.zip",
-          "sha256": "09fb341201c06a3604ce162d3d28fc7121911c2b70d5ec6acb61fc02c006f82d",
-          "goSumVerified": true
-        },
-        "notices": [],
-        "problems": [
-          "Exact module source archive and official version tree have no license or copyright grant. Aggregate publisher GPLv3 scope needs confirmation."
-        ]
-      },
-      {
-        "coordinate": "github.com/cloudflare/circl@v1.6.2",
-        "licenseExpression": "BSD-3-Clause",
-        "reviewed": true,
-        "reviewEvidence": {
-          "module": "github.com/cloudflare/circl",
-          "version": "v1.6.2",
-          "goSum": "h1:hL7VBpHHKzrV5WTfHCaBsgx/HGbBYlgrwvNXEVDYYsQ=",
-          "url": "https://proxy.golang.org/github.com/cloudflare/circl/@v/v1.6.2.zip",
-          "sha256": "07400ed2808f2324faf1aeca9b5f5539de884d6820ad36453bcefbd96bfd7fc4",
-          "goSumVerified": true
-        },
-        "notices": [
-          {
-            "origin": "https://proxy.golang.org/github.com/cloudflare/circl/@v/v1.6.2.zip!/github.com/cloudflare/circl@v1.6.2/LICENSE",
-            "file": "dependency-notices/b0da1764fe4d13d610b695536fc3f2ebc362482d053a1cd258e36975bc6b97a7.txt",
-            "sha256": "b0da1764fe4d13d610b695536fc3f2ebc362482d053a1cd258e36975bc6b97a7"
-          },
-          {
-            "origin": "https://proxy.golang.org/github.com/cloudflare/circl/@v/v1.6.2.zip!/github.com/cloudflare/circl@v1.6.2/ecc/p384/LICENSE",
-            "file": "dependency-notices/18951c084f68bce792efa2037685466628ebc1c67f4bff8b7147f3d5050e50a4.txt",
-            "sha256": "18951c084f68bce792efa2037685466628ebc1c67f4bff8b7147f3d5050e50a4"
-          },
-          {
-            "origin": "https://proxy.golang.org/github.com/cloudflare/circl/@v/v1.6.2.zip!/copyright-headers",
-            "file": "dependency-notices/5fbe6046490938f10a11000979c2b022c72c03b686cf613c53ceb91d01f26398.txt",
-            "sha256": "5fbe6046490938f10a11000979c2b022c72c03b686cf613c53ceb91d01f26398"
-          }
-        ],
-        "problems": [],
-        "reviewAttestation": {
-          "sha256": "abe2ec06c426cc5f73eb1daaea5f5ca5d9506760316f043e5c4632398509d3d8",
-          "basis": "Previously reviewed exact source archive/license evidence, with preserved notices verified unchanged."
-        }
-      },
-      {
-        "coordinate": "github.com/cronokirby/saferith@v0.33.0",
-        "licenseExpression": "MIT AND BSD-3-Clause",
-        "reviewed": true,
-        "reviewEvidence": {
-          "module": "github.com/cronokirby/saferith",
-          "version": "v0.33.0",
-          "goSum": "h1:TgoQlfsD4LIwx71+ChfRcIpjkw+RPOapDEVxa+LhwLo=",
-          "url": "https://proxy.golang.org/github.com/cronokirby/saferith/@v/v0.33.0.zip",
-          "sha256": "140b09e60685914ce1b7398d0c77bc5f2b527f96c26a837f97b683f97d6410e8",
-          "goSumVerified": true
-        },
-        "notices": [
-          {
-            "origin": "https://proxy.golang.org/github.com/cronokirby/saferith/@v/v0.33.0.zip!/github.com/cronokirby/saferith@v0.33.0/LICENSE",
-            "file": "dependency-notices/6d18204bd2f491153e8ad86767bdccedaf238e2a7bc2a1fee592888dfcfe2735.txt",
-            "sha256": "6d18204bd2f491153e8ad86767bdccedaf238e2a7bc2a1fee592888dfcfe2735"
-          },
-          {
-            "origin": "https://proxy.golang.org/github.com/cronokirby/saferith/@v/v0.33.0.zip!/github.com/cronokirby/saferith@v0.33.0/LICENSE_go",
-            "file": "dependency-notices/2d36597f7117c38b006835ae7f537487207d8ec407aa9d9980794b2030cbc067.txt",
-            "sha256": "2d36597f7117c38b006835ae7f537487207d8ec407aa9d9980794b2030cbc067"
-          },
-          {
-            "origin": "https://proxy.golang.org/github.com/cronokirby/saferith/@v/v0.33.0.zip!/copyright-headers",
-            "file": "dependency-notices/a0dfe03b6d5dffef847e2ec49896d23f6bed383630fb5603b79eb7d3eccd3cc8.txt",
-            "sha256": "a0dfe03b6d5dffef847e2ec49896d23f6bed383630fb5603b79eb7d3eccd3cc8"
-          }
-        ],
-        "problems": [],
-        "reviewAttestation": {
-          "sha256": "50f50175eb36a76570b207e1b3bf7adf94f51d0573864fa5126cff401833eab1",
-          "basis": "Previously reviewed exact source archive/license evidence, with preserved notices verified unchanged."
-        }
-      },
-      {
-        "coordinate": "github.com/golang/glog@v0.0.0-20160126235308-23def4e6c14b",
-        "licenseExpression": "Apache-2.0",
-        "reviewed": true,
-        "reviewEvidence": {
-          "module": "github.com/golang/glog",
-          "version": "v0.0.0-20160126235308-23def4e6c14b",
-          "goSum": "h1:VKtxabqXZkF25pY9ekfRL6a582T4P37/31XEstQ5p58=",
-          "url": "https://proxy.golang.org/github.com/golang/glog/@v/v0.0.0-20160126235308-23def4e6c14b.zip",
-          "sha256": "36b3c522c8102dfe74ca96e474c4c361750bf2bb85bc3cefe4f074c07d6825a9",
-          "goSumVerified": true
-        },
-        "notices": [
-          {
-            "origin": "https://proxy.golang.org/github.com/golang/glog/@v/v0.0.0-20160126235308-23def4e6c14b.zip!/github.com/golang/glog@v0.0.0-20160126235308-23def4e6c14b/LICENSE",
-            "file": "dependency-notices/73ba74dfaa520b49a401b5d21459a8523a146f3b7518a833eea5efa85130bf68.txt",
-            "sha256": "73ba74dfaa520b49a401b5d21459a8523a146f3b7518a833eea5efa85130bf68"
-          },
-          {
-            "origin": "https://proxy.golang.org/github.com/golang/glog/@v/v0.0.0-20160126235308-23def4e6c14b.zip!/copyright-headers",
-            "file": "dependency-notices/a954691034dbdff9f20b9a378875ab829b647fe72382d858b46b62818468be20.txt",
-            "sha256": "a954691034dbdff9f20b9a378875ab829b647fe72382d858b46b62818468be20"
-          }
-        ],
-        "problems": [],
-        "reviewAttestation": {
-          "sha256": "6676caeefd800f49b40cdddddcb60ad04127db3fa1ec06d7620d1c0f38210e47",
-          "basis": "Previously reviewed exact source archive/license evidence, with preserved notices verified unchanged."
-        }
-      },
-      {
-        "coordinate": "github.com/golang/mock@v1.4.4",
-        "licenseExpression": "Apache-2.0",
-        "reviewed": true,
-        "reviewEvidence": {
-          "module": "github.com/golang/mock",
-          "version": "v1.4.4",
-          "goSum": "h1:l75CXGRSwbaYNpl/Z2X1XIIAMSCquvXgpVZDhwEIJsc=",
-          "url": "https://proxy.golang.org/github.com/golang/mock/@v/v1.4.4.zip",
-          "sha256": "c6727fd55a7ca763697a33ee342dd820680a1b117d799ab93a8ce8fcee27fa4f",
-          "goSumVerified": true
-        },
-        "notices": [
-          {
-            "origin": "https://proxy.golang.org/github.com/golang/mock/@v/v1.4.4.zip!/github.com/golang/mock@v1.4.4/AUTHORS",
-            "file": "dependency-notices/638fe32585f50191c76b3f7ccfc0e0710c7bcd9f11620709bcc705083395b913.txt",
-            "sha256": "638fe32585f50191c76b3f7ccfc0e0710c7bcd9f11620709bcc705083395b913"
-          },
-          {
-            "origin": "https://proxy.golang.org/github.com/golang/mock/@v/v1.4.4.zip!/github.com/golang/mock@v1.4.4/LICENSE",
-            "file": "dependency-notices/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30.txt",
-            "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
-          },
-          {
-            "origin": "https://proxy.golang.org/github.com/golang/mock/@v/v1.4.4.zip!/github.com/golang/mock@v1.4.4/mockgen/internal/tests/copyright_file/mock_copyright_header",
-            "file": "dependency-notices/823dcea7fae12387eb0e45de41cb4f815c4fe34276fd633c6fe29279a6311e63.txt",
-            "sha256": "823dcea7fae12387eb0e45de41cb4f815c4fe34276fd633c6fe29279a6311e63"
-          },
-          {
-            "origin": "https://proxy.golang.org/github.com/golang/mock/@v/v1.4.4.zip!/copyright-headers",
-            "file": "dependency-notices/c419d3aeaf283ecfd51de7d76e5a9a9a94b043e9d03b8020f2462e2d5e0de98e.txt",
-            "sha256": "c419d3aeaf283ecfd51de7d76e5a9a9a94b043e9d03b8020f2462e2d5e0de98e"
-          }
-        ],
-        "problems": [],
-        "reviewAttestation": {
-          "sha256": "1ecf5cf0fbc41f988c7d8eaff5f794b4f76d4a83d4de68621170bbd27492153b",
-          "basis": "Previously reviewed exact source archive/license evidence, with preserved notices verified unchanged."
-        }
-      },
-      {
-        "coordinate": "github.com/golang/protobuf@v1.4.2",
-        "licenseExpression": "BSD-3-Clause",
-        "reviewed": true,
-        "reviewEvidence": {
-          "module": "github.com/golang/protobuf",
-          "version": "v1.4.2",
-          "goSum": "h1:+Z5KGCizgyZCbGh1KZqA0fcLLkwbsjIzS4aV2v7wJX0=",
-          "url": "https://proxy.golang.org/github.com/golang/protobuf/@v/v1.4.2.zip",
-          "sha256": "b8a8eae4bc576f096cf5726c5b60bdc537b419590b7523976447244ba7db168d",
-          "goSumVerified": true
-        },
-        "notices": [
-          {
-            "origin": "https://proxy.golang.org/github.com/golang/protobuf/@v/v1.4.2.zip!/github.com/golang/protobuf@v1.4.2/AUTHORS",
-            "file": "dependency-notices/b82446c166daa6932dc33418961ed7a7f06c5a9fee17e9d214e16079e3442757.txt",
-            "sha256": "b82446c166daa6932dc33418961ed7a7f06c5a9fee17e9d214e16079e3442757"
-          },
-          {
-            "origin": "https://proxy.golang.org/github.com/golang/protobuf/@v/v1.4.2.zip!/github.com/golang/protobuf@v1.4.2/LICENSE",
-            "file": "dependency-notices/8778a9fc1eaffb03ab873caae251df2d224f6b5502be8777d3cd573a4dd43903.txt",
-            "sha256": "8778a9fc1eaffb03ab873caae251df2d224f6b5502be8777d3cd573a4dd43903"
-          },
-          {
-            "origin": "https://proxy.golang.org/github.com/golang/protobuf/@v/v1.4.2.zip!/copyright-headers",
-            "file": "dependency-notices/467e419dbabc24523a7ced77c5f6dcc7ef9a5a79c2016c1ea1693714c464b761.txt",
-            "sha256": "467e419dbabc24523a7ced77c5f6dcc7ef9a5a79c2016c1ea1693714c464b761"
-          }
-        ],
-        "problems": [],
-        "reviewAttestation": {
-          "sha256": "f458142a961d335608a719c9c4766d88134d3e8dadc90a5d6206ee31063b2242",
-          "basis": "Previously reviewed exact source archive/license evidence, with preserved notices verified unchanged."
-        }
-      },
-      {
-        "coordinate": "github.com/google/certificate-transparency-go@v1.1.1",
-        "licenseExpression": "Apache-2.0",
-        "reviewed": true,
-        "reviewEvidence": {
-          "module": "github.com/google/certificate-transparency-go",
-          "version": "v1.1.1",
-          "goSum": "h1:6JHXZhXEvilMcTjR4MGZn5KV0IRkcFl4CJx5iHVhjFE=",
-          "url": "https://proxy.golang.org/github.com/google/certificate-transparency-go/@v/v1.1.1.zip",
-          "sha256": "43abc25efa5e981a6b6a15f04a11c03bc925359c67cad5f4227733fbe51ae491",
-          "goSumVerified": true
-        },
-        "notices": [
-          {
-            "origin": "https://proxy.golang.org/github.com/google/certificate-transparency-go/@v/v1.1.1.zip!/github.com/google/certificate-transparency-go@v1.1.1/AUTHORS",
-            "file": "dependency-notices/53c0f3e7d60e6ace0bc60d758934de419c87a91075033d32f12b20e37f6cc69d.txt",
-            "sha256": "53c0f3e7d60e6ace0bc60d758934de419c87a91075033d32f12b20e37f6cc69d"
-          },
-          {
-            "origin": "https://proxy.golang.org/github.com/google/certificate-transparency-go/@v/v1.1.1.zip!/github.com/google/certificate-transparency-go@v1.1.1/LICENSE",
-            "file": "dependency-notices/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30.txt",
-            "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
-          },
-          {
-            "origin": "https://proxy.golang.org/github.com/google/certificate-transparency-go/@v/v1.1.1.zip!/github.com/google/certificate-transparency-go@v1.1.1/third_party/prometheus/LICENSE",
-            "file": "dependency-notices/c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4.txt",
-            "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
-          },
-          {
-            "origin": "https://proxy.golang.org/github.com/google/certificate-transparency-go/@v/v1.1.1.zip!/copyright-headers",
-            "file": "dependency-notices/70f84fac2b1e656668c2c020a564b56792f808d4b98feede456dbd4011e1085f.txt",
-            "sha256": "70f84fac2b1e656668c2c020a564b56792f808d4b98feede456dbd4011e1085f"
-          }
-        ],
-        "problems": [],
-        "reviewAttestation": {
-          "sha256": "944015964334a21625d35ec4037c3b6b1a4d1f7b4dbb6732c84a2d01b3d1d662",
-          "basis": "Previously reviewed exact source archive/license evidence, with preserved notices verified unchanged."
-        }
-      },
-      {
-        "coordinate": "github.com/google/trillian@v1.3.11",
-        "licenseExpression": "Apache-2.0",
-        "reviewed": true,
-        "reviewEvidence": {
-          "module": "github.com/google/trillian",
-          "version": "v1.3.11",
-          "goSum": "h1:pPzJPkK06mvXId1LHEAJxIegGgHzzp/FUnycPYfoCMI=",
-          "url": "https://proxy.golang.org/github.com/google/trillian/@v/v1.3.11.zip",
-          "sha256": "2079d1979e37dca29d7f3a4de4d41c6d2ab0784e90e5193706d8f416d3fcaaf0",
-          "goSumVerified": true
-        },
-        "notices": [
-          {
-            "origin": "https://proxy.golang.org/github.com/google/trillian/@v/v1.3.11.zip!/github.com/google/trillian@v1.3.11/AUTHORS",
-            "file": "dependency-notices/0bfaa1f982bf2e7b89370edcd64b5b7e98a6ee0051ed0040a7a197b4e8283719.txt",
-            "sha256": "0bfaa1f982bf2e7b89370edcd64b5b7e98a6ee0051ed0040a7a197b4e8283719"
-          },
-          {
-            "origin": "https://proxy.golang.org/github.com/google/trillian/@v/v1.3.11.zip!/github.com/google/trillian@v1.3.11/LICENSE",
-            "file": "dependency-notices/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30.txt",
-            "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
-          },
-          {
-            "origin": "https://proxy.golang.org/github.com/google/trillian/@v/v1.3.11.zip!/copyright-headers",
-            "file": "dependency-notices/c8012890b91115e76c8f8b48b7708e9243cec90c023a7aae0c41454bc02679cc.txt",
-            "sha256": "c8012890b91115e76c8f8b48b7708e9243cec90c023a7aae0c41454bc02679cc"
-          }
-        ],
-        "problems": [],
-        "reviewAttestation": {
-          "sha256": "c9207e63462e1f310079eb99209fef74cfe5d5754ed8768c8604a7de9e222066",
-          "basis": "Previously reviewed exact source archive/license evidence, with preserved notices verified unchanged."
-        }
-      },
-      {
-        "coordinate": "github.com/pkg/errors@v0.9.1",
-        "licenseExpression": "BSD-2-Clause",
-        "reviewed": true,
-        "reviewEvidence": {
-          "module": "github.com/pkg/errors",
-          "version": "v0.9.1",
-          "goSum": "h1:FEBLx1zS214owpjy7qsBeixbURkuhQAwrK5UwLGTwt4=",
-          "url": "https://proxy.golang.org/github.com/pkg/errors/@v/v0.9.1.zip",
-          "sha256": "d4c36b8bcd0616290a3913215e0f53b931bd6e00670596f2960df1b44af2bd07",
-          "goSumVerified": true
-        },
-        "notices": [
-          {
-            "origin": "https://proxy.golang.org/github.com/pkg/errors/@v/v0.9.1.zip!/github.com/pkg/errors@v0.9.1/LICENSE",
-            "file": "dependency-notices/8d427fd87bc9579ea368fde3d49f9ca22eac857f91a9dec7e3004bdfab7dee86.txt",
-            "sha256": "8d427fd87bc9579ea368fde3d49f9ca22eac857f91a9dec7e3004bdfab7dee86"
-          }
-        ],
-        "problems": [],
-        "reviewAttestation": {
-          "sha256": "ce67bed9e02c5a2ffdd536832c6bc63f3a6b4724500a70a857fc352d8a6ed365",
-          "basis": "Previously reviewed exact source archive/license evidence, with preserved notices verified unchanged."
-        }
-      },
-      {
-        "coordinate": "golang.org/x/crypto@v0.41.0",
-        "licenseExpression": "BSD-3-Clause",
-        "reviewed": true,
-        "reviewEvidence": {
-          "module": "golang.org/x/crypto",
-          "version": "v0.41.0",
-          "goSum": "h1:WKYxWedPGCTVVl5+WHSSrOBT0O8lx32+zxmHxijgXp4=",
-          "url": "https://proxy.golang.org/golang.org/x/crypto/@v/v0.41.0.zip",
-          "sha256": "7da981b09d79d021f79ea2953637a85e3c72e43fc88b6a3230e7976fbbeec2de",
-          "goSumVerified": true
-        },
-        "notices": [
-          {
-            "origin": "https://proxy.golang.org/golang.org/x/crypto/@v/v0.41.0.zip!/golang.org/x/crypto@v0.41.0/LICENSE",
-            "file": "dependency-notices/911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad.txt",
-            "sha256": "911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad"
-          },
-          {
-            "origin": "https://proxy.golang.org/golang.org/x/crypto/@v/v0.41.0.zip!/golang.org/x/crypto@v0.41.0/PATENTS",
-            "file": "dependency-notices/96f408bfae65bf137fc2525d3ecb030271c50c1e90799f87abf8846d8dd505cc.txt",
-            "sha256": "96f408bfae65bf137fc2525d3ecb030271c50c1e90799f87abf8846d8dd505cc"
-          },
-          {
-            "origin": "https://proxy.golang.org/golang.org/x/crypto/@v/v0.41.0.zip!/copyright-headers",
-            "file": "dependency-notices/d7af58a5f7d2b8221680d8475f6a9817707ad23ab4e449c73779b90bd040e726.txt",
-            "sha256": "d7af58a5f7d2b8221680d8475f6a9817707ad23ab4e449c73779b90bd040e726"
-          }
-        ],
-        "problems": [],
-        "reviewAttestation": {
-          "sha256": "b6885c829c981ce79f67afe8896db659129225f4621d39765a12396f8be2ceff",
-          "basis": "Previously reviewed exact source archive/license evidence, with preserved notices verified unchanged."
-        }
-      },
-      {
-        "coordinate": "golang.org/x/mobile@v0.0.0-20201217150744-e6ae53a27f4f",
-        "licenseExpression": "BSD-3-Clause",
-        "reviewed": true,
-        "reviewEvidence": {
-          "module": "golang.org/x/mobile",
-          "version": "v0.0.0-20201217150744-e6ae53a27f4f",
-          "goSum": "h1:kgfVkAEEQXXQ0qc6dH7n6y37NAYmTFmz0YRwrRjgxKw=",
-          "url": "https://proxy.golang.org/golang.org/x/mobile/@v/v0.0.0-20201217150744-e6ae53a27f4f.zip",
-          "sha256": "1fd2f665cdb7f64b80e2e1224941d1ecad10bd99327c6fc8906183d2ef3816df",
-          "goSumVerified": true
-        },
-        "notices": [
-          {
-            "origin": "https://proxy.golang.org/golang.org/x/mobile/@v/v0.0.0-20201217150744-e6ae53a27f4f.zip!/golang.org/x/mobile@v0.0.0-20201217150744-e6ae53a27f4f/AUTHORS",
-            "file": "dependency-notices/b82446c166daa6932dc33418961ed7a7f06c5a9fee17e9d214e16079e3442757.txt",
-            "sha256": "b82446c166daa6932dc33418961ed7a7f06c5a9fee17e9d214e16079e3442757"
-          },
-          {
-            "origin": "https://proxy.golang.org/golang.org/x/mobile/@v/v0.0.0-20201217150744-e6ae53a27f4f.zip!/golang.org/x/mobile@v0.0.0-20201217150744-e6ae53a27f4f/LICENSE",
-            "file": "dependency-notices/2d36597f7117c38b006835ae7f537487207d8ec407aa9d9980794b2030cbc067.txt",
-            "sha256": "2d36597f7117c38b006835ae7f537487207d8ec407aa9d9980794b2030cbc067"
-          },
-          {
-            "origin": "https://proxy.golang.org/golang.org/x/mobile/@v/v0.0.0-20201217150744-e6ae53a27f4f.zip!/golang.org/x/mobile@v0.0.0-20201217150744-e6ae53a27f4f/PATENTS",
-            "file": "dependency-notices/96f408bfae65bf137fc2525d3ecb030271c50c1e90799f87abf8846d8dd505cc.txt",
-            "sha256": "96f408bfae65bf137fc2525d3ecb030271c50c1e90799f87abf8846d8dd505cc"
-          },
-          {
-            "origin": "https://proxy.golang.org/golang.org/x/mobile/@v/v0.0.0-20201217150744-e6ae53a27f4f.zip!/copyright-headers",
-            "file": "dependency-notices/c2fed1ca89483811878281b9f82f39709c50692e4950f4c567239b5ec3349055.txt",
-            "sha256": "c2fed1ca89483811878281b9f82f39709c50692e4950f4c567239b5ec3349055"
-          }
-        ],
-        "problems": [],
-        "reviewAttestation": {
-          "sha256": "45ffb0e84cf93e3da4b47174be8cba6f6abfc8178b19145173c3c1a529a481d3",
-          "basis": "Previously reviewed exact source archive/license evidence, with preserved notices verified unchanged."
-        }
-      },
-      {
-        "coordinate": "golang.org/x/net@v0.42.0",
-        "licenseExpression": "BSD-3-Clause",
-        "reviewed": true,
-        "reviewEvidence": {
-          "module": "golang.org/x/net",
-          "version": "v0.42.0",
-          "goSum": "h1:jzkYrhi3YQWD6MLBJcsklgQsoAcw89EcZbJw8Z614hs=",
-          "url": "https://proxy.golang.org/golang.org/x/net/@v/v0.42.0.zip",
-          "sha256": "cc9f79d1c8a796c756b636cee007b4ac5eba7b1f3276cd42658f4ac4a28cfbc1",
-          "goSumVerified": true
-        },
-        "notices": [
-          {
-            "origin": "https://proxy.golang.org/golang.org/x/net/@v/v0.42.0.zip!/golang.org/x/net@v0.42.0/LICENSE",
-            "file": "dependency-notices/911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad.txt",
-            "sha256": "911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad"
-          },
-          {
-            "origin": "https://proxy.golang.org/golang.org/x/net/@v/v0.42.0.zip!/golang.org/x/net@v0.42.0/PATENTS",
-            "file": "dependency-notices/96f408bfae65bf137fc2525d3ecb030271c50c1e90799f87abf8846d8dd505cc.txt",
-            "sha256": "96f408bfae65bf137fc2525d3ecb030271c50c1e90799f87abf8846d8dd505cc"
-          },
-          {
-            "origin": "https://proxy.golang.org/golang.org/x/net/@v/v0.42.0.zip!/copyright-headers",
-            "file": "dependency-notices/b1d73a5ee886c6aa8f457fe15536ddc132f79201a1c5704d6f1b5b5edb3babe2.txt",
-            "sha256": "b1d73a5ee886c6aa8f457fe15536ddc132f79201a1c5704d6f1b5b5edb3babe2"
-          }
-        ],
-        "problems": [],
-        "reviewAttestation": {
-          "sha256": "c396889c88dab933d2c39c3a0494bee5b6f1a901becfa01ab3f7ee1fc50bd0d6",
-          "basis": "Previously reviewed exact source archive/license evidence, with preserved notices verified unchanged."
-        }
-      },
-      {
-        "coordinate": "golang.org/x/sys@v0.35.0",
-        "licenseExpression": "BSD-3-Clause",
-        "reviewed": true,
-        "reviewEvidence": {
-          "module": "golang.org/x/sys",
-          "version": "v0.35.0",
-          "goSum": "h1:vz1N37gP5bs89s7He8XuIYXpyY0+QlsKmzipCbUtyxI=",
-          "url": "https://proxy.golang.org/golang.org/x/sys/@v/v0.35.0.zip",
-          "sha256": "dc3c20611168aaa8fda0d71999be1a5222a0ba57bc767c978a590e41ff2ede35",
-          "goSumVerified": true
-        },
-        "notices": [
-          {
-            "origin": "https://proxy.golang.org/golang.org/x/sys/@v/v0.35.0.zip!/golang.org/x/sys@v0.35.0/LICENSE",
-            "file": "dependency-notices/911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad.txt",
-            "sha256": "911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad"
-          },
-          {
-            "origin": "https://proxy.golang.org/golang.org/x/sys/@v/v0.35.0.zip!/golang.org/x/sys@v0.35.0/PATENTS",
-            "file": "dependency-notices/96f408bfae65bf137fc2525d3ecb030271c50c1e90799f87abf8846d8dd505cc.txt",
-            "sha256": "96f408bfae65bf137fc2525d3ecb030271c50c1e90799f87abf8846d8dd505cc"
-          },
-          {
-            "origin": "https://proxy.golang.org/golang.org/x/sys/@v/v0.35.0.zip!/copyright-headers",
-            "file": "dependency-notices/0836b57d510b5fa976a4a3280a74a522717b007716fd6d69ee949d5bf9a8e539.txt",
-            "sha256": "0836b57d510b5fa976a4a3280a74a522717b007716fd6d69ee949d5bf9a8e539"
-          }
-        ],
-        "problems": [],
-        "reviewAttestation": {
-          "sha256": "daa9e4c78c4b9283a847697c79fcb7ba3e130309869b20b523d4038d9df198bf",
-          "basis": "Previously reviewed exact source archive/license evidence, with preserved notices verified unchanged."
-        }
-      },
-      {
-        "coordinate": "golang.org/x/text@v0.28.0",
-        "licenseExpression": "BSD-3-Clause",
-        "reviewed": true,
-        "reviewEvidence": {
-          "module": "golang.org/x/text",
-          "version": "v0.28.0",
-          "goSum": "h1:rhazDwis8INMIwQ4tpjLDzUhx6RlXqZNPEM0huQojng=",
-          "url": "https://proxy.golang.org/golang.org/x/text/@v/v0.28.0.zip",
-          "sha256": "46259e1416ae7ec6adf1867c5f9fab32af0476a148e3c95f1dfbb134f4acf48d",
-          "goSumVerified": true
-        },
-        "notices": [
-          {
-            "origin": "https://proxy.golang.org/golang.org/x/text/@v/v0.28.0.zip!/golang.org/x/text@v0.28.0/LICENSE",
-            "file": "dependency-notices/911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad.txt",
-            "sha256": "911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad"
-          },
-          {
-            "origin": "https://proxy.golang.org/golang.org/x/text/@v/v0.28.0.zip!/golang.org/x/text@v0.28.0/PATENTS",
-            "file": "dependency-notices/96f408bfae65bf137fc2525d3ecb030271c50c1e90799f87abf8846d8dd505cc.txt",
-            "sha256": "96f408bfae65bf137fc2525d3ecb030271c50c1e90799f87abf8846d8dd505cc"
-          },
-          {
-            "origin": "https://proxy.golang.org/golang.org/x/text/@v/v0.28.0.zip!/copyright-headers",
-            "file": "dependency-notices/29be77e49b58b460a475890155b5158f99cf56c59fa90933e4bac4dd195957f3.txt",
-            "sha256": "29be77e49b58b460a475890155b5158f99cf56c59fa90933e4bac4dd195957f3"
-          }
-        ],
-        "problems": [],
-        "reviewAttestation": {
-          "sha256": "9f8aeacf0d00b76b0bbb4c99fb3668223caf5960cffa25848a939b60b9213751",
-          "basis": "Previously reviewed exact source archive/license evidence, with preserved notices verified unchanged."
-        }
-      },
-      {
-        "coordinate": "google.golang.org/genproto@v0.0.0-20200707001353-8e8330bf89df",
-        "licenseExpression": "Apache-2.0",
-        "reviewed": true,
-        "reviewEvidence": {
-          "module": "google.golang.org/genproto",
-          "version": "v0.0.0-20200707001353-8e8330bf89df",
-          "goSum": "h1:HWF6nM8ruGdu1K8IXFR+i2oT3YP+iBfZzCbC9zUfcWo=",
-          "url": "https://proxy.golang.org/google.golang.org/genproto/@v/v0.0.0-20200707001353-8e8330bf89df.zip",
-          "sha256": "85f87e262cccb171b366ac72a6721e877873458452515dd7beb4f0e67b9d72d9",
-          "goSumVerified": true
-        },
-        "notices": [
-          {
-            "origin": "https://proxy.golang.org/google.golang.org/genproto/@v/v0.0.0-20200707001353-8e8330bf89df.zip!/google.golang.org/genproto@v0.0.0-20200707001353-8e8330bf89df/LICENSE",
-            "file": "dependency-notices/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30.txt",
-            "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
-          },
-          {
-            "origin": "https://proxy.golang.org/google.golang.org/genproto/@v/v0.0.0-20200707001353-8e8330bf89df.zip!/copyright-headers",
-            "file": "dependency-notices/5619ac973639a0ebc0acd04a7c6b743d4b356e614170591218892014ab548309.txt",
-            "sha256": "5619ac973639a0ebc0acd04a7c6b743d4b356e614170591218892014ab548309"
-          }
-        ],
-        "problems": [],
-        "reviewAttestation": {
-          "sha256": "095a3d6b87fc75f3200ef4b499e189efb804c1bb0325fb2098ff945cbbacc6b1",
-          "basis": "Previously reviewed exact source archive/license evidence, with preserved notices verified unchanged."
-        }
-      },
-      {
-        "coordinate": "google.golang.org/grpc@v1.29.1",
-        "licenseExpression": "Apache-2.0",
-        "reviewed": true,
-        "reviewEvidence": {
-          "module": "google.golang.org/grpc",
-          "version": "v1.29.1",
-          "goSum": "h1:EC2SB8S04d2r73uptxphDSUG+kTKVgjRPF+N3xpxRB4=",
-          "url": "https://proxy.golang.org/google.golang.org/grpc/@v/v1.29.1.zip",
-          "sha256": "17733816e7fa5d6f0a76a59a8593a6d981be13743d4d7fa848c513689e950b42",
-          "goSumVerified": true
-        },
-        "notices": [
-          {
-            "origin": "https://proxy.golang.org/google.golang.org/grpc/@v/v1.29.1.zip!/google.golang.org/grpc@v1.29.1/AUTHORS",
-            "file": "dependency-notices/627c695f80fdac6412d66e6ad4160a4acb41923ca7ee3fd7e112e105f0ff46b9.txt",
-            "sha256": "627c695f80fdac6412d66e6ad4160a4acb41923ca7ee3fd7e112e105f0ff46b9"
-          },
-          {
-            "origin": "https://proxy.golang.org/google.golang.org/grpc/@v/v1.29.1.zip!/google.golang.org/grpc@v1.29.1/LICENSE",
-            "file": "dependency-notices/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30.txt",
-            "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
-          },
-          {
-            "origin": "https://proxy.golang.org/google.golang.org/grpc/@v/v1.29.1.zip!/copyright-headers",
-            "file": "dependency-notices/db7dc28ab5b18fdb65eb1b4c24beee7de08da7b3bc859ddc6771f24ed2e3c05c.txt",
-            "sha256": "db7dc28ab5b18fdb65eb1b4c24beee7de08da7b3bc859ddc6771f24ed2e3c05c"
-          }
-        ],
-        "problems": [],
-        "reviewAttestation": {
-          "sha256": "68a56be17c7114e604a0feacb511d364623b5da5b939a04ea3ddade114583409",
-          "basis": "Previously reviewed exact source archive/license evidence, with preserved notices verified unchanged."
-        }
-      },
-      {
-        "coordinate": "google.golang.org/protobuf@v1.25.0",
-        "licenseExpression": "BSD-3-Clause",
-        "reviewed": true,
-        "reviewEvidence": {
-          "module": "google.golang.org/protobuf",
-          "version": "v1.25.0",
-          "goSum": "h1:Ejskq+SyPohKW+1uil0JJMtmHCgJPJ/qWTxr8qp+R4c=",
-          "url": "https://proxy.golang.org/google.golang.org/protobuf/@v/v1.25.0.zip",
-          "sha256": "204f72cf4d80eaf1892d4b4fe4e34dc9db283eb8fdb36902f871bf3eaa29aff9",
-          "goSumVerified": true
-        },
-        "notices": [
-          {
-            "origin": "https://proxy.golang.org/google.golang.org/protobuf/@v/v1.25.0.zip!/google.golang.org/protobuf@v1.25.0/AUTHORS",
-            "file": "dependency-notices/5aa3167c44245f0b12b27195d85c6a8c8e067cfdd511059daa4d7b3c5b232129.txt",
-            "sha256": "5aa3167c44245f0b12b27195d85c6a8c8e067cfdd511059daa4d7b3c5b232129"
-          },
-          {
-            "origin": "https://proxy.golang.org/google.golang.org/protobuf/@v/v1.25.0.zip!/google.golang.org/protobuf@v1.25.0/LICENSE",
-            "file": "dependency-notices/4835612df0098ca95f8e7d9e3bffcb02358d435dbb38057c844c99d7f725eb20.txt",
-            "sha256": "4835612df0098ca95f8e7d9e3bffcb02358d435dbb38057c844c99d7f725eb20"
-          },
-          {
-            "origin": "https://proxy.golang.org/google.golang.org/protobuf/@v/v1.25.0.zip!/google.golang.org/protobuf@v1.25.0/PATENTS",
-            "file": "dependency-notices/96f408bfae65bf137fc2525d3ecb030271c50c1e90799f87abf8846d8dd505cc.txt",
-            "sha256": "96f408bfae65bf137fc2525d3ecb030271c50c1e90799f87abf8846d8dd505cc"
-          },
-          {
-            "origin": "https://proxy.golang.org/google.golang.org/protobuf/@v/v1.25.0.zip!/copyright-headers",
-            "file": "dependency-notices/dd2320a0f2a74ef211b5a46604ec092948eed865e5f8b086ffc6b779cda70db9.txt",
-            "sha256": "dd2320a0f2a74ef211b5a46604ec092948eed865e5f8b086ffc6b779cda70db9"
-          }
-        ],
-        "problems": [],
-        "reviewAttestation": {
-          "sha256": "5556c3311267c93bd48a0033bdc7bea2cf7831e50024ba654a08a785569ce95d",
-          "basis": "Previously reviewed exact source archive/license evidence, with preserved notices verified unchanged."
-        }
-      },
-      {
-        "coordinate": "Go standard library/runtime@go1.23.12",
-        "licenseExpression": "BSD-3-Clause",
-        "reviewed": true,
-        "reviewEvidence": {
-          "url": "https://raw.githubusercontent.com/golang/go/go1.23.12/LICENSE",
-          "sha256": "2d36597f7117c38b006835ae7f537487207d8ec407aa9d9980794b2030cbc067"
-        },
-        "notices": [
-          {
-            "origin": "https://raw.githubusercontent.com/golang/go/go1.23.12/LICENSE",
-            "file": "dependency-notices/2d36597f7117c38b006835ae7f537487207d8ec407aa9d9980794b2030cbc067.txt",
-            "sha256": "2d36597f7117c38b006835ae7f537487207d8ec407aa9d9980794b2030cbc067"
-          }
-        ],
-        "problems": [],
-        "reviewAttestation": {
-          "sha256": "248b0bf4aa64eb79b16734d3f002a1774206ec94e3d2dcf8d8dce32f4d2ba0bc",
-          "basis": "Previously reviewed exact source archive/license evidence, with preserved notices verified unchanged."
-        }
-      }
-    ],
-    "upstreamEvidence": [
-      {
-        "url": "https://raw.githubusercontent.com/ProtonMail/gopenpgp/v2.10.0-proton/.github/workflows/android.yml",
-        "sha256": "7a918e5bbcbce33a86ee3b7cc3238bbd479e7a2c618ebfbbed093691940da9c5"
-      },
-      {
-        "url": "https://raw.githubusercontent.com/ProtonMail/gopenpgp/v2.10.0-proton/build.sh",
-        "sha256": "87cb47bc1923e934fa4d305af776da542201a552198f9d8e657cda99e5905c52"
-      },
-      {
-        "url": "https://raw.githubusercontent.com/ProtonMail/pm-key-transparency-go-client/v0.0.1/LICENSE",
-        "status": "HTTP Error 404: Not Found"
-      },
-      {
-        "url": "https://api.github.com/repos/ProtonMail/pm-key-transparency-go-client/license?ref=v0.0.1",
-        "status": "HTTP Error 404: Not Found"
-      },
-      {
-        "url": "https://api.github.com/repos/ProtonMail/pm-key-transparency-go-client/git/trees/v0.0.1?recursive=1",
-        "sha256": "48e0d3e3deda0d1a8e98202409028a7b2aecb6899e4eb8f4b9fb33117d36102b"
-      }
-    ],
-    "inventorySha256": "f550fd41abbccb01b5f91f2c8c50dd6380ccc16455492d3d30676fef21fbff59"
+    "inventorySha256": "bdbdacc7942fcaaaf3930c44832acf850be588a4c1702c7cf552983301482e81",
+    "reviewAttestation": {
+      "sha256": "bdbdacc7942fcaaaf3930c44832acf850be588a4c1702c7cf552983301482e81",
+      "basis": "Exact source-descriptor digest, linked source/archive/grant inventory and reviewed API/ELF mapping; no publisher aggregate license inference."
+    }
   },
   "packages": [
     {
@@ -12109,53 +11718,152 @@
       }
     },
     {
-      "coordinate": "me.proton.crypto:android-golib:2.10.0-2",
+      "coordinate": "com.patmanak.calendeer.crypto:android-golib:2.10.0-2-go1.27.1-16k-linux1",
       "licenses": [
         {
           "name": "GNU GENERAL PUBLIC LICENSE, Version 3.0",
           "url": "https://www.gnu.org/licenses/gpl-3.0.en.html"
         }
       ],
-      "notices": [
-        {
-          "origin": "https://repo.maven.apache.org/maven2/me/proton/crypto/android-golib/2.10.0-2/android-golib-2.10.0-2-sources.jar!/copyright-headers",
-          "file": "dependency-notices/e8ee26f79ce764758f2cae3161accca156b30993e34541b1ad05ec22e05f70fa.txt",
-          "sha256": "e8ee26f79ce764758f2cae3161accca156b30993e34541b1ad05ec22e05f70fa"
-        },
-        {
-          "origin": "GNU GPL version 3 full text",
-          "file": "dependency-notices/0abbff814cd00e2b0b6d08395af2b419c1a92026c4b4adacbb65ccda45fa58cf.txt",
-          "sha256": "0abbff814cd00e2b0b6d08395af2b419c1a92026c4b4adacbb65ccda45fa58cf"
-        }
-      ],
-      "reviewed": false,
-      "problems": [
-        "Native publisher GPLv3 grant requires the separate native-source/license review; one exact embedded module has no source license."
-      ],
-      "pomSha256": "313a3b325e5006b2a367657f4ad01aa31ceec73996e8a07f53bb16e8aec23960",
-      "source": "https://github.com/ProtonMail/gopenpgp",
+      "licenseExpression": "GPL-3.0-only",
+      "source": "https://github.com/patmanak/calendeer/tree/main/proton-auth/native/golib",
+      "pomPackaging": "aar",
+      "pomSha256": "3d87f9ed87559c39ee12252f94537a143472c2b9ee06980c53cf1f54661b87bb",
       "artifacts": [
         {
-          "name": "android-golib-2.10.0-2.aar",
-          "sha256": "f64705f4ae14dde5c619d03a3a7fc2e8d747fb2803c4b5da01b0c38dac7884c9"
+          "name": "android-golib-2.10.0-2-go1.27.1-16k-linux1.aar",
+          "sha256": "41253b873c64e9dceec6c21b12d9a2e3a8152cb4f52957a67d43d9d77753171f"
         }
       ],
-      "licenseExpression": "GPL-3.0-only",
-      "reviewEvidence": {
-        "metadata": {
-          "url": "https://repo.maven.apache.org/maven2/me/proton/crypto/android-golib/2.10.0-2/android-golib-2.10.0-2.pom",
-          "sha256": "313a3b325e5006b2a367657f4ad01aa31ceec73996e8a07f53bb16e8aec23960",
-          "mirrorUrl": "https://repo1.maven.org/maven2/me/proton/crypto/android-golib/2.10.0-2/android-golib-2.10.0-2.pom",
-          "mirrorMatches": true,
-          "cachedPomMatches": true
+      "notices": [
+        {
+          "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/Go/LICENSE",
+          "file": "dependency-notices/911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad.txt",
+          "sha256": "911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad"
         },
-        "sourceArchives": [
-          {
-            "url": "https://repo.maven.apache.org/maven2/me/proton/crypto/android-golib/2.10.0-2/android-golib-2.10.0-2-sources.jar",
-            "sha256": "337a9754226b0653aa9e2a9f9bb2eb209d6f3934ce28530c12c6c4fe96b59764"
-          }
-        ],
-        "basis": "Published versioned source copyright/license headers and artifact notices; selected compatible terms preserve all captured third-party notices."
+        {
+          "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/Go/PATENTS",
+          "file": "dependency-notices/96f408bfae65bf137fc2525d3ecb030271c50c1e90799f87abf8846d8dd505cc.txt",
+          "sha256": "96f408bfae65bf137fc2525d3ecb030271c50c1e90799f87abf8846d8dd505cc"
+        },
+        {
+          "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/github.com_ProtonMail_bcrypt/LICENSE",
+          "file": "dependency-notices/da4b77ea67eea3548aac445741cd70cfbd87e2a5bcbb03a2bb85abda0e2fa3c1.txt",
+          "sha256": "da4b77ea67eea3548aac445741cd70cfbd87e2a5bcbb03a2bb85abda0e2fa3c1"
+        },
+        {
+          "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/github.com_ProtonMail_go-crypto/AUTHORS",
+          "file": "dependency-notices/5aa3167c44245f0b12b27195d85c6a8c8e067cfdd511059daa4d7b3c5b232129.txt",
+          "sha256": "5aa3167c44245f0b12b27195d85c6a8c8e067cfdd511059daa4d7b3c5b232129"
+        },
+        {
+          "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/github.com_ProtonMail_go-crypto/LICENSE",
+          "file": "dependency-notices/2d36597f7117c38b006835ae7f537487207d8ec407aa9d9980794b2030cbc067.txt",
+          "sha256": "2d36597f7117c38b006835ae7f537487207d8ec407aa9d9980794b2030cbc067"
+        },
+        {
+          "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/github.com_ProtonMail_go-crypto/PATENTS",
+          "file": "dependency-notices/96f408bfae65bf137fc2525d3ecb030271c50c1e90799f87abf8846d8dd505cc.txt",
+          "sha256": "96f408bfae65bf137fc2525d3ecb030271c50c1e90799f87abf8846d8dd505cc"
+        },
+        {
+          "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/github.com_ProtonMail_go-mime/LICENSE",
+          "file": "dependency-notices/503bdcb689e2033376caa35eb66f170920221e96706da77be941804bc4f36422.txt",
+          "sha256": "503bdcb689e2033376caa35eb66f170920221e96706da77be941804bc4f36422"
+        },
+        {
+          "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/github.com_ProtonMail_go-srp/LICENSE.txt",
+          "file": "dependency-notices/7b3f092184869028bb9706f902c60e45fe53bbad504fa8fefa54e9119d0571a0.txt",
+          "sha256": "7b3f092184869028bb9706f902c60e45fe53bbad504fa8fefa54e9119d0571a0"
+        },
+        {
+          "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/github.com_ProtonMail_gopenpgp_v2/LICENSE",
+          "file": "dependency-notices/503bdcb689e2033376caa35eb66f170920221e96706da77be941804bc4f36422.txt",
+          "sha256": "503bdcb689e2033376caa35eb66f170920221e96706da77be941804bc4f36422"
+        },
+        {
+          "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/github.com_cloudflare_circl/LICENSE",
+          "file": "dependency-notices/b0da1764fe4d13d610b695536fc3f2ebc362482d053a1cd258e36975bc6b97a7.txt",
+          "sha256": "b0da1764fe4d13d610b695536fc3f2ebc362482d053a1cd258e36975bc6b97a7"
+        },
+        {
+          "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/github.com_cloudflare_circl/ecc/p384/LICENSE",
+          "file": "dependency-notices/18951c084f68bce792efa2037685466628ebc1c67f4bff8b7147f3d5050e50a4.txt",
+          "sha256": "18951c084f68bce792efa2037685466628ebc1c67f4bff8b7147f3d5050e50a4"
+        },
+        {
+          "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/github.com_cronokirby_saferith/LICENSE",
+          "file": "dependency-notices/6d18204bd2f491153e8ad86767bdccedaf238e2a7bc2a1fee592888dfcfe2735.txt",
+          "sha256": "6d18204bd2f491153e8ad86767bdccedaf238e2a7bc2a1fee592888dfcfe2735"
+        },
+        {
+          "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/github.com_cronokirby_saferith/LICENSE_go",
+          "file": "dependency-notices/2d36597f7117c38b006835ae7f537487207d8ec407aa9d9980794b2030cbc067.txt",
+          "sha256": "2d36597f7117c38b006835ae7f537487207d8ec407aa9d9980794b2030cbc067"
+        },
+        {
+          "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/github.com_pkg_errors/LICENSE",
+          "file": "dependency-notices/8d427fd87bc9579ea368fde3d49f9ca22eac857f91a9dec7e3004bdfab7dee86.txt",
+          "sha256": "8d427fd87bc9579ea368fde3d49f9ca22eac857f91a9dec7e3004bdfab7dee86"
+        },
+        {
+          "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/golang.org_x_crypto/LICENSE",
+          "file": "dependency-notices/911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad.txt",
+          "sha256": "911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad"
+        },
+        {
+          "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/golang.org_x_crypto/PATENTS",
+          "file": "dependency-notices/96f408bfae65bf137fc2525d3ecb030271c50c1e90799f87abf8846d8dd505cc.txt",
+          "sha256": "96f408bfae65bf137fc2525d3ecb030271c50c1e90799f87abf8846d8dd505cc"
+        },
+        {
+          "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/golang.org_x_mobile/LICENSE",
+          "file": "dependency-notices/911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad.txt",
+          "sha256": "911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad"
+        },
+        {
+          "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/golang.org_x_mobile/PATENTS",
+          "file": "dependency-notices/96f408bfae65bf137fc2525d3ecb030271c50c1e90799f87abf8846d8dd505cc.txt",
+          "sha256": "96f408bfae65bf137fc2525d3ecb030271c50c1e90799f87abf8846d8dd505cc"
+        },
+        {
+          "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/golang.org_x_sys/LICENSE",
+          "file": "dependency-notices/911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad.txt",
+          "sha256": "911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad"
+        },
+        {
+          "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/golang.org_x_sys/PATENTS",
+          "file": "dependency-notices/96f408bfae65bf137fc2525d3ecb030271c50c1e90799f87abf8846d8dd505cc.txt",
+          "sha256": "96f408bfae65bf137fc2525d3ecb030271c50c1e90799f87abf8846d8dd505cc"
+        },
+        {
+          "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/golang.org_x_text/LICENSE",
+          "file": "dependency-notices/911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad.txt",
+          "sha256": "911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad"
+        },
+        {
+          "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/golang.org_x_text/PATENTS",
+          "file": "dependency-notices/96f408bfae65bf137fc2525d3ecb030271c50c1e90799f87abf8846d8dd505cc.txt",
+          "sha256": "96f408bfae65bf137fc2525d3ecb030271c50c1e90799f87abf8846d8dd505cc"
+        }
+      ],
+      "reviewed": true,
+      "problems": [],
+      "reviewEvidence": {
+        "basis": "Project-owned source-built aggregate: GPLv3 packaging plus the separately reviewed native source terms. No use of the upstream precompiled JNI binaries. Full GPLv3 text shipped separately in legal/GPL-3.0.txt.",
+        "sourceDescriptors": {
+          "go.mod": "1aa0b4ee39976d09b967a21e56911d8bfdf0c0f8724e7ca6ce034740a3ee9ce9",
+          "go.sum": "2e6ec8297605f1caea038ce48d4daa4420a4c279192fcb81c00a5d64cfff3b81",
+          "dependencies.go": "e766531b25cbb0b96155d8db40a4febfdd13f0f06947315121d4325a3672b615",
+          "build.ps1": "9178db31c7ed2c8decb4d82aedf32bb6c59ac272a97b9005fe0b66318c21318d",
+          "build.sh": "9f0f79f862c49323477aeaa9540aaa29f0fb287ab2c43d18d52c98e62401d0ab",
+          "package-aar.py": "ab3ee4a4aeb968853c35d0e43cfd40cb99f8d296ae94f475f6c1e81c387cdcb5",
+          "golib.pom": "3d87f9ed87559c39ee12252f94537a143472c2b9ee06980c53cf1f54661b87bb"
+        }
+      },
+      "reviewAttestation": {
+        "sha256": "9eed55787973f23c1410888f9b5664ab51f9b2f7e3c6758b56a9de57dc3500af",
+        "basis": "Project-owned POM/AAR with exact admitted hashes and full native source review; all other Maven reviews preserved unchanged."
       }
     },
     {
@@ -13740,7 +13448,7 @@
       }
     }
   ],
-  "verificationMetadataSha256": "ee0b0024d74904a26e93bfc9f6fdacdd4ed7f21bb390fe7855bfbb51bec03a4f",
+  "verificationMetadataSha256": "f88c81bd31b883e9d01bf7d21fd66b9260e52f6deba844d2e18b97e080e8d2a0",
   "nonPackagedComponents": [
     {
       "coordinate": "com.google.code.findbugs:jsr305:3.0.2",

@@ -1,6 +1,6 @@
 Calendeer third-party licenses and copyright notices
-License audit: BLOCKED - see unresolved source/licensing gates below
-Manifest SHA-256: 584838723664e0a3f9b0fc9a538959510aac67ea50d9ed9aa67be4f4c3317632
+License audit: PASS
+Manifest SHA-256: d2132100103b738d6ce10f830e24f41c3bd999f9b94c5638fb93e523f7f215e9
 
 Imported Proton Calendar/WebClients adaptations: GPL-3.0-only.
 Source/provenance: proton-auth/PROVENANCE.md; GPLv3 text: GPL-3.0.txt.
@@ -194,7 +194,7 @@ me.proton.core:user-settings-domain:36.8.0 — GPL-3.0-only
 me.proton.core:util-android-device:36.8.0 — GPL-3.0-only
 me.proton.core:util-android-shared-preferences:36.8.0 — GPL-3.0-only
 me.proton.core:util-kotlin:36.8.0 — GPL-3.0-only
-me.proton.crypto:android-golib:2.10.0-2 — GPL-3.0-only
+com.patmanak.calendeer.crypto:android-golib:2.10.0-2-go1.27.1-16k-linux1 — GPL-3.0-only
 net.sf.biweekly:biweekly:0.6.8 — BSD-2-Clause AND MIT AND Apache-2.0
 org.jetbrains.kotlin:kotlin-android-extensions-runtime:2.1.0 — Apache-2.0
 org.jetbrains.kotlin:kotlin-parcelize-runtime:2.1.0 — Apache-2.0
@@ -226,38 +226,21 @@ org.mobilenativefoundation.store:store5:5.0.0 — Apache-2.0
 org.mobilenativefoundation.store:store5-jvm:5.0.0 — Apache-2.0
 
 Native dependencies:
-filippo.io/edwards25519@v1.0.0-rc.1 — BSD-3-Clause
 github.com/ProtonMail/bcrypt@v0.0.0-20210511135022-227b4adcab57 — BSD-3-Clause
 github.com/ProtonMail/go-crypto@v1.4.1-proton — BSD-3-Clause
-github.com/ProtonMail/go-ecvrf@v0.0.1 — MIT
 github.com/ProtonMail/go-mime@v0.0.0-20230322103455-7d82a3887f2f — MIT
 github.com/ProtonMail/go-srp@v0.0.7 — MIT
 github.com/ProtonMail/gopenpgp/v2@v2.10.0-proton — MIT
-github.com/ProtonMail/gopenpgp/v3@v3.4.1-proton — MIT
-github.com/ProtonMail/pm-key-transparency-go-client@v0.0.1 — NOASSERTION
 github.com/cloudflare/circl@v1.6.2 — BSD-3-Clause
 github.com/cronokirby/saferith@v0.33.0 — MIT AND BSD-3-Clause
-github.com/golang/glog@v0.0.0-20160126235308-23def4e6c14b — Apache-2.0
-github.com/golang/mock@v1.4.4 — Apache-2.0
-github.com/golang/protobuf@v1.4.2 — BSD-3-Clause
-github.com/google/certificate-transparency-go@v1.1.1 — Apache-2.0
-github.com/google/trillian@v1.3.11 — Apache-2.0
 github.com/pkg/errors@v0.9.1 — BSD-2-Clause
 golang.org/x/crypto@v0.41.0 — BSD-3-Clause
-golang.org/x/mobile@v0.0.0-20201217150744-e6ae53a27f4f — BSD-3-Clause
-golang.org/x/net@v0.42.0 — BSD-3-Clause
-golang.org/x/sys@v0.35.0 — BSD-3-Clause
+golang.org/x/mobile@v0.0.0-20260908204917-8b95e45f8d3e — BSD-3-Clause AND MIT
+golang.org/x/sys@v0.48.0 — BSD-3-Clause
 golang.org/x/text@v0.28.0 — BSD-3-Clause
-google.golang.org/genproto@v0.0.0-20200707001353-8e8330bf89df — Apache-2.0
-google.golang.org/grpc@v1.29.1 — Apache-2.0
-google.golang.org/protobuf@v1.25.0 — BSD-3-Clause
-Go standard library/runtime@go1.23.12 — BSD-3-Clause
+Go standard library/runtime@go1.27.1 — BSD-3-Clause
 
 Unresolved distribution gates:
-me.proton.crypto:android-golib:2.10.0-2: license/notice compatibility review incomplete
-me.proton.crypto:android-golib:2.10.0-2: unresolved evidence problems
-Native transitive source/license inventory incomplete
-Native dependency review incomplete or requires compatibility policy review
 
 ========================================================================
 Preserved notice: dependency-notices/01fe7f0b8047cb61cf38934c48bae1bdb3c9661d47cba01874cd76c1c5399ab1.txt
@@ -400,6 +383,98 @@ Source example: androidx/lifecycle/ProcessLifecycleInitializer.kt
 
 
 ========================================================================
+Preserved notice: dependency-notices/05cb04a1bf34fee46125dd18cd1fe8d7e218005e87a60a1e782ef02afb9a1c17.txt
+Origins: https://proxy.golang.org/golang.org/x/mobile/@v/v0.0.0-20260908204917-8b95e45f8d3e.zip!/copyright-headers
+
+Source copyright/license headers (verbatim; distinct blocks deduplicated)
+
+Source example: golang.org/x/mobile@v0.0.0-20260908204917-8b95e45f8d3e/example/bind/android/app/src/main/java/org/golang/example/bind/MainActivity.java
+/*
+ * Copyright 2015 The Go Authors. All rights reserved.
+ * Use of this source code is governed by a BSD-style
+ * license that can be found in the LICENSE file.
+ */
+
+Source example: golang.org/x/mobile@v0.0.0-20260908204917-8b95e45f8d3e/gl/consts.go
+/*
+Partially generated from the Khronos OpenGL API specification in XML
+format, which is covered by the license:
+
+	Copyright (c) 2013-2014 The Khronos Group Inc.
+
+	Permission is hereby granted, free of charge, to any person obtaining a
+	copy of this software and/or associated documentation files (the
+	"Materials"), to deal in the Materials without restriction, including
+	without limitation the rights to use, copy, modify, merge, publish,
+	distribute, sublicense, and/or sell copies of the Materials, and to
+	permit persons to whom the Materials are furnished to do so, subject to
+	the following conditions:
+
+	The above copyright notice and this permission notice shall be included
+	in all copies or substantial portions of the Materials.
+
+	THE MATERIALS ARE PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+	EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+	MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+	IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+	CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+	TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+	MATERIALS OR THE USE OR OTHER DEALINGS IN THE MATERIALS.
+
+*/
+
+Source example: golang.org/x/mobile@v0.0.0-20260908204917-8b95e45f8d3e/app/android.c
+// Copyright 2014 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+Source example: golang.org/x/mobile@v0.0.0-20260908204917-8b95e45f8d3e/app/app_test.go
+// Copyright 2015 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+Source example: golang.org/x/mobile@v0.0.0-20260908204917-8b95e45f8d3e/app/internal/callfn/callfn_arm64.s
+// Copyright 2016 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+Source example: golang.org/x/mobile@v0.0.0-20260908204917-8b95e45f8d3e/gl/work_windows_386.s
+// Copyright 2016 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+Source example: golang.org/x/mobile@v0.0.0-20260908204917-8b95e45f8d3e/bind/testdata/testpkg/tagged.go
+// Copyright 2017 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+Source example: golang.org/x/mobile@v0.0.0-20260908204917-8b95e45f8d3e/bind/objc/SeqCustom.m
+// Copyright 2018 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+Source example: golang.org/x/mobile@v0.0.0-20260908204917-8b95e45f8d3e/cmd/gomobile/env_test.go
+// Copyright 2019 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+Source example: golang.org/x/mobile@v0.0.0-20260908204917-8b95e45f8d3e/internal/sdkpath/sdkpath.go
+// Copyright 2022 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+Source example: golang.org/x/mobile@v0.0.0-20260908204917-8b95e45f8d3e/asset/asset_ios.go
+// Copyright 2024 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+Source example: golang.org/x/mobile@v0.0.0-20260908204917-8b95e45f8d3e/bind/testdata/aliases.go
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+
+========================================================================
 Preserved notice: dependency-notices/06f77dbd4e5f51524bcebe8ebb754fb3f7a96f100884d0734b4431cbaebbf03a.txt
 Origins: https://dl.google.com/dl/android/maven2/androidx/compose/runtime/runtime-android/1.10.4/runtime-android-1.10.4-sources.jar!/copyright-headers
 
@@ -535,122 +610,6 @@ Source example: androidMain/androidx/compose/runtime/snapshots/SnapshotStateList
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
-
-========================================================================
-Preserved notice: dependency-notices/0836b57d510b5fa976a4a3280a74a522717b007716fd6d69ee949d5bf9a8e539.txt
-Origins: https://proxy.golang.org/golang.org/x/sys/@v/v0.35.0.zip!/copyright-headers
-
-Source copyright/license headers (verbatim; distinct blocks deduplicated)
-
-Source example: golang.org/x/sys@v0.35.0/plan9/asm_plan9_386.s
-// Copyright 2009 The Go Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
-
-Source example: golang.org/x/sys@v0.35.0/unix/syscall_darwin.go
-// Copyright 2009,2010 The Go Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
-
-Source example: golang.org/x/sys@v0.35.0/unix/env_unix.go
-// Copyright 2010 The Go Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
-
-Source example: golang.org/x/sys@v0.35.0/plan9/env_plan9.go
-// Copyright 2011 The Go Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
-
-Source example: golang.org/x/sys@v0.35.0/plan9/dir_plan9.go
-// Copyright 2012 The Go Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
-
-Source example: golang.org/x/sys@v0.35.0/plan9/syscall_test.go
-// Copyright 2013 The Go Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
-
-Source example: golang.org/x/sys@v0.35.0/plan9/asm.s
-// Copyright 2014 The Go Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
-
-Source example: golang.org/x/sys@v0.35.0/plan9/pwd_go15_plan9.go
-// Copyright 2015 The Go Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
-
-Source example: golang.org/x/sys@v0.35.0/unix/asm_linux_mipsx.s
-// Copyright 2016 The Go Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
-
-Source example: golang.org/x/sys@v0.35.0/unix/endian_little.go
-// Copyright 2016 The Go Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
-//
-//go:build 386 || amd64 || amd64p32 || alpha || arm || arm64 || loong64 || mipsle || mips64le || mips64p32le || nios2 || ppc64le || riscv || riscv64 || sh
-
-Source example: golang.org/x/sys@v0.35.0/unix/endian_big.go
-// Copyright 2016 The Go Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
-//
-//go:build armbe || arm64be || m68k || mips || mips64 || mips64p32 || ppc || ppc64 || s390 || s390x || shbe || sparc || sparc64
-
-Source example: golang.org/x/sys@v0.35.0/unix/timestruct_test.go
-// Copyright 2017 The Go Authors. All right reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
-
-Source example: golang.org/x/sys@v0.35.0/unix/cap_freebsd.go
-// Copyright 2017 The Go Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
-
-Source example: golang.org/x/sys@v0.35.0/cpu/asm_aix_ppc64.s
-// Copyright 2018 The Go Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
-
-Source example: golang.org/x/sys@v0.35.0/cpu/byteorder.go
-// Copyright 2019 The Go Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
-
-Source example: golang.org/x/sys@v0.35.0/cpu/cpu_linux_mips64x.go
-// Copyright 2020 The Go Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
-
-Source example: golang.org/x/sys@v0.35.0/unix/asm_bsd_386.s
-// Copyright 2021 The Go Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
-
-Source example: golang.org/x/sys@v0.35.0/cpu/cpu_loong64.go
-// Copyright 2022 The Go Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
-
-Source example: golang.org/x/sys@v0.35.0/cpu/endian_big.go
-// Copyright 2023 The Go Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
-
-Source example: golang.org/x/sys@v0.35.0/cpu/asm_darwin_x86_gc.s
-// Copyright 2024 The Go Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
-
-Source example: golang.org/x/sys@v0.35.0/cpu/cpu_linux_loong64.go
-// Copyright 2025 The Go Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
 
 
 ========================================================================
@@ -1444,26 +1403,6 @@ Source example: jvmMain/co/touchlab/stately/concurrency/AtomicInt.kt
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
-
-========================================================================
-Preserved notice: dependency-notices/0bfaa1f982bf2e7b89370edcd64b5b7e98a6ee0051ed0040a7a197b4e8283719.txt
-Origins: https://proxy.golang.org/github.com/google/trillian/@v/v1.3.11.zip!/github.com/google/trillian@v1.3.11/AUTHORS
-
-# This is the official list of benchmark authors for copyright purposes.
-# This file is distinct from the CONTRIBUTORS files.
-# See the latter for an explanation.
-#
-# Names should be added to this file as:
-#	Name or Organization <email address>
-# The email address is not required for organizations.
-#
-# Please keep the list sorted.
-
-Antonio Marcedone <a.marcedone@gmail.com>
-Google LLC
-Internet Security Research Group
-Vishal Kuo <vishalkuo@gmail.com>
 
 
 ========================================================================
@@ -2422,7 +2361,7 @@ Source example: commonMain/androidx/datastore/DataStoreDelegateUtils.kt
 
 ========================================================================
 Preserved notice: dependency-notices/18951c084f68bce792efa2037685466628ebc1c67f4bff8b7147f3d5050e50a4.txt
-Origins: https://proxy.golang.org/github.com/cloudflare/circl/@v/v1.6.2.zip!/github.com/cloudflare/circl@v1.6.2/ecc/p384/LICENSE
+Origins: android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/github.com_cloudflare_circl/ecc/p384/LICENSE; https://proxy.golang.org/github.com/cloudflare/circl/@v/v1.6.2.zip!/github.com/cloudflare/circl@v1.6.2/ecc/p384/LICENSE
 
 Copyright (c) 2018, Brendan McMillion. All rights reserved.
 
@@ -4057,7 +3996,7 @@ Source example: commonMain/kotlinx/atomicfu/AtomicFU.common.kt
 
 ========================================================================
 Preserved notice: dependency-notices/2d36597f7117c38b006835ae7f537487207d8ec407aa9d9980794b2030cbc067.txt
-Origins: https://proxy.golang.org/filippo.io/edwards25519/@v/v1.0.0-rc.1.zip!/filippo.io/edwards25519@v1.0.0-rc.1/LICENSE; https://proxy.golang.org/github.com/!proton!mail/go-crypto/@v/v1.4.1-proton.zip!/github.com/ProtonMail/go-crypto@v1.4.1-proton/LICENSE; https://proxy.golang.org/github.com/cronokirby/saferith/@v/v0.33.0.zip!/github.com/cronokirby/saferith@v0.33.0/LICENSE_go; https://proxy.golang.org/golang.org/x/mobile/@v/v0.0.0-20201217150744-e6ae53a27f4f.zip!/golang.org/x/mobile@v0.0.0-20201217150744-e6ae53a27f4f/LICENSE; https://raw.githubusercontent.com/golang/go/go1.23.12/LICENSE
+Origins: android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/github.com_ProtonMail_go-crypto/LICENSE; android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/github.com_cronokirby_saferith/LICENSE_go; https://proxy.golang.org/github.com/!proton!mail/go-crypto/@v/v1.4.1-proton.zip!/github.com/ProtonMail/go-crypto@v1.4.1-proton/LICENSE; https://proxy.golang.org/github.com/cronokirby/saferith/@v/v0.33.0.zip!/github.com/cronokirby/saferith@v0.33.0/LICENSE_go
 
 Copyright (c) 2009 The Go Authors. All rights reserved.
 
@@ -5405,63 +5344,6 @@ Source example: dagger/hilt/android/UnstableApi.java
 
 
 ========================================================================
-Preserved notice: dependency-notices/467e419dbabc24523a7ced77c5f6dcc7ef9a5a79c2016c1ea1693714c464b761.txt
-Origins: https://proxy.golang.org/github.com/golang/protobuf/@v/v1.4.2.zip!/copyright-headers
-
-Source copyright/license headers (verbatim; distinct blocks deduplicated)
-
-Source example: github.com/golang/protobuf@v1.4.2/proto/extensions.go
-// Copyright 2010 The Go Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
-
-Source example: github.com/golang/protobuf@v1.4.2/proto/proto_clone_test.go
-// Copyright 2011 The Go Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
-
-Source example: github.com/golang/protobuf@v1.4.2/proto/extensions_test.go
-// Copyright 2014 The Go Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
-
-Source example: github.com/golang/protobuf@v1.4.2/protoc-gen-go/grpc/grpc.go
-// Copyright 2015 The Go Authors.  All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
-
-Source example: github.com/golang/protobuf@v1.4.2/jsonpb/decode.go
-// Copyright 2015 The Go Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
-
-Source example: github.com/golang/protobuf@v1.4.2/descriptor/descriptor.go
-// Copyright 2016 The Go Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
-
-Source example: github.com/golang/protobuf@v1.4.2/proto/discard_test.go
-// Copyright 2017 The Go Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
-
-Source example: github.com/golang/protobuf@v1.4.2/internal/gengogrpc/grpc.go
-// Copyright 2018 The Go Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
-
-Source example: github.com/golang/protobuf@v1.4.2/internal/cmd/generate-alias/main.go
-// Copyright 2019 The Go Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
-
-Source example: github.com/golang/protobuf@v1.4.2/descriptor/descriptor_test.go
-// Copyright 2020 The Go Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
-
-
-========================================================================
 Preserved notice: dependency-notices/4719796b67042481599454fa18b42ca184b0a3a854658728707b3a36e37f98d5.txt
 Origins: https://dl.google.com/dl/android/maven2/androidx/compose/ui/ui-util-android/1.10.4/ui-util-android-1.10.4-sources.jar!/copyright-headers
 
@@ -5534,39 +5416,6 @@ Source example: commonMain/androidx/compose/ui/ExperimentalIndirectPointerApi.kt
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
-
-========================================================================
-Preserved notice: dependency-notices/4835612df0098ca95f8e7d9e3bffcb02358d435dbb38057c844c99d7f725eb20.txt
-Origins: https://proxy.golang.org/google.golang.org/protobuf/@v/v1.25.0.zip!/google.golang.org/protobuf@v1.25.0/LICENSE
-
-Copyright (c) 2018 The Go Authors. All rights reserved.
-
-Redistribution and use in source and binary forms, with or without
-modification, are permitted provided that the following conditions are
-met:
-
-   * Redistributions of source code must retain the above copyright
-notice, this list of conditions and the following disclaimer.
-   * Redistributions in binary form must reproduce the above
-copyright notice, this list of conditions and the following disclaimer
-in the documentation and/or other materials provided with the
-distribution.
-   * Neither the name of Google Inc. nor the names of its
-contributors may be used to endorse or promote products derived from
-this software without specific prior written permission.
-
-THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-"AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
-OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
-LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 
 ========================================================================
@@ -5729,38 +5578,6 @@ Source example: commonMain/androidx/lifecycle/compose/RememberLifecycleOwner.kt
 
 
 ========================================================================
-Preserved notice: dependency-notices/4f4dbb7e4065cccfabaa25216b5d2f19fecaf34d52645e2e5aa351ac996003e0.txt
-Origins: https://proxy.golang.org/filippo.io/edwards25519/@v/v1.0.0-rc.1.zip!/copyright-headers
-
-Source copyright/license headers (verbatim; distinct blocks deduplicated)
-
-Source example: filippo.io/edwards25519@v1.0.0-rc.1/scalar.go
-// Copyright (c) 2016 The Go Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
-
-Source example: filippo.io/edwards25519@v1.0.0-rc.1/edwards25519.go
-// Copyright (c) 2017 The Go Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
-
-Source example: filippo.io/edwards25519@v1.0.0-rc.1/edwards25519_test.go
-// Copyright (c) 2019 The Go Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
-
-Source example: filippo.io/edwards25519@v1.0.0-rc.1/field/fe_arm64.go
-// Copyright (c) 2020 The Go Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
-
-Source example: filippo.io/edwards25519@v1.0.0-rc.1/doc.go
-// Copyright (c) 2021 The Go Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
-
-
-========================================================================
 Preserved notice: dependency-notices/4f956b53ed0de9d8dbaa36a4ac6a324f57f2551c094e206afb8e26877158a6d1.txt
 Origins: https://dl.google.com/dl/android/maven2/androidx/navigationevent/navigationevent/1.0.2/navigationevent-1.0.2-sources.jar!/copyright-headers
 
@@ -5912,7 +5729,7 @@ Source example: commonMain/androidx/compose/material3/AppBarColumn.kt
 
 ========================================================================
 Preserved notice: dependency-notices/503bdcb689e2033376caa35eb66f170920221e96706da77be941804bc4f36422.txt
-Origins: https://proxy.golang.org/github.com/!proton!mail/go-mime/@v/v0.0.0-20230322103455-7d82a3887f2f.zip!/github.com/ProtonMail/go-mime@v0.0.0-20230322103455-7d82a3887f2f/LICENSE; https://proxy.golang.org/github.com/!proton!mail/gopenpgp/v2/@v/v2.10.0-proton.zip!/github.com/ProtonMail/gopenpgp/v2@v2.10.0-proton/LICENSE; https://proxy.golang.org/github.com/!proton!mail/gopenpgp/v3/@v/v3.4.1-proton.zip!/github.com/ProtonMail/gopenpgp/v3@v3.4.1-proton/LICENSE
+Origins: android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/github.com_ProtonMail_go-mime/LICENSE; android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/github.com_ProtonMail_gopenpgp_v2/LICENSE; https://proxy.golang.org/github.com/!proton!mail/go-mime/@v/v0.0.0-20230322103455-7d82a3887f2f.zip!/github.com/ProtonMail/go-mime@v0.0.0-20230322103455-7d82a3887f2f/LICENSE; https://proxy.golang.org/github.com/!proton!mail/gopenpgp/v2/@v/v2.10.0-proton.zip!/github.com/ProtonMail/gopenpgp/v2@v2.10.0-proton/LICENSE
 
 (The MIT License)
 
@@ -6143,39 +5960,6 @@ Origins: biweekly-0.6.8.jar!/biweekly/biweekly.license; https://repo.maven.apach
  ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
  (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
  SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-
-
-========================================================================
-Preserved notice: dependency-notices/53c0f3e7d60e6ace0bc60d758934de419c87a91075033d32f12b20e37f6cc69d.txt
-Origins: https://proxy.golang.org/github.com/google/certificate-transparency-go/@v/v1.1.1.zip!/github.com/google/certificate-transparency-go@v1.1.1/AUTHORS
-
-# This is the official list of benchmark authors for copyright purposes.
-# This file is distinct from the CONTRIBUTORS files.
-# See the latter for an explanation.
-#
-# Names should be added to this file as:
-#	Name or Organization <email address>
-# The email address is not required for organizations.
-#
-# Please keep the list sorted.
-
-Comodo CA Limited
-Ed Maste <emaste@freebsd.org>
-Fiaz Hossain <fiaz.hossain@salesforce.com>
-Google LLC
-Internet Security Research Group
-Jeff Trawick <trawick@gmail.com>
-Katriel Cohn-Gordon <katriel.cohn-gordon@cybersecurity.ox.ac.uk>
-Laël Cellier <lael.cellier@gmail.com>
-Mark Schloesser <ms@mwcollect.org>
-NORDUnet A/S
-Nicholas Galbreath <nickg@client9.com>
-Oliver Weidner <Oliver.Weidner@gmail.com>
-PrimeKey Solutions AB
-Ruslan Kovalov <ruslan.kovalyov@gmail.com>
-Venafi, Inc.
-Vladimir Rutsky <vladimir@rutsky.org>
-Ximin Luo <infinity0@gmx.com>
 
 
 ========================================================================
@@ -6435,179 +6219,6 @@ Source example: me/proton/core/auth/domain/usecase/sso/Crockford32.kt
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  * SOFTWARE.
  */
-
-
-========================================================================
-Preserved notice: dependency-notices/5619ac973639a0ebc0acd04a7c6b743d4b356e614170591218892014ab548309.txt
-Origins: https://proxy.golang.org/google.golang.org/genproto/@v/v0.0.0-20200707001353-8e8330bf89df.zip!/copyright-headers
-
-Source copyright/license headers (verbatim; distinct blocks deduplicated)
-
-Source example: google.golang.org/genproto@v0.0.0-20200707001353-8e8330bf89df/googleapis/api/annotations/annotations.pb.go
-// Copyright (c) 2015, Google Inc.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
-Source example: google.golang.org/genproto@v0.0.0-20200707001353-8e8330bf89df/googleapis/api/serviceconfig/consumer.pb.go
-// Copyright 2016 Google Inc.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
-Source example: google.golang.org/genproto@v0.0.0-20200707001353-8e8330bf89df/googleapis/api/servicecontrol/v1/distribution.pb.go
-// Copyright 2017 Google Inc.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
-Source example: google.golang.org/genproto@v0.0.0-20200707001353-8e8330bf89df/googleapis/assistant/embedded/v1alpha2/embedded_assistant.pb.go
-// Copyright 2018 Google Inc.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
-Source example: google.golang.org/genproto@v0.0.0-20200707001353-8e8330bf89df/googleapis/devtools/cloudprofiler/v2/profiler.pb.go
-// Copyright 2018 Google LLC
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
-Source example: google.golang.org/genproto@v0.0.0-20200707001353-8e8330bf89df/googleapis/devtools/containeranalysis/v1beta1/attestation/attestation.pb.go
-// Copyright 2018 The Grafeas Authors. All rights reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//    http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
-Source example: google.golang.org/genproto@v0.0.0-20200707001353-8e8330bf89df/tools.go
-// Copyright 2019 Google LLC
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//      http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
-Source example: google.golang.org/genproto@v0.0.0-20200707001353-8e8330bf89df/googleapis/api/servicemanagement/v1/servicemanager.pb.go
-// Copyright 2019 Google LLC.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
-Source example: google.golang.org/genproto@v0.0.0-20200707001353-8e8330bf89df/googleapis/ads/googleads/v3/enums/listing_custom_attribute_index.pb.go
-// Copyright 2019 Google LLC.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-//
-
-Source example: google.golang.org/genproto@v0.0.0-20200707001353-8e8330bf89df/protobuf/api/api.go
-// Copyright 2020 Google LLC
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//      http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
-Source example: google.golang.org/genproto@v0.0.0-20200707001353-8e8330bf89df/googleapis/ads/admob/v1/admob_api.pb.go
-// Copyright 2020 Google LLC
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
 
 
 ========================================================================
@@ -7081,7 +6692,7 @@ Source example: commonMain/androidx/compose/material3/AppBarColumn.kt
 
 ========================================================================
 Preserved notice: dependency-notices/5aa3167c44245f0b12b27195d85c6a8c8e067cfdd511059daa4d7b3c5b232129.txt
-Origins: https://proxy.golang.org/github.com/!proton!mail/go-crypto/@v/v1.4.1-proton.zip!/github.com/ProtonMail/go-crypto@v1.4.1-proton/AUTHORS; https://proxy.golang.org/google.golang.org/protobuf/@v/v1.25.0.zip!/google.golang.org/protobuf@v1.25.0/AUTHORS
+Origins: android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/github.com_ProtonMail_go-crypto/AUTHORS; https://proxy.golang.org/github.com/!proton!mail/go-crypto/@v/v1.4.1-proton.zip!/github.com/ProtonMail/go-crypto@v1.4.1-proton/AUTHORS
 
 # This source code refers to The Go Authors for copyright purposes.
 # The master list of authors is in the main Go distribution,
@@ -7660,13 +7271,6 @@ Source example: commonMain/androidx/compose/ui/FrameRate.kt
 
 
 ========================================================================
-Preserved notice: dependency-notices/627c695f80fdac6412d66e6ad4160a4acb41923ca7ee3fd7e112e105f0ff46b9.txt
-Origins: https://proxy.golang.org/google.golang.org/grpc/@v/v1.29.1.zip!/google.golang.org/grpc@v1.29.1/AUTHORS
-
-Google Inc.
-
-
-========================================================================
 Preserved notice: dependency-notices/62868172b3b6e4687cd40564d5c02547dd23a379c114f3d3fef910b3304e6189.txt
 Origins: https://dl.google.com/dl/android/maven2/androidx/compose/foundation/foundation/1.10.4/foundation-1.10.4-sources.jar!/copyright-headers
 
@@ -7964,24 +7568,6 @@ Source example: me/proton/core/plan/domain/IsSplitStorageEnabled.kt
  * You should have received a copy of the GNU General Public License
  * along with ProtonCore.  If not, see <https://www.gnu.org/licenses/>.
  */
-
-
-========================================================================
-Preserved notice: dependency-notices/638fe32585f50191c76b3f7ccfc0e0710c7bcd9f11620709bcc705083395b913.txt
-Origins: https://proxy.golang.org/github.com/golang/mock/@v/v1.4.4.zip!/github.com/golang/mock@v1.4.4/AUTHORS
-
-# This is the official list of GoMock authors for copyright purposes.
-# This file is distinct from the CONTRIBUTORS files.
-# See the latter for an explanation.
-
-# Names should be added to this file as
-#	Name or Organization <email address>
-# The email address is not required for organizations.
-
-# Please keep the list sorted.
-
-Alex Reece <awreece@gmail.com>
-Google Inc.
 
 
 ========================================================================
@@ -8530,7 +8116,7 @@ Source example: androidx/arch/core/internal/FastSafeIterableMap.java
 
 ========================================================================
 Preserved notice: dependency-notices/6d18204bd2f491153e8ad86767bdccedaf238e2a7bc2a1fee592888dfcfe2735.txt
-Origins: https://proxy.golang.org/github.com/cronokirby/saferith/@v/v0.33.0.zip!/github.com/cronokirby/saferith@v0.33.0/LICENSE
+Origins: android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/github.com_cronokirby_saferith/LICENSE; https://proxy.golang.org/github.com/cronokirby/saferith/@v/v0.33.0.zip!/github.com/cronokirby/saferith@v0.33.0/LICENSE
 
 Copyright (c) 2021 Lúcás Meier
 
@@ -9248,149 +8834,6 @@ Source example: me/proton/core/crypto/android/aead/AndroidAeadCryptoFactory.kt
 
 
 ========================================================================
-Preserved notice: dependency-notices/70f84fac2b1e656668c2c020a564b56792f808d4b98feede456dbd4011e1085f.txt
-Origins: https://proxy.golang.org/github.com/google/certificate-transparency-go/@v/v1.1.1.zip!/copyright-headers
-
-Source copyright/license headers (verbatim; distinct blocks deduplicated)
-
-Source example: github.com/google/certificate-transparency-go@v1.1.1/asn1/asn1.go
-// Copyright 2009 The Go Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
-
-Source example: github.com/google/certificate-transparency-go@v1.1.1/x509/cert_pool.go
-// Copyright 2011 The Go Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
-
-Source example: github.com/google/certificate-transparency-go@v1.1.1/x509/pem_decrypt.go
-// Copyright 2012 The Go Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
-
-Source example: github.com/google/certificate-transparency-go@v1.1.1/x509/root_darwin.go
-// Copyright 2013 The Go Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
-
-Source example: github.com/google/certificate-transparency-go@v1.1.1/client/logclient.go
-// Copyright 2014 Google LLC. All Rights Reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
-Source example: github.com/google/certificate-transparency-go@v1.1.1/x509/example_test.go
-// Copyright 2014 The Go Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
-
-Source example: github.com/google/certificate-transparency-go@v1.1.1/preload/dumpscts/dumpscts.go
-// Copyright 2015 Google LLC. All Rights Reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
-Source example: github.com/google/certificate-transparency-go@v1.1.1/x509/root_bsd.go
-// Copyright 2015 The Go Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
-
-Source example: github.com/google/certificate-transparency-go@v1.1.1/client/ctclient/ctclient.go
-// Copyright 2016 Google LLC. All Rights Reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
-Source example: github.com/google/certificate-transparency-go@v1.1.1/client/configpb/gen.go
-// Copyright 2017 Google LLC. All Rights Reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
-Source example: github.com/google/certificate-transparency-go@v1.1.1/x509/names_test.go
-// Copyright 2017 Google LLC. All Rights Reserved.
-//
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
-
-Source example: github.com/google/certificate-transparency-go@v1.1.1/x509/name_constraints_test.go
-// Copyright 2017 The Go Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
-
-Source example: github.com/google/certificate-transparency-go@v1.1.1/ctpolicy/applepolicy.go
-// Copyright 2018 Google LLC. All Rights Reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
-Source example: github.com/google/certificate-transparency-go@v1.1.1/x509/curves.go
-// Copyright 2018 The Go Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
-
-Source example: github.com/google/certificate-transparency-go@v1.1.1/ctpolicy/tools.go
-// Copyright 2019 Google LLC. All Rights Reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
-
-========================================================================
 Preserved notice: dependency-notices/7133b9dc990e6bde9d832e799e8d53d682cc12c3f006149d05040897635b215f.txt
 Origins: https://dl.google.com/dl/android/maven2/androidx/annotation/annotation/1.9.1/annotation-1.9.1-sources.jar!/copyright-headers
 
@@ -9658,203 +9101,6 @@ Source example: me/proton/core/domain/arch/ErrorMessageContext.kt
 
 
 ========================================================================
-Preserved notice: dependency-notices/73ba74dfaa520b49a401b5d21459a8523a146f3b7518a833eea5efa85130bf68.txt
-Origins: https://proxy.golang.org/github.com/golang/glog/@v/v0.0.0-20160126235308-23def4e6c14b.zip!/github.com/golang/glog@v0.0.0-20160126235308-23def4e6c14b/LICENSE
-
-Apache License
-Version 2.0, January 2004
-http://www.apache.org/licenses/
-
-TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
-
-1. Definitions.
-
-"License" shall mean the terms and conditions for use, reproduction, and
-distribution as defined by Sections 1 through 9 of this document.
-
-"Licensor" shall mean the copyright owner or entity authorized by the copyright
-owner that is granting the License.
-
-"Legal Entity" shall mean the union of the acting entity and all other entities
-that control, are controlled by, or are under common control with that entity.
-For the purposes of this definition, "control" means (i) the power, direct or
-indirect, to cause the direction or management of such entity, whether by
-contract or otherwise, or (ii) ownership of fifty percent (50%) or more of the
-outstanding shares, or (iii) beneficial ownership of such entity.
-
-"You" (or "Your") shall mean an individual or Legal Entity exercising
-permissions granted by this License.
-
-"Source" form shall mean the preferred form for making modifications, including
-but not limited to software source code, documentation source, and configuration
-files.
-
-"Object" form shall mean any form resulting from mechanical transformation or
-translation of a Source form, including but not limited to compiled object code,
-generated documentation, and conversions to other media types.
-
-"Work" shall mean the work of authorship, whether in Source or Object form, made
-available under the License, as indicated by a copyright notice that is included
-in or attached to the work (an example is provided in the Appendix below).
-
-"Derivative Works" shall mean any work, whether in Source or Object form, that
-is based on (or derived from) the Work and for which the editorial revisions,
-annotations, elaborations, or other modifications represent, as a whole, an
-original work of authorship. For the purposes of this License, Derivative Works
-shall not include works that remain separable from, or merely link (or bind by
-name) to the interfaces of, the Work and Derivative Works thereof.
-
-"Contribution" shall mean any work of authorship, including the original version
-of the Work and any modifications or additions to that Work or Derivative Works
-thereof, that is intentionally submitted to Licensor for inclusion in the Work
-by the copyright owner or by an individual or Legal Entity authorized to submit
-on behalf of the copyright owner. For the purposes of this definition,
-"submitted" means any form of electronic, verbal, or written communication sent
-to the Licensor or its representatives, including but not limited to
-communication on electronic mailing lists, source code control systems, and
-issue tracking systems that are managed by, or on behalf of, the Licensor for
-the purpose of discussing and improving the Work, but excluding communication
-that is conspicuously marked or otherwise designated in writing by the copyright
-owner as "Not a Contribution."
-
-"Contributor" shall mean Licensor and any individual or Legal Entity on behalf
-of whom a Contribution has been received by Licensor and subsequently
-incorporated within the Work.
-
-2. Grant of Copyright License.
-
-Subject to the terms and conditions of this License, each Contributor hereby
-grants to You a perpetual, worldwide, non-exclusive, no-charge, royalty-free,
-irrevocable copyright license to reproduce, prepare Derivative Works of,
-publicly display, publicly perform, sublicense, and distribute the Work and such
-Derivative Works in Source or Object form.
-
-3. Grant of Patent License.
-
-Subject to the terms and conditions of this License, each Contributor hereby
-grants to You a perpetual, worldwide, non-exclusive, no-charge, royalty-free,
-irrevocable (except as stated in this section) patent license to make, have
-made, use, offer to sell, sell, import, and otherwise transfer the Work, where
-such license applies only to those patent claims licensable by such Contributor
-that are necessarily infringed by their Contribution(s) alone or by combination
-of their Contribution(s) with the Work to which such Contribution(s) was
-submitted. If You institute patent litigation against any entity (including a
-cross-claim or counterclaim in a lawsuit) alleging that the Work or a
-Contribution incorporated within the Work constitutes direct or contributory
-patent infringement, then any patent licenses granted to You under this License
-for that Work shall terminate as of the date such litigation is filed.
-
-4. Redistribution.
-
-You may reproduce and distribute copies of the Work or Derivative Works thereof
-in any medium, with or without modifications, and in Source or Object form,
-provided that You meet the following conditions:
-
-You must give any other recipients of the Work or Derivative Works a copy of
-this License; and
-You must cause any modified files to carry prominent notices stating that You
-changed the files; and
-You must retain, in the Source form of any Derivative Works that You distribute,
-all copyright, patent, trademark, and attribution notices from the Source form
-of the Work, excluding those notices that do not pertain to any part of the
-Derivative Works; and
-If the Work includes a "NOTICE" text file as part of its distribution, then any
-Derivative Works that You distribute must include a readable copy of the
-attribution notices contained within such NOTICE file, excluding those notices
-that do not pertain to any part of the Derivative Works, in at least one of the
-following places: within a NOTICE text file distributed as part of the
-Derivative Works; within the Source form or documentation, if provided along
-with the Derivative Works; or, within a display generated by the Derivative
-Works, if and wherever such third-party notices normally appear. The contents of
-the NOTICE file are for informational purposes only and do not modify the
-License. You may add Your own attribution notices within Derivative Works that
-You distribute, alongside or as an addendum to the NOTICE text from the Work,
-provided that such additional attribution notices cannot be construed as
-modifying the License.
-You may add Your own copyright statement to Your modifications and may provide
-additional or different license terms and conditions for use, reproduction, or
-distribution of Your modifications, or for any such Derivative Works as a whole,
-provided Your use, reproduction, and distribution of the Work otherwise complies
-with the conditions stated in this License.
-
-5. Submission of Contributions.
-
-Unless You explicitly state otherwise, any Contribution intentionally submitted
-for inclusion in the Work by You to the Licensor shall be under the terms and
-conditions of this License, without any additional terms or conditions.
-Notwithstanding the above, nothing herein shall supersede or modify the terms of
-any separate license agreement you may have executed with Licensor regarding
-such Contributions.
-
-6. Trademarks.
-
-This License does not grant permission to use the trade names, trademarks,
-service marks, or product names of the Licensor, except as required for
-reasonable and customary use in describing the origin of the Work and
-reproducing the content of the NOTICE file.
-
-7. Disclaimer of Warranty.
-
-Unless required by applicable law or agreed to in writing, Licensor provides the
-Work (and each Contributor provides its Contributions) on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied,
-including, without limitation, any warranties or conditions of TITLE,
-NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR A PARTICULAR PURPOSE. You are
-solely responsible for determining the appropriateness of using or
-redistributing the Work and assume any risks associated with Your exercise of
-permissions under this License.
-
-8. Limitation of Liability.
-
-In no event and under no legal theory, whether in tort (including negligence),
-contract, or otherwise, unless required by applicable law (such as deliberate
-and grossly negligent acts) or agreed to in writing, shall any Contributor be
-liable to You for damages, including any direct, indirect, special, incidental,
-or consequential damages of any character arising as a result of this License or
-out of the use or inability to use the Work (including but not limited to
-damages for loss of goodwill, work stoppage, computer failure or malfunction, or
-any and all other commercial damages or losses), even if such Contributor has
-been advised of the possibility of such damages.
-
-9. Accepting Warranty or Additional Liability.
-
-While redistributing the Work or Derivative Works thereof, You may choose to
-offer, and charge a fee for, acceptance of support, warranty, indemnity, or
-other liability obligations and/or rights consistent with this License. However,
-in accepting such obligations, You may act only on Your own behalf and on Your
-sole responsibility, not on behalf of any other Contributor, and only if You
-agree to indemnify, defend, and hold each Contributor harmless for any liability
-incurred by, or claims asserted against, such Contributor by reason of your
-accepting any such warranty or additional liability.
-
-END OF TERMS AND CONDITIONS
-
-APPENDIX: How to apply the Apache License to your work
-
-To apply the Apache License to your work, attach the following boilerplate
-notice, with the fields enclosed by brackets "[]" replaced with your own
-identifying information. (Don't include the brackets!) The text should be
-enclosed in the appropriate comment syntax for the file format. We also
-recommend that a file or class name and description of purpose be included on
-the same "printed page" as the copyright notice for easier identification within
-third-party archives.
-
-   Copyright [yyyy] [name of copyright owner]
-
-   Licensed under the Apache License, Version 2.0 (the "License");
-   you may not use this file except in compliance with the License.
-   You may obtain a copy of the License at
-
-     http://www.apache.org/licenses/LICENSE-2.0
-
-   Unless required by applicable law or agreed to in writing, software
-   distributed under the License is distributed on an "AS IS" BASIS,
-   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-   See the License for the specific language governing permissions and
-   limitations under the License.
-
-
-========================================================================
 Preserved notice: dependency-notices/73be1e63224745626c37489999e212b80244a82d5cc8ff4146550f4a2d5f123a.txt
 Origins: https://dl.google.com/dl/android/maven2/androidx/sqlite/sqlite-framework/2.6.2/sqlite-framework-2.6.2-sources.jar!/copyright-headers
 
@@ -9988,33 +9234,6 @@ Source example: commonMain/androidx/compose/animation/SharedElementEntry.kt
 
 
 ========================================================================
-Preserved notice: dependency-notices/770da99dbb5ebdc0169a3b5cae7ae6b3bce381a0a01653a868774de108af873a.txt
-Origins: https://proxy.golang.org/github.com/!proton!mail/go-ecvrf/@v/v0.0.1.zip!/github.com/ProtonMail/go-ecvrf@v0.0.1/LICENSE
-
-MIT License
-
-Copyright (c) 2021 ProtonMail
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-
-
-========================================================================
 Preserved notice: dependency-notices/7a992e22ed9b0b7bf6178cae6516a2d072e175277df86b371d134da22c3d5ee0.txt
 Origins: https://dl.google.com/dl/android/maven2/androidx/transition/transition/1.6.0/transition-1.6.0-sources.jar!/copyright-headers
 
@@ -10091,7 +9310,7 @@ Source example: androidx/transition/TransitionSeekController.java
 
 ========================================================================
 Preserved notice: dependency-notices/7b3f092184869028bb9706f902c60e45fe53bbad504fa8fefa54e9119d0571a0.txt
-Origins: https://proxy.golang.org/github.com/!proton!mail/go-srp/@v/v0.0.7.zip!/github.com/ProtonMail/go-srp@v0.0.7/LICENSE.txt
+Origins: android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/github.com_ProtonMail_go-srp/LICENSE.txt; https://proxy.golang.org/github.com/!proton!mail/go-srp/@v/v0.0.7.zip!/github.com/ProtonMail/go-srp@v0.0.7/LICENSE.txt
 
 The MIT License
 
@@ -10906,17 +10125,6 @@ Origins: activity-1.12.4.aar!/META-INF/androidx/activity/activity/LICENSE.txt; a
 
 
 ========================================================================
-Preserved notice: dependency-notices/823dcea7fae12387eb0e45de41cb4f815c4fe34276fd633c6fe29279a6311e63.txt
-Origins: https://proxy.golang.org/github.com/golang/mock/@v/v1.4.4.zip!/github.com/golang/mock@v1.4.4/mockgen/internal/tests/copyright_file/mock_copyright_header
-
-This is a mock copyright header.
-
-Lorem ipsum dolor sit amet, consectetur adipiscing elit,
-sed do eiusmod tempor incididunt ut labore et dolore magna 
-aliqua. Velit ut tortor pretium viverra suspendisse potenti.
-
-
-========================================================================
 Preserved notice: dependency-notices/861bc98e26802352dc18b1238adefb4c64a5f48ed1f6e341f36e3cc1755f6dda.txt
 Origins: https://repo.maven.apache.org/maven2/me/proton/core/user-settings-domain/36.8.0/user-settings-domain-36.8.0-sources.jar!/copyright-headers
 
@@ -11095,40 +10303,6 @@ Source example: me/proton/core/usersettings/domain/usecase/IsUserSettingEnabled.
 
 
 ========================================================================
-Preserved notice: dependency-notices/8778a9fc1eaffb03ab873caae251df2d224f6b5502be8777d3cd573a4dd43903.txt
-Origins: https://proxy.golang.org/github.com/golang/protobuf/@v/v1.4.2.zip!/github.com/golang/protobuf@v1.4.2/LICENSE
-
-Copyright 2010 The Go Authors.  All rights reserved.
-
-Redistribution and use in source and binary forms, with or without
-modification, are permitted provided that the following conditions are
-met:
-
-    * Redistributions of source code must retain the above copyright
-notice, this list of conditions and the following disclaimer.
-    * Redistributions in binary form must reproduce the above
-copyright notice, this list of conditions and the following disclaimer
-in the documentation and/or other materials provided with the
-distribution.
-    * Neither the name of Google Inc. nor the names of its
-contributors may be used to endorse or promote products derived from
-this software without specific prior written permission.
-
-THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-"AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
-OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
-LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-
-
-
-========================================================================
 Preserved notice: dependency-notices/897c061424e7ea9ba6a9afc158a443ae5f54cc78ed5112dd49ee429fa4060bec.txt
 Origins: https://dl.google.com/dl/android/maven2/androidx/profileinstaller/profileinstaller/1.4.0/profileinstaller-1.4.0-sources.jar!/copyright-headers
 
@@ -11291,7 +10465,7 @@ Source example: androidx/activity/compose/internal/BackHandlerCompat.kt
 
 ========================================================================
 Preserved notice: dependency-notices/8d427fd87bc9579ea368fde3d49f9ca22eac857f91a9dec7e3004bdfab7dee86.txt
-Origins: https://proxy.golang.org/github.com/pkg/errors/@v/v0.9.1.zip!/github.com/pkg/errors@v0.9.1/LICENSE
+Origins: android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/github.com_pkg_errors/LICENSE; https://proxy.golang.org/github.com/pkg/errors/@v/v0.9.1.zip!/github.com/pkg/errors@v0.9.1/LICENSE
 
 Copyright (c) 2015, Dave Cheney <dave@cheney.net>
 All rights reserved.
@@ -11385,7 +10559,7 @@ Source example: androidx/customview/poolingcontainer/PoolingContainer.kt
 
 ========================================================================
 Preserved notice: dependency-notices/911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad.txt
-Origins: https://proxy.golang.org/golang.org/x/crypto/@v/v0.41.0.zip!/golang.org/x/crypto@v0.41.0/LICENSE; https://proxy.golang.org/golang.org/x/net/@v/v0.42.0.zip!/golang.org/x/net@v0.42.0/LICENSE; https://proxy.golang.org/golang.org/x/sys/@v/v0.35.0.zip!/golang.org/x/sys@v0.35.0/LICENSE; https://proxy.golang.org/golang.org/x/text/@v/v0.28.0.zip!/golang.org/x/text@v0.28.0/LICENSE
+Origins: android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/Go/LICENSE; android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/golang.org_x_crypto/LICENSE; android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/golang.org_x_mobile/LICENSE; android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/golang.org_x_sys/LICENSE; android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/golang.org_x_text/LICENSE; https://proxy.golang.org/golang.org/x/crypto/@v/v0.41.0.zip!/golang.org/x/crypto@v0.41.0/LICENSE; https://proxy.golang.org/golang.org/x/mobile/@v/v0.0.0-20260908204917-8b95e45f8d3e.zip!/golang.org/x/mobile@v0.0.0-20260908204917-8b95e45f8d3e/LICENSE; https://proxy.golang.org/golang.org/x/sys/@v/v0.48.0.zip!/golang.org/x/sys@v0.48.0/LICENSE; https://proxy.golang.org/golang.org/x/text/@v/v0.28.0.zip!/golang.org/x/text@v0.28.0/LICENSE; https://raw.githubusercontent.com/golang/go/go1.27.1/LICENSE
 
 Copyright 2009 The Go Authors.
 
@@ -11974,7 +11148,7 @@ Source example: commonMain/androidx/room/concurrent/Atomics.kt
 
 ========================================================================
 Preserved notice: dependency-notices/96f408bfae65bf137fc2525d3ecb030271c50c1e90799f87abf8846d8dd505cc.txt
-Origins: https://proxy.golang.org/github.com/!proton!mail/go-crypto/@v/v1.4.1-proton.zip!/github.com/ProtonMail/go-crypto@v1.4.1-proton/PATENTS; https://proxy.golang.org/golang.org/x/crypto/@v/v0.41.0.zip!/golang.org/x/crypto@v0.41.0/PATENTS; https://proxy.golang.org/golang.org/x/mobile/@v/v0.0.0-20201217150744-e6ae53a27f4f.zip!/golang.org/x/mobile@v0.0.0-20201217150744-e6ae53a27f4f/PATENTS; https://proxy.golang.org/golang.org/x/net/@v/v0.42.0.zip!/golang.org/x/net@v0.42.0/PATENTS; https://proxy.golang.org/golang.org/x/sys/@v/v0.35.0.zip!/golang.org/x/sys@v0.35.0/PATENTS; https://proxy.golang.org/golang.org/x/text/@v/v0.28.0.zip!/golang.org/x/text@v0.28.0/PATENTS; https://proxy.golang.org/google.golang.org/protobuf/@v/v1.25.0.zip!/google.golang.org/protobuf@v1.25.0/PATENTS
+Origins: android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/Go/PATENTS; android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/github.com_ProtonMail_go-crypto/PATENTS; android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/golang.org_x_crypto/PATENTS; android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/golang.org_x_mobile/PATENTS; android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/golang.org_x_sys/PATENTS; android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/golang.org_x_text/PATENTS; https://proxy.golang.org/github.com/!proton!mail/go-crypto/@v/v1.4.1-proton.zip!/github.com/ProtonMail/go-crypto@v1.4.1-proton/PATENTS; https://proxy.golang.org/golang.org/x/crypto/@v/v0.41.0.zip!/golang.org/x/crypto@v0.41.0/PATENTS; https://proxy.golang.org/golang.org/x/mobile/@v/v0.0.0-20260908204917-8b95e45f8d3e.zip!/golang.org/x/mobile@v0.0.0-20260908204917-8b95e45f8d3e/PATENTS; https://proxy.golang.org/golang.org/x/sys/@v/v0.48.0.zip!/golang.org/x/sys@v0.48.0/PATENTS; https://proxy.golang.org/golang.org/x/text/@v/v0.28.0.zip!/golang.org/x/text@v0.28.0/PATENTS; https://raw.githubusercontent.com/golang/go/go1.27.1/PATENTS
 
 Additional IP Rights Grant (Patents)
 
@@ -12571,30 +11745,6 @@ Source example: com/github/mangstadt/vinnie/codec/QuotedPrintableCodec.java
 
 
 ========================================================================
-Preserved notice: dependency-notices/a954691034dbdff9f20b9a378875ab829b647fe72382d858b46b62818468be20.txt
-Origins: https://proxy.golang.org/github.com/golang/glog/@v/v0.0.0-20160126235308-23def4e6c14b.zip!/copyright-headers
-
-Source copyright/license headers (verbatim; distinct blocks deduplicated)
-
-Source example: github.com/golang/glog@v0.0.0-20160126235308-23def4e6c14b/glog.go
-// Go support for leveled logs, analogous to https://code.google.com/p/google-glog/
-//
-// Copyright 2013 Google Inc. All Rights Reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
-
-========================================================================
 Preserved notice: dependency-notices/aa4dc81ef2c6b4c2fd8cb7a7a4245c34396acd5a5dfa1ba6c8c0cf9ee88423fb.txt
 Origins: https://repo.maven.apache.org/maven2/io/swagger/core/v3/swagger-annotations/2.2.7/swagger-annotations-2.2.7-sources.jar!/META-INF/LICENSE; swagger-annotations-2.2.7.jar!/META-INF/LICENSE
 
@@ -12862,7 +12012,7 @@ Source example: commonMain/androidx/window/core/layout/WindowSizeClassSelectors.
 
 ========================================================================
 Preserved notice: dependency-notices/b0da1764fe4d13d610b695536fc3f2ebc362482d053a1cd258e36975bc6b97a7.txt
-Origins: https://proxy.golang.org/github.com/cloudflare/circl/@v/v1.6.2.zip!/github.com/cloudflare/circl@v1.6.2/LICENSE
+Origins: android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/github.com_cloudflare_circl/LICENSE; https://proxy.golang.org/github.com/cloudflare/circl/@v/v1.6.2.zip!/github.com/cloudflare/circl@v1.6.2/LICENSE
 
 Copyright (c) 2019 Cloudflare. All rights reserved.
 
@@ -12921,101 +12071,6 @@ DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
 THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-
-
-========================================================================
-Preserved notice: dependency-notices/b1d73a5ee886c6aa8f457fe15536ddc132f79201a1c5704d6f1b5b5edb3babe2.txt
-Origins: https://proxy.golang.org/golang.org/x/net/@v/v0.42.0.zip!/copyright-headers
-
-Source copyright/license headers (verbatim; distinct blocks deduplicated)
-
-Source example: golang.org/x/net@v0.42.0/internal/http3/files_test.go
-// Check for copyright header while we're in here.
-
-Source example: golang.org/x/net@v0.42.0/dns/dnsmessage/message.go
-// Copyright 2009 The Go Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
-
-Source example: golang.org/x/net@v0.42.0/dict/dict.go
-// Copyright 2010 The Go Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
-
-Source example: golang.org/x/net@v0.42.0/html/const.go
-// Copyright 2011 The Go Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
-
-Source example: golang.org/x/net@v0.42.0/html/atom/atom.go
-// Copyright 2012 The Go Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
-
-Source example: golang.org/x/net@v0.42.0/html/charset/charset.go
-// Copyright 2013 The Go Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
-
-Source example: golang.org/x/net@v0.42.0/context/context.go
-// Copyright 2014 The Go Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
-
-Source example: golang.org/x/net@v0.42.0/context/ctxhttp/ctxhttp_test.go
-// Copyright 2015 The Go Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
-
-Source example: golang.org/x/net@v0.42.0/bpf/asm.go
-// Copyright 2016 The Go Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
-
-Source example: golang.org/x/net@v0.42.0/bpf/setter.go
-// Copyright 2017 The Go Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
-
-Source example: golang.org/x/net@v0.42.0/http/httpguts/guts.go
-// Copyright 2018 The Go Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
-
-Source example: golang.org/x/net@v0.42.0/internal/socket/defs_aix.go
-// Copyright 2019 The Go Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
-
-Source example: golang.org/x/net@v0.42.0/internal/socket/cmsghdr_unix.go
-// Copyright 2020 The Go Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
-
-Source example: golang.org/x/net@v0.42.0/http2/ascii.go
-// Copyright 2021 The Go Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
-
-Source example: golang.org/x/net@v0.42.0/http2/hpack/gen.go
-// Copyright 2022 The Go Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
-
-Source example: golang.org/x/net@v0.42.0/html/comment_test.go
-// Copyright 2023 The Go Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
-
-Source example: golang.org/x/net@v0.42.0/html/iter.go
-// Copyright 2024 The Go Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
-
-Source example: golang.org/x/net@v0.42.0/internal/http3/body.go
-// Copyright 2025 The Go Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
 
 
 ========================================================================
@@ -13706,15 +12761,6 @@ Source example: dagger/hilt/internal/TestSingletonComponent.java
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
-
-========================================================================
-Preserved notice: dependency-notices/b82446c166daa6932dc33418961ed7a7f06c5a9fee17e9d214e16079e3442757.txt
-Origins: https://proxy.golang.org/github.com/golang/protobuf/@v/v1.4.2.zip!/github.com/golang/protobuf@v1.4.2/AUTHORS; https://proxy.golang.org/golang.org/x/mobile/@v/v0.0.0-20201217150744-e6ae53a27f4f.zip!/golang.org/x/mobile@v0.0.0-20201217150744-e6ae53a27f4f/AUTHORS
-
-# This source code refers to The Go Authors for copyright purposes.
-# The master list of authors is in the main Go distribution,
-# visible at http://tip.golang.org/AUTHORS.
 
 
 ========================================================================
@@ -14855,206 +13901,8 @@ Source example: commonMain/io/matthewnelson/encoding/core/util/CTCase.kt
 
 
 ========================================================================
-Preserved notice: dependency-notices/c2fed1ca89483811878281b9f82f39709c50692e4950f4c567239b5ec3349055.txt
-Origins: https://proxy.golang.org/golang.org/x/mobile/@v/v0.0.0-20201217150744-e6ae53a27f4f.zip!/copyright-headers
-
-Source copyright/license headers (verbatim; distinct blocks deduplicated)
-
-Source example: golang.org/x/mobile@v0.0.0-20201217150744-e6ae53a27f4f/example/bind/android/app/src/main/java/org/golang/example/bind/MainActivity.java
-/*
- * Copyright 2015 The Go Authors. All rights reserved.
- * Use of this source code is governed by a BSD-style
- * license that can be found in the LICENSE file.
- */
-
-Source example: golang.org/x/mobile@v0.0.0-20201217150744-e6ae53a27f4f/gl/consts.go
-/*
-Partially generated from the Khronos OpenGL API specification in XML
-format, which is covered by the license:
-
-	Copyright (c) 2013-2014 The Khronos Group Inc.
-
-	Permission is hereby granted, free of charge, to any person obtaining a
-	copy of this software and/or associated documentation files (the
-	"Materials"), to deal in the Materials without restriction, including
-	without limitation the rights to use, copy, modify, merge, publish,
-	distribute, sublicense, and/or sell copies of the Materials, and to
-	permit persons to whom the Materials are furnished to do so, subject to
-	the following conditions:
-
-	The above copyright notice and this permission notice shall be included
-	in all copies or substantial portions of the Materials.
-
-	THE MATERIALS ARE PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
-	EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
-	MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
-	IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
-	CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
-	TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
-	MATERIALS OR THE USE OR OTHER DEALINGS IN THE MATERIALS.
-
-*/
-
-Source example: golang.org/x/mobile@v0.0.0-20201217150744-e6ae53a27f4f/example/ivy/android/app/src/main/java/org/golang/ivy/Help.java
-/**
- * Copyright 2015 The Go Authors. All rights reserved.
- * Use of this source code is governed by a BSD-style
- * license that can be found in the LICENSE file.
- */
-
-Source example: golang.org/x/mobile@v0.0.0-20201217150744-e6ae53a27f4f/bind/testdata/basictypes.go
-// Copyright 2014 The Go Authors.  All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
-
-Source example: golang.org/x/mobile@v0.0.0-20201217150744-e6ae53a27f4f/app/android.c
-// Copyright 2014 The Go Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
-
-Source example: golang.org/x/mobile@v0.0.0-20201217150744-e6ae53a27f4f/bind/testdata/customprefix.go
-// Copyright 2015 The Go Authors.  All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
-
-Source example: golang.org/x/mobile@v0.0.0-20201217150744-e6ae53a27f4f/app/app_test.go
-// Copyright 2015 The Go Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
-
-Source example: golang.org/x/mobile@v0.0.0-20201217150744-e6ae53a27f4f/bind/testdata/doc.go
-// Copyright 2016 The Go Authors.  All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
-
-Source example: golang.org/x/mobile@v0.0.0-20201217150744-e6ae53a27f4f/app/internal/callfn/callfn_arm64.s
-// Copyright 2016 The Go Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
-
-Source example: golang.org/x/mobile@v0.0.0-20201217150744-e6ae53a27f4f/gl/work_windows_386.s
-// Copyright 2016 The Go Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
-
-Source example: golang.org/x/mobile@v0.0.0-20201217150744-e6ae53a27f4f/bind/testdata/testpkg/tagged.go
-// Copyright 2017 The Go Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
-
-Source example: golang.org/x/mobile@v0.0.0-20201217150744-e6ae53a27f4f/bind/testdata/underscores.go
-// Copyright 2018 The Go Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
-
-Source example: golang.org/x/mobile@v0.0.0-20201217150744-e6ae53a27f4f/cmd/gomobile/env_test.go
-// Copyright 2019 The Go Authors.  All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
-
-Source example: golang.org/x/mobile@v0.0.0-20201217150744-e6ae53a27f4f/gl/work_other.go
-// Copyright 2019 The Go Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
-
-
-========================================================================
-Preserved notice: dependency-notices/c419d3aeaf283ecfd51de7d76e5a9a9a94b043e9d03b8020f2462e2d5e0de98e.txt
-Origins: https://proxy.golang.org/github.com/golang/mock/@v/v1.4.4.zip!/copyright-headers
-
-Source copyright/license headers (verbatim; distinct blocks deduplicated)
-
-Source example: github.com/golang/mock@v1.4.4/gomock/call.go
-// Copyright 2010 Google Inc.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
-Source example: github.com/golang/mock@v1.4.4/gomock/callset.go
-// Copyright 2011 Google Inc.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
-Source example: github.com/golang/mock@v1.4.4/mockgen/model/model.go
-// Copyright 2012 Google Inc.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
-Source example: github.com/golang/mock@v1.4.4/mockgen/version.1.11.go
-// Copyright 2019 Google LLC
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
-Source example: github.com/golang/mock@v1.4.4/mockgen/version.1.12.go
-// Copyright 2019 Google LLC
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-//
-
-Source example: github.com/golang/mock@v1.4.4/mockgen/internal/tests/copyright_file/mock.go
-// This is a mock copyright header.
-//
-// Lorem ipsum dolor sit amet, consectetur adipiscing elit,
-// sed do eiusmod tempor incididunt ut labore et dolore magna
-// aliqua. Velit ut tortor pretium viverra suspendisse potenti.
-//
-
-Source example: github.com/golang/mock@v1.4.4/mockgen/internal/tests/copyright_file/input.go
-//go:generate mockgen -package empty_interface -destination mock.go -source input.go -copyright_file=mock_copyright_header
-
-
-========================================================================
 Preserved notice: dependency-notices/c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4.txt
-Origins: https://proxy.golang.org/github.com/google/certificate-transparency-go/@v/v1.1.1.zip!/github.com/google/certificate-transparency-go@v1.1.1/third_party/prometheus/LICENSE; https://repo.maven.apache.org/maven2/net/sf/biweekly/biweekly/0.6.8/biweekly-0.6.8-sources.jar!/biweekly/google-rfc-2445.license
+Origins: https://repo.maven.apache.org/maven2/net/sf/biweekly/biweekly/0.6.8/biweekly-0.6.8-sources.jar!/biweekly/google-rfc-2445.license
 
                                  Apache License
                            Version 2.0, January 2004
@@ -15260,103 +14108,6 @@ Origins: https://proxy.golang.org/github.com/google/certificate-transparency-go/
 
 
 ========================================================================
-Preserved notice: dependency-notices/c8012890b91115e76c8f8b48b7708e9243cec90c023a7aae0c41454bc02679cc.txt
-Origins: https://proxy.golang.org/github.com/google/trillian/@v/v1.3.11.zip!/copyright-headers
-
-Source copyright/license headers (verbatim; distinct blocks deduplicated)
-
-Source example: github.com/google/trillian@v1.3.11/cmd/trillian_log_server/main.go
-// Copyright 2016 Google LLC. All Rights Reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
-Source example: github.com/google/trillian@v1.3.11/client/backoff/backoff.go
-// Copyright 2017 Google LLC. All Rights Reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
-Source example: github.com/google/trillian@v1.3.11/monitoring/opencensus/trace.go
-// Copyright 2018 Google LLC. All Rights Reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//      http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
-Source example: github.com/google/trillian@v1.3.11/client/admin.go
-// Copyright 2018 Google LLC. All Rights Reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
-Source example: github.com/google/trillian@v1.3.11/client/timeout/timeout.go
-// Copyright 2019 Google LLC. All Rights Reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
-Source example: github.com/google/trillian@v1.3.11/integration/storagetest/loghelpers.go
-// Copyright 2020 Google LLC. All Rights Reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
-
-========================================================================
 Preserved notice: dependency-notices/caef7822fe2690f6d67e3cdffd1a4b9cb9f30bc02a90e1274251281211709c6a.txt
 Origins: https://dl.google.com/dl/android/maven2/androidx/core/core-viewtree/1.0.0/core-viewtree-1.0.0-sources.jar!/copyright-headers
 
@@ -15427,7 +14178,7 @@ Source example: me/proton/core/auth/fido/domain/usecase/PerformTwoFaWithSecurity
 
 ========================================================================
 Preserved notice: dependency-notices/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30.txt
-Origins: Apache License 2.0 full text; https://proxy.golang.org/github.com/golang/mock/@v/v1.4.4.zip!/github.com/golang/mock@v1.4.4/LICENSE; https://proxy.golang.org/github.com/google/certificate-transparency-go/@v/v1.1.1.zip!/github.com/google/certificate-transparency-go@v1.1.1/LICENSE; https://proxy.golang.org/github.com/google/trillian/@v/v1.3.11.zip!/github.com/google/trillian@v1.3.11/LICENSE; https://proxy.golang.org/google.golang.org/genproto/@v/v0.0.0-20200707001353-8e8330bf89df.zip!/google.golang.org/genproto@v0.0.0-20200707001353-8e8330bf89df/LICENSE; https://proxy.golang.org/google.golang.org/grpc/@v/v1.29.1.zip!/google.golang.org/grpc@v1.29.1/LICENSE; https://raw.githubusercontent.com/JakeWharton/retrofit2-kotlinx-serialization-converter/1.0.0/LICENSE.txt; https://raw.githubusercontent.com/JetBrains/kotlin/v1.9.10/license/LICENSE.txt; https://raw.githubusercontent.com/google/dagger/dagger-2.58/LICENSE.txt; https://repo.maven.apache.org/maven2/com/fasterxml/jackson/core/jackson-core/2.18.11/jackson-core-2.18.11-sources.jar!/META-INF/LICENSE; https://repo.maven.apache.org/maven2/com/fasterxml/jackson/core/jackson-core/2.18.11/jackson-core-2.18.11-sources.jar!/META-INF/jackson-core-LICENSE; https://repo.maven.apache.org/maven2/jakarta/inject/jakarta.inject-api/2.0.1/jakarta.inject-api-2.0.1-sources.jar!/META-INF/LICENSE.txt; jackson-core-2.18.11.jar!/META-INF/LICENSE; jakarta.inject-api-2.0.1.jar!/META-INF/LICENSE.txt
+Origins: Apache License 2.0 full text; https://raw.githubusercontent.com/JakeWharton/retrofit2-kotlinx-serialization-converter/1.0.0/LICENSE.txt; https://raw.githubusercontent.com/JetBrains/kotlin/v1.9.10/license/LICENSE.txt; https://raw.githubusercontent.com/google/dagger/dagger-2.58/LICENSE.txt; https://repo.maven.apache.org/maven2/com/fasterxml/jackson/core/jackson-core/2.18.11/jackson-core-2.18.11-sources.jar!/META-INF/LICENSE; https://repo.maven.apache.org/maven2/com/fasterxml/jackson/core/jackson-core/2.18.11/jackson-core-2.18.11-sources.jar!/META-INF/jackson-core-LICENSE; https://repo.maven.apache.org/maven2/jakarta/inject/jakarta.inject-api/2.0.1/jakarta.inject-api-2.0.1-sources.jar!/META-INF/LICENSE.txt; jackson-core-2.18.11.jar!/META-INF/LICENSE; jakarta.inject-api-2.0.1.jar!/META-INF/LICENSE.txt
 
 
                                  Apache License
@@ -16296,7 +15047,7 @@ Source example: golang.org/x/crypto@v0.41.0/acme/pebble_test.go
 
 ========================================================================
 Preserved notice: dependency-notices/da4b77ea67eea3548aac445741cd70cfbd87e2a5bcbb03a2bb85abda0e2fa3c1.txt
-Origins: https://proxy.golang.org/github.com/!proton!mail/bcrypt/@v/v0.0.0-20210511135022-227b4adcab57.zip!/github.com/ProtonMail/bcrypt@v0.0.0-20210511135022-227b4adcab57/LICENSE
+Origins: android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/github.com_ProtonMail_bcrypt/LICENSE; https://proxy.golang.org/github.com/!proton!mail/bcrypt/@v/v0.0.0-20210511135022-227b4adcab57.zip!/github.com/ProtonMail/bcrypt@v0.0.0-20210511135022-227b4adcab57/LICENSE
 
 Copyright (c) 2011 James Keane <james.keane@gmail.com>. All rights reserved.
 Copyright (c) 2006 Damien Miller <djm@mindrot.org>.
@@ -16327,293 +15078,6 @@ DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
 THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-
-
-========================================================================
-Preserved notice: dependency-notices/db7dc28ab5b18fdb65eb1b4c24beee7de08da7b3bc859ddc6771f24ed2e3c05c.txt
-Origins: https://proxy.golang.org/google.golang.org/grpc/@v/v1.29.1.zip!/copyright-headers
-
-Source copyright/license headers (verbatim; distinct blocks deduplicated)
-
-Source example: google.golang.org/grpc@v1.29.1/benchmark/benchmark.go
-/*
- *
- * Copyright 2014 gRPC authors.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- *
- */
-
-Source example: google.golang.org/grpc@v1.29.1/credentials/oauth/oauth.go
-/*
- *
- * Copyright 2015 gRPC authors.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- *
- */
-
-Source example: google.golang.org/grpc@v1.29.1/interop/http2/negative_http2_client.go
-/*
- *
- * Copyright 2016 gRPC authors.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- *
- *
- * Client used to test http2 error edge cases like GOAWAYs and RST_STREAMs
- *
- * Documentation:
- *	 https://github.com/grpc/grpc/blob/master/doc/negative-http2-interop-test-descriptions.md
- */
-
-Source example: google.golang.org/grpc@v1.29.1/balancer.go
-/*
- *
- * Copyright 2016 gRPC authors.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- *
- */
-
-Source example: google.golang.org/grpc@v1.29.1/backoff.go
-/*
- *
- * Copyright 2017 gRPC authors.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- *
- */
-
-Source example: google.golang.org/grpc@v1.29.1/balancer/grpclb/grpclb_util_test.go
-/*
- *
- * Copyright 2018 gRPC authors.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- *
- */
-
-Source example: google.golang.org/grpc@v1.29.1/attributes/attributes.go
-/*
- *
- * Copyright 2019 gRPC authors.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- *
- */
-
-Source example: google.golang.org/grpc@v1.29.1/benchmark/primitives/syncmap_test.go
-/*
- *
- * Copyright 2019 gRPC authors.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
-
-Source example: google.golang.org/grpc@v1.29.1/balancer/rls/internal/adaptive/adaptive.go
-/*
- *
- * Copyright 2020 gRPC authors.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- *
- */
-
-Source example: google.golang.org/grpc@v1.29.1/internal/internal.go
-/*
- * Copyright 2016 gRPC authors.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- *
- */
-
-Source example: google.golang.org/grpc@v1.29.1/test/servertester.go
-/*
- * Copyright 2016 gRPC authors.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
-
-Source example: google.golang.org/grpc@v1.29.1/testdata/testdata.go
-/*
- * Copyright 2017 gRPC authors.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- *
- */
-
-Source example: google.golang.org/grpc@v1.29.1/test/rawConnWrapper.go
-/*
- * Copyright 2018 gRPC authors.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
-
-Source example: google.golang.org/grpc@v1.29.1/internal/buffer/unbounded.go
-/*
- * Copyright 2019 gRPC authors.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- *
- */
-
-Source example: google.golang.org/grpc@v1.29.1/internal/balancerload/load.go
-/*
- * Copyright 2019 gRPC authors.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
 
 
 ========================================================================
@@ -16837,139 +15301,6 @@ Source example: androidx/work/impl/StartStopToken.kt
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
-
-========================================================================
-Preserved notice: dependency-notices/dd2320a0f2a74ef211b5a46604ec092948eed865e5f8b086ffc6b779cda70db9.txt
-Origins: https://proxy.golang.org/google.golang.org/protobuf/@v/v1.25.0.zip!/copyright-headers
-
-Source copyright/license headers (verbatim; distinct blocks deduplicated)
-
-Source example: google.golang.org/protobuf@v1.25.0/cmd/protoc-gen-go/annotation_test.go
-// Copyright 2018 The Go Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
-
-Source example: google.golang.org/protobuf@v1.25.0/internal/cmd/generate-types/main.go
-// Copyright 2018 The Go Authors. All rights reserved.",
-
-Source example: google.golang.org/protobuf@v1.25.0/cmd/protoc-gen-go/internal_gengo/init.go
-// Copyright 2019 The Go Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
-
-Source example: google.golang.org/protobuf@v1.25.0/internal/cmd/generate-protos/main.go
-// Copyright 2019 The Go Authors. All rights reserved.",
-
-Source example: google.golang.org/protobuf@v1.25.0/cmd/protoc-gen-go/internal_gengo/well_known_types.go
-// Copyright 2020 The Go Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
-
-Source example: google.golang.org/protobuf@v1.25.0/internal/testprotos/benchmarks/benchmarks.pb.go
-// Protocol Buffers - Google's data interchange format
-// Copyright 2008 Google Inc.  All rights reserved.
-// https://developers.google.com/protocol-buffers/
-//
-// Redistribution and use in source and binary forms, with or without
-// modification, are permitted provided that the following conditions are
-// met:
-//
-//     * Redistributions of source code must retain the above copyright
-// notice, this list of conditions and the following disclaimer.
-//     * Redistributions in binary form must reproduce the above
-// copyright notice, this list of conditions and the following disclaimer
-// in the documentation and/or other materials provided with the
-// distribution.
-//     * Neither the name of Google Inc. nor the names of its
-// contributors may be used to endorse or promote products derived from
-// this software without specific prior written permission.
-//
-// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-// "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-// LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-// A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
-// OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-// SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
-// LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-// DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-// THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-// (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-
-Source example: google.golang.org/protobuf@v1.25.0/internal/testprotos/conformance/test_messages_proto2.pb.go
-// Protocol Buffers - Google's data interchange format
-// Copyright 2008 Google Inc.  All rights reserved.
-// https://developers.google.com/protocol-buffers/
-//
-// Redistribution and use in source and binary forms, with or without
-// modification, are permitted provided that the following conditions are
-// met:
-//
-//     * Redistributions of source code must retain the above copyright
-// notice, this list of conditions and the following disclaimer.
-//     * Redistributions in binary form must reproduce the above
-// copyright notice, this list of conditions and the following disclaimer
-// in the documentation and/or other materials provided with the
-// distribution.
-//     * Neither the name of Google Inc. nor the names of its
-// contributors may be used to endorse or promote products derived from
-// this software without specific prior written permission.
-//
-// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-// "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-// LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-// A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
-// OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-// SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
-// LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-// DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-// THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-// (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-//
-// Test schema for proto2 messages.  This test schema is used by:
-//
-// - conformance tests
-//
-
-Source example: google.golang.org/protobuf@v1.25.0/internal/testprotos/conformance/test_messages_proto3.pb.go
-// Protocol Buffers - Google's data interchange format
-// Copyright 2008 Google Inc.  All rights reserved.
-// https://developers.google.com/protocol-buffers/
-//
-// Redistribution and use in source and binary forms, with or without
-// modification, are permitted provided that the following conditions are
-// met:
-//
-//     * Redistributions of source code must retain the above copyright
-// notice, this list of conditions and the following disclaimer.
-//     * Redistributions in binary form must reproduce the above
-// copyright notice, this list of conditions and the following disclaimer
-// in the documentation and/or other materials provided with the
-// distribution.
-//     * Neither the name of Google Inc. nor the names of its
-// contributors may be used to endorse or promote products derived from
-// this software without specific prior written permission.
-//
-// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-// "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-// LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-// A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
-// OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-// SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
-// LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-// DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-// THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-// (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-//
-// Test schema for proto3 messages.  This test schema is used by:
-//
-// - benchmarks
-// - fuzz tests
-// - conformance tests
-//
 
 
 ========================================================================
@@ -18013,18 +16344,6 @@ Source example: commonMain/org/mobilenativefoundation/store/store5/SourceOfTruth
 
 
 ========================================================================
-Preserved notice: dependency-notices/e8ee26f79ce764758f2cae3161accca156b30993e34541b1ad05ec22e05f70fa.txt
-Origins: https://repo.maven.apache.org/maven2/me/proton/crypto/android-golib/2.10.0-2/android-golib-2.10.0-2-sources.jar!/copyright-headers
-
-Source copyright/license headers (verbatim; distinct blocks deduplicated)
-
-Source example: go/Seq.java
-// Copyright 2014 The Go Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
-
-
-========================================================================
 Preserved notice: dependency-notices/ee7f3afb36dc649f3e197156be479061a7334750e8c2634c466d0ad37c922884.txt
 Origins: https://dl.google.com/dl/android/maven2/androidx/room/room-common-jvm/2.8.4/room-common-jvm-2.8.4-sources.jar!/copyright-headers
 
@@ -18599,6 +16918,127 @@ Swagger Core - swagger-annotations
 Copyright (c) 2015. SmartBear Software Inc.
 Swagger Core - swagger-annotations  is licensed under Apache 2.0 license.
 Copy of the Apache 2.0 license can be found in `LICENSE` file.
+
+
+========================================================================
+Preserved notice: dependency-notices/f220a848d909168f57119b0c5ebb67049501ca7f8b275955df4fb30dc7fbedba.txt
+Origins: https://proxy.golang.org/golang.org/x/sys/@v/v0.48.0.zip!/copyright-headers
+
+Source copyright/license headers (verbatim; distinct blocks deduplicated)
+
+Source example: golang.org/x/sys@v0.48.0/plan9/asm_plan9_386.s
+// Copyright 2009 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+Source example: golang.org/x/sys@v0.48.0/unix/syscall_darwin.go
+// Copyright 2009,2010 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+Source example: golang.org/x/sys@v0.48.0/unix/env_unix.go
+// Copyright 2010 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+Source example: golang.org/x/sys@v0.48.0/plan9/env_plan9.go
+// Copyright 2011 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+Source example: golang.org/x/sys@v0.48.0/plan9/dir_plan9.go
+// Copyright 2012 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+Source example: golang.org/x/sys@v0.48.0/plan9/syscall_test.go
+// Copyright 2013 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+Source example: golang.org/x/sys@v0.48.0/plan9/asm.s
+// Copyright 2014 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+Source example: golang.org/x/sys@v0.48.0/plan9/pwd_plan9.go
+// Copyright 2015 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+Source example: golang.org/x/sys@v0.48.0/unix/asm_linux_mipsx.s
+// Copyright 2016 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+Source example: golang.org/x/sys@v0.48.0/unix/endian_little.go
+// Copyright 2016 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+//
+//go:build 386 || amd64 || amd64p32 || alpha || arm || arm64 || loong64 || mipsle || mips64le || mips64p32le || nios2 || ppc64le || riscv || riscv64 || sh
+
+Source example: golang.org/x/sys@v0.48.0/unix/endian_big.go
+// Copyright 2016 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+//
+//go:build armbe || arm64be || m68k || mips || mips64 || mips64p32 || ppc || ppc64 || s390 || s390x || shbe || sparc || sparc64
+
+Source example: golang.org/x/sys@v0.48.0/unix/timestruct_test.go
+// Copyright 2017 The Go Authors. All right reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+Source example: golang.org/x/sys@v0.48.0/unix/cap_freebsd.go
+// Copyright 2017 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+Source example: golang.org/x/sys@v0.48.0/cpu/asm_aix_ppc64.s
+// Copyright 2018 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+Source example: golang.org/x/sys@v0.48.0/cpu/byteorder.go
+// Copyright 2019 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+Source example: golang.org/x/sys@v0.48.0/cpu/cpu_linux_mips64x.go
+// Copyright 2020 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+Source example: golang.org/x/sys@v0.48.0/unix/asm_bsd_386.s
+// Copyright 2021 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+Source example: golang.org/x/sys@v0.48.0/cpu/cpu_loong64.go
+// Copyright 2022 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+Source example: golang.org/x/sys@v0.48.0/cpu/endian_big.go
+// Copyright 2023 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+Source example: golang.org/x/sys@v0.48.0/cpu/asm_darwin_arm64_gc.s
+// Copyright 2024 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+Source example: golang.org/x/sys@v0.48.0/cpu/cpu_linux_loong64.go
+// Copyright 2025 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+Source example: golang.org/x/sys@v0.48.0/cpu/cpu_darwin_arm64.go
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
 
 
 ========================================================================

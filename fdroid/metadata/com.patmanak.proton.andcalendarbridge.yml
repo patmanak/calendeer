@@ -1,0 +1,77 @@
+Disabled: Pending native and Linux qualification, reviewed source commit and signing decision
+AntiFeatures:
+  TetheredNet:
+    en-US: Synchronization requires an account on the Proton service.
+    fr-FR: La synchronisation nécessite un compte sur le service Proton.
+Categories:
+  - Calendar & Agenda
+License: GPL-3.0-only
+SourceCode: https://github.com/patmanak/calendeer
+IssueTracker: https://github.com/patmanak/calendeer/issues
+
+AutoName: Calendeer
+RepoType: git
+Repo: https://github.com/patmanak/calendeer.git
+
+Builds:
+  - versionName: 0.1.0-dev
+    versionCode: 1
+    disable: Development baseline only; qualify Linux native and APK, source commit and signing first
+    # Deliberately unresolved until a reviewed commit contains the complete build.
+    # Replace HEAD with its immutable SHA in the qualification copy; never enable HEAD.
+    commit: HEAD
+    sudo:
+      - apt-get update
+      - apt-get install -y golang-go openjdk-21-jdk-headless python3 gcc libc6-dev
+    output: app/build/outputs/apk/release/app-release-unsigned.apk
+    gradle:
+      - yes
+    srclibs:
+      - go@go1.27.1
+    prebuild:
+      - sdkmanager 'platforms;android-37.0' 'build-tools;36.0.0'
+      - sed -i 's/\r$//' gradlew
+      - python3 -c "import os; assert not any(k in os.environ for k in ('CALENDEER_VERSION_CODE', 'CALENDEER_VERSION_NAME')), 'PUBLIC_VERSION_OVERRIDE_NOT_ALLOWED'"
+      # Exact reviewed repository declarations: the only non-public repository
+      # is group-exclusive and populated by our source builder after scanning.
+      - python3 -c "import hashlib,pathlib; assert hashlib.sha256(pathlib.Path('settings.gradle.kts').read_bytes().replace(b'\\r\\n',b'\\n')).hexdigest() == 'bcdd0094fae46c3970d3d61669853819e24f4d3a7db90d8e6d35ed08b6ef794b', 'REPOSITORY_DECLARATIONS_CHANGED'"
+    # Measured scanner finding: unknown local source-generated Maven repository.
+    # No other source file, dependency or binary is exempted. Maintainer review
+    # is still required; this disabled draft is not an accepted exception.
+    scanignore:
+      - settings.gradle.kts
+    build: |-
+      set -euo pipefail
+      project_dir="$PWD"
+      export JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64
+      export ANDROID_HOME="$$SDK$$"
+      export ANDROID_NDK_HOME="$$NDK$$"
+      test -x "$JAVA_HOME/bin/javac" || { echo JAVA_21_REQUIRED >&2; exit 1; }
+      grep -Eq 'Pkg.Revision[[:space:]]*=[[:space:]]*27\.2\.12479018([[:space:]]|$)' "$ANDROID_NDK_HOME/source.properties"
+      command -v go >/dev/null || { echo GO_BOOTSTRAP_REQUIRED >&2; exit 1; }
+      bootstrap_version="$(go env GOVERSION)"
+      python3 - "$bootstrap_version" <<'PY'
+      import re, sys
+      match = re.fullmatch(r'go(\d+)\.(\d+)(?:\.(\d+))?', sys.argv[1])
+      if not match or tuple(int(x or 0) for x in match.groups()) < (1, 24, 6):
+          sys.exit('GO_BOOTSTRAP_1_24_6_REQUIRED')
+      PY
+      export GOROOT_BOOTSTRAP="$(go env GOROOT)"
+      export GOTOOLCHAIN=local
+      export GOMAXPROCS=2
+      (cd "$$go$$/src" && ./make.bash)
+      export GOROOT="$$go$$"
+      export PATH="$GOROOT/bin:$JAVA_HOME/bin:$PATH"
+      test "$(go env GOVERSION)" = go1.27.1
+      cd "$project_dir"
+      bash proton-auth/native/golib/build.sh --go-home "$GOROOT" --android-sdk "$ANDROID_HOME" \
+        --android-ndk "$ANDROID_NDK_HOME" --java-home "$JAVA_HOME" \
+        --work "$project_dir/proton-auth/native/build/fdroid-work" \
+        --repository "$project_dir/proton-auth/native/build/maven"
+    ndk: 27.2.12479018
+
+# Signing is undecided. No Binaries URL or signing-certificate pin is asserted.
+AutoUpdateMode: None
+UpdateCheckMode: None
+CurrentVersion: 0.1.0-dev
+CurrentVersionCode: 1

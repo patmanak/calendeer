@@ -1,5 +1,45 @@
 # Validation
 
+## Selected source-native aggregate
+
+The project-owned `android-golib:2.10.0-2-go1.27.1-16k-linux1` is built from
+selected unmodified Proton crypto/SRP packages and pinned mobile sources.
+Two independent Linux source/work/module/compiler-cache builds produce identical
+AAR/POM bytes. After separate repackaging of their independently compiled libraries,
+the admitted AAR SHA-256 is
+`41253b873c64e9dceec6c21b12d9a2e3a8152cb4f52957a67d43d9d77753171f`.
+Per-declaring-class public Java API, exact four-ABI source/module identity,
+ELF 16 KiB LOAD/RELRO layout and retained notices pass. Seven builder rejection
+tests and 15 packager tests pass. The three new notice/API guard cases were
+observed failing before the fixes.
+
+The actual Gradle admission guard rejects a missing artifact and separately
+modified AAR, POM and source descriptor; exact restoration passes. Strict Windows
+host checks pass 444 domain, 20 authentication, 922 backend and 236 app tests with
+zero failures or skips, plus lint, debug app/test and unsigned release builds.
+The resolved lock change substitutes only the native coordinate. The legal
+inventory preserves the 217 other Maven reviews and separately binds the 12
+native modules plus Go runtime; its checker passes with zero unresolved legal
+gates. Seventy-four tooling tests pass with one optional witness skipped; the
+archived upstream AAR's real scope inspection also passes separately.
+
+On the enrolled API 35 / arm64-v8a / 4096-byte-page phone, an existing debug
+installation is updated without uninstall/reset. All 24 synthetic native crypto
+tests pass: event import/preparation, binary/text signatures, title/text/time and
+personal transitions, protected reopening and tamper rejection. One explicit
+read-only live catalogue test passes with the retained authenticated session.
+Only counts/booleans are reported. No new login or account setting is required.
+
+Both Windows APKs contain the exact four admitted JNI hashes and reviewed legal
+asset; the static APK/ELF alignment check passes. The checked-in development
+version produces code 1; the explicit paired test override produces code 9.
+An unpaired override is rejected by actual Gradle configuration. Earlier device,
+API 37 / 16 KiB and signed-release evidence below concerns older native cohorts;
+it does not automatically qualify this replacement. Fresh SRP login, other device
+profiles, whole-APK reproducibility and signed update continuity remain separate.
+Exact-version OSV queries still return module/runtime/compiler matches;
+see [build security](BUILD_SECURITY.md) and [F-Droid preparation](FDROID.md).
+
 ## Known calendar feed metadata
 
 A synthetic host reproduction first fails with `PROTON_FEED_UNSUPPORTED` for an

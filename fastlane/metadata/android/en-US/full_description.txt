@@ -1,0 +1,7 @@
+Calendeer bridges Proton Calendar and Android's system calendars. Choose which calendars to synchronize, then view events and receive local reminders in your Android calendar apps.
+
+Read-only synchronization is the default. Separate experimental options per calendar enable supported event creation, title changes, description and location changes, date changes and deletion through a compatible Android calendar app. These options have limited supported profiles: invitations, recurrence changes and other unsupported edits may remain pending. Conflicts and uncertain operations are retained for inspection.
+
+Calendeer provides account connection, calendar selection and synchronization settings. It has no built-in event editor or calendar browser and does not deliver reminder notifications itself. An Android calendar app is needed to view or edit mirrored events and handle local reminders.
+
+Requires Android 12 or later and a Proton account. Synchronization depends on the Proton service and an Internet connection; already mirrored events remain available in your calendar apps offline. Calendeer is an independent project and is not affiliated with Proton.

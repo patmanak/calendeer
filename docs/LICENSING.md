@@ -49,14 +49,15 @@ not a complete transitive dependency or security assessment.
 
 [release-dependencies.json](release-dependencies.json) covers all 218 coordinates
 in the checked-in app `releaseRuntimeClasspath` lock, including metadata-only BOMs
-and multiplatform variants conservatively. 217 have reviewed license evidence;
-the remaining native coordinate/source limitation below still blocks distribution.
+and multiplatform variants conservatively. The 217 published Maven reviews are
+preserved unchanged; the remaining coordinate is a project-owned source-native
+aggregate with a separate reviewed 12-module and Go runtime inventory.
 JSR305 is no longer assigned to the resolved app release runtime; its separate
 compiler/tooling evidence is retained under `nonPackagedComponents` rather than
 included in the APK notice bundle. Actual signed APK DEX-definition inspection
 and targeted release runtime qualification pass; see [validation](VALIDATION.md).
 
-Every POM's bytes match the cached SHA-256 and both public repository endpoints
+Every published Maven POM's bytes match the cached SHA-256 and both public repository endpoints
 (Maven Central canonical/mirror, or Google's canonical/redirect endpoint). This
 resolves the earlier 186 POM verification gaps without changing Gradle verification
 pins. Published versioned source archives were inspected for copyright/license
@@ -78,7 +79,7 @@ BSD-3-Clause. The deterministic legal asset
 source origins, coordinate/license map and unresolved distribution gates. Regenerate
 it with `python tools/release_notices.py --bundle-assets` after an evidence change.
 
-## Concrete distribution blockers
+## Packaging mitigations and native source scope
 
 - JSR305 packaging mitigation (qualified for the measured APK): `com.google.code.findbugs:jsr305:3.0.2`
   contains four published source files under
@@ -98,25 +99,25 @@ it with `python tools/release_notices.py --bundle-assets` after an evidence chan
   runtime checks pass. This is a packaged-artifact mitigation, not a reclassification
   of the original source grant. The
   runtime notice inventory now follows the verified 218-coordinate resolved snapshot.
-- `me.proton.crypto:android-golib:2.10.0-2`: all four pinned ELF libraries expose
-  the same Go 1.23.12 build information and exact 25-module dependency/version/h1
-  graph. All 25 public Go module archives recompute to those embedded h1 sums;
-  24 have preserved compatible source grants. However,
-  `github.com/ProtonMail/pm-key-transparency-go-client@v0.0.1` has no license/grant
-  in its exact source archive or
-  [official version tree](https://github.com/ProtonMail/pm-key-transparency-go-client/tree/v0.0.1).
-  The publisher's AAR POM declares GPLv3 for the aggregate, but its application to
-  this source needs confirmation; do not invent a separate MIT/GPL source grant.
-  The generated `gobind` root is recorded as `(devel)`, without an exact build-source
-  revision. The public gopenpgp build script at the module tag does not match all
-  packages in this aggregate. Retain the recovered dependency graph and obtain
-  the matching aggregate build/corresponding-source mapping before release.
-  Additional primary-source inspection identified
-  [Proton's gomobile build tool](https://github.com/ProtonMail/gomobile-build-tool),
-  whose MIT license covers that tool rather than supplying the absent key-transparency
-  grant. The public ProtonCore `gopenpgp/build-config.json` at commit
-  `1332f316564156221bd177520f41202826f4ca21` identifies `2.9.0-1`, not the pinned
-  `2.10.0-2` AAR. Neither source closes the exact aggregate-source question.
+- `com.patmanak.calendeer.crypto:android-golib:2.10.0-2-go1.27.1-16k-linux1`
+  replaces the upstream aggregate in every resolved app configuration. The
+  [source builder](../proton-auth/native/golib/README.md) selects unchanged Proton
+  crypto/SRP packages and pinned mobile bindings, compiled with Go 1.27.1 for four
+  ABIs. Exact module archives recompute to all 12 embedded h1 sums. Their compatible
+  grants, supplementary licenses, patent notices and copyright headers are retained,
+  including saferith's `LICENSE_go`, CIRCL's nested P384 notice and the Khronos MIT
+  header from x/mobile, conservatively retained with that module's BSD grant.
+  The Go runtime's BSD grant and PATENTS are included. The source descriptor digest,
+  per-ABI hashes, recipe, public API and module mapping are bound in the manifest.
+  The two independently compiled Linux candidates produce identical AAR/POM bytes.
+- The old precompiled upstream AAR remains a hash-pinned API reference only.
+  Its 25-module Go 1.23.12 graph and binary-scope witness are archived in
+  [the reference snapshot](research/UPSTREAM_GOLIB_REFERENCE.json). The missing
+  key-transparency source grant and unknown aggregate root recipe remain unresolved
+  for that artifact; no grant is invented. Its JNI binaries and key-transparency
+  bindings are omitted from the replacement. This is a different selected aggregate,
+  not an exact source rebuild or legal clearance of the original. Runtime and
+  security qualification of the replacement remain independent release gates.
 
 `python tools/release_notices.py` exits nonzero for missing/stale coordinates,
 unreviewed compatibility, unresolved evidence, missing/changed notice files or
@@ -152,7 +153,8 @@ Android/JVM runtime variants redirect to separately inventoried coordinates with
 local runtime files. Capture without that evidence records a missing-artifact
 problem. The native source inventory has a separate snapshot digest even while
 unreviewed, so dropping a dependency or notice adds a gate. Completing its review
-also requires an attestation over the full native inventory; it remains unreviewed.
+also requires an attestation over the full native inventory. The selected source
+aggregate has that review; it does not confer one on the archived upstream artifact.
 
 GPLv3 permits combining compatible permissive code while preserving its notices;
 the applicable version-3 obligations remain. Primary guidance:

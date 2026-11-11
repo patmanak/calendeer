@@ -32,8 +32,8 @@ dependencies {
     implementation("androidx.room:room-ktx:2.8.4")
     ksp("androidx.room:room-compiler:2.8.4")
     constraints {
-        implementation("me.proton.crypto:android-golib:2.10.0-2") {
-            version { strictly("2.10.0-2") }
+        implementation("com.patmanak.calendeer.crypto:android-golib:${rootProject.extra["calendeerNativeVersion"]}") {
+            version { strictly(rootProject.extra["calendeerNativeVersion"] as String) }
         }
     }
     listOf(

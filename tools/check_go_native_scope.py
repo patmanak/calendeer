@@ -1,4 +1,4 @@
-"""Read-only symbol-scope witness for the inventoried android-golib AAR.
+"""Read-only symbol-scope witness for the archived upstream android-golib AAR.
 
 Usage: python tools/check_go_native_scope.py --aar PATH [--output REPORT.json]
 No extraction, network, native execution or advisory suppression. Names are not a
@@ -18,7 +18,7 @@ import sys
 import zipfile
 
 COORDINATE = "me.proton.crypto:android-golib:2.10.0-2"
-INVENTORY = Path(__file__).resolve().parents[1] / "docs/release-dependencies.json"
+INVENTORY = Path(__file__).resolve().parents[1] / "docs/research/UPSTREAM_GOLIB_REFERENCE.json"
 ABIS = {"armeabi-v7a": (1, 40), "arm64-v8a": (2, 183),
         "x86": (1, 3), "x86_64": (2, 62)}
 MAX_ELF = 64 * 1024 * 1024

@@ -22,10 +22,18 @@ Guava parents. The recorded pins use SHA-256 throughout. These additions retain
 all existing pins, versions and strict-verification rules; the upstream trust
 limit above still applies.
 
+The Linux AAPT2 `9.2.1-15009934` host artifact is also pinned. Its downloaded bytes
+match Google's canonical and redirect endpoints and the published SHA-256
+`755f6727fb3f4cce5e319eac0f3618ed4b36b49a46d4bb2cbb6fa8e9175a54d6`.
+This enables strict Linux builds without replacing the existing Windows pin.
+The two Google endpoints are not independent publisher authentication.
+
 ## Routine checks and dependency updates
 
-Use JDK 17 and the Android SDK specified by the build. The checked-in Windows CI
-workflow runs the host suites, lint, debug app/test and unsigned release builds,
+Use JDK 21 and the Android SDK specified by the build. Build the
+[native dependency from source](../proton-auth/native/golib/README.md) before Gradle.
+The checked-in Linux CI workflow reconstructs it before running the host suites,
+lint, debug app/test and unsigned release builds,
 workflow validation, tooling tests and an offline dependency inventory. Actions
 are pinned by commit, permissions are read-only and no publication is configured.
 Device tests require an authorized, explicitly selected physical or isolated emulator target;
@@ -58,9 +66,9 @@ Regenerate locks and checksum metadata using the same full task list above with
 coordinate/checksum diff and provenance. Never accept an unexpected checksum
 failure by blindly regenerating this file. Rerun the normal strict build and OSV
 review before committing. Requalify native cryptography and affected Android
-paths when runtime dependencies change. The current inventory is qualified on
-Windows; another host may need reviewed host-specific artifacts, not disabled
-verification.
+paths when runtime dependencies change. Fresh host resolution may need reviewed
+host-specific artifacts, not disabled verification. A workflow declaration does
+not establish a completed remote run.
 
 References: [Gradle locking](https://docs.gradle.org/current/userguide/dependency_locking.html),
 [Gradle verification](https://docs.gradle.org/current/userguide/dependency_verification.html)
@@ -70,7 +78,9 @@ and [OSV API](https://google.github.io/osv.dev/api/).
 
 The build uses Kotlin/KGP and the Compose compiler plugin 2.4.21, with KSP 2.3.12.
 AGP 9.2.1, Gradle 9.4.1, Java bytecode target 17, Room 2.8.4 and the Proton
-Core/native crypto versions stay unchanged. The explicit root buildscript
+Core and selected Proton crypto source versions stay unchanged. The native
+aggregate is now a separately pinned Calendeer source build using Go 1.27.1;
+see [native provenance](../proton-auth/native/golib/PROVENANCE.md). The explicit root buildscript
 classpath upgrades AGP's built-in Kotlin/KSP baseline; the JVM and Compose plugin
 declarations use the same Kotlin version. The obsolete
 `android.disallowKotlinSourceSets=false` workaround is removed. No compiler
@@ -118,9 +128,21 @@ packaging another Core copy in the instrumentation APK.
 
 ## Native advisory review boundary
 
-The Maven advisory inventory does not cover the Go modules embedded in
-`android-golib`. The recovered native build information in the
-[dependency inventory](release-dependencies.json) records 25 exact Go module
+The Maven advisory inventory does not cover embedded Go modules. The current
+[source-built inventory](release-dependencies.json) records 12 linked modules and
+Go 1.27.1 with exact source/ABI hashes and source descriptors. Its native source
+licenses and reproducibility are reviewed separately from advisory applicability.
+The exact-version OSV query on 2026-11-11 completed all 14 module/runtime/compiler
+queries and returned matches for CIRCL v1.6.2, x/crypto v0.41.0, x/text v0.28.0,
+stdlib 1.27.1 and toolchain 1.27.1. Examples are GO-2026-4550, GO-2026-5970,
+GO-2026-6599 and compiler GO-2026-6848. These remain unresolved version matches,
+not demonstrated Android exploits or exclusions. A public RC needs assessment
+or a separately qualified fixed source/toolchain selection. Successful API
+matching, round trips or a Maven-only query do not clear this gate.
+
+The following earlier analysis concerns only the archived upstream reference,
+not the selected source-built replacement. Its
+[reference snapshot](research/UPSTREAM_GOLIB_REFERENCE.json) records 25 exact Go module
 versions and Go 1.23.12 across four ABIs. Official OSV/Go queries find advisory
 version matches in several modules and the standard library; compiler/toolchain
 records are kept separate from runtime package reports. Examples include
@@ -146,13 +168,13 @@ OpenPGP packet signature verification; no ASN.1/X509 attack path is established
 for that reviewed entry. Other entries and inlining remain separate questions.
 
 `python tools/check_go_native_scope.py --aar CACHED_AAR --output REPORT.json`
-reproduces the bounded binary-name inspection against the inventory's exact AAR
+reproduces the bounded binary-name inspection against the archived reference's exact AAR
 and ELF hashes. It parses validated function metadata without extracting or
 executing native code. Offsets are relative to `runtime.text`, not resolved runtime
 addresses. Its successful result explicitly leaves applicability unresolved;
 it cannot suppress an advisory or supply missing corresponding source.
 
-Compiler advisories remain unresolved. The official fixes for
+For that original Go 1.23.12 artifact, compiler advisories remain unresolved. The official fixes for
 [overlapping array assignment](https://github.com/golang/go/commit/3985ca0b6264835c049e601900a8072b5d1b13b4)
 and [incorrect bounds-check elimination](https://github.com/golang/go/commit/f5b77a7e2fa0f7ff346c665974a8eded367b1bc2)
 concern emitted code. Absence of compiler symbols from a runtime library cannot
@@ -166,8 +188,9 @@ symbol inspection and crypto smoke tests do not close those gates.
 Both Android modules compile against API 37; the app targets 37 and retains
 minimum API 31. CI installs the stable `platforms;android-37.0` package, not a
 preview or a later minor platform. AGP 9.2.1 supports API 37.0 with Gradle 9.4.1
-and Build Tools 36.0.0; the Kotlin/KSP and Proton Core/native versions remain
-unchanged. See the [AGP compatibility table](https://developer.android.com/build/releases/agp-9-2-0-release-notes#compatibility)
+and Build Tools 36.0.0; Kotlin/KSP and Proton Core stay pinned. The source-native
+replacement needs its own runtime coverage; older device results do not qualify
+it automatically. See the [AGP compatibility table](https://developer.android.com/build/releases/agp-9-2-0-release-notes#compatibility)
 and [SDK setup](https://developer.android.com/about/versions/17/setup-sdk).
 
 Review of [target-specific changes](https://developer.android.com/about/versions/17/behavior-changes-17)
@@ -176,7 +199,7 @@ found no required application-code workaround:
 
 | Area | Reviewed behavior and remaining boundary |
 | --- | --- |
-| Native loading | The resolved `android-golib` uses `go.Seq` and `System.loadLibrary("gojni")`. No application extraction/`System.load` path or writable-code exception is added. Native execution passes on an isolated API 37 / x86_64 / 16 KiB image, including the signed release after update/reboot; other profiles remain unmeasured. |
+| Native loading | `android-golib` uses `go.Seq` and `System.loadLibrary("gojni")`. No application extraction/`System.load` path or writable-code exception is added. The previous upstream artifact passed on an isolated API 37 / x86_64 / 16 KiB image, including a signed update/reboot. Requalify the selected source-built replacement separately. |
 | TLS and authentication | Keep platform CT/ECH defaults, HTTPS validation, WebView SSL cancellation and origin checks. No trust override, cleartext allowance or new permission is added. Real Android 17 API/WebView transport remains to be measured. |
 | Sensitive UI | Authentication and hosted verification already use `FLAG_SECURE`; no deprecated content-capture opt-out replaces it. Test Android 17 recreation, keyboard and large-screen behavior before claiming qualification. |
 | Background work and Provider | Workers remain bounded, with existing request/consent/recovery gates. The documented CP2 changes concern Contacts rather than Calendar Provider. Android 17 scheduling, permissions and recovery still need device coverage. |
@@ -194,7 +217,7 @@ native APK gate, required device profiles, test matrix and pass criteria.
 | Gate | Required evidence or decision |
 | --- | --- |
 | Concurrent remote edits | A supported atomic server precondition or an explicit accepted-risk product decision. GET then PUT/DELETE leaves a race; the experimental options display this warning and remain default-off. See [conditional writes](research/CONDITIONAL_WRITES.md). |
-| Distribution | Original contributions use GPL-3.0-or-later, while imported Proton terms constrain the combined application to GPLv3. Private offline signing is prepared; preserve complete notices and qualify actual signed updates. Native corresponding-source/license and advisory applicability gates remain open. See [licensing](LICENSING.md) and [distribution](RELEASE_DISTRIBUTION.md). |
+| Distribution | Original contributions use GPL-3.0-or-later, while imported Proton terms constrain the combined application to GPLv3. Preserve complete notices and qualify actual signed updates. The selected native source/license review is recorded; current native advisory/runtime qualification, F-Droid build-server and APK reproducibility remain separate. The F-Droid signature choice is deferred. See [licensing](LICENSING.md), [F-Droid](FDROID.md) and [distribution](RELEASE_DISTRIBUTION.md). |
 | Android qualification | Extend the measured editor/device coverage to the intended OEM, real reboot/power loss, production-worker interruption during transport, periodic scheduling, battery and large calendars. Process restart and synthetic fixtures do not substitute for these journeys. |
 | Supported write profile | Keep unsupported fields/variants held. Richer events, combined edits and kind/zone transitions need explicit profile contracts and qualification before enabling them. |
 

@@ -1,0 +1,1 @@
+Base de développement : synchronisation des calendriers Proton sélectionnés vers les agendas Android. Lecture seule par défaut ; options expérimentales distinctes pour la création, le titre, la description/le lieu, les dates et la suppression pris en charge. Cette note n’annonce pas une version publiée.

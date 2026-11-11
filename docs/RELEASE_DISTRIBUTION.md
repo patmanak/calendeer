@@ -1,9 +1,11 @@
 # Signed release preparation and preserved-state update
 
 This procedure prepares local candidates. Publication is a separate authorized
-action. Current native license evidence and authenticated signed-update
-qualification remain blocked;
-a successful build alone does not make a release ready.
+action. The selected source-native license review is recorded in
+[licensing](LICENSING.md); current native advisory applicability and complete
+runtime/signed-update qualification remain release gates. The F-Droid signature
+choice is deferred; see [distribution preparation](FDROID.md). A successful build
+alone does not make a release ready.
 
 ## Private signing and versioning
 
@@ -13,8 +15,10 @@ passwords on command lines or include a key in a source/archive artifact. Retain
 the public signing-certificate SHA-256 separately so every candidate can be checked
 against the intended identity. Losing the key prevents ordinary future updates.
 
-Every Gradle release build is **unsigned**. Gradle accepts only the public
-`CALENDEER_VERSION_CODE` / `CALENDEER_VERSION_NAME` pair. Do not configure an AGP
+Every Gradle release build is **unsigned**. The checked-in
+`gradle/version.properties` supplies the development version. Explicit overrides
+require the public `CALENDEER_VERSION_CODE` / `CALENDEER_VERSION_NAME` pair.
+Do not configure an AGP
 `SigningConfig`: AGP writes plaintext store/key passwords into signing-config
 intermediates even when configuration caching is disabled.
 

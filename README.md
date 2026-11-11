@@ -22,6 +22,7 @@ the integration boundary rather than spread through the application.
 - [Synchronization behavior](docs/SYNCHRONIZATION_BEHAVIOR.md): proposed read-only and editing capability gates.
 - [Build and validation](docs/VALIDATION.md): repeatable checks and qualification scope.
 - [Build security](docs/BUILD_SECURITY.md): dependency checks, CI and remaining release gates.
+- [F-Droid preparation](docs/FDROID.md): disabled recipe, listing, source builds and pending distribution choices.
 - [Licensing and source reuse](docs/LICENSING.md): imported components and notices.
 - [Agent instructions](AGENTS.md): project rules and task routing.
 - [Working method](docs/WORKFLOW.md): roles, handoffs and verification.
@@ -73,8 +74,11 @@ Upstream workflow frameworks are selectively adapted; no installer/hook is requi
 
 ## Build
 
-Use a compatible JDK (17 or newer) and Android SDK platform 37. Configure the SDK
-in ignored `local.properties` or `ANDROID_HOME`, then run from the project root:
+Use JDK 21 and Android SDK platform 37. Configure the SDK in ignored
+`local.properties` or `ANDROID_HOME`. First reconstruct the Proton native
+dependency using the [Linux reference builder](proton-auth/native/golib/README.md)
+with Go 1.27.1 and NDK r27c. Gradle refuses a missing or altered native artifact;
+it never falls back to upstream precompiled JNI libraries. Then run:
 
 ```sh
 ./gradlew :sync:test :auth:test :proton-auth:testDebugUnitTest :app:testDebugUnitTest :app:assembleDebug :app:lintDebug

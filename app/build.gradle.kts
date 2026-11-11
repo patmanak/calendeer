@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.plugin.compose")
@@ -5,6 +7,15 @@ plugins {
 
 // Public version inputs only. Every Gradle release is unsigned; private signing
 // happens separately through tools/sign_release.py, outside AGP intermediates.
+val checkedInVersion = Properties().apply {
+    rootProject.file("gradle/version.properties").inputStream().use { load(it) }
+}
+val checkedInVersionCode = checkedInVersion.getProperty("versionCode") ?: error("Public versionCode missing")
+val checkedInVersionName = checkedInVersion.getProperty("versionName") ?: error("Public versionName missing")
+require(checkedInVersionCode.toIntOrNull()?.let { it in 1..2100000000 } == true &&
+    checkedInVersionName.matches(Regex("[0-9][0-9A-Za-z.+-]{0,63}"))) {
+    "Checked-in public version fields must be valid"
+}
 val releaseVersionCode = providers.environmentVariable("CALENDEER_VERSION_CODE").orNull
 val releaseVersionName = providers.environmentVariable("CALENDEER_VERSION_NAME").orNull
 require((releaseVersionCode == null) == (releaseVersionName == null)) { "Supply both release version fields" }
@@ -22,8 +33,8 @@ android {
         applicationId = "com.patmanak.proton.andcalendarbridge"
         minSdk = 31
         targetSdk = 37
-        versionCode = releaseVersionCode?.toInt() ?: 1
-        versionName = releaseVersionName ?: "0.1.0-dev"
+        versionCode = releaseVersionCode?.toInt() ?: checkedInVersionCode.toInt()
+        versionName = releaseVersionName ?: checkedInVersionName
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     compileOptions {

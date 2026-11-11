@@ -67,7 +67,7 @@ def embedded_notices(data, prefix="", depth=0):
             name = item.filename
             # Include copyright/authors as well as conventional LICENSE and NOTICE.
             if (not name.lower().endswith((".class", ".java", ".kt", ".kotlin_metadata")) and
-                    re.search(r"license|notice|copying|copyright|authors|third[-_]party", name.rsplit("/", 1)[-1], re.I)):
+                    re.search(r"license|notice|copying|copyright|authors|patents?|third[-_]party", name.rsplit("/", 1)[-1], re.I)):
                 if item.file_size > 4 * 1024 * 1024:
                     raise ValueError("Oversized embedded notice")
                 found.append((prefix + name, archive.read(item)))
@@ -85,10 +85,13 @@ def capture(root, cache, destination):
     for package in runtime_packages(root):
         group, name = package["name"].split(":")
         version = package["version"]
-        directory = cache / group / name / version
+        local_native = group == "com.patmanak.calendeer.crypto" and name == "android-golib"
+        directory = (root / "proton-auth/native/build/maven" / group.replace(".", "/") / name / version
+                     if local_native else cache / group / name / version)
         entry = {"coordinate": f"{group}:{name}:{version}", "licenses": [], "notices": [],
                  "reviewed": False, "problems": []}
-        poms = list(directory.glob("*/*.pom"))
+        prefix = "" if local_native else "*/"
+        poms = list(directory.glob(prefix + "*.pom"))
         if len(poms) != 1:
             entry["problems"].append("missing-or-ambiguous-pom")
         else:
@@ -104,7 +107,7 @@ def capture(root, cache, destination):
                                  for lic in pom.findall("m:licenses/m:license", NS)]
             if not entry["licenses"]:
                 entry["problems"].append("missing-pom-license-review-parent-or-source")
-        artifacts = sorted(list(directory.glob("*/*.aar")) + list(directory.glob("*/*.jar")))
+        artifacts = sorted(list(directory.glob(prefix + "*.aar")) + list(directory.glob(prefix + "*.jar")))
         entry["artifacts"] = []
         for artifact in artifacts:
             data = artifact.read_bytes()

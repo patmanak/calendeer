@@ -10,8 +10,11 @@ permissions:
 
 jobs:
   host-and-android-build:
-    runs-on: windows-latest
-    timeout-minutes: 40
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -19,27 +22,44 @@ jobs:
       - uses: actions/setup-java@0f481fcb613427c0f801b606911222b5b6f3083a # v5.5.0
         with:
           distribution: temurin
-          java-version: '17'
-      - name: Install Android platform
-        shell: pwsh
+          java-version: '21.0.13+9'
+      - name: Install pinned Go toolchain
         run: |
-          & "$env:ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager.bat" 'platforms;android-37.0' 'build-tools;36.0.0'
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          set -euo pipefail
+          # SHA-256 from https://go.dev/dl/?mode=json&include=all.
+          archive="$RUNNER_TEMP/go1.27.1.linux-amd64.tar.gz"
+          curl --fail --location --retry 3 https://go.dev/dl/go1.27.1.linux-amd64.tar.gz --output "$archive"
+          echo "63d339f0da5ab53635a56f2490a7984dfe12dfcff22ad749f63edaf590168445  $archive" | sha256sum --check --strict
+          mkdir -p "$RUNNER_TEMP/calendeer-go"
+          tar -xzf "$archive" -C "$RUNNER_TEMP/calendeer-go"
+          echo "GOROOT=$RUNNER_TEMP/calendeer-go/go" >> "$GITHUB_ENV"
+          echo "$RUNNER_TEMP/calendeer-go/go/bin" >> "$GITHUB_PATH"
+          echo 'GOTOOLCHAIN=local' >> "$GITHUB_ENV"
+      - name: Install Android platform and pinned NDK
+        run: |
+          set -euo pipefail
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'platforms;android-37.0' 'build-tools;36.0.0' 'ndk;27.2.12479018'
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
+      - name: Verify and build native crypto from source
+        run: |
+          set -euo pipefail
+          test "$(go env GOVERSION)" = go1.27.1
+          python3 proton-auth/native/golib/test-build.py
+          python3 proton-auth/native/golib/test-package-aar.py
+          bash proton-auth/native/golib/build.sh --go-home "$GOROOT" \
+            --android-sdk "$ANDROID_HOME" --android-ndk "$ANDROID_NDK_HOME" \
+            --java-home "$JAVA_HOME" --work "$RUNNER_TEMP/calendeer-native" \
+            --repository "$GITHUB_WORKSPACE/proton-auth/native/build/maven"
       - name: Verify host suites, lint and APK builds
-        shell: pwsh
         run: |
-          .\gradlew.bat --no-daemon --dependency-verification strict :sync:test :auth:test :proton-auth:testDebugUnitTest :app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:assembleDebugAndroidTest :app:assembleRelease
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          set -euo pipefail
+          bash gradlew --no-daemon --dependency-verification strict :sync:test :auth:test :proton-auth:testDebugUnitTest :app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:assembleDebugAndroidTest :app:assembleRelease
       - name: Verify dependency inventory and tooling
-        shell: pwsh
         run: |
-          python -m pip install --only-binary=:all: -r tools/requirements.txt
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          python tools/validate_workflow.py
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          python -m unittest discover -s tools -p 'test_*.py'
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          python tools/check_native_alignment.py app/build/outputs/apk/debug/app-debug.apk app/build/outputs/apk/release/app-release-unsigned.apk
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          python tools/dependency_audit.py
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          set -euo pipefail
+          python3 -m pip install --only-binary=:all: --target "$RUNNER_TEMP/calendeer-workflow-python" -r tools/requirements.txt
+          export PYTHONPATH="$RUNNER_TEMP/calendeer-workflow-python${PYTHONPATH:+:$PYTHONPATH}"
+          python3 tools/validate_workflow.py
+          python3 -m unittest discover -s tools -p 'test_*.py'
+          python3 tools/check_native_alignment.py app/build/outputs/apk/debug/app-debug.apk app/build/outputs/apk/release/app-release-unsigned.apk
+          python3 tools/dependency_audit.py

@@ -1009,3 +1009,24 @@ or granting access. No upstream implementation is copied, no new dependency is
 introduced and no sharing-link API is invoked. Existing GPL notices are retained.
 See [the feed contract](../docs/research/CHANGE_FEED_RESET.md) for strict validation
 and qualification limits.
+
+## Selected source-native aggregate
+
+The transitive `me.proton.crypto:android-golib:2.10.0-2` runtime artifact is
+substituted globally with the project-owned source coordinate
+`com.patmanak.calendeer.crypto:android-golib:2.10.0-2-go1.27.1-16k-linux1`.
+[Builder provenance](native/golib/PROVENANCE.md) records the pinned Contako utility
+extraction and adaptations; `go.mod`/`go.sum` pin the upstream source modules.
+GopenPGP v2.10.0-proton, go-crypto v1.4.1-proton and go-srp v0.0.7 remain unchanged.
+The recipe rebuilds those selected bindings with Go 1.27.1 and pinned mobile
+sources; it omits unused key-transparency bindings rather than distributing the
+unresolved original aggregate. The original AAR supplies only a hash-pinned
+public-API reference, never generated JNI contents.
+
+Gradle admits only the reviewed local AAR/POM bytes and their matching source
+descriptors. [The native source inventory](../docs/release-dependencies.json)
+preserves linked module archive/h1 evidence, grants, supplementary notices and
+copyright headers. Equal per-class API, 16 KiB layout and reproducible native
+bytes are distinct from application/runtime and vulnerability qualification.
+The F-Droid recipe and listing remain disabled pending their distribution gates;
+signature selection is deferred.

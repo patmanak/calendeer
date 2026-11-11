@@ -63,6 +63,21 @@ separate work. See [the protocol](CONFLICT_RESOLUTION.md).
 
 ## Evidence and remaining RC work
 
+F-Droid preparation now includes English/French listing text, a checked-in
+development version and a disabled recipe. Proton JNI is replaced by a pinned
+source build of the selected unmodified crypto/SRP packages with current mobile
+bindings and Go 1.27.1. Two independent Linux compilations give identical native
+AAR/POM bytes; per-class Java API, four-ABI 16 KiB ELF, source and license/notice
+guards pass. The 217 other Maven reviews are preserved. The selected source-built
+artifact passes 24 synthetic crypto tests and one read-only retained-session
+catalogue test on API 35 / arm64 / 4 KiB. This does not qualify a fresh SRP login,
+other ABIs/OEMs, API 37 / 16 KiB or advisory applicability.
+The official metadata parser and source scanner run on a local qualification
+copy; a narrowly hash-guarded settings-file scanner exception still requires
+maintainer acceptance. Build-server qualification, complete APK reproducibility,
+current native advisory applicability/fixes and the deferred signature choice remain
+separate distribution gates. See [F-Droid preparation](FDROID.md).
+
 Real controlled-account journeys qualify login/import, simple CREATE, title edits,
 ordinary timed and three-day all-day text edits and same-kind timed/all-day date edits through authenticated
 ports. Seven temporal service profiles cover one/multiple civil days, Paris and
@@ -153,15 +168,16 @@ The debug transport seam drops a real matched response and never manufactures
 acceptance. The corresponding production WorkManager checkpoint remains open.
 
 Current host suites pass 444 domain, 20 authentication, 922 backend and 236 app JVM cases without
-skips. The authentication suite is unchanged from its earlier measured baseline. Physical crypto, SQL/migration, Provider, worker/recovery and option UI
+skips. Physical crypto, SQL/migration, Provider, worker/recovery and option UI
 checks pass; APK builds and app lint pass. Scope-specific evidence and remaining
 qualification are in [validation](VALIDATION.md) and the linked contracts.
 
-Resolved Maven versions and SHA-256 checksums are locked, with a Windows CI
-baseline and advisory inventory. Kotlin/Compose 2.4.21 and KSP 2.3.12 replace the
+Resolved Maven versions and SHA-256 checksums are locked, with a Linux source-build
+CI configuration and advisory inventory. The remote workflow has not been executed
+for this source-native change. Kotlin/Compose 2.4.21 and KSP 2.3.12 replace the
 vulnerable Kotlin/KAPT baseline while retaining AGP 9.2.1 and Gradle 9.4.1.
 Android modules compile against API 37; the app targets 37 with minimum API 31.
-An isolated API 37 / x86_64 / 16 KiB emulator passes selected native, Provider,
+The earlier upstream-native cohort on an isolated API 37 / x86_64 / 16 KiB emulator passes selected native, Provider,
 migration, UI and capacity cases, plus an actual same-key release update and
 reboot preserving synthetic SQL/Provider/Keystore state. Authenticated release
 session upgrades, OEMs and the other runtime profiles remain unqualified.

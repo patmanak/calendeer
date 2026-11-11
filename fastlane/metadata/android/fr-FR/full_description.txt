@@ -1,0 +1,7 @@
+Calendeer relie Proton Calendar aux agendas système Android. Choisissez les calendriers à synchroniser, puis consultez les événements et recevez les rappels locaux dans vos applications d’agenda Android.
+
+La synchronisation est en lecture seule par défaut. Des options expérimentales distinctes, par calendrier, permettent les opérations prises en charge depuis une application d’agenda Android compatible : création d’événements, modification du titre, de la description et du lieu, des dates, et suppression. Leur périmètre est limité : les invitations, changements de récurrence et autres modifications non prises en charge peuvent rester en attente. Les conflits et les opérations dont le résultat est incertain sont conservés pour examen.
+
+Calendeer propose la connexion au compte, le choix des calendriers et les réglages de synchronisation. L’application ne possède ni éditeur d’événements ni vue de consultation d’agenda et n’émet pas elle-même les notifications de rappel. Une application d’agenda Android est nécessaire pour consulter ou modifier les événements synchronisés et gérer les rappels locaux.
+
+Nécessite Android 12 ou une version ultérieure et un compte Proton. La synchronisation dépend du service Proton et d’une connexion Internet ; les événements déjà synchronisés restent accessibles hors ligne dans vos applications d’agenda. Calendeer est un projet indépendant, sans affiliation avec Proton.
