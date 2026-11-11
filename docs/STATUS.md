@@ -9,10 +9,20 @@ under `.local/`.
 
 0.1 for F-Droid. Scope: incoming synchronization, editing of simple events
 through one outgoing family (personal-v2; retire the legacy title/text/time
-families with safe migration), hourly incoming refresh. Out of scope until 0.1
+families with safe migration), hourly incoming refresh. Scheduling strategy: a
+thin calendar SyncAdapter on the existing Calendeer account (upload supported) is
+the entry point for Android triggers (local edits, manual refresh, periodic sync
+with a user interval of 15 min/30 min/1 h default/2 h/6 h); it enqueues the
+existing WorkManager work, awaits it within a bound and reports the result.
+WorkManager remains the executor; its six-hour periodic job is removed, and the
+URI watcher is retired once Provider-triggered upload is qualified. Show the last
+sync time and the Android auto-sync state; offer the battery-optimization
+exemption once. Out of scope until 0.1
 ships: recurrence, reminders, guests, new outgoing families. Exit criteria: the
 scope works, one grouped E4 qualification run (physical device, live test account,
-offline/reconnect, reboot, permission revocation, Samsung/Doze), green remote CI,
+offline/reconnect, reboot, permission revocation, Samsung/Doze with and without
+the exemption, closed-app local edit, manual refresh from two calendar apps,
+auto-sync disabled), green remote CI,
 signing decided. This file must be reduced to under 100 lines.
 
 ## Product and boundaries
