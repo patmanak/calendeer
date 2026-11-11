@@ -35,6 +35,8 @@ internal class AndroidProviderWake(context: Context) {
     val registration = ProviderWakeRegistration(store, object : ProviderWakeBackend {
         override suspend fun arm(token: String) {
             require(validToken(token))
+            if ((this@AndroidProviderWake.context as? com.patmanak.proton.andcalendarbridge.BridgeApplication)
+                    ?.calendarSyncSettings?.automaticAllowed() == false) return
             // A new independent name is necessary: KEEP on our own RUNNING name loses the successor.
             manager.enqueueUniqueWork("calendar-provider-watch.$token", ExistingWorkPolicy.KEEP,
                 OneTimeWorkRequestBuilder<CalendarProviderChangeWorker>()

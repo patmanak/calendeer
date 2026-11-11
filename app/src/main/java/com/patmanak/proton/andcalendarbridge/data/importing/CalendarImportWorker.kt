@@ -14,18 +14,26 @@ class CalendarImportWorker(context: Context, parameters: WorkerParameters) : Cor
     override suspend fun doWork(): Result {
         val app = applicationContext as BridgeApplication
         if (inputData.getString(SystemSyncWork.ACCOUNT) != null) return systemWork(app)
+        if (!app.calendarSyncSettings.automaticAllowed()) return Result.success()
         app.allowNormalScheduling()
         val network = inputData.getBoolean("network", false)
+        var normalAccount: com.patmanak.proton.andcalendarbridge.sync.AccountId? = null
         val result = executeImportWork(ready = { withContext(Dispatchers.Main.immediate) {
             val controller = app.authentication
-            val state = withTimeoutOrNull(60_000) { controller.state.first { !it.isSubmitting } }
+            val state = withTimeoutOrNull(60_000) { controller.state.first {
+                !it.isSubmitting && it.destination != AuthenticationDestination.RESTORING
+            } }
             if (state == null) null else {
                 app.imports.authenticationChanged(state.destination == AuthenticationDestination.AUTHENTICATED)
-                state.destination == AuthenticationDestination.AUTHENTICATED
+                val active = if (state.destination == AuthenticationDestination.AUTHENTICATED)
+                    com.patmanak.proton.andcalendarbridge.protonauth.ProtonAuthentication.events(app).currentAccount() else null
+                normalAccount = active
+                active != null && SystemSyncWork.automaticAllowed(
+                    com.patmanak.proton.andcalendarbridge.data.calendar.AndroidCalendarProjection(app).accountFor(active))
             }
         } }, run = {
             val fresh = runAttemptCount == 0 && !inputData.getBoolean("resume", false)
-            runPass(app, network, fresh, fresh, false, false)
+            runPass(app, network, fresh, fresh, false, false, requireNotNull(normalAccount))
         }, continueWork = { app.imports.enqueueContinuation(network) })
         return when (result) {
             ImportRunResult.RETRY -> Result.retry()

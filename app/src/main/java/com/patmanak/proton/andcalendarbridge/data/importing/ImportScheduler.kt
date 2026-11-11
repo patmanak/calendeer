@@ -17,7 +17,9 @@ class WorkManagerImportScheduler(context: Context) : ImportScheduler {
     private val manager get() = WorkManager.getInstance(context)
     override fun cancel() { manager.cancelAllWorkByTag(WORK_TAG) }
     private val normalAllowed get() =
-        (context as? com.patmanak.proton.andcalendarbridge.BridgeApplication)?.normalSchedulingAllowed != false
+        (context as? com.patmanak.proton.andcalendarbridge.BridgeApplication)?.let {
+            it.normalSchedulingAllowed && it.calendarSyncSettings.automaticAllowed()
+        } != false
     override fun requestLocal() {
         if (!normalAllowed) return
         manager.enqueueUniqueWork(LOCAL_WORK, ExistingWorkPolicy.KEEP,
@@ -31,11 +33,8 @@ class WorkManagerImportScheduler(context: Context) : ImportScheduler {
                 .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
                 .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
                 .addTag(WORK_TAG).build())
-        manager.enqueueUniquePeriodicWork(PERIODIC_WORK, ExistingPeriodicWorkPolicy.KEEP,
-            PeriodicWorkRequestBuilder<CalendarImportWorker>(6, TimeUnit.HOURS)
-                .setInputData(workDataOf("network" to true))
-                .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
-                .addTag(WORK_TAG).build())
+        // Android's per-account periodic sync is the only periodic trigger.
+        manager.cancelUniqueWork(PERIODIC_WORK)
     }
     override fun continueWork(network: Boolean) {
         if (!normalAllowed) return

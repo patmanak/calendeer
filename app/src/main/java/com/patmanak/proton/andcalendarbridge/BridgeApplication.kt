@@ -39,6 +39,9 @@ class BridgeApplication : Application() {
     private val normalScheduling = java.util.concurrent.atomic.AtomicBoolean(false)
     internal val normalSchedulingAllowed: Boolean get() = normalScheduling.get()
     internal fun allowNormalScheduling() { normalScheduling.set(true) }
+    val calendarSyncSettings by lazy {
+        com.patmanak.proton.andcalendarbridge.data.importing.AndroidCalendarSyncSettings(this, authenticationScope)
+    }
     internal val providerWake: com.patmanak.proton.andcalendarbridge.data.importing.AndroidProviderWake by lazy {
         com.patmanak.proton.andcalendarbridge.data.importing.AndroidProviderWake(this)
     }
@@ -193,6 +196,7 @@ class BridgeApplication : Application() {
         super.onCreate()
         themePreferences = AndroidThemePreferenceStore(this)
         languagePreferences = AndroidLanguagePreferenceStore(this)
+        calendarSyncSettings.start(this)
         systemCreates.start()
         authenticationScope.launch {
             try { imports.initializeCreates() }
