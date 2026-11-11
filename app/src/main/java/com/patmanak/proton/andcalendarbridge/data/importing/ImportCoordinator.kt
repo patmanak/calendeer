@@ -2797,31 +2797,8 @@ class ImportCoordinator(
     /** Successful continuation and transient retry are distinct; the store owns pending work. */
     suspend fun run(network: Boolean, fresh: Boolean = true): ImportRunResult = mutex.withLock { runLocked(network, fresh) }
 
-    private suspend fun refreshAccess(account: AccountId, expected: Long): ImportRunResult? {
-        val catalogPort = remote as? CalendarCatalogPort ?: return null
-        val enabled = store.selections(account).filter { it.enabled && it.available }
-        if (enabled.isNotEmpty() && enabled.all { it.nextAttempt > System.currentTimeMillis() })
-            return ImportRunResult.RETRY
-        when (val catalog = catalogPort.load()) {
-            is CalendarCatalogResult.Success -> {
-                if (catalog.account != account || !isCurrent(expected, account)) return ImportRunResult.COMPLETE
-                rememberAccessibleCatalog(account, catalog.calendars)
-            }
-            is CalendarCatalogResult.Failure -> {
-                val status = when (catalog.category) {
-                    CalendarCatalogFailure.AUTHENTICATION_REQUIRED -> "AUTH"
-                    CalendarCatalogFailure.UNSUPPORTED_RESPONSE, CalendarCatalogFailure.FORBIDDEN -> "UNSUPPORTED"
-                    else -> "NETWORK"
-                }
-                for (item in store.selections(account).filter { it.enabled && it.available }) {
-                    store.status(item.scope, status)
-                    catalog.retryAfterMillis?.let { store.deferNetwork(item.scope, it) }
-                }
-                return ImportRunResult.RETRY
-            }
-        }
-        return null
-    }
+    private suspend fun refreshAccess(account: AccountId, expected: Long): ImportRunResult? =
+        refreshImportAccess(remote, store, account, { isCurrent(expected, account) }, ::rememberAccessibleCatalog)
 
     private suspend fun bootstrapInitialPage(target: CalendarScope, allowNetwork: Boolean,
         deltaReady: Boolean): ImportProgress {
