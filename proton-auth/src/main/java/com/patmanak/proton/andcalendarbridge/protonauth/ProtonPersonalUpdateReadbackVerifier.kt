@@ -10,7 +10,7 @@ import kotlinx.serialization.json.JsonObject
 import java.nio.CharBuffer
 import java.nio.charset.CodingErrorAction
 
-/** Supplied temporal observations only; exact signed parts AND API dates must match.
+/** Supplied personal-v2 observations only; exact signed parts AND API dates must match.
  * This grants no authentication, dispatch, persistence or native acknowledgement authority.
  */
 internal class ProtonPersonalUpdateReadbackVerifier(

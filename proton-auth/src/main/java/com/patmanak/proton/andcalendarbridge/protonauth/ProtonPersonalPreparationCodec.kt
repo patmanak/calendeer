@@ -13,7 +13,7 @@ internal class ProtonPersonalPreparationException(val reason: ProtonPersonalPrep
     Exception("PERSONAL_PREPARATION_${reason.name}")
 internal val PERSONAL_PREPARATION_FORMAT = AdapterFormat("proton-calendar-offline-personal-edit-preparation", 2)
 
-/** Disjoint offline temporal history. Reopening checks retained structure; it does not
+/** Disjoint offline personal-v2 history. Reopening checks retained structure; it does not
  * verify signatures, decrypt replacement data or establish current access/send authority.
  */
 internal class ProtonPersonalPreparationCodec(private val protector: EventPayloadProtector) {

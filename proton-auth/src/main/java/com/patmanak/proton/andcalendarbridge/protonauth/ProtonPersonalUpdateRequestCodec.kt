@@ -14,7 +14,7 @@ internal enum class ProtonPersonalUpdateRequestFailure { UNSUPPORTED, STORAGE }
 internal class ProtonPersonalUpdateRequestException(val reason: ProtonPersonalUpdateRequestFailure) :
     Exception("PERSONAL_UPDATE_REQUEST_${reason.name}")
 
-/** Protected offline temporal request only; no journal state, transport or sending authority. */
+/** Protected offline personal-v2 request only; no journal state, transport or sending authority. */
 internal class ProtonProtectedPersonalUpdateRequest(val id: MutationId, preparation: PersonalEditPreparation,
     val format: AdapterFormat, val protectedPayload: String) {
     private val frozen = PersonalEditPreparation(preparation.intent, preparation.timestamp, preparation.format, preparation.protectedPayload)
