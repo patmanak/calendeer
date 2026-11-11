@@ -38,6 +38,8 @@ import com.patmanak.proton.andcalendarbridge.ui.auth.HumanVerificationPanel
 import com.patmanak.proton.andcalendarbridge.ui.calendars.CalendarDashboard
 import com.patmanak.proton.andcalendarbridge.protonauth.ProtonAuthentication
 import com.patmanak.proton.andcalendarbridge.ui.locale.AndroidLanguagePreferenceStore
+import com.patmanak.proton.andcalendarbridge.ui.settings.CalendarSyncSettingsPanel
+import com.patmanak.proton.andcalendarbridge.ui.settings.CalendarSyncBatteryOffer
 import com.patmanak.proton.andcalendarbridge.ui.theme.BridgeTheme
 import com.patmanak.proton.andcalendarbridge.ui.theme.resolveDarkTheme
 
@@ -66,6 +68,7 @@ class MainActivity : ComponentActivity() {
             val systemCreates by preferences.systemCreates.state.collectAsState()
             val authenticationState by authentication.state.collectAsState()
             val archiveEpoch by preferences.imports.conflictArchiveEpoch.collectAsState()
+            val syncSettings by preferences.calendarSyncSettings.state.collectAsState()
             val accountLabelAllowed = !verification.isRequired && !authenticationState.isSubmitting &&
                 !authenticationState.isCleanupRequired && !authenticationState.isCleanupInProgress &&
                 authenticationState.destination == com.patmanak.proton.andcalendarbridge.auth.AuthenticationDestination.AUTHENTICATED
@@ -110,9 +113,14 @@ class MainActivity : ComponentActivity() {
                             AuthenticationPanel(authentication, connectedAccountLabel = connectedAccountLabel)
                         }
                     },
+                    synchronizationContent = {
+                        if (accountLabelAllowed && syncSettings.accountPresent) {
+                            CalendarSyncSettingsPanel(preferences.calendarSyncSettings, syncSettings)
+                        }
+                    },
                     calendarContent = {
                         CalendarDashboard(catalogState, importState, systemCreates, catalog::refresh, preferences.imports::setEnabled,
-                            preferences.imports::requestSync,
+                            preferences.calendarSyncSettings::requestManual,
                             onRequestPermission = { calendarPermissions.launch(arrayOf(
                                 Manifest.permission.READ_CALENDAR, Manifest.permission.WRITE_CALENDAR)) },
                             onOpenSettings = { startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
@@ -125,6 +133,9 @@ class MainActivity : ComponentActivity() {
                             onOpenConflicts = { selection -> archiveScope = selection.scope })
                     },
                 )
+                if (accountLabelAllowed && syncSettings.accountPresent) {
+                    CalendarSyncBatteryOffer(preferences.calendarSyncSettings, syncSettings)
+                }
                 if (archiveAllowed) archiveScope?.let { target ->
                     Dialog(onDismissRequest = { archiveScope = null }) {
                         Surface(shape = androidx.compose.foundation.shape.RoundedCornerShape(24.dp)) {
@@ -141,6 +152,7 @@ class MainActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         (application as BridgeApplication).languagePreferences.refresh()
+        (application as BridgeApplication).calendarSyncSettings.refresh()
         (application as BridgeApplication).imports.permissionsChanged()
     }
 }

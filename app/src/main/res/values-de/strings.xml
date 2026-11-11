@@ -30,4 +30,25 @@
     <string name="system_delete_mode">Löschungen synchronisieren (experimentell)</string>
     <string name="system_delete_limits">Nur einfache importierte Termine ohne Wiederholungen, Erinnerungen, Gäste oder eigene Farben. Andere Löschungen bleiben auf Android.</string>
     <string name="calendar_dashboard_delete_mode">Löschungen aktiviert</string>
+    <string name="sync_settings_title">Synchronisierung</string>
+    <string name="sync_settings_last_success">Letzte erfolgreiche Synchronisierung</string>
+    <string name="sync_settings_never">Noch keine erfolgreiche Synchronisierung</string>
+    <string name="sync_settings_account_auto">Automatische Synchronisierung dieses Kontos</string>
+    <string name="sync_settings_master_auto">Automatische Synchronisierung von Android (alle Konten)</string>
+    <string name="sync_settings_enabled">Aktiviert</string>
+    <string name="sync_settings_disabled">Deaktiviert</string>
+    <string name="sync_settings_schedule_note">Android kann die Synchronisierung im Hintergrund verzögern, um Akku zu sparen. Beide Einstellungen für die automatische Synchronisierung müssen aktiviert sein.</string>
+    <string name="sync_settings_interval_value">Intervall: %1$s</string>
+    <string name="sync_settings_interval">Synchronisierungsintervall</string>
+    <string name="sync_settings_android">Android-Synchronisierungseinstellungen öffnen</string>
+    <string name="sync_settings_now">Jetzt synchronisieren</string>
+    <string name="sync_settings_15_minutes">15 Minuten</string>
+    <string name="sync_settings_30_minutes">30 Minuten</string>
+    <string name="sync_settings_1_hour">1 Stunde (Standard)</string>
+    <string name="sync_settings_2_hours">2 Stunden</string>
+    <string name="sync_settings_6_hours">6 Stunden</string>
+    <string name="sync_settings_battery_title">Zuverlässigere Synchronisierung im Hintergrund erlauben?</string>
+    <string name="sync_settings_battery_explanation">Android kann die Synchronisierung verzögern, um Akku zu sparen. Sie können Calendeer von der Akkuoptimierung ausnehmen. Dies kann den Akkuverbrauch erhöhen. Fahren Sie fort, um den Android-Dialog zu prüfen, oder behalten Sie die aktuelle Einstellung bei.</string>
+    <string name="sync_settings_battery_continue">Weiter</string>
+    <string name="sync_settings_battery_decline">Aktuelle Einstellung beibehalten</string>
 </resources>

@@ -30,4 +30,25 @@
     <string name="system_delete_mode">Sincronizar eliminações (experimental)</string>
     <string name="system_delete_limits">Apenas eventos importados simples, sem repetições, lembretes, convidados ou cores personalizadas. As outras eliminações permanecem no Android.</string>
     <string name="calendar_dashboard_delete_mode">Eliminações ativadas</string>
+    <string name="sync_settings_title">Sincronização</string>
+    <string name="sync_settings_last_success">Última sincronização bem-sucedida</string>
+    <string name="sync_settings_never">Ainda não há sincronizações bem-sucedidas</string>
+    <string name="sync_settings_account_auto">Sincronização automática desta conta</string>
+    <string name="sync_settings_master_auto">Sincronização automática do Android (todas as contas)</string>
+    <string name="sync_settings_enabled">Ativada</string>
+    <string name="sync_settings_disabled">Desativada</string>
+    <string name="sync_settings_schedule_note">O Android pode adiar a sincronização em segundo plano para poupar bateria. Ambas as definições de sincronização automática devem estar ativadas.</string>
+    <string name="sync_settings_interval_value">Intervalo: %1$s</string>
+    <string name="sync_settings_interval">Intervalo de sincronização</string>
+    <string name="sync_settings_android">Abrir definições de sincronização do Android</string>
+    <string name="sync_settings_now">Sincronizar agora</string>
+    <string name="sync_settings_15_minutes">15 minutos</string>
+    <string name="sync_settings_30_minutes">30 minutos</string>
+    <string name="sync_settings_1_hour">1 hora (predefinição)</string>
+    <string name="sync_settings_2_hours">2 horas</string>
+    <string name="sync_settings_6_hours">6 horas</string>
+    <string name="sync_settings_battery_title">Permitir uma sincronização em segundo plano mais fiável?</string>
+    <string name="sync_settings_battery_explanation">O Android pode adiar a sincronização para poupar bateria. Pode excluir o Calendeer da otimização da bateria. Isto pode aumentar o consumo. Continue para rever o diálogo do Android ou mantenha a definição atual.</string>
+    <string name="sync_settings_battery_continue">Continuar</string>
+    <string name="sync_settings_battery_decline">Manter a definição atual</string>
 </resources>

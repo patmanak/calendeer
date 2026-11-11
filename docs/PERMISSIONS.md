@@ -63,6 +63,17 @@ Qualify background scheduling and OEM restrictions with the actual worker design
 
 ## Verification
 
+The calendar SyncAdapter uses install-time `READ_SYNC_SETTINGS` and
+`WRITE_SYNC_SETTINGS` for its own account and calendar authority. It preserves
+later per-account choices and never enables the global master switch.
+`REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` supports a one-time optional explanation:
+only the user's Continue action opens Android's official exemption dialog.
+Refusal does not block sign-in or calendar access. The app checks PowerManager
+again on return; the explanation itself grants nothing. This standard platform
+API requires no proprietary service, notification or foreground service.
+See [scheduling](SYNC_SCHEDULING.md) and the
+[Android Settings contract](https://developer.android.com/reference/android/provider/Settings#ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).
+
 - Inspect permissions in the merged manifest and installed package; confirm that
   normal permissions used by authentication are granted without a runtime prompt.
 - On a controlled device, qualify initial denial, partial grant, repeated denial,

@@ -30,4 +30,25 @@
     <string name="system_delete_mode">Sincronizza eliminazioni (sperimentale)</string>
     <string name="system_delete_limits">Solo eventi importati semplici, senza ripetizioni, promemoria, invitati o colori personalizzati. Le altre eliminazioni restano su Android.</string>
     <string name="calendar_dashboard_delete_mode">Eliminazioni attivate</string>
+    <string name="sync_settings_title">Sincronizzazione</string>
+    <string name="sync_settings_last_success">Ultima sincronizzazione riuscita</string>
+    <string name="sync_settings_never">Nessuna sincronizzazione riuscita finora</string>
+    <string name="sync_settings_account_auto">Sincronizzazione automatica di questo account</string>
+    <string name="sync_settings_master_auto">Sincronizzazione automatica di Android (tutti gli account)</string>
+    <string name="sync_settings_enabled">Attivata</string>
+    <string name="sync_settings_disabled">Disattivata</string>
+    <string name="sync_settings_schedule_note">Android può ritardare la sincronizzazione in background per risparmiare batteria. Entrambe le impostazioni di sincronizzazione automatica devono essere attivate.</string>
+    <string name="sync_settings_interval_value">Intervallo: %1$s</string>
+    <string name="sync_settings_interval">Intervallo di sincronizzazione</string>
+    <string name="sync_settings_android">Apri le impostazioni di sincronizzazione Android</string>
+    <string name="sync_settings_now">Sincronizza ora</string>
+    <string name="sync_settings_15_minutes">15 minuti</string>
+    <string name="sync_settings_30_minutes">30 minuti</string>
+    <string name="sync_settings_1_hour">1 ora (predefinito)</string>
+    <string name="sync_settings_2_hours">2 ore</string>
+    <string name="sync_settings_6_hours">6 ore</string>
+    <string name="sync_settings_battery_title">Consentire una sincronizzazione in background più affidabile?</string>
+    <string name="sync_settings_battery_explanation">Android può ritardare la sincronizzazione per risparmiare batteria. Puoi escludere Calendeer dall’ottimizzazione della batteria. Il consumo potrebbe aumentare. Continua per esaminare la finestra Android oppure mantieni l’impostazione attuale.</string>
+    <string name="sync_settings_battery_continue">Continua</string>
+    <string name="sync_settings_battery_decline">Mantieni l’impostazione attuale</string>
 </resources>

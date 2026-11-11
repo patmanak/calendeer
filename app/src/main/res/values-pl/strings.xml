@@ -30,4 +30,25 @@
     <string name="system_delete_mode">Synchronizuj usunięcia (eksperymentalne)</string>
     <string name="system_delete_limits">Tylko proste zaimportowane wydarzenia, bez powtórzeń, przypomnień, gości ani własnych kolorów. Pozostałe usunięcia pozostają w Androidzie.</string>
     <string name="calendar_dashboard_delete_mode">Usunięcia włączone</string>
+    <string name="sync_settings_title">Synchronizacja</string>
+    <string name="sync_settings_last_success">Ostatnia udana synchronizacja</string>
+    <string name="sync_settings_never">Brak udanej synchronizacji</string>
+    <string name="sync_settings_account_auto">Automatyczna synchronizacja tego konta</string>
+    <string name="sync_settings_master_auto">Automatyczna synchronizacja Androida (wszystkie konta)</string>
+    <string name="sync_settings_enabled">Włączona</string>
+    <string name="sync_settings_disabled">Wyłączona</string>
+    <string name="sync_settings_schedule_note">Android może opóźniać synchronizację w tle, aby oszczędzać baterię. Oba ustawienia automatycznej synchronizacji muszą być włączone.</string>
+    <string name="sync_settings_interval_value">Odstęp: %1$s</string>
+    <string name="sync_settings_interval">Odstęp synchronizacji</string>
+    <string name="sync_settings_android">Otwórz ustawienia synchronizacji Androida</string>
+    <string name="sync_settings_now">Synchronizuj teraz</string>
+    <string name="sync_settings_15_minutes">15 minut</string>
+    <string name="sync_settings_30_minutes">30 minut</string>
+    <string name="sync_settings_1_hour">1 godzina (domyślnie)</string>
+    <string name="sync_settings_2_hours">2 godziny</string>
+    <string name="sync_settings_6_hours">6 godzin</string>
+    <string name="sync_settings_battery_title">Zezwolić na bardziej niezawodną synchronizację w tle?</string>
+    <string name="sync_settings_battery_explanation">Android może opóźniać synchronizację, aby oszczędzać baterię. Możesz wykluczyć Calendeer z optymalizacji baterii. Może to zwiększyć zużycie energii. Kontynuuj, aby sprawdzić okno Androida, lub zachowaj obecne ustawienie.</string>
+    <string name="sync_settings_battery_continue">Kontynuuj</string>
+    <string name="sync_settings_battery_decline">Zachowaj obecne ustawienie</string>
 </resources>

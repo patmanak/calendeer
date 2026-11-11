@@ -31,4 +31,25 @@
     <string name="system_delete_mode">Synchronize deletions (experimental)</string>
     <string name="system_delete_limits">Simple imported events only, without repeats, reminders, guests or custom colors. Other deletions stay on Android.</string>
     <string name="calendar_dashboard_delete_mode">Deletions enabled</string>
+    <string name="sync_settings_title">Synchronization</string>
+    <string name="sync_settings_last_success">Last successful synchronization</string>
+    <string name="sync_settings_never">No successful synchronization yet</string>
+    <string name="sync_settings_account_auto">Automatic synchronization for this account</string>
+    <string name="sync_settings_master_auto">Android automatic synchronization (all accounts)</string>
+    <string name="sync_settings_enabled">Enabled</string>
+    <string name="sync_settings_disabled">Disabled</string>
+    <string name="sync_settings_schedule_note">Android may delay background synchronization to save battery. Both automatic synchronization settings must be enabled.</string>
+    <string name="sync_settings_interval_value">Interval: %1$s</string>
+    <string name="sync_settings_interval">Synchronization interval</string>
+    <string name="sync_settings_android">Open Android sync settings</string>
+    <string name="sync_settings_now">Synchronize now</string>
+    <string name="sync_settings_15_minutes">15 minutes</string>
+    <string name="sync_settings_30_minutes">30 minutes</string>
+    <string name="sync_settings_1_hour">1 hour (default)</string>
+    <string name="sync_settings_2_hours">2 hours</string>
+    <string name="sync_settings_6_hours">6 hours</string>
+    <string name="sync_settings_battery_title">Allow more reliable background synchronization?</string>
+    <string name="sync_settings_battery_explanation">Android can delay synchronization to save battery. You can optionally exclude Calendeer from battery optimization. This may use more battery. Continue to review the Android dialog, or keep the current setting.</string>
+    <string name="sync_settings_battery_continue">Continue</string>
+    <string name="sync_settings_battery_decline">Keep current setting</string>
 </resources>

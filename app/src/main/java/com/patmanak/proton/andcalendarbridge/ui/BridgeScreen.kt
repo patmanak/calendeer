@@ -41,6 +41,7 @@ fun BridgeScreen(
     signedIn: Boolean = false,
     settingsEnabled: Boolean = true,
     verificationRequired: Boolean = false,
+    synchronizationContent: @Composable () -> Unit = {},
 ) {
     var openPicker by rememberSaveable { mutableStateOf<String?>(null) }
     var settingsOpen by rememberSaveable(signedIn) { mutableStateOf(false) }
@@ -86,6 +87,7 @@ fun BridgeScreen(
                             SectionTitle(stringResource(R.string.ui_account))
                             ContentCard { authenticationContent() }
                         }
+                        if (signedIn) synchronizationContent()
                         SectionTitle(stringResource(R.string.ui_personalization))
                         Card(shape = RoundedCornerShape(24.dp), colors = CardDefaults.cardColors(
                             containerColor = MaterialTheme.colorScheme.surface)) {

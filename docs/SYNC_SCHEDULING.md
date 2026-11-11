@@ -1,70 +1,77 @@
 # Synchronization scheduling
 
-## Android edits
+## Android entry points and execution
 
-When a selected, available calendar has creation/editing enabled, Calendeer
-registers a one-time WorkManager 2.8.1 content trigger for
-`CalendarContract.Events.CONTENT_URI`, including descendants. Android owns this
-registration while the application process is absent. Notifications are grouped
-with a five-second update delay and a thirty-second maximum batching delay.
-These are requested batching limits, not a delivery deadline: Android quotas,
-power management, permissions and connectivity can delay execution. A force-stop
-prevents ordinary background operation until Android permits the app to run again.
+A calendar SyncAdapter is registered on the existing Calendeer account type and
+`com.android.calendar`, with uploads enabled and no parallel adapter threads.
+Android can request upload after native edits, manual synchronization or periodic
+refresh. A native signal is only a scheduling hint: it grants no account ownership,
+calendar permission, write consent or authority to resend an uncertain request.
 
-The native URI job first awaits a durable, independent local handoff without URI
-constraints. That job can retry authentication, registration and capture without
-requiring another content notification. It persists its successor token before
-enqueuing an independent URI job,
-and awaits WorkManager's enqueue operation before scanning. It does not use KEEP
-on its own RUNNING job or replace an active capture. A pending token survives
-failed enqueue/capture/handoff. Conditional acknowledgement cannot consume a newer
-signal. Continuations are separate durable jobs and preserve their origin.
-Registration is removed when resolved selections have no writable calendar;
-initial session restoration is distinguished from a resolved empty selection.
-A revoked operation lease does not terminate the long-lived state observer;
-genuine cancellation of its coroutine still propagates.
+The adapter enqueues an independent `CalendarImportWorker` request and waits up to
+two minutes. It waits for actual completion, not just enqueue acknowledgement.
+Callbacks have distinct IDs and no WorkManager dependency chain; cancelling one
+cannot cancel another callback. Interruption or timeout cancels only that executor,
+retaining domain intents and uncertain results for safe later inspection. Auth,
+permission, stale-account and transient failures are reported to Android. A retry,
+missing result or exhausted wait is never reported as success.
 
-The worker restores authentication and reads retained selections without starting
-an incoming refresh. Automatic normal scheduling stays closed in a process
-started solely for this wake. The UI and ordinary import/periodic workers retain
-their normal scheduling entry points. The in-process observer repairs the URI
-registration; it no longer schedules a fresh network refresh for every Provider
-notification. The existing six-hour periodic catch-up is retained.
+The system profile restores authentication without enabling ordinary fresh outgoing
+recovery. It validates the exact active account before each pass; both coordinators
+also bind execution to the expected account under their existing mutexes. Incoming
+refresh may be fresh on the first pass; outgoing work always uses `fresh=false`
+and `providerWake=true`. UNKNOWN stays inspect-only and paused CREATEs stay paused.
+Manual Android extras bypass automatic scheduling settings, never these admissions.
 
-A notification grants no ownership or permission to send. The existing bounded
-native discovery, capture and outgoing pipeline recheck session, permissions,
-selection, account/generation, opt-ins and immutable request identity. The URI
-origin does not reset recovery exhaustion. Uncertain outcomes remain inspect-only;
-it cannot lift a durable paused CREATE in the SQL resume transaction. Normal
-explicit requalification keeps its previous behavior. No reminder notification
-or event editor is added to Calendeer.
+The worker reuses the existing incoming/outgoing pass and drains continuation pages
+inside its own execution (up to sixteen passes). It does not report success after
+scheduling a hidden successor. More pages or transient failure use normal persistent
+WorkManager retry. Only an admitted completed system cycle records its local success
+time. This does not mean unsupported/held events were uploaded; their existing
+status remains visible.
 
-Before capture, a dedicated read-only adapter hashes the full values of owned
-dirty/deleted events and their reminder, attendee and extended-property rows.
-No raw contents are stored in the scheduling preferences. Unchanged contents,
-including an unchanged held event, do not initiate another capture/network pass.
-Clean incoming imports and completed acknowledgements have no dirty rows and
-therefore do not initiate outgoing work. The fingerprint grants no admission.
+## Periodic sync and automatic settings
 
-Hashing is limited to 4096 rows and 16 MiB of framed values per pass. On overflow,
-capture proceeds through its existing bounded pages with **no cached fingerprint**;
-one large unsupported event cannot starve other edits. Deduplication is unavailable
-for such a snapshot until it falls below the limits. Local continuations carry
-this uncached state explicitly. A network-constrained job is persisted only after
-the local capture traversal finishes, so offline edits remain durably captured.
+Android is the sole periodic owner: 15 minutes, 30 minutes, one hour by default,
+two hours or six hours. Reconfiguration replaces the account's previous periodic
+schedule instead of accumulating schedules. The old six-hour WorkManager job is
+cancelled at startup and is no longer created. WorkManager remains the executor,
+with network constraints, durable queues and existing backoff.
 
-Normal WorkManager retry and the retained periodic catch-up remain necessary for
-crashes, unavailable providers and platform scheduling limits. This mechanism does
-not provide an atomic transaction between preferences, WorkManager and the
-Calendar Provider, or a guaranteed latency across every interruption. If the
-initial durable handoff itself fails, URI retry alone does not guarantee another
-notification; normal startup/periodic catch-up remains necessary. Qualification
-must separate actual URI registration, process-absent editor delivery, offline
-reconnection, bursts, reboot, permission revocation and Samsung/Doze behavior.
+The newly introduced Android channel is enabled once per account. Later startup,
+refresh and interval changes preserve the user's per-account switch; the app never
+enables Android's global master switch. Automatic workers and the temporary URI
+path check both switches. Disabling automatic sync cancels automatic executors and
+leaves durable domain intent intact. Manual refresh remains available while the
+automatic switches are OFF. Authentication, account, permissions and operation
+consent are still required.
 
-## Incoming changes
+Settings show the per-account and global Android states, configured interval and
+last successful system cycle, scoped to the connected account. Android can delay
+jobs and periodic sync in Doze, standby or under quotas. An interval is not a
+maximum delivery delay. A calendar client's refresh button must actually request
+Android synchronization; merely reloading its own view cannot trigger the adapter.
 
-This change does not alter the incoming six-hour periodic cadence or add a push
-service. Shorter polling intervals and a foreground change-feed polling loop need
-separate product decisions and battery/data measurements. A Proton change-feed
-endpoint is a pull API; its presence is not proof of a background push service.
+## Temporary URI compatibility path
+
+The existing one-shot Events URI watcher remains until real Android-triggered
+upload is qualified in the milestone's grouped E4 run. Its durable signal transfer,
+rearm-before-capture, dirty-content fingerprint and bounded offline capture remain.
+It now respects automatic-sync settings and binds post-authentication execution to
+the actual account. Clean imports/ACKs and unchanged held contents do not cause an
+outgoing pass; the watcher itself can still wake on unrelated authority changes.
+Retiring this path after E4 also removes that remaining broad wake cost.
+
+## Battery and qualification
+
+Calendeer offers an explanation of battery exemption once. Continuing opens the
+standard Android permission dialog; refusal leaves the existing choice untouched.
+PowerManager state is reread on return. This needs no push SDK, event notification,
+foreground service or exact alarm. Exemption does not guarantee a deadline, network
+availability or exemption from an OEM's separate restrictions.
+
+E3 covers targeted execution, native settings/periodic metadata and account
+admissions. E4 remains grouped at milestone exit: closed-app edit, refresh from two
+calendar clients, periodic operation in deep sleep with/without exemption,
+auto-sync OFF, offline/reconnect, reboot and permission revocation. Source review,
+synthetic Android fixtures and successful enqueue are not live Proton/OEM evidence.
