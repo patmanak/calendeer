@@ -43,6 +43,10 @@ repeated GO requests, unchanged polling or duplicate parent/child build runs.
   reread all of `VALIDATION.md`, specifications or source audits at startup.
 - Plan from accepted behavior into the smallest integrated slice. Record a real
   consequential decision when needed; do not create speculative abstractions.
+- Before starting a batch, write in the journal the milestone item it serves, the
+  expected user-visible result, the evidence level (E1-E4 in `AGENTS.md`) and a
+  budget of about 400 changed production lines. When the budget is exceeded, stop,
+  commit what is coherent and move the rest into a new batch.
 - Preserve the Proton boundary, opaque state compatibility and synchronization
   invariants in `AGENTS.md`. Unknown capabilities need source/evidence, not guesses.
 - Reproduce a sync defect, form a falsifiable cause, fix it, rerun focused checks.

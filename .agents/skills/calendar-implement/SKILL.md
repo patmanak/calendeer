@@ -6,8 +6,7 @@ description: Implement or debug an authorized Calendar slice with behavior tests
 # Implement Calendar
 
 Read AGENTS.md, the assigned slice and relevant contracts. Inspect existing files
-and build descriptors first. No application/build exists at initial setup;
-do not invent Gradle tasks or silently select a stack from another project.
+and build descriptors first. Respect the batch evidence level and size budget.
 
 ## Deliver one behavior
 
@@ -21,8 +20,10 @@ objects and provider rows out of the domain. Translate errors and preserve data
 at adapters. Use maintained cryptography. Follow the agreed persistence and sync
 contracts; do not decide conflict/deletion policy inside a mapper.
 
-For sync changes, check applicable retry, cancellation, process death and
-lost-acknowledgement cases. Avoid implicit destructive full replacement and
+For sync changes, cover the retry, cancellation and lost-acknowledgement cases
+the changed code can actually reach, at the batch evidence level. Process-death
+and device journeys belong to milestone qualification (E4). Extend the existing
+pipeline rather than adding a parallel family. Avoid implicit destructive full replacement and
 duplicate creation after an uncertain upload result. Preserve unsupported fields
 or report a limitation instead of silently removing them.
 

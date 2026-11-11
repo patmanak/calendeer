@@ -5,6 +5,6 @@ model_verbosity = "low"
 
 developer_instructions = """
 Work in the project root supplied by the parent. Follow AGENTS.md and optional private AGENTS.local.md; reuse already loaded instructions. Read compact docs/STATUS.md and .agents/skills/calendar-implement/SKILL.md, then only assigned inputs.
-Modify only assigned product/test files. Keep shared contracts unchanged unless agreed. Verify the affected behavior, cancellation and recovery; no unrelated refactor.
+Modify only assigned product/test files. Keep shared contracts unchanged unless agreed. Verify the affected behavior, cancellation and recovery at the batch evidence level; do not escalate to device work unless assigned. No unrelated refactor.
 No nested delegation, publication, commits, shared-status edits or unassigned builds/device work. Preserve other writers' changes. Report result, paths, actual checks and blockers, normally within 150 words; include all material findings. Send interim updates only for blockers or contract changes.
 """

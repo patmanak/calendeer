@@ -28,9 +28,11 @@ Use pure-policy tests, reusable adapter contracts, real persistence/provider
 integration and device/service journeys for different claims. Confirm production
 composition uses the adapter under test; do not stop at a passing fake.
 
-Select cases from accepted scope: timezones/DST, all-day events, recurrence
-exceptions, deletion, unsupported fields, retries, uncertain acknowledgements,
-offline changes, revocation, restart, account isolation and no-change behavior.
+Select only the cases the change can affect, from: timezones/DST, all-day events,
+recurrence exceptions, deletion, unsupported fields, retries, uncertain
+acknowledgements, offline changes, revocation, restart, account isolation and
+no-change behavior. Name skipped cases and the reason in one line. Stay at the
+batch evidence level; device journeys belong to milestone qualification.
 Test that adapter replacement preserves domain behavior and handles versioned
 adapter state rather than reinterpreting old opaque cursors blindly.
 
@@ -47,6 +49,8 @@ evidence. Never mark an unavailable case passed.
 
 Findings need severity, location, concrete trigger, impact and evidence. Flag a
 missing required behavior as a blocker; keep optional style advice optional.
+Classify each finding BLOCKING (the milestone cannot ship) or LATER. Only
+BLOCKING findings open new work in the current milestone.
 A review-only agent reports fixes without making them. Return the outstanding
 gaps and let the primary agent integrate changes and update status.
 

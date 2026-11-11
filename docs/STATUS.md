@@ -2,7 +2,18 @@
 
 This is the compact entry point, not an execution history. Read only the linked
 contract relevant to the task. Existing detailed evidence is in
-[validation](VALIDATION.md); run-specific notes remain ignored under `.local/`.
+[validation](VALIDATION.md) (frozen history); run-specific notes remain ignored
+under `.local/`.
+
+## Current milestone
+
+0.1 for F-Droid. Scope: incoming synchronization, editing of simple events
+through one outgoing family (personal-v2; retire the legacy title/text/time
+families with safe migration), hourly incoming refresh. Out of scope until 0.1
+ships: recurrence, reminders, guests, new outgoing families. Exit criteria: the
+scope works, one grouped E4 qualification run (physical device, live test account,
+offline/reconnect, reboot, permission revocation, Samsung/Doze), green remote CI,
+signing decided. This file must be reduced to under 100 lines.
 
 ## Product and boundaries
 

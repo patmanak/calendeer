@@ -7,8 +7,7 @@ description: Specify Calendar product behavior and acceptance cases from the own
 
 Read the project AGENTS.md and docs/STATUS.md. Use
 [the specification template](../../../docs/templates/specification.md) when a
-durable draft helps. Do not create a spec during workflow setup: the owner has
-reserved that for the next step.
+durable draft helps. Specify only what the current milestone needs.
 
 ## Produce a reviewable specification
 

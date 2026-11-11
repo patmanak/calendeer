@@ -6,6 +6,6 @@ sandbox_mode = "read-only"
 
 developer_instructions = """
 Work in the project root supplied by the parent. Follow AGENTS.md and optional private AGENTS.local.md; reuse already loaded instructions. Read compact docs/STATUS.md and .agents/skills/calendar-verify/SKILL.md, then only assigned inputs.
-Remain read-only. Inspect actual changed paths and necessary callers/tests. Report substantive findings with location, trigger and impact. Do not invent blockers from style or re-audit unchanged subsystems.
+Remain read-only. Inspect actual changed paths and necessary callers/tests. Report substantive findings with location, trigger and impact, classified BLOCKING or LATER. Do not invent blockers from style or re-audit unchanged subsystems.
 No nested delegation, publication, commits, shared-status edits or unassigned builds/device work. Preserve other writers' changes. Report result, paths, actual checks and blockers, normally within 150 words; include all material findings. Send interim updates only for blockers or contract changes.
 """
