@@ -2795,7 +2795,8 @@ class ImportCoordinator(
     }
 
     /** Successful continuation and transient retry are distinct; the store owns pending work. */
-    suspend fun run(network: Boolean, fresh: Boolean = true): ImportRunResult = mutex.withLock { runLocked(network, fresh) }
+    suspend fun run(network: Boolean, fresh: Boolean = true, expectedAccount: AccountId? = null): ImportRunResult =
+        mutex.withLock { runLocked(network, fresh, expectedAccount) }
 
     private suspend fun refreshAccess(account: AccountId, expected: Long): ImportRunResult? =
         refreshImportAccess(remote, store, account, { isCurrent(expected, account) }, ::rememberAccessibleCatalog)
@@ -2807,9 +2808,10 @@ class ImportCoordinator(
         return engine.run(target, allowNetwork = allowNetwork, maxPages = 1)
     }
 
-    private suspend fun runLocked(network: Boolean, fresh: Boolean): ImportRunResult {
+    private suspend fun runLocked(network: Boolean, fresh: Boolean, expectedAccount: AccountId?): ImportRunResult {
         val expected = generation
         val account = currentObservedAccount() ?: return ImportRunResult.COMPLETE
+        if (expectedAccount != null && account != expectedAccount) return ImportRunResult.COMPLETE
         if (!isCurrent(expected, account)) return ImportRunResult.COMPLETE
         store.admitTransaction = { it.account == account && authenticated && generation == expected }
         projection.admitOperation = { authenticated && generation == expected }

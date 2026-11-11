@@ -251,12 +251,14 @@ class SystemCreateController(
     }
 
     /** One bounded page per selected scope; unknown outcomes never cause immediate retry loops. */
-    suspend fun run(network: Boolean, fresh: Boolean = true, providerWake: Boolean = false): ImportRunResult = mutex.withLock {
+    suspend fun run(network: Boolean, fresh: Boolean = true, providerWake: Boolean = false,
+        expectedAccount: AccountId? = null): ImportRunResult = mutex.withLock {
         mutableState.update { it.copy(busy = true, failed = false) }
         var more = false
         var retry = false
         try {
             for (target in activeScopes()) {
+                if (expectedAccount != null && target.account != expectedAccount) continue
                 val epoch = epochs.computeIfAbsent(target) { AtomicLong() }.get()
                 val titleAdmission = imports.systemTitleRunAdmission(target)
                 // Capture all policy leases before the first suspension. Re-enabling cannot

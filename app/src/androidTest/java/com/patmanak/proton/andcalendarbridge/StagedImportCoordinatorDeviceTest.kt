@@ -68,6 +68,8 @@ class StagedImportCoordinatorDeviceTest {
             store.setEnabled(calendarScope, true)
             coordinator.authenticationChanged(true)
             withTimeout(10_000) { while (networkSchedules.get() == 0) delay(10) }
+            assertEquals(ImportRunResult.COMPLETE, coordinator.run(true, expectedAccount = AccountId("foreign-callback")))
+            assertEquals("A callback for another account must not fetch the current one", 0, requests)
             assertEquals(ImportRunResult.CONTINUE, coordinator.run(true))
             assertNull(store.selections(calendarScope.account).single().completedAt)
             repeat(4) { coordinator.run(false) }
