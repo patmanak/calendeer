@@ -65,6 +65,45 @@ class ProtonCalendarDeltaAdapterTest {
         assertEquals(0, network.bootstrapCalls)
     }
 
+    @Test fun calendarUrlMetadataSurvivesSealingAndOfflineReopeningWithoutCreatingNotices() = runTest {
+        for (rows in listOf("[]", """[{"ID":"deleted","Action":0}]""")) {
+            val network = Network().apply { changes = obj("""{"Code":1000,"CalendarModelEventID":"next","More":1,"Refresh":0,
+                "CalendarURL":[{"ID":"synthetic-link-notice","Action":0,"Opaque":{"future":"synthetic"}}],
+                "CalendarEvents":$rows}""") }
+            val decoder = Decoder()
+            val first = adapter(network, decoder)
+            val before = first.latestChanges(scope)
+            val receipt = first.receiveChanges(scope, before)
+            val sealed = obj(protector.open(receipt.protectedPayload))
+            assertEquals(network.changes, sealed.obj("envelope"))
+            network.forbidNetwork = true
+            val decoded = adapter(network, decoder).decodeChanges(receipt)
+            assertEquals(decoded, first.decodeChanges(receipt))
+            assertTrue(decoded.more)
+            assertFalse(decoded.reconciliationRequired)
+            assertEquals("next", CalendarDeltaReceiptCodec(protector).readCursor(scope, decoded.next).value)
+            assertEquals(if (rows == "[]") emptyList() else listOf(CalendarNoticeKind.EVENT_DELETED), decoded.notices.map { it.kind })
+            assertTrue(decoded.notices.all { it.eventId == EventId("deleted") })
+            assertEquals(0, network.bootstrapCalls); assertEquals(0, network.contextCalls); assertEquals(0, decoder.calls)
+            reason(RemoteImportFailure.UNSUPPORTED) { first.decodeChanges(receipt.copy(scope = scope.copy(generation = 2))) }
+        }
+    }
+
+    @Test fun calendarUrlDoesNotTurnDuplicateOrMalformedEventPagesIntoSuccessfulReceipts() = runTest {
+        val invalid = listOf("""[{"ID":"same","Action":0},{"ID":"same","Action":0}]""",
+            """[{"ID":"event","Action":2,"Event":{"ID":"event","CalendarID":"foreign"}}]""",
+            """[{"ID":"event","Action":3}]""")
+        for (rows in invalid) {
+            val network = Network().apply { changes = obj("""{"Code":1000,"CalendarModelEventID":"next","More":0,"Refresh":0,
+                "CalendarURL":[],"CalendarEvents":$rows}""") }
+            val decoder = Decoder()
+            val current = adapter(network, decoder)
+            val before = current.latestChanges(scope)
+            reason(RemoteImportFailure.UNSUPPORTED) { current.receiveChanges(scope, before) }
+            assertEquals(0, decoder.calls); assertEquals(0, network.contextCalls); assertEquals(0, network.bootstrapCalls)
+        }
+    }
+
     @Test fun refreshDiscardsDeletionInterpretationAndDemandsReconciliation() = runTest {
         val network = Network().apply { changes = obj("""{"Code":1000,"CalendarModelEventID":"next","More":0,"Refresh":255,"CalendarEvents":[{"ID":"event","Action":0}]}""") }
         val adapter = adapter(network, Decoder())

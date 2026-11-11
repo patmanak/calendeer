@@ -1,5 +1,22 @@
 # Validation
 
+## Known calendar feed metadata
+
+A synthetic host reproduction first fails with `PROTON_FEED_UNSUPPORTED` for an
+otherwise valid event page containing `CalendarURL: []`. After the bounded
+compatibility fix, all 34 change-feed/parser and delta-adapter cases pass. Eight
+new cases cover opaque metadata preservation, empty/null and metadata-only pages,
+pagination, shape/count/byte limits, event provenance, strict rejection of malformed
+or duplicate event actions, and sealed reopening without network access.
+Full backend (922), domain (444) and app JVM (236) regressions then pass without
+skips, as does app lint. The authentication module is unchanged and was not rerun
+for this fix.
+
+This qualifies host parsing and replay against the pinned official type, not
+actual server emission or a real sharing-link operation. Duplicate interpreted
+identities remain unsupported. See [the feed contract](research/CHANGE_FEED_RESET.md)
+for scope and reconciliation limits.
+
 ## Personal-edit v2 integration and Android 17 / 16 KiB fixtures
 
 PASS: 444 domain, 907 backend and 236 app JVM tests, without skips. New coverage

@@ -152,7 +152,7 @@ native/SQL completion; final restarted replay is immutable and sends nothing.
 The debug transport seam drops a real matched response and never manufactures
 acceptance. The corresponding production WorkManager checkpoint remains open.
 
-Current host suites pass 444 domain, 20 authentication, 914 backend and 236 app JVM cases without
+Current host suites pass 444 domain, 20 authentication, 922 backend and 236 app JVM cases without
 skips. The authentication suite is unchanged from its earlier measured baseline. Physical crypto, SQL/migration, Provider, worker/recovery and option UI
 checks pass; APK builds and app lint pass. Scope-specific evidence and remaining
 qualification are in [validation](VALIDATION.md) and the linked contracts.

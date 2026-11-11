@@ -83,6 +83,9 @@ internal object ProtonChangeFeedParser {
         "CalendarAlarms" to "Alarm", "CalendarSubscriptions" to "CalendarSubscription")
     private val globalCollections = mapOf("Calendars" to "Calendar", "CalendarMembers" to "Member",
         "Addresses" to "Address")
+    // Known public-link management metadata, not an event or access-grant action
+    // for this bridge. Preserve it in the sealed envelope without interpreting it.
+    private val calendarOpaqueCollections = setOf("CalendarURL")
 
     fun latest(scope: ProtonFeedScope, root: JsonObject): ProtonFeedCursor = parsed {
         validateScope(scope)
@@ -102,8 +105,15 @@ internal object ProtonChangeFeedParser {
         if (refresh != 0L) return@parsed ProtonFeedPage(cursor, next, more == 1L, refresh, emptyList(), root)
         val collections = if (cursor.scope.calendar == null) globalCollections else calendarCollections
         if (cursor.scope.calendar != null && root.keys.any {
-            it !in collections && it !in setOf("Code", "CalendarModelEventID", "More", "Refresh")
+            it !in collections && it !in calendarOpaqueCollections &&
+                it !in setOf("Code", "CalendarModelEventID", "More", "Refresh")
         }) feedUnsupported()
+        if (cursor.scope.calendar != null) for (name in calendarOpaqueCollections) {
+            val value = root[name]
+            if (value == null || value == JsonNull) continue
+            val rows = value as? JsonArray ?: feedUnsupported()
+            if (rows.size > 10_000 || rows.any { it !is JsonObject }) feedUnsupported()
+        }
         val changes = collections.flatMap { (collection, payloadName) ->
             val value = root[collection]
             if (value == null || value == JsonNull) return@flatMap emptyList()
@@ -177,6 +187,8 @@ internal object ProtonChangeFeedParser {
 }
 
 internal interface ProtonChangeFeedApi : BaseRetrofitApi {
+    // Legacy global contract, not composed by the production calendar delta adapter.
+    // A future global feed needs its own qualified API version and cursor contract.
     @Streaming @GET("core/v4/events/latest") suspend fun globalLatest(): ResponseBody
     @Streaming @GET("core/v5/events/{cursor}") suspend fun globalChanges(@Path("cursor") cursor: String): ResponseBody
     @Streaming @GET("calendar/v1/{calendar}/modelevents/latest")

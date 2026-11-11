@@ -21,6 +21,37 @@ moved outside the horizon or deleted during the gap; absence from a bounded scan
 cannot distinguish these cases. No automatic deletion or clearing of this warning
 is implemented. New authoritative deletion notices still follow the normal path.
 
+## Known non-event feed metadata
+
+Calendar-scoped pages accept `CalendarURL` as known public-link management
+metadata. The bridge retains it unchanged inside the existing protected response
+envelope but creates no event, context or permission notice from its entries.
+Absent/null values and bounded arrays of objects are accepted; other shapes,
+more than 10,000 entries and responses over the existing whole-response byte
+limit are refused. Unknown root collections and malformed interpreted event
+actions, identities, payloads or calendar scopes remain unsupported.
+
+This classification does not change cursor formats, pagination, event provenance
+or the reset short-circuit above. Sealed pages reopen offline through the same
+parser. It is a narrow compatibility rule, not a general policy of ignoring
+unknown server fields or an authority to manage sharing links.
+
+The official Web Calendar type declares this separate collection:
+[calendar feed type](https://github.com/ProtonMail/WebClients/blob/e4eb11459e7c8d7ac33802cbf9a4f38bf93e0f34/packages/calendar/calendarServerEvent.ts),
+[notification types](https://github.com/ProtonMail/WebClients/blob/e4eb11459e7c8d7ac33802cbf9a4f38bf93e0f34/packages/shared/lib/interfaces/calendar/EventManager.ts).
+Synthetic host fixtures qualify parsing and sealed/offline replay. No real
+sharing-link operation or server-emission observation is implied.
+
+Repeated identities in interpreted collections still fail closed. Applying their
+actions in received order has not been qualified through the bridge's staging and
+projection pipeline. A future local reconciliation policy must preserve the full
+envelope, distinguish its reason from a server-supplied `Refresh`, and avoid
+silently discarding tombstones or advancing an incomplete page.
+
+The production adapter composes calendar scopes only. Retained legacy global
+Core routes are not a supported production global feed; enabling such a feed
+requires separately qualified routes, payloads and versioned cursor semantics.
+
 ## Source basis and limits
 
 The inspected official Core implementation reuses `nextEventId` before notifying

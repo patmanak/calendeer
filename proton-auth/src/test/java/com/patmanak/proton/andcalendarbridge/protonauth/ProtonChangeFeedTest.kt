@@ -17,6 +17,84 @@ class ProtonChangeFeedTest {
     private val cursor = ProtonFeedCursor(scope, "cursor-before")
     private val session = CatalogSession(UserId(scope.account), SessionId("fixture-session"))
 
+    @Test fun calendarUrlMetadataDoesNotBlockAnOtherwiseValidEventPage() {
+        // An empty collection already satisfies the official optional CalendarURL array type.
+        // No account, sharing link or network request is used by this reproduction.
+        val root = JsonObject(page("""[{"ID":"fixture-event","Action":0}]""", more = 1)
+            .toMutableMap().apply { put("CalendarURL", JsonArray(emptyList())) })
+        val parsed = ProtonChangeFeedParser.page(cursor, root)
+        assertEquals("cursor-after", parsed.next.value)
+        assertTrue(parsed.more)
+        assertFalse(parsed.requiresReconciliation)
+        assertEquals("CalendarEvents", parsed.changes.single().collection)
+        assertEquals(ProtonFeedAction.DELETE, parsed.changes.single().action)
+        assertEquals(root, parsed.envelope)
+    }
+
+    @Test fun calendarUrlMetadataIsOpaqueAndDoesNotChangeEventProvenance() {
+        val base = page("""[{"ID":"fixture-event","Action":2,"Event":{"ID":"fixture-event","CalendarID":"fixture-calendar"}}]""")
+        val metadata = JsonArray(listOf(
+            obj("""{"ID":"synthetic-notice","Action":0,"FutureMetadata":{"CalendarEvents":[{"ID":"not-an-event","Action":0}]}}"""),
+            obj("""{"ID":"synthetic-notice","Action":0}"""),
+        ))
+        val root = JsonObject(base + ("CalendarURL" to metadata))
+        val parsed = ProtonChangeFeedParser.page(cursor, root)
+        assertEquals(ProtonChangeFeedParser.page(cursor, base).changes, parsed.changes)
+        assertEquals(root, parsed.envelope)
+        assertEquals(metadata, parsed.envelope["CalendarURL"])
+        assertEquals("fixture-event", parsed.changes.single().id)
+    }
+
+    @Test fun calendarUrlOnlyPagesAndNullMetadataAdvanceWithoutInventingActions() {
+        for (metadata in listOf(JsonNull, JsonArray(emptyList()), JsonArray(listOf(obj("""{"ID":"synthetic-notice","Action":0}"""))))) {
+            val root = JsonObject(page().toMutableMap().apply { put("CalendarURL", metadata) })
+            val parsed = ProtonChangeFeedParser.page(cursor, root)
+            assertEquals("cursor-after", parsed.next.value)
+            assertTrue(parsed.changes.isEmpty())
+            assertFalse(parsed.more)
+            assertFalse(parsed.requiresReconciliation)
+            assertEquals(root, parsed.envelope)
+        }
+    }
+
+    @Test fun calendarUrlMetadataMustRemainABoundedArrayOfOpaqueObjects() {
+        val invalid = listOf<JsonElement>(JsonObject(emptyMap()), JsonPrimitive("synthetic"),
+            JsonPrimitive(1), JsonPrimitive(true), JsonArray(listOf(JsonNull)),
+            JsonArray(listOf(JsonPrimitive("synthetic"))), JsonArray(listOf(JsonArray(emptyList()))))
+        invalid.forEach { metadata -> unsupported {
+            ProtonChangeFeedParser.page(cursor, JsonObject(page() + ("CalendarURL" to metadata)))
+        } }
+        val boundary = JsonArray(List(10_000) { JsonObject(emptyMap()) })
+        assertTrue(ProtonChangeFeedParser.page(cursor, JsonObject(page() + ("CalendarURL" to boundary))).changes.isEmpty())
+        unsupported { ProtonChangeFeedParser.page(cursor, JsonObject(page() +
+            ("CalendarURL" to JsonArray(boundary + JsonObject(emptyMap()))))) }
+    }
+
+    @Test fun calendarUrlMetadataCannotHideInvalidEventsOrUnknownRootCollections() {
+        val invalidEvents = listOf("{}", """[{"ID":"same","Action":0},{"ID":"same","Action":0}]""",
+            """[{"ID":"fixture-event","Action":3}]""",
+            """[{"ID":"fixture-event","Action":2}]""",
+            """[{"ID":"fixture-event","Action":2,"Event":{"ID":"other","CalendarID":"fixture-calendar"}}]""",
+            """[{"ID":"fixture-event","Action":2,"Event":{"ID":"fixture-event","CalendarID":"foreign"}}]""")
+        for (events in invalidEvents) unsupported {
+            ProtonChangeFeedParser.page(cursor, JsonObject(page().toMutableMap().apply {
+                put("CalendarURL", JsonArray(emptyList())); put("CalendarEvents", Json.parseToJsonElement(events))
+            }))
+        }
+        unsupported { ProtonChangeFeedParser.page(cursor, JsonObject(page().toMutableMap().apply {
+            put("CalendarURL", JsonArray(emptyList())); put("FutureCollection", JsonArray(emptyList()))
+        })) }
+        unsupported { ProtonChangeFeedParser.page(cursor, JsonObject(page(next = cursor.value, more = 1) +
+            ("CalendarURL" to JsonArray(emptyList())))) }
+    }
+
+    @Test fun calendarUrlMetadataSharesTheExistingWholeResponseByteLimit() {
+        val metadata = buildJsonArray { add(buildJsonObject {
+            put("Opaque", "x".repeat(CalendarCatalogParser.MAX_RESPONSE_BYTES))
+        }) }
+        unsupported { ProtonChangeFeedParser.page(cursor, JsonObject(page() + ("CalendarURL" to metadata))) }
+    }
+
     @Test fun calendarMemberNoticeIsAcceptedOnlyForItsCalendar() {
         val root = obj("""{"Code":1000,"CalendarModelEventID":"next","More":0,"Refresh":0,
             "CalendarMembers":[{"ID":"member","Action":2,

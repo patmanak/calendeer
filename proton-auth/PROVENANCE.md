@@ -994,3 +994,18 @@ request. Readback verifies renewed shared signatures, unchanged metadata, comple
 expected content and current membership. The GET/PUT concurrency limit above
 remains: no atomic remote precondition or general last-modification order is
 invented. See [personal edits](../docs/PERSONAL_UPDATE.md).
+
+## Calendar public-link feed metadata
+
+The `CalendarURL` classification in `ProtonChangeFeedParser` is based on WebClients
+commit `e4eb11459e7c8d7ac33802cbf9a4f38bf93e0f34`,
+[`packages/calendar/calendarServerEvent.ts`](https://github.com/ProtonMail/WebClients/blob/e4eb11459e7c8d7ac33802cbf9a4f38bf93e0f34/packages/calendar/calendarServerEvent.ts)
+and
+[`packages/shared/lib/interfaces/calendar/EventManager.ts`](https://github.com/ProtonMail/WebClients/blob/e4eb11459e7c8d7ac33802cbf9a4f38bf93e0f34/packages/shared/lib/interfaces/calendar/EventManager.ts).
+Those types describe public-link management notifications separately from calendar
+events and members. The bridge's original compatibility handling retains their
+bounded opaque JSON in the existing sealed envelope without interpreting actions
+or granting access. No upstream implementation is copied, no new dependency is
+introduced and no sharing-link API is invoked. Existing GPL notices are retained.
+See [the feed contract](../docs/research/CHANGE_FEED_RESET.md) for strict validation
+and qualification limits.
