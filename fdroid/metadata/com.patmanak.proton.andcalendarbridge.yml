@@ -1,4 +1,4 @@
-Disabled: Pending native and Linux qualification, reviewed source commit and signing decision
+Disabled: Pending build-server verification, native security qualification and signing decision
 AntiFeatures:
   TetheredNet:
     en-US: Synchronization requires an account on the Proton service.
@@ -16,10 +16,9 @@ Repo: https://github.com/patmanak/calendeer.git
 Builds:
   - versionName: 0.1.0-dev
     versionCode: 1
-    disable: Development baseline only; qualify Linux native and APK, source commit and signing first
-    # Deliberately unresolved until a reviewed commit contains the complete build.
-    # Replace HEAD with its immutable SHA in the qualification copy; never enable HEAD.
-    commit: HEAD
+    disable: Development baseline; qualify build server, native security/runtime and signing first
+    # Locally qualified source baseline; this is not a release or submission.
+    commit: ee6b19c1494664eae21b9f0e63ab2fed53d2bfad
     sudo:
       - apt-get update
       - apt-get install -y golang-go openjdk-21-jdk-headless python3 gcc libc6-dev

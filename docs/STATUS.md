@@ -72,9 +72,10 @@ guards pass. The 217 other Maven reviews are preserved. The selected source-buil
 artifact passes 24 synthetic crypto tests and one read-only retained-session
 catalogue test on API 35 / arm64 / 4 KiB. This does not qualify a fresh SRP login,
 other ABIs/OEMs, API 37 / 16 KiB or advisory applicability.
-The official metadata parser and source scanner run on a local qualification
+The official metadata parser, lint and source scanner pass on a local qualification
 copy; a narrowly hash-guarded settings-file scanner exception still requires
-maintainer acceptance. Build-server qualification, complete APK reproducibility,
+maintainer acceptance. Two clean Git Linux builds produce byte-identical unsigned
+APKs with revision metadata preserved. Build-server qualification, signed-release comparison,
 current native advisory applicability/fixes and the deferred signature choice remain
 separate distribution gates. See [F-Droid preparation](FDROID.md).
 

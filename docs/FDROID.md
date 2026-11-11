@@ -5,7 +5,7 @@ is disabled at application and build level, with update checks and automatic
 builds off. It describes the existing development baseline, code `1` and name
 `0.1.0-dev`; it does not create a release or a tag. The selected native source
 build and bounded application checks are qualified below. Full build-server
-validation, independent APK reproducibility, current security/runtime release
+validation, matching signed-release comparison, current security/runtime release
 gates and the signing choice remain open.
 
 ## Listing and versions
@@ -27,9 +27,10 @@ filenames aligned with Android versionCode. The draft refuses public
 either Gradle phase so the checked-in version is used. Version `0.1.0-dev` is preparation
 only. Before a release, choose its real name/code, review the resulting manifest
 and APK, and select the exact source commit containing its inputs and listing.
-Do not enable the draft's provisional `commit: HEAD`; replace it with that
-immutable reviewed commit. No stable-tag pattern or auto-update policy is
-asserted yet.
+The draft pins development source commit
+`ee6b19c1494664eae21b9f0e63ab2fed53d2bfad`; keep it disabled. A later release
+version needs its own reviewed immutable inputs. No stable-tag pattern or
+auto-update policy is asserted yet.
 
 ## Linux build candidate
 
@@ -94,12 +95,21 @@ the recipe fields and build phases.
 | Native source build | Two independent Linux compilations produce identical admitted AAR/POM bytes; per-class API, module hashes, four-ABI ELF and source/license guards pass. |
 | Host/application | Strict Windows build, lint and 1,622 host tests pass. The unsigned Linux APK also builds with strict verification after reviewing its Linux AAPT2 artifact. |
 | Device crypto | 24 synthetic crypto cases and one read-only retained-session catalogue case pass on API 35 / arm64 / 4 KiB. Fresh SRP login, other profiles and full synchronization journeys are separate. |
-| Metadata/scanner | fdroidserver 2.4.5 `readmeta` and source scanner pass on an isolated activated copy. The provisional `HEAD` build revision still blocks lint until replaced by a reviewed immutable commit. |
-| Reproducibility | Native equality is measured. The initial Windows/Linux APK comparison differs only in Git metadata because the source contexts differ; no whole-APK equality is claimed from it. |
-| Release/distribution | Build-server, independent APK/release verification and current native advisory applicability remain open. Signing is deferred; no submission or publication has occurred. |
+| Metadata/scanner | fdroidserver 2.4.5 `readmeta`, lint and source scanner pass on an isolated activated copy of the recipe pinned to the source commit. The tracked recipe stays disabled; the proposed scanner exception still needs maintainer acceptance. |
+| Reproducibility | Two independent clean Git Linux builds of the pinned source produce byte-identical unsigned APKs, with Git metadata preserved. Compilation caches and application outputs are not reused between them. |
+| Release/distribution | Build-server, matching signed-release verification and current native advisory applicability remain open. Signing is deferred; no submission or publication has occurred. |
 
 See [validation](VALIDATION.md) for the measured source-native scope. A scanner
 exception and metadata classification still need maintainer acceptance.
+
+The measured unsigned APK SHA-256 is
+`f76b66b6d00d1fc68a2e6d11c34cb2e35c9abf5e9602c89d56120dc9c8dd0a1a`
+for development source commit `ee6b19c1494664eae21b9f0e63ab2fed53d2bfad`.
+Both checkouts remain clean after the builds. The SDK/toolchain and public Maven
+downloads are reused; source paths, compilation/transform caches, outputs and
+the independently built native inputs are separate. This does not establish a
+matching published signed APK, a future release version or an F-Droid server
+build. Ensure the pinned source is available publicly before external builds.
 
 ## Signing is pending
 

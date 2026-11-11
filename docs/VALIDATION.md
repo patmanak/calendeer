@@ -20,8 +20,10 @@ zero failures or skips, plus lint, debug app/test and unsigned release builds.
 The resolved lock change substitutes only the native coordinate. The legal
 inventory preserves the 217 other Maven reviews and separately binds the 12
 native modules plus Go runtime; its checker passes with zero unresolved legal
-gates. Seventy-four tooling tests pass with one optional witness skipped; the
-archived upstream AAR's real scope inspection also passes separately.
+gates. All 74 tooling cases pass across runs: the full sandboxed run skips one
+host-restricted hardlink case, which passes separately with permitted workspace
+filesystem access. The archived upstream AAR's real scope inspection also passes
+separately.
 
 On the enrolled API 35 / arm64-v8a / 4096-byte-page phone, an existing debug
 installation is updated without uninstall/reset. All 24 synthetic native crypto
@@ -30,13 +32,24 @@ personal transitions, protected reopening and tamper rejection. One explicit
 read-only live catalogue test passes with the retained authenticated session.
 Only counts/booleans are reported. No new login or account setting is required.
 
+Two independent clean Git Linux clones of source commit
+`ee6b19c1494664eae21b9f0e63ab2fed53d2bfad` produce byte-identical unsigned APKs:
+`f76b66b6d00d1fc68a2e6d11c34cb2e35c9abf5e9602c89d56120dc9c8dd0a1a`.
+Each uses a separate source path and fresh compilation/transform caches, with
+its own previously independent native build A or B. Only public Maven downloads,
+the wrapper distribution and SDK/toolchain are reused; no application outputs
+are copied. Both Git checkouts remain clean and their revision metadata is
+preserved. JNI hashes, legal bytes and static APK alignment pass for the identical
+result. This is a local unsigned development-baseline comparison, not an
+F-Droid build-server run or a signed-release comparison.
+
 Both Windows APKs contain the exact four admitted JNI hashes and reviewed legal
 asset; the static APK/ELF alignment check passes. The checked-in development
 version produces code 1; the explicit paired test override produces code 9.
 An unpaired override is rejected by actual Gradle configuration. Earlier device,
 API 37 / 16 KiB and signed-release evidence below concerns older native cohorts;
 it does not automatically qualify this replacement. Fresh SRP login, other device
-profiles, whole-APK reproducibility and signed update continuity remain separate.
+profiles, matching signed-release comparison and update continuity remain separate.
 Exact-version OSV queries still return module/runtime/compiler matches;
 see [build security](BUILD_SECURITY.md) and [F-Droid preparation](FDROID.md).
 
