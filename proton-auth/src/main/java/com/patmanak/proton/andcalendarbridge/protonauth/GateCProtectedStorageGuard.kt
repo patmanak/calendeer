@@ -9,7 +9,7 @@ import me.proton.core.crypto.common.keystore.KeyStoreCrypto
  * Fail-closed admission for Proton Core's account, session, and derived-passphrase store.
  *
  * Proton Core's Android implementation intentionally falls back to copying plaintext when no
- * Android Keystore key can be obtained. Contako does not permit that compatibility fallback. A
+ * Android Keystore key can be obtained. Calendeer does not permit that compatibility fallback. A
  * proof returned here is therefore required before the Gate C database can be opened.
  */
 internal object GateCProtectedStorageGuard {

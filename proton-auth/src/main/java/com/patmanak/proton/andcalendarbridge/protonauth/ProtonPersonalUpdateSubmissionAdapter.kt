@@ -10,7 +10,7 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.serialization.json.*
 import me.proton.core.network.domain.ApiException
 
-/** Guarded temporal UPDATE. A fresh read and one PUT do not provide server-side compare-and-swap. */
+/** Guarded personal-v2 UPDATE. A fresh read and one PUT do not provide server-side compare-and-swap. */
 internal class ProtonPersonalUpdateSubmissionAdapter(
     private val preparations: CalendarPersonalPreparationPort,
     private val protector: EventPayloadProtector,
@@ -205,7 +205,7 @@ internal class ProtonPersonalUpdateSubmissionAdapter(
     private fun validateEvidence(record: PersonalUpdateAttemptRecord, text: String) {
         bounded(text)
         require(UniqueJsonKeys(text).validate())
-        val root = Json.parseToJsonElement(text) as? JsonObject ?: error("Invalid time evidence")
+        val root = Json.parseToJsonElement(text) as? JsonObject ?: error("Invalid personal evidence")
         require(root.keys == setOf("kind", "version", "attempt", "payload", "preparation", "complete", "body"))
         val complete = (root["complete"] as? JsonPrimitive)?.takeUnless { it.isString }?.booleanOrNull
         require(complete != null)

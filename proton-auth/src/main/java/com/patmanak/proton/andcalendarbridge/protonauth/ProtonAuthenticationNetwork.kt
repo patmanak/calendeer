@@ -155,7 +155,7 @@ private object EmptyHumanVerificationProvider : HumanVerificationProvider {
     ): HumanVerificationDetails? = null
 }
 
-/** Closed signal emitted only by Contako's fail-closed human-verification listener. */
+/** Closed signal emitted only by Calendeer's fail-closed human-verification listener. */
 internal class GateCHumanVerificationRequired : IllegalStateException()
 
 private object RejectingHumanVerificationListener : HumanVerificationListener {
