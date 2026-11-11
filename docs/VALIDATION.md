@@ -32,6 +32,19 @@ personal transitions, protected reopening and tamper rejection. One explicit
 read-only live catalogue test passes with the retained authenticated session.
 Only counts/booleans are reported. No new login or account setting is required.
 
+A separate clean debug installation with isolated application ID, UID and Android
+account type qualifies new password/SRP login on the same phone. Its production
+authentication backend, network client identity and all four admitted JNI bytes
+remain unchanged. The package was absent before installation, backup is disabled,
+and a first read-only instrumentation witness observes SIGN_IN without restoration.
+The owner then enters the test account/password through the normal Android UI;
+a second, separately invoked witness observes AUTHENTICATED and catalogue READY.
+The unchanged production route obtains SRP information, generates proofs through
+Core's GOpenPGPSrpCrypto and performs login. This is functional evidence correlated
+with that code, not a recorded wire transcript. No web cookie, session or password
+is copied. The main installation is preserved. A clean canonical-ID install,
+2FA, separate mailbox password and human verification remain outside this result.
+
 Two independent clean Git Linux clones of source commit
 `ee6b19c1494664eae21b9f0e63ab2fed53d2bfad` produce byte-identical unsigned APKs:
 `f76b66b6d00d1fc68a2e6d11c34cb2e35c9abf5e9602c89d56120dc9c8dd0a1a`.
@@ -48,7 +61,7 @@ asset; the static APK/ELF alignment check passes. The checked-in development
 version produces code 1; the explicit paired test override produces code 9.
 An unpaired override is rejected by actual Gradle configuration. Earlier device,
 API 37 / 16 KiB and signed-release evidence below concerns older native cohorts;
-it does not automatically qualify this replacement. Fresh SRP login, other device
+it does not automatically qualify this replacement. Other device
 profiles, matching signed-release comparison and update continuity remain separate.
 Exact-version OSV queries still return module/runtime/compiler matches;
 see [build security](BUILD_SECURITY.md) and [F-Droid preparation](FDROID.md).

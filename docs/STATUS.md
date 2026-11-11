@@ -70,8 +70,12 @@ bindings and Go 1.27.1. Two independent Linux compilations give identical native
 AAR/POM bytes; per-class Java API, four-ABI 16 KiB ELF, source and license/notice
 guards pass. The 217 other Maven reviews are preserved. The selected source-built
 artifact passes 24 synthetic crypto tests and one read-only retained-session
-catalogue test on API 35 / arm64 / 4 KiB. This does not qualify a fresh SRP login,
-other ABIs/OEMs, API 37 / 16 KiB or advisory applicability.
+catalogue test on API 35 / arm64 / 4 KiB. A clean isolated debug installation also
+passes new password/SRP login with the same authentication backend, client identity
+and JNI: SIGN_IN was observed before owner-entered credentials, then authenticated
+catalogue readiness was verified. The main session remains connected. This does
+not qualify a clean canonical-ID installation, all account variants, other
+ABIs/OEMs, API 37 / 16 KiB or advisory applicability.
 The official metadata parser, lint and source scanner pass on a local qualification
 copy; a narrowly hash-guarded settings-file scanner exception still requires
 maintainer acceptance. Two clean Git Linux builds produce byte-identical unsigned

@@ -7,6 +7,12 @@ runtime/signed-update qualification remain release gates. The F-Droid signature
 choice is deferred; see [distribution preparation](FDROID.md). A successful build
 alone does not make a release ready.
 
+Use the pinned Linux toolchain and a clean checkout of the exact release commit
+for the unsigned release reference. Windows builds are for development and
+diagnostics. Preserve Git revision metadata and compare matching source contexts;
+do not remove VCS information to disguise a host/revision difference. A later
+offline signing step may run separately, after the signing choice is made.
+
 ## Private signing and versioning
 
 Keep the new Calendeer key and its backup outside all project trees. Provision it
@@ -26,8 +32,8 @@ Launch the Gradle child with all private signing fields removed from its environ
 (the `sanitized_environment` function in `tools/sign_release.py` provides the exact
 field list). Keep only the public version pair, then run:
 
-```powershell
-.\gradlew.bat --no-daemon --no-configuration-cache --dependency-verification strict :app:assembleRelease
+```sh
+bash gradlew --no-daemon --no-configuration-cache --dependency-verification strict :app:assembleRelease
 ```
 
 The output is `app/build/outputs/apk/release/app-release-unsigned.apk`. Qualify that

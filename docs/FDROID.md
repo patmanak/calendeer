@@ -61,6 +61,14 @@ make a build pass. Native identity and whole-APK reproducibility are separate
 gates. Device crypto/calendar qualification must use the actual reconstructed
 Calendeer native library.
 
+The reproducibility reference for the complete unsigned APK is also Linux, from
+a clean Git checkout of the exact selected commit and the documented toolchain.
+Windows builds remain development/diagnostic artifacts, not release reference
+inputs. Retain `META-INF/version-control-info.textproto`; do not disable VCS
+metadata or remove it to make different source contexts compare equal. The two
+qualified Linux Git builds below preserve it. Any later signed-release comparison
+must use this matching Linux source baseline after the signing decision.
+
 The official source scanner flags the group-exclusive local Maven declaration
 as an unknown repository. The draft limits `scanignore` to `settings.gradle.kts`
 and checks its exact canonical LF SHA-256 during prebuild. That reviewed file
@@ -94,7 +102,7 @@ the recipe fields and build phases.
 | --- | --- |
 | Native source build | Two independent Linux compilations produce identical admitted AAR/POM bytes; per-class API, module hashes, four-ABI ELF and source/license guards pass. |
 | Host/application | Strict Windows build, lint and 1,622 host tests pass. The unsigned Linux APK also builds with strict verification after reviewing its Linux AAPT2 artifact. |
-| Device crypto | 24 synthetic crypto cases and one read-only retained-session catalogue case pass on API 35 / arm64 / 4 KiB. Fresh SRP login, other profiles and full synchronization journeys are separate. |
+| Device crypto | 24 synthetic crypto cases and retained-session catalogue pass on API 35 / arm64 / 4 KiB. A clean isolated installation also passes owner-entered password/SRP login followed by authenticated catalogue readiness, with the same backend/client/native bytes. Canonical-ID clean installation, other account/device profiles and full synchronization journeys remain separate. |
 | Metadata/scanner | fdroidserver 2.4.5 `readmeta`, lint and source scanner pass on an isolated activated copy of the recipe pinned to the source commit. The tracked recipe stays disabled; the proposed scanner exception still needs maintainer acceptance. |
 | Reproducibility | Two independent clean Git Linux builds of the pinned source produce byte-identical unsigned APKs, with Git metadata preserved. Compilation caches and application outputs are not reused between them. |
 | Release/distribution | Build-server, matching signed-release verification and current native advisory applicability remain open. Signing is deferred; no submission or publication has occurred. |
