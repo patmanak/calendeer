@@ -8,7 +8,6 @@ import android.os.Bundle
 import android.os.IBinder
 import androidx.work.WorkManager
 import com.patmanak.proton.andcalendarbridge.data.importing.*
-import java.util.UUID
 
 class CalendarSyncAdapterService : Service() {
     private val adapter by lazy { CalendarSyncAdapter(applicationContext) }
@@ -23,22 +22,11 @@ internal class CalendarSyncAdapter(context: Context) : AbstractThreadedSyncAdapt
         }
         val manual = extras.getBoolean(ContentResolver.SYNC_EXTRAS_MANUAL, false)
         if (!manual && !SystemSyncWork.automaticAllowed(account)) return
-        var id: UUID? = null
-        try {
-            val request = SystemSyncWork.request(account, manual,
-                extras.getBoolean(ContentResolver.SYNC_EXTRAS_UPLOAD, false))
-            id = request.id
-            // Independent jobs: cancelling this callback cannot cancel another callback's work.
-            WorkManager.getInstance(context).enqueue(request).result.get(10, java.util.concurrent.TimeUnit.SECONDS)
-            report(SystemSyncWork.await(context, id), syncResult)
-        } catch (_: InterruptedException) {
-            id?.let { WorkManager.getInstance(context).cancelWorkById(it) }
-            Thread.currentThread().interrupt()
-            syncResult.stats.numIoExceptions++
-        } catch (_: Exception) {
-            id?.let { WorkManager.getInstance(context).cancelWorkById(it) }
-            syncResult.stats.numIoExceptions++
-        }
+        val request = SystemSyncWork.request(account, manual,
+            extras.getBoolean(ContentResolver.SYNC_EXTRAS_UPLOAD, false))
+        report(relaySystemSync(
+            { WorkManager.getInstance(context).enqueue(request).result.get(10, java.util.concurrent.TimeUnit.SECONDS); Unit },
+            { SystemSyncWork.await(context, request.id) }), syncResult)
     }
 
     internal fun report(outcome: SystemSyncOutcome, result: SyncResult) {

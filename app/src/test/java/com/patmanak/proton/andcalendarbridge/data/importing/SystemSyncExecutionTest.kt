@@ -6,6 +6,29 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class SystemSyncExecutionTest {
+    @Test fun interruptedEnqueueDoesNotWaitAndRestoresTheInterruptFlag() {
+        try {
+            assertEquals(SystemSyncOutcome.RETRY, relaySystemSync(
+                { throw InterruptedException() }, { error("No accepted enqueue acknowledgement") }))
+            assertTrue(Thread.currentThread().isInterrupted)
+        } finally { Thread.interrupted() }
+    }
+
+    @Test fun interruptedResultWaitReturnsRetryWithoutChangingTheExecutor() {
+        var enqueued = false
+        try {
+            assertEquals(SystemSyncOutcome.RETRY, relaySystemSync(
+                { enqueued = true }, { throw InterruptedException() }))
+            assertTrue(enqueued)
+            assertTrue(Thread.currentThread().isInterrupted)
+        } finally { Thread.interrupted() }
+    }
+
+    @Test fun failedResultReadIsRetryAndSuccessfulOutcomeIsForwarded() {
+        assertEquals(SystemSyncOutcome.RETRY, relaySystemSync({}, { throw java.util.concurrent.TimeoutException() }))
+        assertEquals(SystemSyncOutcome.SUCCESS, relaySystemSync({}, { SystemSyncOutcome.SUCCESS }))
+    }
+
     @Test fun androidSuccessRequiresDrainingAllPages() = runBlocking {
         var remaining = 2
         assertEquals(SystemSyncOutcome.SUCCESS, executeSystemSync({ null }, {

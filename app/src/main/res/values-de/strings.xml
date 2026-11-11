@@ -51,4 +51,8 @@
     <string name="sync_settings_battery_explanation">Android kann die Synchronisierung verzögern, um Akku zu sparen. Sie können Calendeer von der Akkuoptimierung ausnehmen. Dies kann den Akkuverbrauch erhöhen. Fahren Sie fort, um den Android-Dialog zu prüfen, oder behalten Sie die aktuelle Einstellung bei.</string>
     <string name="sync_settings_battery_continue">Weiter</string>
     <string name="sync_settings_battery_decline">Aktuelle Einstellung beibehalten</string>
+    <string name="sync_settings_paused">Die automatische Synchronisierung ist deaktiviert. Ausgewählte Kalender warten, bis Sie auf Synchronisieren tippen oder die automatische Synchronisierung in den Android-Einstellungen wieder aktivieren.</string>
+    <string name="sync_request_accepted">Anfrage an Android gesendet.</string>
+    <string name="sync_request_account_not_ready">Das Konto ist noch nicht bereit. Prüfen Sie die Kontoanmeldung und den Kalenderzugriff und versuchen Sie es erneut.</string>
+    <string name="sync_request_unavailable">Die Synchronisierung konnte nicht angefordert werden. Versuchen Sie es erneut.</string>
 </resources>

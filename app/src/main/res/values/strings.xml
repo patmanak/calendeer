@@ -52,4 +52,8 @@
     <string name="sync_settings_battery_explanation">Android can delay synchronization to save battery. You can optionally exclude Calendeer from battery optimization. This may use more battery. Continue to review the Android dialog, or keep the current setting.</string>
     <string name="sync_settings_battery_continue">Continue</string>
     <string name="sync_settings_battery_decline">Keep current setting</string>
+    <string name="sync_settings_paused">Automatic synchronization is off. Selected calendars will wait until you tap Synchronize or turn automatic synchronization back on in Android settings.</string>
+    <string name="sync_request_accepted">Request sent to Android.</string>
+    <string name="sync_request_account_not_ready">The account is not ready yet. Check your account connection and calendar access, then try again.</string>
+    <string name="sync_request_unavailable">Unable to request synchronization. Try again.</string>
 </resources>

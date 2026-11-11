@@ -90,4 +90,25 @@ class CalendarSyncSettingsDeviceTest {
         assertNull(settings.state.value.lastSuccessMillis)
         assertFalse(settings.state.value.accountPresent)
     } }
+
+    @Test fun manualRequestReportsMissingAccountAndAcceptsAnExplicitRequestWithAutoOff() = runBlocking { fixture { settings, account, isolated ->
+        assertEquals(ManualSyncRequestResult.ACCOUNT_NOT_READY, settings.requestManual())
+        settings.bind(account)
+        ContentResolver.setSyncAutomatically(account, SystemSyncWork.AUTHORITY, false)
+        withTimeout(10_000) {
+            while (ContentResolver.getSyncAutomatically(account, SystemSyncWork.AUTHORITY)) delay(50)
+        }
+        assertEquals(ManualSyncRequestResult.REQUESTED, settings.requestManual())
+        val unavailable = object : ContextWrapper(isolated) {
+            override fun getApplicationContext(): Context = this
+            override fun getSystemService(name: String): Any? {
+                if (name == Context.ACCOUNT_SERVICE) throw SecurityException("Synthetic service failure")
+                return super.getSystemService(name)
+            }
+        }
+        assertEquals(ManualSyncRequestResult.UNAVAILABLE,
+            AndroidCalendarSyncSettings(unavailable, CoroutineScope(currentCoroutineContext())).requestManual())
+        settings.bind(null)
+        assertEquals(ManualSyncRequestResult.ACCOUNT_NOT_READY, settings.requestManual())
+    } }
 }

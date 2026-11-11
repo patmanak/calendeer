@@ -40,6 +40,9 @@ import com.patmanak.proton.andcalendarbridge.protonauth.ProtonAuthentication
 import com.patmanak.proton.andcalendarbridge.ui.locale.AndroidLanguagePreferenceStore
 import com.patmanak.proton.andcalendarbridge.ui.settings.CalendarSyncSettingsPanel
 import com.patmanak.proton.andcalendarbridge.ui.settings.CalendarSyncBatteryOffer
+import com.patmanak.proton.andcalendarbridge.ui.settings.AutomaticSyncNotice
+import com.patmanak.proton.andcalendarbridge.data.importing.ManualSyncRequestResult
+import kotlinx.coroutines.launch
 import com.patmanak.proton.andcalendarbridge.ui.theme.BridgeTheme
 import com.patmanak.proton.andcalendarbridge.ui.theme.resolveDarkTheme
 
@@ -69,6 +72,16 @@ class MainActivity : ComponentActivity() {
             val authenticationState by authentication.state.collectAsState()
             val archiveEpoch by preferences.imports.conflictArchiveEpoch.collectAsState()
             val syncSettings by preferences.calendarSyncSettings.state.collectAsState()
+            val syncFeedback = remember { androidx.compose.material3.SnackbarHostState() }
+            val feedbackScope = androidx.compose.runtime.rememberCoroutineScope()
+            val onManualSync: () -> Unit = {
+                val message = when (preferences.calendarSyncSettings.requestManual()) {
+                    ManualSyncRequestResult.REQUESTED -> R.string.sync_request_accepted
+                    ManualSyncRequestResult.ACCOUNT_NOT_READY -> R.string.sync_request_account_not_ready
+                    ManualSyncRequestResult.UNAVAILABLE -> R.string.sync_request_unavailable
+                }
+                feedbackScope.launch { syncFeedback.showSnackbar(getString(message)) }
+            }
             val accountLabelAllowed = !verification.isRequired && !authenticationState.isSubmitting &&
                 !authenticationState.isCleanupRequired && !authenticationState.isCleanupInProgress &&
                 authenticationState.destination == com.patmanak.proton.andcalendarbridge.auth.AuthenticationDestination.AUTHENTICATED
@@ -96,6 +109,7 @@ class MainActivity : ComponentActivity() {
                     mode, preferences.themePreferences::setMode, language,
                     signedIn = authenticationState.destination == com.patmanak.proton.andcalendarbridge.auth.AuthenticationDestination.AUTHENTICATED,
                     verificationRequired = verification.isRequired,
+                    snackbarContent = { androidx.compose.material3.SnackbarHost(syncFeedback) },
                     settingsEnabled = !verification.isRequired && !authenticationState.isSubmitting &&
                         !authenticationState.isCleanupRequired && authenticationState.destination in setOf(
                             com.patmanak.proton.andcalendarbridge.auth.AuthenticationDestination.SIGN_IN,
@@ -115,12 +129,13 @@ class MainActivity : ComponentActivity() {
                     },
                     synchronizationContent = {
                         if (accountLabelAllowed && syncSettings.accountPresent) {
-                            CalendarSyncSettingsPanel(preferences.calendarSyncSettings, syncSettings)
+                            CalendarSyncSettingsPanel(preferences.calendarSyncSettings, syncSettings, onManualSync)
                         }
                     },
                     calendarContent = {
+                        AutomaticSyncNotice(syncSettings)
                         CalendarDashboard(catalogState, importState, systemCreates, catalog::refresh, preferences.imports::setEnabled,
-                            preferences.calendarSyncSettings::requestManual,
+                            onManualSync,
                             onRequestPermission = { calendarPermissions.launch(arrayOf(
                                 Manifest.permission.READ_CALENDAR, Manifest.permission.WRITE_CALENDAR)) },
                             onOpenSettings = { startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,

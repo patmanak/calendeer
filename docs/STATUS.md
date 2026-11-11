@@ -33,7 +33,8 @@ qualify One UI. Signature management remains deferred by the owner.
 - Violet deer interface, eight languages, light/dark/system themes, calendar
   selection and per-operation experimental consent. Sync settings expose Android
   switches, the last successful cycle, interval and an optional one-time battery
-  offer. [Design](DESIGN.md), [permissions](PERMISSIONS.md).
+  offer. Disabled automatic sync is explained; manual requests receive visible
+  feedback. [Design](DESIGN.md), [permissions](PERMISSIONS.md).
 - Incoming data uses bounded sealed staging, offline decoding, retained keys,
   opaque cursors/change feeds and rolling coverage. Dirty unsupported events hold
   their own projection, not unrelated pages. Colors preserve supported event

@@ -51,4 +51,8 @@
     <string name="sync_settings_battery_explanation">Android può ritardare la sincronizzazione per risparmiare batteria. Puoi escludere Calendeer dall’ottimizzazione della batteria. Il consumo potrebbe aumentare. Continua per esaminare la finestra Android oppure mantieni l’impostazione attuale.</string>
     <string name="sync_settings_battery_continue">Continua</string>
     <string name="sync_settings_battery_decline">Mantieni l’impostazione attuale</string>
+    <string name="sync_settings_paused">La sincronizzazione automatica è disattivata. I calendari selezionati attendono un tocco su Sincronizza o la riattivazione nelle impostazioni Android.</string>
+    <string name="sync_request_accepted">Richiesta inviata ad Android.</string>
+    <string name="sync_request_account_not_ready">L’account non è ancora pronto. Controlla la connessione dell’account e l’accesso ai calendari, poi riprova.</string>
+    <string name="sync_request_unavailable">Impossibile richiedere la sincronizzazione. Riprova.</string>
 </resources>

@@ -42,6 +42,7 @@ fun BridgeScreen(
     settingsEnabled: Boolean = true,
     verificationRequired: Boolean = false,
     synchronizationContent: @Composable () -> Unit = {},
+    snackbarContent: @Composable () -> Unit = {},
 ) {
     var openPicker by rememberSaveable { mutableStateOf<String?>(null) }
     var settingsOpen by rememberSaveable(signedIn) { mutableStateOf(false) }
@@ -50,6 +51,7 @@ fun BridgeScreen(
     BackHandler(settingsOpen && openPicker == null && canConfigure) { settingsOpen = false }
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
+        snackbarHost = snackbarContent,
         bottomBar = {
             if (signedIn) NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
                 NavigationBarItem(selected = !settingsOpen, enabled = canConfigure,

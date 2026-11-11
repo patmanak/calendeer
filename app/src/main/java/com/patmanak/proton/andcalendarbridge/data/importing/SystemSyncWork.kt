@@ -56,8 +56,7 @@ internal object SystemSyncWork {
             }
             Thread.sleep(250)
         }
-        // Cancel only this executor; the domain journal keeps any uncertain request inspect-only.
-        manager.cancelWorkById(id)
+        // Only the Android wait expires. The independent executor must keep running.
         return SystemSyncOutcome.RETRY
     }
 

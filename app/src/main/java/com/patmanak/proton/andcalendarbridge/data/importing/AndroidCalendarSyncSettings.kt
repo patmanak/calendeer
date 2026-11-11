@@ -13,6 +13,8 @@ import com.patmanak.proton.andcalendarbridge.protonauth.ProtonAuthentication
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 
+enum class ManualSyncRequestResult { REQUESTED, ACCOUNT_NOT_READY, UNAVAILABLE }
+
 data class CalendarSyncSettingsState(
     val accountPresent: Boolean = false,
     val automatic: Boolean = false,
@@ -108,12 +110,16 @@ class AndroidCalendarSyncSettings(context: Context, private val scope: Coroutine
         bind(bound)
     }
 
-    fun requestManual() {
-        val account = bound ?: return
-        if (SystemSyncWork.installed(context, account)) ContentResolver.requestSync(account, SystemSyncWork.AUTHORITY,
-            Bundle().apply { putBoolean(ContentResolver.SYNC_EXTRAS_MANUAL, true)
-                putBoolean(ContentResolver.SYNC_EXTRAS_EXPEDITED, true) })
-    }
+    fun requestManual(): ManualSyncRequestResult = try {
+        val account = bound
+        if (account == null || !SystemSyncWork.installed(context, account)) ManualSyncRequestResult.ACCOUNT_NOT_READY
+        else {
+            ContentResolver.requestSync(account, SystemSyncWork.AUTHORITY,
+                Bundle().apply { putBoolean(ContentResolver.SYNC_EXTRAS_MANUAL, true)
+                    putBoolean(ContentResolver.SYNC_EXTRAS_EXPEDITED, true) })
+            ManualSyncRequestResult.REQUESTED
+        }
+    } catch (_: Exception) { ManualSyncRequestResult.UNAVAILABLE }
 
     fun markBatteryOfferSeen(): Boolean {
         if (prefs.getBoolean("battery_offer_seen", false)) return false

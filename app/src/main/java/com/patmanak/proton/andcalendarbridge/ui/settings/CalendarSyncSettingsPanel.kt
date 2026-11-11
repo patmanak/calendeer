@@ -31,7 +31,7 @@ import com.patmanak.proton.andcalendarbridge.data.importing.CalendarSyncSettings
 import java.util.Date
 
 @Composable
-fun CalendarSyncSettingsPanel(settings: AndroidCalendarSyncSettings, state: CalendarSyncSettingsState) {
+fun CalendarSyncSettingsPanel(settings: AndroidCalendarSyncSettings, state: CalendarSyncSettingsState, onSync: () -> Unit) {
     val context = LocalContext.current
     var intervalOpen by rememberSaveable { mutableStateOf(false) }
     Text(stringResource(R.string.sync_settings_title), style = MaterialTheme.typography.titleSmall,
@@ -48,6 +48,7 @@ fun CalendarSyncSettingsPanel(settings: AndroidCalendarSyncSettings, state: Cale
             SyncValue(stringResource(R.string.sync_settings_master_auto), enabledLabel(state.masterAutomatic))
             Text(stringResource(R.string.sync_settings_schedule_note), style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
+            AutomaticSyncNotice(state)
             OutlinedButton(onClick = { intervalOpen = true }, modifier = Modifier.fillMaxWidth()
                 .testTag("sync_interval")) {
                 Text(stringResource(R.string.sync_settings_interval_value, intervalLabel(state.intervalMinutes)))
@@ -56,7 +57,7 @@ fun CalendarSyncSettingsPanel(settings: AndroidCalendarSyncSettings, state: Cale
                 modifier = Modifier.fillMaxWidth().testTag("sync_android_settings")) {
                 Text(stringResource(R.string.sync_settings_android))
             }
-            Button(onClick = settings::requestManual, modifier = Modifier.fillMaxWidth().testTag("sync_now")) {
+            Button(onClick = onSync, modifier = Modifier.fillMaxWidth().testTag("sync_now")) {
                 Text(stringResource(R.string.sync_settings_now))
             }
         }
@@ -81,6 +82,16 @@ fun CalendarSyncSettingsPanel(settings: AndroidCalendarSyncSettings, state: Cale
         },
         confirmButton = { TextButton(onClick = { intervalOpen = false }) { Text(stringResource(R.string.close)) } },
     )
+}
+
+@Composable
+fun AutomaticSyncNotice(state: CalendarSyncSettingsState) {
+    if (state.accountPresent && (!state.automatic || !state.masterAutomatic)) {
+        Surface(color = MaterialTheme.colorScheme.secondaryContainer, shape = RoundedCornerShape(16.dp)) {
+            Text(stringResource(R.string.sync_settings_paused), modifier = Modifier.padding(16.dp),
+                style = MaterialTheme.typography.bodyMedium)
+        }
+    }
 }
 
 @Composable

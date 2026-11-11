@@ -11,8 +11,9 @@ calendar permission, write consent or authority to resend an uncertain request.
 The adapter enqueues an independent `CalendarImportWorker` request and waits up to
 two minutes. It waits for actual completion, not just enqueue acknowledgement.
 Callbacks have distinct IDs and no WorkManager dependency chain; cancelling one
-cannot cancel another callback. Interruption or timeout cancels only that executor,
-retaining domain intents and uncertain results for safe later inspection. Auth,
+cannot cancel another callback. Interruption or timeout ends only the adapter's
+wait and reports RETRY; the independent executor continues. It is not cancelled
+because Android stopped waiting, including an interrupted enqueue acknowledgement. Auth,
 permission, stale-account and transient failures are reported to Android. A retry,
 missing result or exhausted wait is never reported as success.
 
@@ -47,7 +48,10 @@ automatic switches are OFF. Authentication, account, permissions and operation
 consent are still required.
 
 Settings show the per-account and global Android states, configured interval and
-last successful system cycle, scoped to the connected account. Android can delay
+last successful system cycle, scoped to the connected account. When automatic sync
+is OFF, the calendar and settings screens explain that selected calendars wait for
+a manual sync or reactivation. The manual action confirms a request to Android or
+shows a visible account-not-ready/request-unavailable message. Android can delay
 jobs and periodic sync in Doze, standby or under quotas. An interval is not a
 maximum delivery delay. A calendar client's refresh button must actually request
 Android synchronization; merely reloading its own view cannot trigger the adapter.
