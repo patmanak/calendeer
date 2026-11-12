@@ -35,8 +35,10 @@ WorkManager is the sole periodic owner: one network-constrained periodic work
 item at 15, 30, 60 (default), 120 or 360 minutes. UPDATE preserves the existing
 periodic identity and an active executor when configuration changes. Its input
 binds it to the selected native account; restoration must still validate the real
-session, permissions and account. Periodic pull runs the incoming pipeline only,
-so a disabled push trigger cannot indirectly send a pending local edit.
+session, permissions and account. Each periodic pass checks the native push
+switches: when allowed it sends retained local work before receiving; otherwise
+it only receives. This also catches missed native change hints and resumes
+inspection of uncertain work, without granting authority to resend it.
 
 All native Android periodic schedules for Calendeer are removed at startup;
 binding and native settings changes also remove schedules, including defaults
@@ -49,6 +51,9 @@ choice. The global master switch is never enabled by Calendeer.
 Opening Calendeer, changing calendar synchronization/editing options, Synchronize
 and Retry are explicit manual requests. They enqueue WorkManager work directly,
 including local/offline processing, even when Android automatic sync is OFF.
+Equivalent full manual requests use a per-account unique KEEP name; a callback
+whose proposed ID was rejected follows the retained live job. Manual requests
+always include receiving, even if an Android caller also supplied an upload hint.
 Manual local/network continuations retain their origin and cannot be lost behind
 an older automatic KEEP work item. State observers do not acquire manual authority
 merely because the app was previously opened.

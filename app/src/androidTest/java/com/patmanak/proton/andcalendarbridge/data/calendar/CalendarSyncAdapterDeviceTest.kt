@@ -63,6 +63,30 @@ class CalendarSyncAdapterDeviceTest {
         assertEquals(SystemSyncOutcome.RETRY, SystemSyncWork.await(context, UUID.randomUUID(), 20))
     }
 
+    @Test @android.annotation.SuppressLint("RestrictedApi")
+    fun manualKeepCoalescesEquivalentFullSyncAndFollowsRetainedWork() {
+        val account = Account("synthetic-keep-${UUID.randomUUID()}", AndroidCalendarProjection.ACCOUNT_TYPE)
+        val manager = WorkManager.getInstance(context)
+        fun delayed() = OneTimeWorkRequestBuilder<CalendarImportWorker>()
+            .setInitialDelay(1, TimeUnit.DAYS)
+            .setInputData(workDataOf(SystemSyncWork.ACCOUNT to account.name, SystemSyncWork.MANUAL to true)).build()
+        val first = delayed()
+        val second = delayed()
+        try {
+            SystemSyncWork.enqueue(context, account, true, first).result.get(10, TimeUnit.SECONDS)
+            SystemSyncWork.enqueue(context, account, true, second).result.get(10, TimeUnit.SECONDS)
+            val live = manager.getWorkInfosForUniqueWork(SystemSyncWork.manualName(account))
+                .get(10, TimeUnit.SECONDS).filter { !it.state.isFinished }
+            assertEquals(listOf(first.id), live.map { it.id })
+            assertNull(manager.getWorkInfoById(second.id).get(10, TimeUnit.SECONDS))
+            assertEquals(SystemSyncOutcome.RETRY, SystemSyncWork.await(context, second.id, 100,
+                SystemSyncWork.manualName(account)))
+            assertEquals(WorkInfo.State.ENQUEUED, manager.getWorkInfoById(first.id).get(10, TimeUnit.SECONDS).state)
+            assertFalse(SystemSyncWork.request(account, manual = true, upload = true).workSpec.input
+                .getBoolean(SystemSyncWork.UPLOAD, true))
+        } finally { manager.cancelUniqueWork(SystemSyncWork.manualName(account)).result.get(10, TimeUnit.SECONDS) }
+    }
+
     @Test fun waitDeadlineLeavesIndependentWorkEnqueued() {
         val manager = WorkManager.getInstance(context)
         val request = OneTimeWorkRequestBuilder<CalendarImportWorker>()

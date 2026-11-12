@@ -122,7 +122,7 @@ class AndroidCalendarSyncSettings(context: Context, private val scope: Coroutine
         val account = bound
         if (account == null || !SystemSyncWork.installed(context, account)) ManualSyncRequestResult.ACCOUNT_NOT_READY
         else {
-            WorkManager.getInstance(context).enqueue(SystemSyncWork.request(account, manual = true, upload = false))
+            SystemSyncWork.enqueue(context, account, true, SystemSyncWork.request(account, manual = true, upload = false))
                 .awaitPersisted()
             ManualSyncRequestResult.REQUESTED
         }

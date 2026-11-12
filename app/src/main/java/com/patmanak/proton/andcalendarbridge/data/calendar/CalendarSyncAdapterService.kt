@@ -8,7 +8,6 @@ import android.os.Bundle
 import android.os.IBinder
 import android.os.Build
 import android.os.SystemClock
-import androidx.work.WorkManager
 import com.patmanak.proton.andcalendarbridge.data.importing.*
 
 class CalendarSyncAdapterService : Service() {
@@ -30,9 +29,10 @@ internal class CalendarSyncAdapter(context: Context) : AbstractThreadedSyncAdapt
             val request = SystemSyncWork.request(account, manual,
                 extras.getBoolean(ContentResolver.SYNC_EXTRAS_UPLOAD, false))
             outcome = relaySystemSync(
-                { WorkManager.getInstance(context).enqueue(request).result.get(
+                { SystemSyncWork.enqueue(context, account, manual, request).result.get(
                     (deadline - SystemClock.elapsedRealtime()).coerceIn(1, 10_000), java.util.concurrent.TimeUnit.MILLISECONDS); Unit },
-                { SystemSyncWork.await(context, request.id, (deadline - SystemClock.elapsedRealtime()).coerceAtLeast(0)) })
+                { SystemSyncWork.await(context, request.id, (deadline - SystemClock.elapsedRealtime()).coerceAtLeast(0),
+                    if (manual) SystemSyncWork.manualName(account) else null) })
         } catch (_: Exception) { /* WorkManager owns retries; never cancel its independent job. */ }
         finally {
             report(outcome, syncResult)

@@ -9,8 +9,8 @@ internal fun requiresPushSettings(manual: Boolean, pull: Boolean): Boolean = !ma
 /** Periodic pull cannot send a dirty local edit when native push is disabled. */
 internal suspend fun executeCalendarPass(pullOnly: Boolean, incoming: suspend () -> ImportRunResult,
     outgoing: suspend () -> ImportRunResult): ImportRunResult {
-    val received = incoming()
     val sent = if (pullOnly) ImportRunResult.COMPLETE else outgoing()
+    val received = incoming()
     return when {
         received == ImportRunResult.RETRY || sent == ImportRunResult.RETRY -> ImportRunResult.RETRY
         received == ImportRunResult.CONTINUE || sent == ImportRunResult.CONTINUE -> ImportRunResult.CONTINUE

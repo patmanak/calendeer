@@ -19,8 +19,8 @@ retry and the app owns actual status. The Android 14+ pending latch is cleared.
 One network-constrained WorkManager periodic pull runs at 15 / 30 / 60 default /
 120 / 360 minutes; native Android periodic syncs are removed. Android automatic
 switches control push only. App actions are manual and bypass those switches;
-periodic receiving continues while push is OFF. B1 still requires periodic send
-then receive when push is allowed. The URI watcher remains temporarily;
+periodic sending precedes receiving when push is allowed; receiving continues
+alone while push is OFF. Manual requests coalesce with KEEP. The URI watcher remains temporarily;
 retire it only after Android-triggered upload is qualified in E4.
 
 Exit: working scope, one grouped physical-device/live-test-account E4 run

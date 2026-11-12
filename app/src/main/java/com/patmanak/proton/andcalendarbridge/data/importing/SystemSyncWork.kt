@@ -36,9 +36,17 @@ internal object SystemSyncWork {
     fun installed(context: Context, account: Account) = account.type == AndroidCalendarProjection.ACCOUNT_TYPE &&
         AccountManager.get(context).getAccountsByType(account.type).contains(account)
 
+    fun manualName(account: Account) = "calendar-manual-${account.name}"
+
+    fun enqueue(context: Context, account: Account, manual: Boolean, request: OneTimeWorkRequest): Operation =
+        WorkManager.getInstance(context).let { manager ->
+            if (manual) manager.enqueueUniqueWork(manualName(account), ExistingWorkPolicy.KEEP, request)
+            else manager.enqueue(request)
+        }
+
     fun request(account: Account, manual: Boolean, upload: Boolean): OneTimeWorkRequest =
         OneTimeWorkRequestBuilder<CalendarImportWorker>()
-            .setInputData(workDataOf(ACCOUNT to account.name, MANUAL to manual, UPLOAD to upload, "network" to true))
+            .setInputData(workDataOf(ACCOUNT to account.name, MANUAL to manual, UPLOAD to (upload && !manual), "network" to true))
             .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
             .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
             .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
@@ -51,12 +59,21 @@ internal object SystemSyncWork {
             .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build()).build()
     }
 
-    fun await(context: Context, id: UUID, timeoutMillis: Long = WAIT_MILLIS): SystemSyncOutcome {
+    fun await(context: Context, id: UUID, timeoutMillis: Long = WAIT_MILLIS,
+        uniqueName: String? = null): SystemSyncOutcome {
         val manager = WorkManager.getInstance(context)
         val deadline = SystemClock.elapsedRealtime() + timeoutMillis
+        var watched = id
         while (SystemClock.elapsedRealtime() < deadline) {
             val remaining = deadline - SystemClock.elapsedRealtime()
-            val info = manager.getWorkInfoById(id).get(remaining.coerceAtLeast(1), TimeUnit.MILLISECONDS)
+            var info = manager.getWorkInfoById(watched).get(remaining.coerceAtLeast(1), TimeUnit.MILLISECONDS)
+            if (info == null && uniqueName != null) {
+                // KEEP may reject the proposed ID. Follow the retained live job instead.
+                info = manager.getWorkInfosForUniqueWork(uniqueName)
+                    .get((deadline - SystemClock.elapsedRealtime()).coerceAtLeast(1), TimeUnit.MILLISECONDS)
+                    .firstOrNull { !it.state.isFinished } ?: return SystemSyncOutcome.RETRY
+                watched = info.id
+            }
             if (info != null) {
                 if (info.state.isFinished) return if (info.state == WorkInfo.State.SUCCEEDED)
                     info.outputData.getString(OUTCOME)?.let { value ->

@@ -6,6 +6,12 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class SystemSyncExecutionTest {
+    @Test fun periodicWithPushEnabledSendsBeforeReceiving() = runBlocking {
+        val order = mutableListOf<String>()
+        executeCalendarPass(false, { order += "receive"; ImportRunResult.COMPLETE },
+            { order += "send"; ImportRunResult.COMPLETE })
+        assertEquals(listOf("send", "receive"), order)
+    }
     @Test fun periodicPullDoesNotRunTheOutgoingPipeline() = runBlocking {
         var sent = false
         assertEquals(ImportRunResult.COMPLETE, executeCalendarPass(true,

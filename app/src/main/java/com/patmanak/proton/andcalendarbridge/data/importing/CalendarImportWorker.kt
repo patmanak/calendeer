@@ -73,7 +73,7 @@ class CalendarImportWorker(context: Context, parameters: WorkerParameters) : Cor
         val outcome = try {
             executeSystemSync(::admit, { first -> runPass(app, true,
                 first && runAttemptCount == 0, false, true, inputData.getBoolean(SystemSyncWork.UPLOAD, false),
-                requireNotNull(accountId), pullOnly = pull) })
+                requireNotNull(accountId), pullOnly = pull && !SystemSyncWork.automaticAllowed(expected)) })
         } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
           catch (_: Exception) { SystemSyncOutcome.RETRY }
         if (outcome == SystemSyncOutcome.SUCCESS) SystemSyncWork.recordSuccess(app, expected)
