@@ -1,44 +1,15 @@
 package com.patmanak.proton.andcalendarbridge.data.importing
 
-import android.content.ContentValues
-import com.patmanak.proton.andcalendarbridge.data.importing.ImportStoreCapturedSql.requireCapturedAcknowledgementSource
-import com.patmanak.proton.andcalendarbridge.data.importing.ImportStoreCapturedSql.readCapturedAcknowledgement
-import com.patmanak.proton.andcalendarbridge.data.importing.ImportStoreCapturedSql.requireOrdinaryLocalCapture
-import com.patmanak.proton.andcalendarbridge.data.importing.ImportStoreCapturedSql.hasCapturedBase
-import com.patmanak.proton.andcalendarbridge.data.importing.ImportStoreCapturedSql.capturedFormatMatches
-import com.patmanak.proton.andcalendarbridge.data.importing.ImportStoreCapturedSql.readCapturedBase
-import com.patmanak.proton.andcalendarbridge.data.importing.ImportStoreCapturedSql.requireHandoffFrame
-import com.patmanak.proton.andcalendarbridge.data.importing.ImportStoreCapturedSql.readHandoffPending
-import com.patmanak.proton.andcalendarbridge.data.importing.ImportStoreCapturedSql.readHandoffProjectionReceipt
-import com.patmanak.proton.andcalendarbridge.data.importing.ImportStoreCapturedSql.readCapturedHandoff
-import com.patmanak.proton.andcalendarbridge.data.importing.ImportStoreCapturedSql.encodeHandoffProjection
-import com.patmanak.proton.andcalendarbridge.data.importing.ImportStoreCapturedSql.readProjectionReceipt
 import com.patmanak.proton.andcalendarbridge.data.importing.ImportStorePageState.requeueSupported
-import com.patmanak.proton.andcalendarbridge.data.importing.ImportStorePageState.countDeferred
-import com.patmanak.proton.andcalendarbridge.data.importing.ImportStorePageState.countPending
-import com.patmanak.proton.andcalendarbridge.data.importing.ImportStorePageState.countUnverified
-import com.patmanak.proton.andcalendarbridge.data.importing.ImportStorePageState.readReceived
-import com.patmanak.proton.andcalendarbridge.data.importing.ImportStorePageState.readCoverage
-import com.patmanak.proton.andcalendarbridge.data.importing.ImportStorePageState.writeCoverage
-import com.patmanak.proton.andcalendarbridge.data.importing.ImportStorePageState.hasReconciliation
-import com.patmanak.proton.andcalendarbridge.data.importing.ImportStorePageState.readDeltaCursor
 import com.patmanak.proton.andcalendarbridge.data.importing.ImportStorePageState.checkStagingCapacity
 import com.patmanak.proton.andcalendarbridge.data.importing.ImportStorePageState.requireKnown
-import com.patmanak.proton.andcalendarbridge.data.importing.ImportStorePageState.hasLocalMutation
-import com.patmanak.proton.andcalendarbridge.data.importing.ImportStoreLocalPreparations.sameTextPreparation
 import com.patmanak.proton.andcalendarbridge.data.importing.ImportStoreLocalPreparations.supportedLocalTextIntent
 import com.patmanak.proton.andcalendarbridge.data.importing.ImportStoreLocalPreparations.readLocalTextEditPreparation
-import com.patmanak.proton.andcalendarbridge.data.importing.ImportStoreLocalPreparations.sameTimePreparation
 import com.patmanak.proton.andcalendarbridge.data.importing.ImportStoreLocalPreparations.supportedLocalTimeIntent
 import com.patmanak.proton.andcalendarbridge.data.importing.ImportStoreLocalPreparations.readLocalTimeEditPreparation
-import com.patmanak.proton.andcalendarbridge.data.importing.ImportStoreLocalPreparations.samePersonalPreparation
 import com.patmanak.proton.andcalendarbridge.data.importing.ImportStoreLocalPreparations.supportedPersonalIntent
 import com.patmanak.proton.andcalendarbridge.data.importing.ImportStoreLocalPreparations.readPersonalEditPreparation
 import com.patmanak.proton.andcalendarbridge.data.importing.ImportStoreLocalPreparations.readLocalEditPreparation
-import com.patmanak.proton.andcalendarbridge.data.importing.ImportStoreLocalPreparations.hasForeignLocalPreparation
-import com.patmanak.proton.andcalendarbridge.data.importing.ImportStoreLocalPreparations.readPreparationOwner
-import com.patmanak.proton.andcalendarbridge.data.importing.ImportStoreLocalPreparations.hasRawEventRow
-import com.patmanak.proton.andcalendarbridge.data.importing.ImportStoreLocalPreparations.activeProjectionScope
 import com.patmanak.proton.andcalendarbridge.data.importing.ImportStoreUpdateAcknowledgements.readTextUpdateAcknowledgement
 import com.patmanak.proton.andcalendarbridge.data.importing.ImportStoreUpdateAcknowledgements.encodeTextUpdateAcknowledgement
 import com.patmanak.proton.andcalendarbridge.data.importing.ImportStoreUpdateAcknowledgements.readTimeUpdateAcknowledgement
@@ -50,10 +21,7 @@ import com.patmanak.proton.andcalendarbridge.data.importing.ImportStoreUpdateAck
 import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
-import com.patmanak.proton.andcalendarbridge.data.importing.ImportPayloadCodec.decodeChange
-import com.patmanak.proton.andcalendarbridge.data.importing.ImportPayloadCodec.decodeCheckpoint
 import com.patmanak.proton.andcalendarbridge.data.importing.ImportPayloadCodec.encodeChange
-import com.patmanak.proton.andcalendarbridge.data.importing.ImportPayloadCodec.encodeCheckpoint
 import com.patmanak.proton.andcalendarbridge.data.importing.ImportPayloadCodec.key
 import com.patmanak.proton.andcalendarbridge.data.importing.ImportPayloadCodec.requirePreparationSnapshotBudget
 import com.patmanak.proton.andcalendarbridge.sync.*
@@ -76,6 +44,10 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
     SQLiteOpenHelper(context, name, null, 23), SyncStore {
     private val lock = Mutex()
     private val localMutations = ImportStoreLocalMutationSql(::conflicts)
+    private val calendar = ImportStoreCalendarSql(localMutations)
+    private val projection = ImportStoreProjectionSql(localMutations) { target -> admitTransaction(target) }
+    private val preparation = ImportStorePreparationSql(::conflicts, ::localTextPreparationAdmission,
+        ::localTimePreparationAdmission, ::personalPreparationAdmission, ::localTitlePreparationAdmission)
     private val updates = ImportStoreUpdateSql(localMutations, ::localTextPreparationAdmission,
         ::localTimePreparationAdmission, ::personalPreparationAdmission, ::localTitlePreparationAdmission)
     /** Check the run lease both before its transaction and before durable commit. */
@@ -111,32 +83,7 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
     suspend fun remember(account: AccountId, calendars: List<CalendarSummary>) = access { db ->
         db.beginTransaction()
         try {
-            val present = calendars.map { it.id.value }.toSet()
-            db.query("calendars", arrayOf("scope", "calendar", "generation"), "account=?", arrayOf(account.value), null, null, null).use { cursor ->
-                while (cursor.moveToNext()) if (cursor.getString(1) !in present) {
-                    val scope = CalendarScope(account, CalendarId(cursor.getString(1)), cursor.getLong(2))
-                    val coverage = readCoverage(db, scope)
-                    val invalidated = coverage.copy(observed = null,
-                        active = coverage.active?.let { run -> run.copy(windows = run.windows.map { it.copy(prefixKnown = false) }) })
-                    if (invalidated != coverage) writeCoverage(db, scope, invalidated)
-                    db.update("calendars", ContentValues().apply { put("available", 0); put("status", "UNAVAILABLE") },
-                        "scope=?", arrayOf(cursor.getString(0)))
-                }
-            }
-            for (calendar in calendars) {
-                val scope = CalendarScope(account, calendar.id, 0)
-                val values = ContentValues().apply {
-                    put("scope", key(scope)); put("account", account.value); put("calendar", calendar.id.value)
-                    put("generation", scope.generation); put("title", calendar.title)
-                    if (calendar.colorRgb == null) putNull("color") else put("color", calendar.colorRgb)
-                }
-                db.insertWithOnConflict("calendars", null, values, SQLiteDatabase.CONFLICT_IGNORE)
-                db.execSQL("UPDATE calendars SET status=CASE WHEN enabled=1 THEN 'PENDING' ELSE 'PAUSED' END WHERE scope=? AND available=0", arrayOf(key(scope)))
-                db.update("calendars", ContentValues().apply {
-                    put("title", calendar.title); put("available", 1)
-                    if (calendar.colorRgb == null) putNull("color") else put("color", calendar.colorRgb)
-                }, "scope=?", arrayOf(key(scope)))
-            }
+            calendar.remember(db, account, calendars)
             checkStagingCapacity(db)
             db.setTransactionSuccessful()
         } finally { db.endTransaction() }
@@ -144,60 +91,21 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
 
     /** Local metadata only, including inactive accounts, for closing retained mirror access. */
     suspend fun calendarScopes(): List<CalendarScope> = access { db ->
-        db.query("calendars", arrayOf("account", "calendar", "generation"), null, null, null, null, null).use { cursor ->
-            buildList { while (cursor.moveToNext()) add(CalendarScope(AccountId(cursor.getString(0)),
-                CalendarId(cursor.getString(1)), cursor.getLong(2))) }
-        }
+        calendar.calendarScopes(db)
     }
 
     suspend fun selections(account: AccountId): List<Selection> = access { db ->
-        // One metadata-only statement keeps retained/conflicted counts coherent, including inactive scopes.
-        db.rawQuery("SELECT c.*, (SELECT COUNT(*) FROM local_edits l WHERE l.scope=c.scope) AS retained_local_changes, " +
-            "(SELECT COUNT(*) FROM local_edits l WHERE l.scope=c.scope AND l.state='CONFLICT') AS local_conflicts " +
-            "FROM calendars c WHERE c.account=? ORDER BY c.rowid", arrayOf(account.value)).use { cursor ->
-            buildList {
-                while (cursor.moveToNext()) {
-                    fun string(name: String) = cursor.getString(cursor.getColumnIndexOrThrow(name))
-                    fun long(name: String) = cursor.getLong(cursor.getColumnIndexOrThrow(name))
-                    val id = CalendarId(string("calendar"))
-                    val colorIndex = cursor.getColumnIndexOrThrow("color")
-                    val completedIndex = cursor.getColumnIndexOrThrow("completed_at")
-                    add(Selection(CalendarScope(account, id, long("generation")),
-                        CalendarSummary(id, string("title"), if (cursor.isNull(colorIndex)) null else cursor.getInt(colorIndex)),
-                        long("enabled") != 0L, string("status"),
-                        if (cursor.isNull(completedIndex)) null else cursor.getLong(completedIndex), long("next_attempt"),
-                        countDeferred(db, CalendarScope(account, id, long("generation"))),
-                        countUnverified(db, CalendarScope(account, id, long("generation"))), long("available") != 0L,
-                        hasReconciliation(db, CalendarScope(account, id, long("generation"))),
-                        readCoverage(db, CalendarScope(account, id, long("generation"))).active,
-                        countPending(db, CalendarScope(account, id, long("generation"))),
-                        cursor.getInt(cursor.getColumnIndexOrThrow("retained_local_changes")) -
-                            completedDeleteEvents(db, CalendarScope(account, id, long("generation"))).size,
-                        cursor.getInt(cursor.getColumnIndexOrThrow("local_conflicts"))))
-                }
-            }
-        }
+        calendar.selections(db, account)
     }
     suspend fun deferNetwork(scope: CalendarScope, milliseconds: Long) = access { db ->
-        val now = System.currentTimeMillis()
-        val delay = milliseconds.coerceAtLeast(0).coerceAtMost(Long.MAX_VALUE - now)
-        db.update("calendars", ContentValues().apply { put("next_attempt", now + delay) }, "scope=?", arrayOf(key(scope)))
+        calendar.deferNetwork(db, scope, milliseconds)
     }
 
     suspend fun setEnabled(scope: CalendarScope, enabled: Boolean) = access { db ->
-        requireKnown(db, scope)
-        db.update("calendars", ContentValues().apply {
-            put("enabled", if (enabled) 1 else 0)
-            put("status", if (!isAvailable(db, scope)) "UNAVAILABLE" else if (enabled) "PENDING" else "PAUSED")
-        }, "scope=?", arrayOf(key(scope)))
+        calendar.setEnabled(db, scope, enabled)
     }
     suspend fun status(scope: CalendarScope, status: String, completedAt: Long? = null) = access { db ->
-        require(status in setOf("PAUSED", "PENDING", "CREATE_PENDING", "RUNNING", "IMPORTED", "PARTIAL", "INCOMPLETE", "SERIES_PENDING", "HISTORY_GAP", "CAPACITY", "PERMISSION", "AUTH", "NETWORK", "UNSUPPORTED", "LOCAL_KEYS", "UNAVAILABLE", "ERROR"))
-        requireKnown(db, scope)
-        db.update("calendars", ContentValues().apply {
-            put("status", if (isAvailable(db, scope)) status else "UNAVAILABLE")
-            if (completedAt != null && isAvailable(db, scope)) put("completed_at", completedAt)
-        }, "scope=?", arrayOf(key(scope)))
+        calendar.status(db, scope, status, completedAt)
     }
 
     /** Admit local mapping semantics without discarding any received or unresolved remote evidence.
@@ -207,21 +115,7 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
         check(admitTransaction(scope)) { "Inactive import lease" }
         db.beginTransaction()
         try {
-            requireKnown(db, scope)
-            val previous = db.query("mapping_profiles", arrayOf("adapter", "version"), "scope=?",
-                arrayOf(key(scope)), null, null, null).use {
-                if (it.moveToFirst()) AdapterFormat(it.getString(0), it.getInt(1)) else null
-            }
-            if (previous != format) {
-                db.insertWithOnConflict("mapping_profiles", null, ContentValues().apply {
-                    put("scope", key(scope)); put("adapter", format.id); put("version", format.version)
-                    put("rescan_pending", 1)
-                }, SQLiteDatabase.CONFLICT_REPLACE).also { check(it != -1L) { "Could not retain mapping profile" } }
-                val coverage = readCoverage(db, scope)
-                val invalidated = coverage.copy(observed = null,
-                    active = coverage.active?.let { run -> run.copy(windows = run.windows.map { it.copy(prefixKnown = false) }) })
-                if (invalidated != coverage) writeCoverage(db, scope, invalidated)
-            }
+            calendar.ensureMappingProfile(db, scope, format)
             checkStagingCapacity(db)
             check(admitTransaction(scope)) { "Inactive import lease" }
             db.setTransactionSuccessful()
@@ -238,31 +132,7 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
         check(admitTransaction(scope)) { "Inactive import lease" }
         db.beginTransaction()
         try {
-            requireKnown(db, scope)
-            val checkpoint = db.query("calendars", arrayOf("checkpoint"), "scope=?", arrayOf(key(scope)), null, null, null).use {
-                check(it.moveToFirst()); if (it.isNull(0)) null else decodeCheckpoint(scope, it.getString(0))
-            }
-            val hasReceived = db.rawQuery("SELECT 1 FROM inbox WHERE scope=?", arrayOf(key(scope))).use { it.moveToFirst() }
-            if (planned != null) {
-                require(checkpoint != null && checkpoint.traversalComplete && !hasReceived) { "Cannot replace an unfinished traversal" }
-                require(planned.scope == scope && planned.format == checkpoint.format && planned.cursor != null &&
-                    planned.cursor?.format == planned.format && !planned.traversalComplete) { "Invalid planned checkpoint" }
-                require(expectedCoverage != null && readCoverage(db, scope) == expectedCoverage) { "Stale planned coverage" }
-                require(readDeltaCursor(db, scope) != null) { "Planned refresh requires an established change cursor" }
-            }
-            if ((checkpoint == null || checkpoint.traversalComplete) && !hasReceived) {
-                if (checkpoint != null) writeCoverage(db, scope, readCoverage(db, scope).restart(preserveObservation = planned != null))
-                db.update("calendars", ContentValues().apply {
-                    if (planned == null) putNull("checkpoint") else put("checkpoint", encodeCheckpoint(planned))
-                }, "scope=?", arrayOf(key(scope)))
-                requeueSupported(db, scope)
-                // The null checkpoint is now the durable obligation to start a complete scan.
-                // An extension or delta-only poll cannot satisfy a mapping change.
-                if (planned == null) db.update("mapping_profiles", ContentValues().apply { put("rescan_pending", 0) },
-                    "scope=?", arrayOf(key(scope)))
-                if (planned != null) check(db.update("delta_state", ContentValues().apply { put("more", 1) },
-                    "scope=?", arrayOf(key(scope))) == 1) { "Missing change state" }
-            }
+            calendar.beginRefresh(db, scope, planned, expectedCoverage)
             checkStagingCapacity(db)
             check(admitTransaction(scope)) { "Inactive import lease" }
             db.setTransactionSuccessful()
@@ -276,16 +146,7 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
         check(admitTransaction(scope)) { "Inactive import lease" }
         db.beginTransaction()
         try {
-            requireKnown(db, scope)
-            val complete = db.query("calendars", arrayOf("checkpoint"), "scope=?", arrayOf(key(scope)), null, null, null).use {
-                check(it.moveToFirst()); !it.isNull(0) && decodeCheckpoint(scope, it.getString(0)).traversalComplete
-            }
-            require(complete && readReceived(db, scope) == null) { "Cannot poll before traversal completion" }
-            require(readCoverage(db, scope) == expectedCoverage) { "Stale planned coverage" }
-            require(readDeltaCursor(db, scope) != null) { "Refresh requires an established change cursor" }
-            requeueSupported(db, scope)
-            check(db.update("delta_state", ContentValues().apply { put("more", 1) },
-                "scope=?", arrayOf(key(scope))) == 1) { "Missing change state" }
+            calendar.beginDeltaRefresh(db, scope, expectedCoverage)
             checkStagingCapacity(db)
             check(admitTransaction(scope)) { "Inactive import lease" }
             db.setTransactionSuccessful()
@@ -318,16 +179,7 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
      * Deferred/pending/deleted work cannot prove a settled Android projection. No writes occur here.
      */
     suspend fun stabilizedProjection(scope: CalendarScope, eventId: EventId): RemoteChange.Upsert? = access { db ->
-        check(admitTransaction(scope)) { "Inactive import lease" }
-        requireKnown(db, scope)
-        db.rawQuery("SELECT r.payload FROM records r WHERE r.scope=? AND r.event=? AND r.pending=0 AND NOT EXISTS " +
-            "(SELECT 1 FROM deferred_events d WHERE d.scope=r.scope AND d.event=r.event) AND NOT EXISTS " +
-            "(SELECT 1 FROM local_edits l WHERE l.scope=r.scope AND l.event=r.event)",
-            arrayOf(key(scope), eventId.value)).use { cursor ->
-            val snapshot = if (cursor.moveToFirst()) decodeChange(cursor.getString(0)) as? RemoteChange.Upsert else null
-            check(admitTransaction(scope)) { "Inactive import lease" }
-            snapshot
-        }
+        projection.stabilizedProjection(db, scope, eventId)
     }
 
     /** CAS acknowledgement: a newer pending value cannot be consumed by an old provider write. */
@@ -344,19 +196,12 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
 
     /** Last successful projection acknowledgement, independent of newer imported remote evidence. */
     suspend fun projectedBaseline(scope: CalendarScope, eventId: EventId): RemoteChange.Upsert? = access { db ->
-        check(admitTransaction(scope)) { "Inactive import lease" }; requireKnown(db, scope)
-        val baseline = readBaseline(db, scope, eventId)
-        check(admitTransaction(scope)) { "Inactive import lease" }
-        baseline
+        projection.projectedBaseline(db, scope, eventId)
     }
 
     /** Saved applied reference, retained after receipt removal; never recalculates finite dates. */
     suspend fun projectedReference(scope: CalendarScope, eventId: EventId): ProjectedEventReference? = access { db ->
-        check(admitTransaction(scope)) { "Inactive import lease" }; requireKnown(db, scope)
-        val base = readProjectionBase(db, scope, eventId)
-        val reference = base?.let { it.representation ?: ProjectedEventReference.direct(it.change) }
-        check(admitTransaction(scope)) { "Inactive import lease" }
-        reference
+        projection.projectedReference(db, scope, eventId)
     }
 
     /** Admission observation only, never a lease across SQL and Provider transactions.
@@ -365,19 +210,7 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
      * metadata remains untouched. Legacy NULL and explicit direct are both known.
      */
     suspend fun requireDirectProjection(scope: CalendarScope, eventId: EventId): Unit = access { db ->
-        check(admitTransaction(scope)) { "Inactive import lease" }
-        db.beginTransactionNonExclusive()
-        try {
-            requireKnown(db, scope)
-            check(activeProjectionScope(db, scope)) { "Inactive projection scope" }
-            val base = readProjectionBase(db, scope, eventId)
-            val receipt = readProjectionReceipt(db, scope, eventId)
-            check(listOf(base?.representation, receipt?.representation, receipt?.previousRepresentation).all {
-                it == null || it.representation == ProjectionRepresentation.DIRECT_V1
-            }) { "Represented projection requires dedicated admission" }
-            check(admitTransaction(scope)) { "Inactive import lease" }
-            db.setTransactionSuccessful()
-        } finally { db.endTransaction() }
+        projection.requireDirectProjection(db, scope, eventId)
     }
 
     /** Seed the first sent reference behind exact original-row metadata proof, never a Provider ACK.
@@ -388,46 +221,7 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
         witness: AppliedCapturedCreateAttachment): Boolean {
         if (witness.receipt != baseline.receipt) return false
         return stagingMutation(baseline.scope) { db ->
-            val event = baseline.change.eventId
-            if (hasRawEventRow(db, "captured_create_handoffs", baseline.scope, event)) return@stagingMutation false
-            if (!activeProjectionScope(db, baseline.scope) ||
-                !capturedFormatMatches(db, baseline.scope, baseline.format)) return@stagingMutation false
-            if (hasCapturedBase(db, baseline.scope, event)) {
-                if (readCapturedBase(db, baseline.scope, event) != baseline) return@stagingMutation false
-            } else {
-                if (hasRawEventRow(db, "projection_bases", baseline.scope, event) ||
-                    hasLocalMutation(db, baseline.scope, event) ||
-                    hasRawEventRow(db, "projection_receipts", baseline.scope, event)) return@stagingMutation false
-                val receipt = baseline.receipt
-                val link = receipt.binding.identity
-                if (db.rawQuery("SELECT 1 FROM captured_create_bases WHERE " +
-                    "(scope=? AND (attempt=? OR local_id=? OR capture_id=?)) OR nonce=? LIMIT 1",
-                    arrayOf(key(baseline.scope), link.attempt.id.value, link.localId.value, link.captureId.value,
-                        receipt.nonce)).use { it.moveToFirst() }) return@stagingMutation false
-                db.insertOrThrow("captured_create_bases", null, ContentValues().apply {
-                    put("scope", key(baseline.scope)); put("event", event.value)
-                    put("account", baseline.scope.account.value); put("calendar", baseline.scope.calendar.value)
-                    put("generation", baseline.scope.generation); put("attempt", link.attempt.id.value)
-                    put("adapter", link.attempt.format.id); put("version", link.attempt.format.version)
-                    put("payload_fingerprint", link.attempt.payloadFingerprint); put("local_id", link.localId.value)
-                    put("capture_id", link.captureId.value); put("capture_adapter", link.captureFormat.id)
-                    put("capture_version", link.captureFormat.version); put("timestamp", link.timestamp.epochSecond)
-                    put("content_fingerprint", link.contentFingerprint); put("fingerprint_version", link.fingerprintVersion)
-                    put("verified_revision", receipt.binding.verifiedRevision.value); put("nonce", receipt.nonce)
-                    put("protocol", receipt.protocol); put("payload", encodeChange(baseline.change))
-                })
-                db.insertOrThrow("projection_bases", null, ContentValues().apply {
-                    put("scope", key(baseline.scope)); put("event", event.value); put("payload", encodeChange(baseline.change))
-                })
-            }
-            // Full serialized content is compared; an opaque revision alone cannot consume work.
-            db.update("records", ContentValues().apply { put("pending", 0) },
-                "scope=? AND event=? AND payload=? AND pending=1 AND NOT EXISTS " +
-                    "(SELECT 1 FROM local_edits l WHERE l.scope=records.scope AND l.event=records.event) AND NOT EXISTS " +
-                    "(SELECT 1 FROM deferred_events d WHERE d.scope=records.scope AND d.event=records.event) AND NOT EXISTS " +
-                    "(SELECT 1 FROM projection_receipts p WHERE p.scope=records.scope AND p.event=records.event)",
-                arrayOf(key(baseline.scope), event.value, encodeChange(baseline.change)))
-            true
+            projection.retainCapturedBaseline(db, baseline)
         }
     }
 
@@ -436,10 +230,7 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
      * structurally valid storage is not authentication. An advanced base is never rewound here.
      */
     suspend fun capturedBaseline(scope: CalendarScope, event: EventId): CapturedCreateBaseline? = access { db ->
-        check(admitTransaction(scope)) { "Inactive import lease" }; requireKnown(db, scope)
-        val baseline = readCapturedBase(db, scope, event)
-        check(admitTransaction(scope)) { "Inactive import lease" }
-        baseline
+        projection.capturedBaseline(db, scope, event)
     }
 
     /** Reserve the only volatile admission for a conditional original-row acknowledgement.
@@ -448,29 +239,14 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
      */
     suspend fun reserveCapturedAcknowledgement(proposed: CapturedCreateAcknowledgementReceipt):
         CapturedCreateAcknowledgementReservation = stagingMutation(proposed.baseline.scope) { db ->
-            requireCapturedAcknowledgementSource(db, proposed.baseline)
-            val existing = readCapturedAcknowledgement(db, proposed.baseline.scope, proposed.baseline.change.eventId)
-            if (existing != null) {
-                check(existing.receipt.baseline == proposed.baseline) { "Captured acknowledgement source is immutable" }
-                return@stagingMutation CapturedCreateAcknowledgementReservation(existing, fresh = false)
-            }
-            db.insertOrThrow("captured_create_acknowledgements", null, ContentValues().apply {
-                put("scope", key(proposed.baseline.scope)); put("event", proposed.baseline.change.eventId.value)
-                put("nonce", proposed.nonce); put("protocol", proposed.protocol)
-                put("fingerprint", proposed.fingerprint()); put("state", CapturedCreateAcknowledgementState.UNKNOWN.name)
-            })
-            CapturedCreateAcknowledgementReservation(CapturedCreateAcknowledgementRecord(proposed,
-                CapturedCreateAcknowledgementState.UNKNOWN), fresh = true)
-        }
+        projection.reserveCapturedAcknowledgement(db, proposed)
+    }
 
     /** Historical proof under the current exact source, never a clean-row or write permission.
      * Raw malformed/orphaned reservations must throw: they cannot reopen an admission as absence.
      */
     suspend fun capturedAcknowledgement(scope: CalendarScope, event: EventId): CapturedCreateAcknowledgementRecord? = access { db ->
-        check(admitTransaction(scope)) { "Inactive import lease" }; requireKnown(db, scope)
-        val record = readCapturedAcknowledgement(db, scope, event)
-        check(admitTransaction(scope)) { "Inactive import lease" }
-        record
+        projection.capturedAcknowledgement(db, scope, event)
     }
 
     /** Point-in-time SQL source qualification only; never current Provider cleanliness or hold release.
@@ -478,31 +254,14 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
      */
     suspend fun capturedCleanSource(receipt: CapturedCreateAcknowledgementReceipt): Boolean =
         stagingMutation(receipt.baseline.scope) { db ->
-            requireCapturedAcknowledgementSource(db, receipt.baseline)
-            val record = readCapturedAcknowledgement(db, receipt.baseline.scope, receipt.baseline.change.eventId)
-            record != null && record.receipt == receipt && record.state == CapturedCreateAcknowledgementState.PROVEN
-        }
+        projection.capturedCleanSource(db, receipt)
+    }
 
     /** Retain the exact historical Provider batch proof without consuming any import or local work. */
     suspend fun retainCapturedAcknowledgement(witness: AppliedCapturedCreateAcknowledgement): CapturedCreateAcknowledgementRecord =
         stagingMutation(witness.receipt.baseline.scope) { db ->
-            val receipt = witness.receipt
-            requireCapturedAcknowledgementSource(db, receipt.baseline)
-            val existing = checkNotNull(readCapturedAcknowledgement(db, receipt.baseline.scope, receipt.baseline.change.eventId)) {
-                "Captured acknowledgement requires its durable reservation"
-            }
-            check(existing.receipt == receipt) { "Captured acknowledgement proof is immutable" }
-            if (existing.state == CapturedCreateAcknowledgementState.UNKNOWN) {
-                check(db.update("captured_create_acknowledgements", ContentValues().apply {
-                    put("state", CapturedCreateAcknowledgementState.PROVEN.name)
-                }, "scope=? AND event=? AND nonce=? AND protocol=? AND fingerprint=? AND state=?",
-                    arrayOf(key(receipt.baseline.scope), receipt.baseline.change.eventId.value, receipt.nonce,
-                        receipt.protocol.toString(), receipt.fingerprint(), CapturedCreateAcknowledgementState.UNKNOWN.name)) == 1) {
-                    "Captured acknowledgement proof was not retained"
-                }
-            }
-            existing.copy(state = CapturedCreateAcknowledgementState.PROVEN)
-        }
+        projection.retainCapturedAcknowledgement(db, witness)
+    }
 
     /** Generic snapshots carry no captured provenance and cannot adopt captured work, even on replay.
      * Raw presence fences malformed/orphaned rows and historical PROVEN acknowledgements alike.
@@ -518,19 +277,11 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
 
     /** Raw provenance is a fence even if a journal row is orphaned or unreadable. */
     suspend fun capturedProvenanceEvents(scope: CalendarScope): Set<EventId> = access { db ->
-        check(admitTransaction(scope)) { "Inactive import lease" }; requireKnown(db, scope)
-        val events = db.rawQuery("SELECT event FROM captured_create_bases WHERE scope=? UNION " +
-            "SELECT event FROM captured_create_acknowledgements WHERE scope=? UNION " +
-            "SELECT event FROM captured_create_handoffs WHERE scope=?", arrayOf(key(scope), key(scope), key(scope))).use {
-            buildSet { while (it.moveToNext()) add(EventId(it.getString(0))) }
-        }
-        check(admitTransaction(scope)) { "Inactive import lease" }; events
+        projection.capturedProvenanceEvents(db, scope)
     }
 
     suspend fun capturedHandoff(scope: CalendarScope, event: EventId): CapturedCreateHandoffRecord? = access { db ->
-        check(admitTransaction(scope)) { "Inactive import lease" }; requireKnown(db, scope)
-        val record = readCapturedHandoff(db, scope, event)
-        check(admitTransaction(scope)) { "Inactive import lease" }; record
+        projection.capturedHandoff(db, scope, event)
     }
 
     /** Reservation transfers no data and grants no future permission to overwrite Android. */
@@ -546,10 +297,7 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
 
     /** Current pending content is read afresh after receipt recovery; stale intents cannot prepare. */
     suspend fun capturedHandoffPending(frame: CapturedCreateHandoffFrame): ProjectionIntent? = access { db ->
-        check(admitTransaction(frame.scope)) { "Inactive import lease" }; requireKnown(db, frame.scope)
-        requireHandoffFrame(db, frame)
-        val pending = readHandoffPending(db, frame.scope, frame.eventId)
-        check(admitTransaction(frame.scope)) { "Inactive import lease" }; pending
+        projection.capturedHandoffPending(db, frame)
     }
 
     suspend fun capturedHandoffCanProject(frame: CapturedCreateHandoffFrame): Boolean = stagingMutation(frame.scope) { db ->
@@ -558,11 +306,7 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
 
     /** Historical prepared proof is recoverable even when the newest pending value differs. */
     suspend fun capturedHandoffProjection(frame: CapturedCreateHandoffFrame): CapturedHandoffProjection? = access { db ->
-        check(admitTransaction(frame.scope)) { "Inactive import lease" }; requireKnown(db, frame.scope)
-        check(requireHandoffFrame(db, frame).state == CapturedCreateHandoffState.RELEASED) { "Handoff is pending" }
-        val receipt = readHandoffProjectionReceipt(db, frame.scope, frame.eventId)
-        val plan = receipt?.let { CapturedHandoffProjection(frame, it) }
-        check(admitTransaction(frame.scope)) { "Inactive import lease" }; plan
+        projection.capturedHandoffProjection(db, frame)
     }
 
     suspend fun prepareCapturedHandoffProjection(frame: CapturedCreateHandoffFrame,
@@ -573,26 +317,8 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
     /** Restore only the exact historical write. A committed replay never consumes requeued work. */
     suspend fun restoreCapturedHandoffProjection(witness: AppliedCapturedHandoffProjection): Boolean =
         stagingMutation(witness.plan.frame.scope) { db ->
-            val plan = witness.plan; val frame = plan.frame; val receipt = plan.receipt
-            val record = readCapturedHandoff(db, frame.scope, frame.eventId) ?: return@stagingMutation false
-            if (record.state != CapturedCreateHandoffState.RELEASED || record.frame.receipt != frame.receipt ||
-                hasLocalMutation(db, frame.scope, frame.eventId)) return@stagingMutation false
-            val outstanding = readHandoffProjectionReceipt(db, frame.scope, frame.eventId)
-            if (record.frame == CapturedCreateHandoffFrame(frame.receipt, receipt.change, receipt)) {
-                return@stagingMutation outstanding == null
-            }
-            if (record.frame != frame || outstanding != receipt) return@stagingMutation false
-            check(db.update("projection_bases", ContentValues().apply { put("payload", encodeChange(receipt.change)); putNull("representation") },
-                "scope=? AND event=? AND payload=? AND representation IS NULL", arrayOf(key(frame.scope), frame.eventId.value, encodeChange(frame.base))) == 1)
-            check(db.update("captured_create_handoffs", ContentValues().apply { put("last_projection", encodeHandoffProjection(receipt)) },
-                "scope=? AND event=? AND nonce=?", arrayOf(key(frame.scope), frame.eventId.value, frame.receipt.nonce)) == 1)
-            db.update("records", ContentValues().apply { put("pending", 0) }, "scope=? AND event=? AND payload=? AND pending=1",
-                arrayOf(key(frame.scope), frame.eventId.value, encodeChange(receipt.change)))
-            check(db.delete("projection_receipts", "scope=? AND event=? AND nonce=? AND payload=? AND adapter=? AND version=? AND previous_base IS ? AND protocol=? AND representation IS NULL AND previous_representation IS NULL",
-                arrayOf(key(frame.scope), frame.eventId.value, receipt.nonce, encodeChange(receipt.change), receipt.format.id,
-                    receipt.format.version.toString(), encodeChange(frame.base), receipt.protocol.toString())) == 1)
-            true
-        }
+        projection.restoreCapturedHandoffProjection(db, witness)
+    }
 
     suspend fun waitCapturedHandoff(frame: CapturedCreateHandoffFrame): Boolean = stagingMutation(frame.scope) { db ->
         ImportStoreCapturedSql.waitCapturedHandoff(db, frame)
@@ -616,39 +342,12 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
         val candidate = ProjectionReceipt(intent.scope, format, intent.change as RemoteChange.Upsert,
             UUID.randomUUID().toString(), null, representation = representation).snapshot()
         return stagingMutation(candidate.scope) { db ->
-            requireOrdinaryLocalCapture(db, candidate.scope, candidate.change.eventId)
-            check(activeProjectionScope(db, candidate.scope)) { "Inactive projection scope" }
-            require(projectionFormatMatches(db, candidate.scope, candidate.format)) { "Incompatible projection format" }
-            val change = candidate.change
-            val pending = db.rawQuery("SELECT 1 FROM records r WHERE r.scope=? AND r.event=? AND r.payload=? AND r.pending=1 " +
-                "AND NOT EXISTS (SELECT 1 FROM local_edits l WHERE l.scope=r.scope AND l.event=r.event) " +
-                "AND NOT EXISTS (SELECT 1 FROM deferred_events d WHERE d.scope=r.scope AND d.event=r.event)",
-                arrayOf(key(candidate.scope), change.eventId.value, encodeChange(change))).use { it.moveToFirst() }
-            require(pending) { "Stale or blocked projection intent" }
-            val existing = readProjectionReceipt(db, candidate.scope, change.eventId)
-            if (existing != null) {
-                require(existing.change == change && existing.format == candidate.format && existing.representation == candidate.representation) { "Unresolved projection receipt" }
-                return@stagingMutation existing
-            }
-            val previous = readProjectionBase(db, candidate.scope, change.eventId)
-            val receipt = candidate.copy(previousBase = previous?.change, previousRepresentation = previous?.representation).snapshot()
-            db.insertOrThrow("projection_receipts", null, ContentValues().apply {
-                put("scope", key(receipt.scope)); put("event", receipt.change.eventId.value); put("nonce", receipt.nonce)
-                put("payload", encodeChange(receipt.change)); put("adapter", receipt.format.id); put("version", receipt.format.version)
-                receipt.previousBase?.let { put("previous_base", encodeChange(it)) } ?: putNull("previous_base")
-                put("protocol", receipt.protocol)
-                put("representation", ProjectionRepresentationCodec.encode(receipt.representation))
-                put("previous_representation", ProjectionRepresentationCodec.encode(receipt.previousRepresentation))
-            })
-            receipt
+            projection.prepareProjection(db, candidate)
         }
     }
 
     suspend fun projectionReceipt(scope: CalendarScope, eventId: EventId): ProjectionReceipt? = access { db ->
-        check(admitTransaction(scope)) { "Inactive import lease" }; requireKnown(db, scope)
-        val receipt = readProjectionReceipt(db, scope, eventId)
-        check(admitTransaction(scope)) { "Inactive import lease" }
-        receipt
+        projection.projectionReceipt(db, scope, eventId)
     }
 
     /** A qualified atomic Provider write can restore its baseline after a lost local acknowledgement.
@@ -657,36 +356,11 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
     suspend fun restoreProjection(witness: AppliedProjectionWitness): Boolean {
         val receipt = witness.receipt.snapshot()
         return stagingMutation(receipt.scope) { db ->
-            requireOrdinaryLocalCapture(db, receipt.scope, receipt.change.eventId)
-            if (readProjectionReceipt(db, receipt.scope, receipt.change.eventId) != receipt) return@stagingMutation false
-            if (!activeProjectionScope(db, receipt.scope) || !projectionFormatMatches(db, receipt.scope, receipt.format) ||
-                hasLocalMutation(db, receipt.scope, receipt.change.eventId)) return@stagingMutation false
-            val baseline = readProjectionBase(db, receipt.scope, receipt.change.eventId)
-            val previousMatches = baseline?.change == receipt.previousBase && baseline?.representation == receipt.previousRepresentation
-            val appliedMatches = baseline?.change == receipt.change && baseline?.representation == receipt.representation
-            if (!previousMatches && !appliedMatches) return@stagingMutation false
-            db.insertWithOnConflict("projection_bases", null, ContentValues().apply {
-                put("scope", key(receipt.scope)); put("event", receipt.change.eventId.value); put("payload", encodeChange(receipt.change))
-                put("representation", ProjectionRepresentationCodec.encode(receipt.representation))
-            }, SQLiteDatabase.CONFLICT_REPLACE).also { check(it != -1L) }
-            db.update("records", ContentValues().apply { put("pending", 0) },
-                "scope=? AND event=? AND payload=? AND pending IN (1,2)",
-                arrayOf(key(receipt.scope), receipt.change.eventId.value, encodeChange(receipt.change)))
-            check(db.delete("projection_receipts", "scope=? AND event=? AND nonce=? AND payload=? AND adapter=? AND version=? AND previous_base IS ? AND protocol=? AND representation IS ? AND previous_representation IS ?",
-                arrayOf(key(receipt.scope), receipt.change.eventId.value, receipt.nonce, encodeChange(receipt.change),
-                    receipt.format.id, receipt.format.version.toString(), receipt.previousBase?.let(::encodeChange), receipt.protocol.toString(),
-                    ProjectionRepresentationCodec.encode(receipt.representation), ProjectionRepresentationCodec.encode(receipt.previousRepresentation))) == 1)
-            true
+        projection.restoreProjection(db, receipt)
         }
     }
-    private fun projectionFormatMatches(db: SQLiteDatabase, scope: CalendarScope, format: AdapterFormat): Boolean = db.rawQuery(
-        "SELECT checkpoint FROM calendars WHERE scope=?", arrayOf(key(scope)),
-    ).use { it.moveToFirst() && (it.isNull(0) || decodeCheckpoint(scope, it.getString(0)).format == format) }
     suspend fun localEdit(scope: CalendarScope, eventId: EventId): LocalEditIntent? = access { db ->
-        check(admitTransaction(scope)) { "Inactive import lease" }; requireKnown(db, scope)
-        val edit = readLocalEdit(db, scope, eventId)
-        check(admitTransaction(scope)) { "Inactive import lease" }
-        edit
+        projection.localEdit(db, scope, eventId)
     }
     /** Bounded metadata index only. No captured contents, preparation payloads or write authority. */
     suspend fun retainedLocalChanges(query: RetainedLocalChangeQuery): RetainedLocalChangePage =
@@ -720,15 +394,7 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
         val base = encodeChange(frozen.intent.base).also(::requirePreparationSnapshotBudget)
         val local = encodeChange(frozen.intent.base.copy(content = frozen.intent.content)).also(::requirePreparationSnapshotBudget)
         return guardedEditMutation(frozen.intent.scope) { db ->
-            val admission = localTextPreparationAdmission(db, frozen.intent)
-            if (admission == LocalTextPreparationAdmission.HISTORICAL) {
-                val retained = readLocalTextEditPreparation(db, frozen.intent.scope, frozen.intent.base.eventId)
-                return@guardedEditMutation if (retained != null && sameTextPreparation(retained, frozen)) admission
-                    else LocalTextPreparationAdmission.UNQUALIFIED
-            }
-            if (admission != LocalTextPreparationAdmission.ELIGIBLE) return@guardedEditMutation admission
-            insertLocalTextPreparation(db, frozen, base, local)
-            LocalTextPreparationAdmission.STORED
+        preparation.retainCurrentLocalTextPreparation(db, frozen, base, local)
         }
     }
     /** Monotone exact-owner transition after a remote conflict; original snapshots/evidence stay intact. */
@@ -736,22 +402,11 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
         currentCoroutineContext().ensureActive()
         val frozen = supportedLocalTextIntent(intent) ?: return LocalTextPreparationAdmission.UNQUALIFIED
         return guardedEditMutation(frozen.scope) { db ->
-            val intent = frozen
-            val admission = localTextPreparationAdmission(db, intent)
-            if (admission !in listOf(LocalTextPreparationAdmission.ELIGIBLE, LocalTextPreparationAdmission.HISTORICAL))
-                return@guardedEditMutation admission
-            check(db.update("local_edits", ContentValues().apply { put("state", LocalEditState.CONFLICT.name) },
-                "scope=? AND event=? AND mutation=? AND kind='UPDATE'",
-                arrayOf(key(intent.scope), intent.base.eventId.value, intent.id.value)) == 1)
-            conflicts(db).ensure(intent.scope, intent.base.eventId)
-            LocalTextPreparationAdmission.CONFLICT
+        preparation.conflictLocalTextPreparation(db, frozen)
         }
     }
     private fun localTextPreparationAdmission(db: SQLiteDatabase, intent: LocalEditIntent): LocalTextPreparationAdmission =
         ImportStoreLocalPreparations.localTextPreparationAdmission(db, intent, ::readBaseline)
-
-    private fun insertLocalTextPreparation(db: SQLiteDatabase, value: LocalTextEditPreparation, base: String, local: String) =
-        ImportStoreLocalPreparations.insertLocalTextPreparation(db, value, base, local, ::checkStagingCapacity)
 
     /** Reserve the immutable text receipt before the one fresh native text/metadata acknowledgement.
      * The coordinator owns verified-result admission; this transaction qualifies only its SQL source.
@@ -803,15 +458,7 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
         val base = encodeChange(frozen.intent.base).also(::requirePreparationSnapshotBudget)
         val local = encodeChange(frozen.intent.base.copy(content = frozen.intent.content)).also(::requirePreparationSnapshotBudget)
         return guardedEditMutation(frozen.intent.scope) { db ->
-            val admission = localTimePreparationAdmission(db, frozen.intent)
-            if (admission == LocalTimePreparationAdmission.HISTORICAL) {
-                val retained = readLocalTimeEditPreparation(db, frozen.intent.scope, frozen.intent.base.eventId)
-                return@guardedEditMutation if (retained != null && sameTimePreparation(retained, frozen)) admission
-                    else LocalTimePreparationAdmission.UNQUALIFIED
-            }
-            if (admission != LocalTimePreparationAdmission.ELIGIBLE) return@guardedEditMutation admission
-            insertLocalTimePreparation(db, frozen, base, local)
-            LocalTimePreparationAdmission.STORED
+        preparation.retainCurrentLocalTimePreparation(db, frozen, base, local)
         }
     }
     /** Monotone exact-owner transition after a remote conflict; original snapshots/evidence stay intact. */
@@ -819,22 +466,11 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
         currentCoroutineContext().ensureActive()
         val frozen = supportedLocalTimeIntent(intent) ?: return LocalTimePreparationAdmission.UNQUALIFIED
         return guardedEditMutation(frozen.scope) { db ->
-            val intent = frozen
-            val admission = localTimePreparationAdmission(db, intent)
-            if (admission !in listOf(LocalTimePreparationAdmission.ELIGIBLE, LocalTimePreparationAdmission.HISTORICAL))
-                return@guardedEditMutation admission
-            check(db.update("local_edits", ContentValues().apply { put("state", LocalEditState.CONFLICT.name) },
-                "scope=? AND event=? AND mutation=? AND kind='UPDATE'",
-                arrayOf(key(intent.scope), intent.base.eventId.value, intent.id.value)) == 1)
-            conflicts(db).ensure(intent.scope, intent.base.eventId)
-            LocalTimePreparationAdmission.CONFLICT
+        preparation.conflictLocalTimePreparation(db, frozen)
         }
     }
     private fun localTimePreparationAdmission(db: SQLiteDatabase, intent: LocalEditIntent): LocalTimePreparationAdmission =
         ImportStoreLocalPreparations.localTimePreparationAdmission(db, intent, ::readBaseline)
-
-    private fun insertLocalTimePreparation(db: SQLiteDatabase, value: LocalTimeEditPreparation, base: String, local: String) =
-        ImportStoreLocalPreparations.insertLocalTimePreparation(db, value, base, local, ::checkStagingCapacity)
 
     /** Reserve the immutable text receipt before the one fresh native time/metadata acknowledgement.
      * The coordinator owns verified-result admission; this transaction qualifies only its SQL source.
@@ -887,15 +523,7 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
         val base = encodeChange(frozen.intent.base).also(::requirePreparationSnapshotBudget)
         val local = encodeChange(frozen.intent.base.copy(content = frozen.intent.content)).also(::requirePreparationSnapshotBudget)
         return guardedEditMutation(frozen.intent.scope) { db ->
-            val admission = personalPreparationAdmission(db, frozen.intent)
-            if (admission == PersonalPreparationAdmission.HISTORICAL) {
-                val retained = readPersonalEditPreparation(db, frozen.intent.scope, frozen.intent.base.eventId)
-                return@guardedEditMutation if (retained != null && samePersonalPreparation(retained, frozen)) admission
-                    else PersonalPreparationAdmission.UNQUALIFIED
-            }
-            if (admission != PersonalPreparationAdmission.ELIGIBLE) return@guardedEditMutation admission
-            insertPersonalPreparation(db, frozen, base, local)
-            PersonalPreparationAdmission.STORED
+        preparation.retainCurrentPersonalPreparation(db, frozen, base, local)
         }
     }
     /** Monotone exact-owner transition after a remote conflict; original snapshots/evidence stay intact. */
@@ -903,22 +531,11 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
         currentCoroutineContext().ensureActive()
         val frozen = supportedPersonalIntent(intent) ?: return PersonalPreparationAdmission.UNQUALIFIED
         return guardedEditMutation(frozen.scope) { db ->
-            val intent = frozen
-            val admission = personalPreparationAdmission(db, intent)
-            if (admission !in listOf(PersonalPreparationAdmission.ELIGIBLE, PersonalPreparationAdmission.HISTORICAL))
-                return@guardedEditMutation admission
-            check(db.update("local_edits", ContentValues().apply { put("state", LocalEditState.CONFLICT.name) },
-                "scope=? AND event=? AND mutation=? AND kind='UPDATE'",
-                arrayOf(key(intent.scope), intent.base.eventId.value, intent.id.value)) == 1)
-            conflicts(db).ensure(intent.scope, intent.base.eventId)
-            PersonalPreparationAdmission.CONFLICT
+        preparation.conflictPersonalPreparation(db, frozen)
         }
     }
     private fun personalPreparationAdmission(db: SQLiteDatabase, intent: LocalEditIntent): PersonalPreparationAdmission =
         ImportStoreLocalPreparations.personalPreparationAdmission(db, intent, ::readBaseline)
-
-    private fun insertPersonalPreparation(db: SQLiteDatabase, value: PersonalEditPreparation, base: String, local: String) =
-        ImportStoreLocalPreparations.insertPersonalPreparation(db, value, base, local, ::checkStagingCapacity)
 
     /** Reserve the immutable personal receipt before the one fresh native personal/metadata acknowledgement.
      * The coordinator owns verified-result admission; this transaction qualifies only its SQL source.
@@ -994,18 +611,7 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
         val base = encodeChange(intent.base).also(::requirePreparationSnapshotBudget)
         val local = encodeChange(intent.base.copy(content = intent.content)).also(::requirePreparationSnapshotBudget)
         return stagingMutation(intent.scope) { db ->
-            check(!hasForeignLocalPreparation(db, intent.scope, intent.base.eventId, "local_edit_preparations")) {
-                "Another preparation already owns this event"
-            }
-            val previous = readLocalEditPreparation(db, intent.scope, intent.base.eventId)
-            if (previous != null) {
-                require(previous == frozen) { "Local edit preparation is immutable" }
-                return@stagingMutation false
-            }
-            check(activeProjectionScope(db, intent.scope)) { "Inactive local preparation scope" }
-            require(readPreparationOwner(db, intent.scope, intent.base.eventId) == intent) { "Stale local preparation owner" }
-            insertLocalTitlePreparation(db, frozen, base, local)
-            true
+        preparation.retainLocalEditPreparation(db, frozen, intent, base, local)
         }
     }
     /** SQL observation only; does not inspect Android or refresh remote access. */
@@ -1018,29 +624,16 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
         val base = encodeChange(frozen.intent.base).also(::requirePreparationSnapshotBudget)
         val local = encodeChange(frozen.intent.base.copy(content = frozen.intent.content)).also(::requirePreparationSnapshotBudget)
         return stagingMutation(frozen.intent.scope) { db ->
-            val admission = localTitlePreparationAdmission(db, frozen.intent)
-            if (admission != LocalTitlePreparationAdmission.ELIGIBLE) return@stagingMutation admission
-            insertLocalTitlePreparation(db, frozen, base, local)
-            LocalTitlePreparationAdmission.STORED
+        preparation.retainCurrentLocalTitlePreparation(db, frozen, base, local)
         }
     }
     /** Monotone exact-owner transition after a remote conflict; original snapshots/evidence stay intact. */
     suspend fun conflictLocalTitlePreparation(intent: LocalEditIntent): LocalTitlePreparationAdmission =
         stagingMutation(intent.scope) { db ->
-            val admission = localTitlePreparationAdmission(db, intent)
-            if (admission !in listOf(LocalTitlePreparationAdmission.ELIGIBLE, LocalTitlePreparationAdmission.HISTORICAL))
-                return@stagingMutation admission
-            check(db.update("local_edits", ContentValues().apply { put("state", LocalEditState.CONFLICT.name) },
-                "scope=? AND event=? AND mutation=? AND kind='UPDATE'",
-                arrayOf(key(intent.scope), intent.base.eventId.value, intent.id.value)) == 1)
-            conflicts(db).ensure(intent.scope, intent.base.eventId)
-            LocalTitlePreparationAdmission.CONFLICT
-        }
+        preparation.conflictLocalTitlePreparation(db, intent)
+    }
     private fun localTitlePreparationAdmission(db: SQLiteDatabase, intent: LocalEditIntent): LocalTitlePreparationAdmission =
         ImportStoreLocalPreparations.localTitlePreparationAdmission(db, intent, ::readBaseline)
-
-    private fun insertLocalTitlePreparation(db: SQLiteDatabase, value: LocalEditPreparation, base: String, local: String) =
-        ImportStoreLocalPreparations.insertLocalTitlePreparation(db, value, base, local, ::checkStagingCapacity)
 
     /** Reserve the immutable title receipt before the one fresh native metadata write.
      * The coordinator owns verified-result admission; this transaction qualifies only its SQL source.
@@ -1079,26 +672,14 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
         stagingMutation(scope) { db -> readLocalEditPreparation(db, scope, eventId) }
 
     /** Decode the complete immutable binding before using even its completion state. */
-    private fun readDeleteAcknowledgement(db: SQLiteDatabase, scope: CalendarScope, event: EventId): DeleteAcknowledgementRecord? =
-        localMutations.readDeleteAcknowledgement(db, scope, event)
-
     suspend fun deleteAcknowledgement(scope: CalendarScope, event: EventId, attempt: MutationId): DeleteAcknowledgementRecord? =
-        stagingMutation(scope) { db -> readDeleteAcknowledgement(db,scope,event)?.takeIf { it.receipt.attempt.id == attempt } }
+        stagingMutation(scope) { db -> localMutations.readDeleteAcknowledgement(db,scope,event)?.takeIf { it.receipt.attempt.id == attempt } }
 
     suspend fun deleteAcknowledgement(scope: CalendarScope, event: EventId): DeleteAcknowledgementRecord? =
-        stagingMutation(scope) { db -> readDeleteAcknowledgement(db,scope,event) }
-
-    private fun matchingDeleteReservation(db: SQLiteDatabase, scope: CalendarScope, event: EventId): Boolean =
-        localMutations.matchingDeleteReservation(db, scope, event)
-
-    private fun completedDeleteEvents(db: SQLiteDatabase, scope: CalendarScope): Set<EventId> =
-        localMutations.completedDeleteEvents(db, scope)
-
-    private fun qualifyLocalDelete(db: SQLiteDatabase, intent: LocalDeleteIntent, allowReservedAbsence: Boolean): Boolean =
-        localMutations.qualifyLocalDelete(db, intent, allowReservedAbsence)
+        stagingMutation(scope) { db -> localMutations.readDeleteAcknowledgement(db,scope,event) }
 
     suspend fun qualifyLocalDelete(intent: LocalDeleteIntent): Boolean = stagingMutation(intent.scope) { db ->
-        qualifyLocalDelete(db,intent,true)
+        localMutations.qualifyLocalDelete(db,intent,true)
     }
 
     /** Reservation precedes network claim; it is never native acknowledgement authority. */
@@ -1120,10 +701,7 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
     }
 
     suspend fun localDelete(scope: CalendarScope, eventId: EventId): LocalDeleteIntent? = access { db ->
-        check(admitTransaction(scope)) { "Inactive import lease" }; requireKnown(db, scope)
-        val deletion = readLocalDelete(db, scope, eventId)
-        check(admitTransaction(scope)) { "Inactive import lease" }
-        deletion
+        projection.localDelete(db, scope, eventId)
     }
     /** Capture and projection suppression share one database transaction. No dispatch/reset exists. */
     suspend fun captureLocalEdit(intent: LocalEditIntent): LocalEditIntent = stagingMutation(intent.scope) { db ->
@@ -1135,17 +713,8 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
         localMutations.captureLocalDelete(db, intent)
     }
 
-    private fun readProjectionBase(db: SQLiteDatabase, scope: CalendarScope, eventId: EventId): ImportStoreLocalMutationSql.ProjectionBase? =
-        localMutations.readProjectionBase(db, scope, eventId)
-
     private fun readBaseline(db: SQLiteDatabase, scope: CalendarScope, eventId: EventId): RemoteChange.Upsert? =
         localMutations.readBaseline(db, scope, eventId)
-
-    private fun readLocalEdit(db: SQLiteDatabase, scope: CalendarScope, eventId: EventId): LocalEditIntent? =
-        localMutations.readLocalEdit(db, scope, eventId)
-
-    private fun readLocalDelete(db: SQLiteDatabase, scope: CalendarScope, eventId: EventId): LocalDeleteIntent? =
-        localMutations.readLocalDelete(db, scope, eventId)
 
     /** Stable keyset pagination: retries may remove rows without skipping subsequent issues. */
     suspend fun deferred(scope: CalendarScope, limit: Int = 4, afterEventId: EventId? = null): List<DeferredCalendarEvent> = access { db ->
@@ -1189,7 +758,7 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
         db.beginTransaction()
         try {
             requireKnown(db, scope)
-            val transaction = ImportStorePageTransaction(db, scope, ::conflicts, ::matchingDeleteReservation)
+            val transaction = ImportStorePageTransaction(db, scope, ::conflicts, localMutations::matchingDeleteReservation)
             val result = block(transaction)
             checkStagingCapacity(db)
             check(admitTransaction(scope)) { "Inactive import lease" }
@@ -1203,9 +772,6 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
     private suspend fun <T> access(action: (SQLiteDatabase) -> T): T = withContext(Dispatchers.IO) {
         lock.withLock { action(writableDatabase) }
     }
-    private fun isAvailable(db: SQLiteDatabase, scope: CalendarScope): Boolean =
-        localMutations.isAvailable(db, scope)
-
     companion object {
         const val STAGING_BUDGET_BYTES: Long = 32L * 1024 * 1024
     }
