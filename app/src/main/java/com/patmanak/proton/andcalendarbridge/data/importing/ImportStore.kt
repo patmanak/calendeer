@@ -25,8 +25,6 @@ import com.patmanak.proton.andcalendarbridge.data.importing.ImportStorePageState
 import com.patmanak.proton.andcalendarbridge.data.importing.ImportStorePageState.checkStagingCapacity
 import com.patmanak.proton.andcalendarbridge.data.importing.ImportStorePageState.requireKnown
 import com.patmanak.proton.andcalendarbridge.data.importing.ImportStorePageState.hasLocalMutation
-import com.patmanak.proton.andcalendarbridge.data.importing.ImportStoreLocalPreparations.titleAcknowledgementOwner
-import com.patmanak.proton.andcalendarbridge.data.importing.ImportStoreLocalPreparations.editAcknowledgementOwner
 import com.patmanak.proton.andcalendarbridge.data.importing.ImportStoreLocalPreparations.sameTextPreparation
 import com.patmanak.proton.andcalendarbridge.data.importing.ImportStoreLocalPreparations.supportedLocalTextIntent
 import com.patmanak.proton.andcalendarbridge.data.importing.ImportStoreLocalPreparations.readLocalTextEditPreparation
@@ -42,22 +40,13 @@ import com.patmanak.proton.andcalendarbridge.data.importing.ImportStoreLocalPrep
 import com.patmanak.proton.andcalendarbridge.data.importing.ImportStoreLocalPreparations.hasRawEventRow
 import com.patmanak.proton.andcalendarbridge.data.importing.ImportStoreLocalPreparations.activeProjectionScope
 import com.patmanak.proton.andcalendarbridge.data.importing.ImportStoreUpdateAcknowledgements.readTextUpdateAcknowledgement
-import com.patmanak.proton.andcalendarbridge.data.importing.ImportStoreUpdateAcknowledgements.readTextUpdateAcknowledgementHistory
-import com.patmanak.proton.andcalendarbridge.data.importing.ImportStoreUpdateAcknowledgements.requireUnusedTextAcknowledgementIdentity
 import com.patmanak.proton.andcalendarbridge.data.importing.ImportStoreUpdateAcknowledgements.encodeTextUpdateAcknowledgement
 import com.patmanak.proton.andcalendarbridge.data.importing.ImportStoreUpdateAcknowledgements.readTimeUpdateAcknowledgement
-import com.patmanak.proton.andcalendarbridge.data.importing.ImportStoreUpdateAcknowledgements.readTimeUpdateAcknowledgementHistory
-import com.patmanak.proton.andcalendarbridge.data.importing.ImportStoreUpdateAcknowledgements.requireUnusedTimeAcknowledgementIdentity
 import com.patmanak.proton.andcalendarbridge.data.importing.ImportStoreUpdateAcknowledgements.encodeTimeUpdateAcknowledgement
 import com.patmanak.proton.andcalendarbridge.data.importing.ImportStoreUpdateAcknowledgements.readPersonalUpdateAcknowledgement
-import com.patmanak.proton.andcalendarbridge.data.importing.ImportStoreUpdateAcknowledgements.readPersonalUpdateAcknowledgementHistory
-import com.patmanak.proton.andcalendarbridge.data.importing.ImportStoreUpdateAcknowledgements.requireUnusedPersonalAcknowledgementIdentity
 import com.patmanak.proton.andcalendarbridge.data.importing.ImportStoreUpdateAcknowledgements.encodePersonalUpdateAcknowledgement
 import com.patmanak.proton.andcalendarbridge.data.importing.ImportStoreUpdateAcknowledgements.readTitleUpdateAcknowledgement
-import com.patmanak.proton.andcalendarbridge.data.importing.ImportStoreUpdateAcknowledgements.readTitleUpdateAcknowledgementHistory
-import com.patmanak.proton.andcalendarbridge.data.importing.ImportStoreUpdateAcknowledgements.requireUnusedTitleAcknowledgementIdentity
 import com.patmanak.proton.andcalendarbridge.data.importing.ImportStoreUpdateAcknowledgements.encodeTitleUpdateAcknowledgement
-import com.patmanak.proton.andcalendarbridge.data.importing.ImportStoreUpdateAcknowledgements.archiveTitleUpdateAcknowledgement
 import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
@@ -87,6 +76,8 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
     SQLiteOpenHelper(context, name, null, 23), SyncStore {
     private val lock = Mutex()
     private val localMutations = ImportStoreLocalMutationSql(::conflicts)
+    private val updates = ImportStoreUpdateSql(localMutations, ::localTextPreparationAdmission,
+        ::localTimePreparationAdmission, ::personalPreparationAdmission, ::localTitlePreparationAdmission)
     /** Check the run lease both before its transaction and before durable commit. */
     @Volatile var admitTransaction: (CalendarScope) -> Boolean = { true }
     override fun onConfigure(db: SQLiteDatabase) {
@@ -772,48 +763,7 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
         val proposed = TextUpdateAcknowledgementReceipt.of(frozen, UUID.randomUUID().toString(), handoff)
         val encoded = encodeTextUpdateAcknowledgement(proposed)
         return guardedEditMutation(proposed.intent.scope) { db ->
-            val scope = proposed.intent.scope
-            val event = proposed.intent.base.eventId
-            val historical = readTextUpdateAcknowledgementHistory(db, scope, event, proposed.attempt.id)
-            val existing = if (historical == null) readTextUpdateAcknowledgement(db, scope, event) else null
-            val exact = if (historical != null) readTextUpdateAcknowledgement(db, scope, event, proposed.attempt.id)
-                else existing?.takeIf { it.receipt.attempt.id == proposed.attempt.id }
-            if (exact != null) {
-                check(exact.receipt.matches(frozen) && exact.receipt.handoff == proposed.handoff) {
-                    "Text acknowledgement receipt is immutable"
-                }
-                return@guardedEditMutation TextUpdateAcknowledgementReservation(exact, fresh = false)
-            }
-            check(existing == null || existing.state == TextUpdateAcknowledgementState.RESTORED) {
-                "Pending text acknowledgement receipt is immutable"
-            }
-            requireUnusedTextAcknowledgementIdentity(db, proposed)
-            if (!textAcknowledgementSource(db, proposed) ||
-                !directUpdateAcknowledgementBase(db, scope, event))
-                return@guardedEditMutation null
-            val owner = editAcknowledgementOwner(db, scope, event)
-            val historicalAdmission = owner == proposed.intent &&
-                localTextPreparationAdmission(db, proposed.intent) == LocalTextPreparationAdmission.HISTORICAL
-            if (!historicalAdmission && !exactUpdateResultEcho(db, proposed.intent, proposed.projection, owner))
-                return@guardedEditMutation null
-            val preparation = readLocalTextEditPreparation(db, scope, event) ?: return@guardedEditMutation null
-            if (!sameTextPreparation(preparation, frozen.record.preparation) || !proposed.attempt.matchesPreparation(preparation))
-                return@guardedEditMutation null
-            if (existing != null) {
-                archiveTextUpdateAcknowledgement(db, existing)
-                check(db.delete("text_update_acknowledgements", "scope=? AND event=? AND nonce=? AND receipt=? AND state='RESTORED'",
-                    arrayOf(key(scope), event.value, existing.receipt.projection.nonce,
-                        encodeTextUpdateAcknowledgement(existing.receipt))) == 1) { "Text acknowledgement slot changed" }
-            }
-            check(!db.rawQuery("SELECT 1 FROM text_update_acknowledgement_history WHERE nonce=?",
-                arrayOf(proposed.projection.nonce)).use { it.moveToFirst() }) { "Text acknowledgement nonce is already retained" }
-            db.insertOrThrow("text_update_acknowledgements", null, ContentValues().apply {
-                put("scope", key(scope)); put("event", event.value); put("nonce", proposed.projection.nonce)
-                put("receipt", encoded); put("state", TextUpdateAcknowledgementState.PENDING.name)
-            })
-            checkStagingCapacity(db)
-            TextUpdateAcknowledgementReservation(TextUpdateAcknowledgementRecord(proposed,
-                TextUpdateAcknowledgementState.PENDING), fresh = true)
+            updates.prepareTextUpdateAcknowledgement(db, frozen, proposed, encoded)
         }
     }
 
@@ -832,107 +782,9 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
         val scope = intent.scope
         val event = intent.base.eventId
         return guardedEditMutation(scope) { db ->
-            val retained = readTextUpdateAcknowledgement(db, scope, event, receipt.attempt.id) ?: return@guardedEditMutation false
-            if (retained.receipt != receipt) return@guardedEditMutation false
-            if (retained.state == TextUpdateAcknowledgementState.RESTORED) return@guardedEditMutation true
-            if (!activeProjectionScope(db, scope) || !acknowledgementFormatMatches(db, scope, intent.format) ||
-                !textAcknowledgementSource(db, receipt) || !directUpdateAcknowledgementBase(db, scope, event))
-                return@guardedEditMutation false
-            val owner = editAcknowledgementOwner(db, scope, event) ?: return@guardedEditMutation false
-            if (owner.copy(state = LocalEditState.PAUSED) != intent) return@guardedEditMutation false
-            val preparation = readLocalTextEditPreparation(db, scope, event) ?: return@guardedEditMutation false
-            if (preparation.intent != intent || !receipt.attempt.matchesPreparation(preparation)) return@guardedEditMutation false
-            if (readBaseline(db, scope, event) != intent.base) return@guardedEditMutation false
-            // The native ACK is now proven. Retire only a still-redundant ordinary
-            // plan, atomically with baseline/owner restoration; never claim its apply succeeded.
-            if (receipt.handoff == null) retireRedundantUpdateProjection(db, receipt.intent, receipt.handoff)
-            val oldBase = encodeChange(intent.base)
-            val newBase = encodeChange(receipt.projection.change)
-            val local = encodeChange(intent.base.copy(content = intent.content))
-            check(db.update("projection_bases", ContentValues().apply { put("payload", newBase) },
-                "scope=? AND event=? AND payload=? AND representation IS NULL", arrayOf(key(scope), event.value, oldBase)) == 1)
-            receipt.handoff?.let { frame ->
-                check(db.update("captured_create_handoffs", ContentValues().apply {
-                    put("last_projection", encodeHandoffProjection(receipt.projection)); put("waiting", 0)
-                }, "scope=? AND event=? AND nonce=? AND protocol=? AND ack_nonce=? AND ack_fingerprint=? " +
-                    "AND fingerprint=? AND state='RELEASED' AND waiting=1 AND last_projection IS ?",
-                    arrayOf(key(scope), event.value, frame.receipt.nonce, frame.receipt.protocol.toString(),
-                        frame.receipt.acknowledgement.nonce, frame.receipt.acknowledgement.fingerprint(), frame.receipt.fingerprint(),
-                        frame.lastProjection?.let(::encodeHandoffProjection))) == 1) {
-                    "Transferred text acknowledgement source changed"
-                }
-            }
-            check(db.delete("local_text_edit_preparations", "scope=? AND event=? AND mutation=? AND adapter=? AND version=? " +
-                "AND base=? AND local=? AND state=? AND timestamp=? AND prep_adapter=? AND prep_version=? AND payload=?",
-                arrayOf(key(scope), event.value, intent.id.value, intent.format.id, intent.format.version.toString(), oldBase,
-                    local, LocalEditState.PAUSED.name, preparation.timestamp.toString(), preparation.format.id,
-                    preparation.format.version.toString(), preparation.protectedPayload)) == 1)
-            check(db.delete("local_edits", "scope=? AND event=? AND mutation=? AND adapter=? AND version=? " +
-                "AND base=? AND local=? AND state=? AND kind='UPDATE'",
-                arrayOf(key(scope), event.value, intent.id.value, intent.format.id, intent.format.version.toString(),
-                    oldBase, local, owner.state.name)) == 1)
-            // Advance only an exact old cache; a concurrent/newer update, deletion or absence survives.
-            db.update("records", ContentValues().apply { put("payload", newBase); put("pending", 0) },
-                "scope=? AND event=? AND payload=?", arrayOf(key(scope), event.value, oldBase))
-            db.update("records", ContentValues().apply { put("pending", 0) },
-                "scope=? AND event=? AND payload=? AND pending=1", arrayOf(key(scope), event.value, newBase))
-            requeueDistinctUpdateObservation(db, receipt.intent, receipt.handoff, newBase)
-            check(db.update("text_update_acknowledgements", ContentValues().apply {
-                put("state", TextUpdateAcknowledgementState.RESTORED.name)
-            }, "scope=? AND event=? AND nonce=? AND receipt=? AND state=?",
-                arrayOf(key(scope), event.value, receipt.projection.nonce, encodeTextUpdateAcknowledgement(receipt),
-                    TextUpdateAcknowledgementState.PENDING.name)) == 1)
-            archiveTextUpdateAcknowledgement(db, TextUpdateAcknowledgementRecord(receipt,
-                TextUpdateAcknowledgementState.RESTORED))
-            true
+            updates.restoreTextUpdateAcknowledgement(db, receipt, intent, scope, event)
         }
     }
-
-    /** The exact owner has been consumed in this transaction. Re-arm only its distinct cached
-     * observation, preserving deferred evidence and the normal recurrence/handoff boundaries.
-     * This is queue state, never permission to overwrite a later dirty Provider row.
-     */
-    private fun requeueDistinctUpdateObservation(db: SQLiteDatabase, intent: LocalEditIntent,
-        handoff: CapturedCreateHandoffFrame?, acknowledgedPayload: String): Unit =
-        localMutations.requeueDistinctUpdateObservation(db, intent, handoff, acknowledgedPayload)
-
-    private fun ordinaryUpdateAcknowledgement(db: SQLiteDatabase, intent: LocalEditIntent,
-        handoff: CapturedCreateHandoffFrame?): Boolean =
-        localMutations.ordinaryUpdateAcknowledgement(db, intent, handoff)
-
-    /** A dirty edit can interrupt a tracked no-change projection after preparation.
-     * This plan carries no content beyond the edit intent's original baseline.
-     * Keep it through reservation: only a proven native ACK supersedes it.
-     */
-    private fun redundantUpdateProjection(pending: ProjectionReceipt, intent: LocalEditIntent,
-        handoff: CapturedCreateHandoffFrame?): Boolean =
-        localMutations.redundantUpdateProjection(pending, intent, handoff)
-
-    private fun retireRedundantUpdateProjection(db: SQLiteDatabase, intent: LocalEditIntent,
-        handoff: CapturedCreateHandoffFrame?): Unit =
-        localMutations.retireRedundantUpdateProjection(db, intent, handoff)
-
-    private fun textAcknowledgementSource(db: SQLiteDatabase, receipt: TextUpdateAcknowledgementReceipt): Boolean =
-        localMutations.textAcknowledgementSource(db, receipt)
-
-    /** Text/time use the shared edit snapshot reader; title keeps its profile-specific reader. */
-    /** A verified result can be imported before its first ACK receipt is reserved.
-     * Consume only that exact owner/result, never reopen conflict dispatch.
-     * Source (including the complete handoff frame) and capsule equality are
-     * checked by the caller in the same transaction.
-     */
-    private fun exactUpdateResultEcho(db: SQLiteDatabase, intent: LocalEditIntent,
-        projection: ProjectionReceipt, owner: LocalEditIntent?): Boolean =
-        localMutations.exactUpdateResultEcho(db, intent, projection, owner)
-
-    private fun directUpdateAcknowledgementBase(db: SQLiteDatabase, scope: CalendarScope, event: EventId): Boolean =
-        localMutations.directUpdateAcknowledgementBase(db, scope, event)
-
-    private fun acknowledgementFormatMatches(db: SQLiteDatabase, scope: CalendarScope, format: AdapterFormat): Boolean =
-        localMutations.acknowledgementFormatMatches(db, scope, format)
-
-    private fun archiveTextUpdateAcknowledgement(db: SQLiteDatabase, record: TextUpdateAcknowledgementRecord) =
-        ImportStoreUpdateAcknowledgements.archiveTextUpdateAcknowledgement(db, record, ::checkStagingCapacity)
 
     /** Historical inspection only. Retained capsules never grant current submission authority. */
     suspend fun localTextEditPreparation(scope: CalendarScope, eventId: EventId): LocalTextEditPreparation? =
@@ -994,48 +846,7 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
         val proposed = TimeUpdateAcknowledgementReceipt.of(frozen, UUID.randomUUID().toString(), handoff)
         val encoded = encodeTimeUpdateAcknowledgement(proposed)
         return guardedEditMutation(proposed.intent.scope) { db ->
-            val scope = proposed.intent.scope
-            val event = proposed.intent.base.eventId
-            val historical = readTimeUpdateAcknowledgementHistory(db, scope, event, proposed.attempt.id)
-            val existing = if (historical == null) readTimeUpdateAcknowledgement(db, scope, event) else null
-            val exact = if (historical != null) readTimeUpdateAcknowledgement(db, scope, event, proposed.attempt.id)
-                else existing?.takeIf { it.receipt.attempt.id == proposed.attempt.id }
-            if (exact != null) {
-                check(exact.receipt.matches(frozen) && exact.receipt.handoff == proposed.handoff) {
-                    "Time acknowledgement receipt is immutable"
-                }
-                return@guardedEditMutation TimeUpdateAcknowledgementReservation(exact, fresh = false)
-            }
-            check(existing == null || existing.state == TimeUpdateAcknowledgementState.RESTORED) {
-                "Pending text acknowledgement receipt is immutable"
-            }
-            requireUnusedTimeAcknowledgementIdentity(db, proposed)
-            if (!timeAcknowledgementSource(db, proposed) ||
-                !directUpdateAcknowledgementBase(db, scope, event))
-                return@guardedEditMutation null
-            val owner = editAcknowledgementOwner(db, scope, event)
-            val historicalAdmission = owner == proposed.intent &&
-                localTimePreparationAdmission(db, proposed.intent) == LocalTimePreparationAdmission.HISTORICAL
-            if (!historicalAdmission && !exactUpdateResultEcho(db, proposed.intent, proposed.projection, owner))
-                return@guardedEditMutation null
-            val preparation = readLocalTimeEditPreparation(db, scope, event) ?: return@guardedEditMutation null
-            if (!sameTimePreparation(preparation, frozen.record.preparation) || !proposed.attempt.matchesPreparation(preparation))
-                return@guardedEditMutation null
-            if (existing != null) {
-                archiveTimeUpdateAcknowledgement(db, existing)
-                check(db.delete("time_update_acknowledgements", "scope=? AND event=? AND nonce=? AND receipt=? AND state='RESTORED'",
-                    arrayOf(key(scope), event.value, existing.receipt.projection.nonce,
-                        encodeTimeUpdateAcknowledgement(existing.receipt))) == 1) { "Time acknowledgement slot changed" }
-            }
-            check(!db.rawQuery("SELECT 1 FROM time_update_acknowledgement_history WHERE nonce=?",
-                arrayOf(proposed.projection.nonce)).use { it.moveToFirst() }) { "Time acknowledgement nonce is already retained" }
-            db.insertOrThrow("time_update_acknowledgements", null, ContentValues().apply {
-                put("scope", key(scope)); put("event", event.value); put("nonce", proposed.projection.nonce)
-                put("receipt", encoded); put("state", TimeUpdateAcknowledgementState.PENDING.name)
-            })
-            checkStagingCapacity(db)
-            TimeUpdateAcknowledgementReservation(TimeUpdateAcknowledgementRecord(proposed,
-                TimeUpdateAcknowledgementState.PENDING), fresh = true)
+            updates.prepareTimeUpdateAcknowledgement(db, frozen, proposed, encoded)
         }
     }
 
@@ -1054,67 +865,9 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
         val scope = intent.scope
         val event = intent.base.eventId
         return guardedEditMutation(scope) { db ->
-            val retained = readTimeUpdateAcknowledgement(db, scope, event, receipt.attempt.id) ?: return@guardedEditMutation false
-            if (retained.receipt != receipt) return@guardedEditMutation false
-            if (retained.state == TimeUpdateAcknowledgementState.RESTORED) return@guardedEditMutation true
-            if (!activeProjectionScope(db, scope) || !acknowledgementFormatMatches(db, scope, intent.format) ||
-                !timeAcknowledgementSource(db, receipt) || !directUpdateAcknowledgementBase(db, scope, event))
-                return@guardedEditMutation false
-            val owner = editAcknowledgementOwner(db, scope, event) ?: return@guardedEditMutation false
-            if (owner.copy(state = LocalEditState.PAUSED) != intent) return@guardedEditMutation false
-            val preparation = readLocalTimeEditPreparation(db, scope, event) ?: return@guardedEditMutation false
-            if (preparation.intent != intent || !receipt.attempt.matchesPreparation(preparation)) return@guardedEditMutation false
-            if (readBaseline(db, scope, event) != intent.base) return@guardedEditMutation false
-            // The native ACK is now proven. Retire only a still-redundant ordinary
-            // plan, atomically with baseline/owner restoration; never claim its apply succeeded.
-            if (receipt.handoff == null) retireRedundantUpdateProjection(db, receipt.intent, receipt.handoff)
-            val oldBase = encodeChange(intent.base)
-            val newBase = encodeChange(receipt.projection.change)
-            val local = encodeChange(intent.base.copy(content = intent.content))
-            check(db.update("projection_bases", ContentValues().apply { put("payload", newBase) },
-                "scope=? AND event=? AND payload=? AND representation IS NULL", arrayOf(key(scope), event.value, oldBase)) == 1)
-            receipt.handoff?.let { frame ->
-                check(db.update("captured_create_handoffs", ContentValues().apply {
-                    put("last_projection", encodeHandoffProjection(receipt.projection)); put("waiting", 0)
-                }, "scope=? AND event=? AND nonce=? AND protocol=? AND ack_nonce=? AND ack_fingerprint=? " +
-                    "AND fingerprint=? AND state='RELEASED' AND waiting=1 AND last_projection IS ?",
-                    arrayOf(key(scope), event.value, frame.receipt.nonce, frame.receipt.protocol.toString(),
-                        frame.receipt.acknowledgement.nonce, frame.receipt.acknowledgement.fingerprint(), frame.receipt.fingerprint(),
-                        frame.lastProjection?.let(::encodeHandoffProjection))) == 1) {
-                    "Transferred time acknowledgement source changed"
-                }
-            }
-            check(db.delete("local_time_edit_preparations", "scope=? AND event=? AND mutation=? AND adapter=? AND version=? " +
-                "AND base=? AND local=? AND state=? AND timestamp=? AND prep_adapter=? AND prep_version=? AND payload=?",
-                arrayOf(key(scope), event.value, intent.id.value, intent.format.id, intent.format.version.toString(), oldBase,
-                    local, LocalEditState.PAUSED.name, preparation.timestamp.toString(), preparation.format.id,
-                    preparation.format.version.toString(), preparation.protectedPayload)) == 1)
-            check(db.delete("local_edits", "scope=? AND event=? AND mutation=? AND adapter=? AND version=? " +
-                "AND base=? AND local=? AND state=? AND kind='UPDATE'",
-                arrayOf(key(scope), event.value, intent.id.value, intent.format.id, intent.format.version.toString(),
-                    oldBase, local, owner.state.name)) == 1)
-            // Advance only an exact old cache; a concurrent/newer update, deletion or absence survives.
-            db.update("records", ContentValues().apply { put("payload", newBase); put("pending", 0) },
-                "scope=? AND event=? AND payload=?", arrayOf(key(scope), event.value, oldBase))
-            db.update("records", ContentValues().apply { put("pending", 0) },
-                "scope=? AND event=? AND payload=? AND pending=1", arrayOf(key(scope), event.value, newBase))
-            requeueDistinctUpdateObservation(db, receipt.intent, receipt.handoff, newBase)
-            check(db.update("time_update_acknowledgements", ContentValues().apply {
-                put("state", TimeUpdateAcknowledgementState.RESTORED.name)
-            }, "scope=? AND event=? AND nonce=? AND receipt=? AND state=?",
-                arrayOf(key(scope), event.value, receipt.projection.nonce, encodeTimeUpdateAcknowledgement(receipt),
-                    TimeUpdateAcknowledgementState.PENDING.name)) == 1)
-            archiveTimeUpdateAcknowledgement(db, TimeUpdateAcknowledgementRecord(receipt,
-                TimeUpdateAcknowledgementState.RESTORED))
-            true
+            updates.restoreTimeUpdateAcknowledgement(db, receipt, intent, scope, event)
         }
     }
-
-    private fun timeAcknowledgementSource(db: SQLiteDatabase, receipt: TimeUpdateAcknowledgementReceipt): Boolean =
-        localMutations.timeAcknowledgementSource(db, receipt)
-
-    private fun archiveTimeUpdateAcknowledgement(db: SQLiteDatabase, record: TimeUpdateAcknowledgementRecord) =
-        ImportStoreUpdateAcknowledgements.archiveTimeUpdateAcknowledgement(db, record, ::checkStagingCapacity)
 
     /** Historical inspection only. Retained capsules never grant current submission authority. */
     suspend fun localTimeEditPreparation(scope: CalendarScope, eventId: EventId): LocalTimeEditPreparation? =
@@ -1177,48 +930,7 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
         val proposed = PersonalUpdateAcknowledgementReceipt.of(frozen, UUID.randomUUID().toString(), handoff)
         val encoded = encodePersonalUpdateAcknowledgement(proposed)
         return guardedEditMutation(proposed.intent.scope) { db ->
-            val scope = proposed.intent.scope
-            val event = proposed.intent.base.eventId
-            val historical = readPersonalUpdateAcknowledgementHistory(db, scope, event, proposed.attempt.id)
-            val existing = if (historical == null) readPersonalUpdateAcknowledgement(db, scope, event) else null
-            val exact = if (historical != null) readPersonalUpdateAcknowledgement(db, scope, event, proposed.attempt.id)
-                else existing?.takeIf { it.receipt.attempt.id == proposed.attempt.id }
-            if (exact != null) {
-                check(exact.receipt.matches(frozen) && exact.receipt.handoff == proposed.handoff) {
-                    "Personal acknowledgement receipt is immutable"
-                }
-                return@guardedEditMutation PersonalUpdateAcknowledgementReservation(exact, fresh = false)
-            }
-            check(existing == null || existing.state == PersonalUpdateAcknowledgementState.RESTORED) {
-                "Pending personal acknowledgement receipt is immutable"
-            }
-            requireUnusedPersonalAcknowledgementIdentity(db, proposed)
-            if (!personalAcknowledgementSource(db, proposed) ||
-                !directUpdateAcknowledgementBase(db, scope, event))
-                return@guardedEditMutation null
-            val owner = editAcknowledgementOwner(db, scope, event)
-            val historicalAdmission = owner == proposed.intent &&
-                personalPreparationAdmission(db, proposed.intent) == PersonalPreparationAdmission.HISTORICAL
-            if (!historicalAdmission && !exactUpdateResultEcho(db, proposed.intent, proposed.projection, owner))
-                return@guardedEditMutation null
-            val preparation = readPersonalEditPreparation(db, scope, event) ?: return@guardedEditMutation null
-            if (!samePersonalPreparation(preparation, frozen.record.preparation) || !proposed.attempt.matchesPreparation(preparation))
-                return@guardedEditMutation null
-            if (existing != null) {
-                archivePersonalUpdateAcknowledgement(db, existing)
-                check(db.delete("personal_update_acknowledgements", "scope=? AND event=? AND nonce=? AND receipt=? AND state='RESTORED'",
-                    arrayOf(key(scope), event.value, existing.receipt.projection.nonce,
-                        encodePersonalUpdateAcknowledgement(existing.receipt))) == 1) { "Personal acknowledgement slot changed" }
-            }
-            check(!db.rawQuery("SELECT 1 FROM personal_update_acknowledgement_history WHERE nonce=?",
-                arrayOf(proposed.projection.nonce)).use { it.moveToFirst() }) { "Personal acknowledgement nonce is already retained" }
-            db.insertOrThrow("personal_update_acknowledgements", null, ContentValues().apply {
-                put("scope", key(scope)); put("event", event.value); put("nonce", proposed.projection.nonce)
-                put("receipt", encoded); put("state", PersonalUpdateAcknowledgementState.PENDING.name)
-            })
-            checkStagingCapacity(db)
-            PersonalUpdateAcknowledgementReservation(PersonalUpdateAcknowledgementRecord(proposed,
-                PersonalUpdateAcknowledgementState.PENDING), fresh = true)
+            updates.preparePersonalUpdateAcknowledgement(db, frozen, proposed, encoded)
         }
     }
 
@@ -1237,67 +949,9 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
         val scope = intent.scope
         val event = intent.base.eventId
         return guardedEditMutation(scope) { db ->
-            val retained = readPersonalUpdateAcknowledgement(db, scope, event, receipt.attempt.id) ?: return@guardedEditMutation false
-            if (retained.receipt != receipt) return@guardedEditMutation false
-            if (retained.state == PersonalUpdateAcknowledgementState.RESTORED) return@guardedEditMutation true
-            if (!activeProjectionScope(db, scope) || !acknowledgementFormatMatches(db, scope, intent.format) ||
-                !personalAcknowledgementSource(db, receipt) || !directUpdateAcknowledgementBase(db, scope, event))
-                return@guardedEditMutation false
-            val owner = editAcknowledgementOwner(db, scope, event) ?: return@guardedEditMutation false
-            if (owner.copy(state = LocalEditState.PAUSED) != intent) return@guardedEditMutation false
-            val preparation = readPersonalEditPreparation(db, scope, event) ?: return@guardedEditMutation false
-            if (preparation.intent != intent || !receipt.attempt.matchesPreparation(preparation)) return@guardedEditMutation false
-            if (readBaseline(db, scope, event) != intent.base) return@guardedEditMutation false
-            // The native ACK is now proven. Retire only a still-redundant ordinary
-            // plan, atomically with baseline/owner restoration; never claim its apply succeeded.
-            if (receipt.handoff == null) retireRedundantUpdateProjection(db, receipt.intent, receipt.handoff)
-            val oldBase = encodeChange(intent.base)
-            val newBase = encodeChange(receipt.projection.change)
-            val local = encodeChange(intent.base.copy(content = intent.content))
-            check(db.update("projection_bases", ContentValues().apply { put("payload", newBase) },
-                "scope=? AND event=? AND payload=? AND representation IS NULL", arrayOf(key(scope), event.value, oldBase)) == 1)
-            receipt.handoff?.let { frame ->
-                check(db.update("captured_create_handoffs", ContentValues().apply {
-                    put("last_projection", encodeHandoffProjection(receipt.projection)); put("waiting", 0)
-                }, "scope=? AND event=? AND nonce=? AND protocol=? AND ack_nonce=? AND ack_fingerprint=? " +
-                    "AND fingerprint=? AND state='RELEASED' AND waiting=1 AND last_projection IS ?",
-                    arrayOf(key(scope), event.value, frame.receipt.nonce, frame.receipt.protocol.toString(),
-                        frame.receipt.acknowledgement.nonce, frame.receipt.acknowledgement.fingerprint(), frame.receipt.fingerprint(),
-                        frame.lastProjection?.let(::encodeHandoffProjection))) == 1) {
-                    "Transferred personal acknowledgement source changed"
-                }
-            }
-            check(db.delete("personal_edit_preparations", "scope=? AND event=? AND mutation=? AND adapter=? AND version=? " +
-                "AND base=? AND local=? AND state=? AND timestamp=? AND prep_adapter=? AND prep_version=? AND payload=?",
-                arrayOf(key(scope), event.value, intent.id.value, intent.format.id, intent.format.version.toString(), oldBase,
-                    local, LocalEditState.PAUSED.name, preparation.timestamp.toString(), preparation.format.id,
-                    preparation.format.version.toString(), preparation.protectedPayload)) == 1)
-            check(db.delete("local_edits", "scope=? AND event=? AND mutation=? AND adapter=? AND version=? " +
-                "AND base=? AND local=? AND state=? AND kind='UPDATE'",
-                arrayOf(key(scope), event.value, intent.id.value, intent.format.id, intent.format.version.toString(),
-                    oldBase, local, owner.state.name)) == 1)
-            // Advance only an exact old cache; a concurrent/newer update, deletion or absence survives.
-            db.update("records", ContentValues().apply { put("payload", newBase); put("pending", 0) },
-                "scope=? AND event=? AND payload=?", arrayOf(key(scope), event.value, oldBase))
-            db.update("records", ContentValues().apply { put("pending", 0) },
-                "scope=? AND event=? AND payload=? AND pending=1", arrayOf(key(scope), event.value, newBase))
-            requeueDistinctUpdateObservation(db, receipt.intent, receipt.handoff, newBase)
-            check(db.update("personal_update_acknowledgements", ContentValues().apply {
-                put("state", PersonalUpdateAcknowledgementState.RESTORED.name)
-            }, "scope=? AND event=? AND nonce=? AND receipt=? AND state=?",
-                arrayOf(key(scope), event.value, receipt.projection.nonce, encodePersonalUpdateAcknowledgement(receipt),
-                    PersonalUpdateAcknowledgementState.PENDING.name)) == 1)
-            archivePersonalUpdateAcknowledgement(db, PersonalUpdateAcknowledgementRecord(receipt,
-                PersonalUpdateAcknowledgementState.RESTORED))
-            true
+            updates.restorePersonalUpdateAcknowledgement(db, receipt, intent, scope, event)
         }
     }
-
-    private fun personalAcknowledgementSource(db: SQLiteDatabase, receipt: PersonalUpdateAcknowledgementReceipt): Boolean =
-        localMutations.personalAcknowledgementSource(db, receipt)
-
-    private fun archivePersonalUpdateAcknowledgement(db: SQLiteDatabase, record: PersonalUpdateAcknowledgementRecord) =
-        ImportStoreUpdateAcknowledgements.archivePersonalUpdateAcknowledgement(db, record, ::checkStagingCapacity)
 
     /** Historical inspection only. Retained capsules never grant current submission authority. */
     suspend fun personalEditPreparation(scope: CalendarScope, eventId: EventId): PersonalEditPreparation? =
@@ -1398,47 +1052,7 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
         val proposed = TitleUpdateAcknowledgementReceipt.of(frozen, UUID.randomUUID().toString(), handoff)
         val encoded = encodeTitleUpdateAcknowledgement(proposed)
         return stagingMutation(proposed.intent.scope) { db ->
-            val scope = proposed.intent.scope
-            val event = proposed.intent.base.eventId
-            val historical = readTitleUpdateAcknowledgementHistory(db, scope, event, proposed.attempt.id)
-            val existing = if (historical == null) readTitleUpdateAcknowledgement(db, scope, event) else null
-            val exact = if (historical != null) readTitleUpdateAcknowledgement(db, scope, event, proposed.attempt.id)
-                else existing?.takeIf { it.receipt.attempt.id == proposed.attempt.id }
-            if (exact != null) {
-                check(exact.receipt.matches(frozen) && exact.receipt.handoff == proposed.handoff) {
-                    "Title acknowledgement receipt is immutable"
-                }
-                return@stagingMutation TitleUpdateAcknowledgementReservation(exact, fresh = false)
-            }
-            check(existing == null || existing.state == TitleUpdateAcknowledgementState.RESTORED) {
-                "Pending title acknowledgement receipt is immutable"
-            }
-            requireUnusedTitleAcknowledgementIdentity(db, proposed)
-            if (!titleAcknowledgementSource(db, proposed) ||
-                !directUpdateAcknowledgementBase(db, scope, event))
-                return@stagingMutation null
-            val owner = titleAcknowledgementOwner(db, scope, event)
-            val historicalAdmission = owner == proposed.intent &&
-                localTitlePreparationAdmission(db, proposed.intent) == LocalTitlePreparationAdmission.HISTORICAL
-            if (!historicalAdmission && !exactUpdateResultEcho(db, proposed.intent, proposed.projection, owner))
-                return@stagingMutation null
-            val preparation = readLocalEditPreparation(db, scope, event) ?: return@stagingMutation null
-            if (preparation != frozen.record.preparation || !proposed.attempt.matchesPreparation(preparation))
-                return@stagingMutation null
-            if (existing != null) {
-                archiveTitleUpdateAcknowledgement(db, existing)
-                check(db.delete("title_update_acknowledgements", "scope=? AND event=? AND nonce=? AND receipt=? AND state='RESTORED'",
-                    arrayOf(key(scope), event.value, existing.receipt.projection.nonce,
-                        encodeTitleUpdateAcknowledgement(existing.receipt))) == 1) { "Title acknowledgement slot changed" }
-            }
-            check(!db.rawQuery("SELECT 1 FROM title_update_acknowledgement_history WHERE nonce=?",
-                arrayOf(proposed.projection.nonce)).use { it.moveToFirst() }) { "Title acknowledgement nonce is already retained" }
-            db.insertOrThrow("title_update_acknowledgements", null, ContentValues().apply {
-                put("scope", key(scope)); put("event", event.value); put("nonce", proposed.projection.nonce)
-                put("receipt", encoded); put("state", TitleUpdateAcknowledgementState.PENDING.name)
-            })
-            TitleUpdateAcknowledgementReservation(TitleUpdateAcknowledgementRecord(proposed,
-                TitleUpdateAcknowledgementState.PENDING), fresh = true)
+            updates.prepareTitleUpdateAcknowledgement(db, frozen, proposed, encoded)
         }
     }
 
@@ -1456,64 +1070,9 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
         val scope = intent.scope
         val event = intent.base.eventId
         return stagingMutation(scope) { db ->
-            val retained = readTitleUpdateAcknowledgement(db, scope, event, receipt.attempt.id) ?: return@stagingMutation false
-            if (retained.receipt != receipt) return@stagingMutation false
-            if (retained.state == TitleUpdateAcknowledgementState.RESTORED) return@stagingMutation true
-            if (!activeProjectionScope(db, scope) || !acknowledgementFormatMatches(db, scope, intent.format) ||
-                !titleAcknowledgementSource(db, receipt) || !directUpdateAcknowledgementBase(db, scope, event))
-                return@stagingMutation false
-            val owner = titleAcknowledgementOwner(db, scope, event) ?: return@stagingMutation false
-            if (owner.copy(state = LocalEditState.PAUSED) != intent) return@stagingMutation false
-            val preparation = readLocalEditPreparation(db, scope, event) ?: return@stagingMutation false
-            if (preparation.intent != intent || !receipt.attempt.matchesPreparation(preparation)) return@stagingMutation false
-            if (readBaseline(db, scope, event) != intent.base) return@stagingMutation false
-            // The native ACK is now proven. Retire only a still-redundant ordinary
-            // plan, atomically with baseline/owner restoration; never claim its apply succeeded.
-            if (receipt.handoff == null) retireRedundantUpdateProjection(db, receipt.intent, receipt.handoff)
-            val oldBase = encodeChange(intent.base)
-            val newBase = encodeChange(receipt.projection.change)
-            val local = encodeChange(intent.base.copy(content = intent.content))
-            check(db.update("projection_bases", ContentValues().apply { put("payload", newBase) },
-                "scope=? AND event=? AND payload=? AND representation IS NULL", arrayOf(key(scope), event.value, oldBase)) == 1)
-            receipt.handoff?.let { frame ->
-                check(db.update("captured_create_handoffs", ContentValues().apply {
-                    put("last_projection", encodeHandoffProjection(receipt.projection)); put("waiting", 0)
-                }, "scope=? AND event=? AND nonce=? AND protocol=? AND ack_nonce=? AND ack_fingerprint=? " +
-                    "AND fingerprint=? AND state='RELEASED' AND waiting=1 AND last_projection IS ?",
-                    arrayOf(key(scope), event.value, frame.receipt.nonce, frame.receipt.protocol.toString(),
-                        frame.receipt.acknowledgement.nonce, frame.receipt.acknowledgement.fingerprint(), frame.receipt.fingerprint(),
-                        frame.lastProjection?.let(::encodeHandoffProjection))) == 1) {
-                    "Transferred title acknowledgement source changed"
-                }
-            }
-            check(db.delete("local_edit_preparations", "scope=? AND event=? AND mutation=? AND adapter=? AND version=? " +
-                "AND base=? AND local=? AND state=? AND timestamp=? AND prep_adapter=? AND prep_version=? AND payload=?",
-                arrayOf(key(scope), event.value, intent.id.value, intent.format.id, intent.format.version.toString(), oldBase,
-                    local, LocalEditState.PAUSED.name, preparation.timestamp.toString(), preparation.format.id,
-                    preparation.format.version.toString(), preparation.protectedPayload)) == 1)
-            check(db.delete("local_edits", "scope=? AND event=? AND mutation=? AND adapter=? AND version=? " +
-                "AND base=? AND local=? AND state=? AND kind='UPDATE'",
-                arrayOf(key(scope), event.value, intent.id.value, intent.format.id, intent.format.version.toString(),
-                    oldBase, local, owner.state.name)) == 1)
-            // Advance only an exact old cache; a concurrent/newer update, deletion or absence survives.
-            db.update("records", ContentValues().apply { put("payload", newBase); put("pending", 0) },
-                "scope=? AND event=? AND payload=?", arrayOf(key(scope), event.value, oldBase))
-            db.update("records", ContentValues().apply { put("pending", 0) },
-                "scope=? AND event=? AND payload=? AND pending=1", arrayOf(key(scope), event.value, newBase))
-            requeueDistinctUpdateObservation(db, receipt.intent, receipt.handoff, newBase)
-            check(db.update("title_update_acknowledgements", ContentValues().apply {
-                put("state", TitleUpdateAcknowledgementState.RESTORED.name)
-            }, "scope=? AND event=? AND nonce=? AND receipt=? AND state=?",
-                arrayOf(key(scope), event.value, receipt.projection.nonce, encodeTitleUpdateAcknowledgement(receipt),
-                    TitleUpdateAcknowledgementState.PENDING.name)) == 1)
-            archiveTitleUpdateAcknowledgement(db, TitleUpdateAcknowledgementRecord(receipt,
-                TitleUpdateAcknowledgementState.RESTORED))
-            true
+            updates.restoreTitleUpdateAcknowledgement(db, receipt, intent, scope, event)
         }
     }
-
-    private fun titleAcknowledgementSource(db: SQLiteDatabase, receipt: TitleUpdateAcknowledgementReceipt): Boolean =
-        localMutations.titleAcknowledgementSource(db, receipt)
 
     /** Historical inspection only: a frozen PAUSED snapshot never resets the current conflict state. */
     suspend fun localEditPreparation(scope: CalendarScope, eventId: EventId): LocalEditPreparation? =
@@ -1541,15 +1100,6 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
     suspend fun qualifyLocalDelete(intent: LocalDeleteIntent): Boolean = stagingMutation(intent.scope) { db ->
         qualifyLocalDelete(db,intent,true)
     }
-
-    /** A dirty tombstone can interrupt an identical incoming re-projection. Retain its
-     * obligation through preparation and sending; only a proven native DELETE ACK supersedes it.
-     */
-    private fun redundantDeleteProjection(pending: ProjectionReceipt, intent: LocalDeleteIntent): Boolean =
-        localMutations.redundantDeleteProjection(pending, intent)
-
-    private fun retireRedundantDeleteProjection(db: SQLiteDatabase, intent: LocalDeleteIntent): Unit =
-        localMutations.retireRedundantDeleteProjection(db, intent)
 
     /** Reservation precedes network claim; it is never native acknowledgement authority. */
     suspend fun prepareDeleteAcknowledgement(record: DeleteAttemptRecord): DeleteAcknowledgementReservation? = stagingMutation(record.scope) { db ->
