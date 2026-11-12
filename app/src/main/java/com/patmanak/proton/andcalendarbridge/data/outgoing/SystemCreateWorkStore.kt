@@ -197,45 +197,79 @@ class SystemCreateWorkStore(context: Context, name: String = "system-creates.db"
     }
 
     /** Opt-in is scoped to the complete account/calendar/generation and defaults to disabled. */
-    fun modeEnabled(scope: CalendarScope): Boolean = modes.getBoolean(modeKey(scope), false)
+    fun modeEnabled(scope: CalendarScope): Boolean {
+        val key = modeKey(scope)
+        return modes.getBoolean(if (modes.contains("unified-$key")) "unified-$key" else key, false)
+    }
+
+    /** Only an existing complete consent can migrate to global editing without a new choice. */
+    @Synchronized fun migrateCalendarModes() {
+        val values = modes.all
+        val update = modes.edit()
+        for (key in values.keys.filter { it.matches(Regex("v1-[a-f0-9]{64}")) }) {
+            if (values.containsKey("unified-$key")) continue
+            val flags = listOf(key, "titles-$key", "texts-$key", "times-$key", "deletes-$key")
+                .map { values[it] == true }
+            update.putBoolean("unified-$key", flags.all { it })
+            update.putBoolean("review-$key", flags.any { it } && !flags.all { it })
+            // Retain the original bits and all SQL work; only the effective consent changes.
+        }
+        check(update.commit()) { "Calendar mode migration was not persisted" }
+    }
+
+    fun modeReviewRequired(scope: CalendarScope) = modes.getBoolean("review-${modeKey(scope)}", false)
+
+    @Synchronized fun setEditableMode(scope: CalendarScope, enabled: Boolean) {
+        val key = modeKey(scope)
+        val update = modes.edit().putBoolean("unified-$key", enabled).putBoolean(key, enabled).remove("review-$key")
+        for (field in listOf("titles", "texts", "times", "deletes")) update.putBoolean("$field-$key", enabled)
+        check(update.commit()) { "Calendar write mode was not persisted" }
+    }
+
+    private fun unified(scope: CalendarScope) = modes.contains("unified-${modeKey(scope)}")
 
     @Synchronized fun textsEnabled(scope: CalendarScope): Boolean =
-        modeEnabled(scope) && modes.getBoolean("texts-${modeKey(scope)}", false)
+        modeEnabled(scope) && (unified(scope) || modes.getBoolean("texts-${modeKey(scope)}", false))
 
     @Synchronized fun setTextsMode(scope: CalendarScope, enabled: Boolean) {
+        if (unified(scope)) return setEditableMode(scope, enabled)
         check(modes.edit().putBoolean("texts-${modeKey(scope)}", enabled && modeEnabled(scope)).commit()) {
             "System text mode was not persisted"
         }
     }
 
     @Synchronized fun timesEnabled(scope: CalendarScope): Boolean =
-        modeEnabled(scope) && modes.getBoolean("times-${modeKey(scope)}", false)
+        modeEnabled(scope) && (unified(scope) || modes.getBoolean("times-${modeKey(scope)}", false))
 
     @Synchronized fun setTimesMode(scope: CalendarScope, enabled: Boolean) {
+        if (unified(scope)) return setEditableMode(scope, enabled)
         check(modes.edit().putBoolean("times-${modeKey(scope)}", enabled && modeEnabled(scope)).commit()) {
             "System time mode was not persisted"
         }
     }
 
     @Synchronized fun titlesEnabled(scope: CalendarScope): Boolean =
-        modeEnabled(scope) && modes.getBoolean("titles-${modeKey(scope)}", false)
+        modeEnabled(scope) && (unified(scope) || modes.getBoolean("titles-${modeKey(scope)}", false))
 
     @Synchronized fun deletesEnabled(scope: CalendarScope): Boolean =
-        modeEnabled(scope) && modes.getBoolean("deletes-${modeKey(scope)}", false)
+        modeEnabled(scope) && (unified(scope) || modes.getBoolean("deletes-${modeKey(scope)}", false))
 
     @Synchronized fun setDeletesMode(scope: CalendarScope, enabled: Boolean) {
+        if (unified(scope)) return setEditableMode(scope, enabled)
         check(modes.edit().putBoolean("deletes-${modeKey(scope)}", enabled && modeEnabled(scope)).commit()) {
             "System delete mode was not persisted"
         }
     }
 
     @Synchronized fun setTitlesMode(scope: CalendarScope, enabled: Boolean) {
+        if (unified(scope)) return setEditableMode(scope, enabled)
         check(modes.edit().putBoolean("titles-${modeKey(scope)}", enabled && modeEnabled(scope)).commit()) {
             "System title mode was not persisted"
         }
     }
 
     @Synchronized fun setMode(scope: CalendarScope, enabled: Boolean) {
+        if (unified(scope)) return setEditableMode(scope, enabled)
         val update = modes.edit().putBoolean(modeKey(scope), enabled)
         if (!enabled) update.remove("titles-${modeKey(scope)}").remove("texts-${modeKey(scope)}")
             .remove("times-${modeKey(scope)}").remove("deletes-${modeKey(scope)}")

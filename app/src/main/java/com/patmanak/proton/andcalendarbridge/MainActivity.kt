@@ -145,11 +145,7 @@ class MainActivity : ComponentActivity() {
                                 Manifest.permission.READ_CALENDAR, Manifest.permission.WRITE_CALENDAR)) },
                             onOpenSettings = { startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
                                 "package:$packageName".toUri())) },
-                            onMode = { selection, enabled -> preferences.systemCreates.setEnabled(selection, enabled); onManualSync() },
-                            onTitlesMode = { selection, enabled -> preferences.systemCreates.setTitlesEnabled(selection, enabled); onManualSync() },
-                            onTextMode = { selection, enabled -> preferences.systemCreates.setTextsEnabled(selection, enabled); onManualSync() },
-                            onTimeMode = { selection, enabled -> preferences.systemCreates.setTimesEnabled(selection, enabled); onManualSync() },
-                            onDeleteMode = { selection, enabled -> preferences.systemCreates.setDeletesEnabled(selection, enabled); onManualSync() },
+                            onMode = { selection, enabled -> preferences.systemCreates.setEnabled(selection, enabled, unified = true); onManualSync() },
                             onOpenConflicts = { selection -> archiveScope = selection.scope })
                     },
                 )

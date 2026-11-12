@@ -20,6 +20,7 @@
     <string name="calendar_dashboard_local">Zapisane zmiany lokalne: %1$d · Konflikty: %2$d</string>
     <string name="calendar_dashboard_outgoing">Oczekujące na wysłanie lub weryfikację: %1$d</string>
     <string name="calendar_dashboard_read_only">Tylko do odczytu</string>
-    <string name="calendar_dashboard_create_mode">Tworzenie wydarzeń dozwolone</string>
-    <string name="calendar_dashboard_title_mode">Tworzenie wydarzeń i zmiany tytułów dozwolone</string>
+    <string name="calendar_mode_editable">Edytowalny</string>
+    <string name="calendar_mode_description">Synchronizuj obsługiwane zmiany z Androida do Proton, gdy ten kalendarz pozwala na edycję. Nieobsługiwane zmiany i oczekujące operacje zostają zachowane.</string>
+    <string name="calendar_mode_migration">Poprzednie ustawienia zezwalające tylko na niektóre zmiany zachowano w trybie tylko do odczytu. Wybierz Edytowalny, aby zezwolić na wszystkie obsługiwane zmiany.</string>
 </resources>

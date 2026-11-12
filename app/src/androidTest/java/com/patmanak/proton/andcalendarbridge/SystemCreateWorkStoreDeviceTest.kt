@@ -28,6 +28,67 @@ import org.junit.runner.RunWith
 /** Opt-in isolated SQLite/preferences fixtures; no Provider, account, network or event content. */
 @RunWith(AndroidJUnit4::class)
 class SystemCreateWorkStoreDeviceTest {
+    @Test fun partialLegacyWriteOptionsDoNotGrantTheNewEditableMode() = fixture { _, _, store ->
+        store.setMode(scope, true)
+        store.setTitlesMode(scope, true)
+        store.migrateCalendarModes()
+        assertFalse("A partial legacy consent must not grant every write operation", store.modeEnabled(scope))
+        assertTrue(store.modeReviewRequired(scope))
+    }
+
+    @Test fun completeLegacyConsentMigratesOnceAndRemainsScopedAfterReopen() = fixture { context, name, store ->
+        store.setMode(scope, true); store.setTitlesMode(scope, true); store.setTextsMode(scope, true)
+        store.setTimesMode(scope, true); store.setDeletesMode(scope, true)
+        val legacy = context.getSharedPreferences("system-create-modes", Context.MODE_PRIVATE).all.toMap()
+        store.migrateCalendarModes()
+        assertAllModes(store, scope, true)
+        assertFalse(store.modeReviewRequired(scope))
+        val migrated = context.getSharedPreferences("system-create-modes", Context.MODE_PRIVATE).all.toMap()
+        for ((key, value) in legacy) assertEquals(value, migrated[key])
+        store.migrateCalendarModes()
+        assertEquals(migrated, context.getSharedPreferences("system-create-modes", Context.MODE_PRIVATE).all)
+        store.close()
+        SystemCreateWorkStore(context, name).use { reopened ->
+            reopened.migrateCalendarModes()
+            assertAllModes(reopened, scope, true)
+            for (other in listOf(scope.copy(account = AccountId("other")),
+                scope.copy(calendar = CalendarId("other")), scope.copy(generation = 1))) {
+                assertAllModes(reopened, other, false)
+            }
+        }
+    }
+
+    @Test fun modeMigrationAndNewChoicesNeverChangeUncertainWork() = fixture { context, name, store ->
+        val pending = store.reserve(scope, 7)
+        assertTrue(store.status(pending, SystemCreateWorkStatus.UNKNOWN))
+        val uncertain = pending.copy(status = SystemCreateWorkStatus.UNKNOWN)
+        store.setMode(scope, true)
+        store.setTimesMode(scope, true)
+        store.migrateCalendarModes()
+        assertAllModes(store, scope, false)
+        assertEquals(uncertain, store.read(scope, 7))
+        store.setEditableMode(scope, true)
+        assertAllModes(store, scope, true)
+        assertFalse(store.modeReviewRequired(scope))
+        store.setEditableMode(scope, false)
+        assertAllModes(store, scope, false)
+        store.migrateCalendarModes()
+        assertFalse(store.modeReviewRequired(scope))
+        store.close()
+        SystemCreateWorkStore(context, name).use { reopened ->
+            assertAllModes(reopened, scope, false)
+            assertEquals(uncertain, reopened.read(scope, 7))
+            assertEquals(uncertain, reopened.reserve(scope, 7))
+        }
+    }
+
+    private fun assertAllModes(store: SystemCreateWorkStore, target: CalendarScope, expected: Boolean) {
+        assertEquals(expected, store.modeEnabled(target))
+        assertEquals(expected, store.titlesEnabled(target))
+        assertEquals(expected, store.textsEnabled(target))
+        assertEquals(expected, store.timesEnabled(target))
+        assertEquals(expected, store.deletesEnabled(target))
+    }
     private val scope = CalendarScope(AccountId("system-create-fixture"), CalendarId("fixture-calendar"), 0)
 
     private fun fixture(block: suspend (Context, String, SystemCreateWorkStore) -> Unit) = runBlocking {

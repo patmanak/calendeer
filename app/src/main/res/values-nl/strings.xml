@@ -19,17 +19,8 @@
     <string name="system_title_limits">Voor persoonlijke afspraken zonder gasten of herhalingen. Bestaande herinneringen en afspraakkleuren blijven behouden. Schakel de juiste opties in voor andere velden.</string>
     <string name="system_create_pending">Creaties in afwachting of ter controle: %1$d. Een onzekere verzending wordt nooit automatisch herhaald.</string>
     <string name="system_create_error">Er is een probleem opgetreden bij de synchronisatie met Android. Je gegevens blijven bewaard.</string>
-    <string name="system_text_mode">Wijzigingen van beschrijving en locatie synchroniseren (experimenteel)</string>
     <string name="system_text_limits">Bewerk beschrijving en locatie, eventueel samen met de titel. Schakel de betreffende opties in als je ook datums wijzigt. Herinneringen en kleuren blijven behouden; wijzigingen daarin blijven lokaal.</string>
     <string name="system_text_overview">Standaard alleen lezen. Aanmaken, titel, tekst, datums en verwijderen hebben aparte opties. Schakel bij gecombineerde wijzigingen de betreffende opties in. Niet-ondersteunde wijzigingen en wachtende taken blijven behouden.</string>
-    <string name="system_title_limits_with_text">@string/system_title_limits</string>
-    <string name="calendar_dashboard_text_mode">Tekstwijzigingen ingeschakeld</string>
-    <string name="system_time_mode">Datum- en tijdwijzigingen synchroniseren (experimenteel)</string>
-    <string name="system_time_limits">Wijzig datums, duur of tijdzone, of wissel tussen afspraken met tijd en hele dagen. Schakel ook voor titel en tekst de juiste opties in. Herinneringen en kleuren blijven behouden. Gasten en herhalingen worden niet ondersteund.</string>
-    <string name="calendar_dashboard_time_mode">Tijdwijzigingen ingeschakeld</string>
-    <string name="system_delete_mode">Verwijderingen synchroniseren (experimenteel)</string>
-    <string name="system_delete_limits">Alleen eenvoudige geïmporteerde afspraken zonder herhalingen, herinneringen, gasten of aangepaste kleuren. Andere verwijderingen blijven op Android.</string>
-    <string name="calendar_dashboard_delete_mode">Verwijderingen ingeschakeld</string>
     <string name="sync_settings_title">Synchronisatie</string>
     <string name="sync_settings_last_success">Laatste geslaagde synchronisatie</string>
     <string name="sync_settings_never">Nog geen geslaagde synchronisatie</string>

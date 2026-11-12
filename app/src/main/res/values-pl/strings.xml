@@ -19,17 +19,8 @@
     <string name="system_title_limits">Dla osobistych wydarzeń bez gości i powtarzania. Istniejące przypomnienia i kolory są zachowywane. Włącz odpowiednie opcje, aby zmieniać inne pola.</string>
     <string name="system_create_pending">Operacje tworzenia oczekujące lub wymagające sprawdzenia: %1$d. Niepewne wysłanie nigdy nie jest automatycznie powtarzane.</string>
     <string name="system_create_error">Wystąpił problem podczas synchronizacji z Androidem. Twoje dane są zachowane.</string>
-    <string name="system_text_mode">Synchronizuj zmiany opisu i miejsca (eksperymentalne)</string>
     <string name="system_text_limits">Zmieniaj opis i miejsce, także wraz z tytułem. Jeśli zmieniasz również daty, włącz odpowiednie opcje. Przypomnienia i kolory są zachowywane; ich zmiany pozostają lokalne.</string>
     <string name="system_text_overview">Domyślnie tylko odczyt. Tworzenie, tytuł, tekst, daty i usuwanie mają osobne opcje. Dla zmian łączonych włącz odpowiednie opcje. Nieobsługiwane zmiany i oczekujące operacje są zachowywane.</string>
-    <string name="system_title_limits_with_text">@string/system_title_limits</string>
-    <string name="calendar_dashboard_text_mode">Zmiany tekstu włączone</string>
-    <string name="system_time_mode">Synchronizuj zmiany daty i godziny (eksperymentalne)</string>
-    <string name="system_time_limits">Zmieniaj daty, czas trwania lub strefę czasową albo przełączaj między wydarzeniami z godziną i całodniowymi. Dla tytułu i tekstu także włącz odpowiednie opcje. Przypomnienia i kolory są zachowywane. Goście i powtarzanie nie są obsługiwane.</string>
-    <string name="calendar_dashboard_time_mode">Zmiany godzin włączone</string>
-    <string name="system_delete_mode">Synchronizuj usunięcia (eksperymentalne)</string>
-    <string name="system_delete_limits">Tylko proste zaimportowane wydarzenia, bez powtórzeń, przypomnień, gości ani własnych kolorów. Pozostałe usunięcia pozostają w Androidzie.</string>
-    <string name="calendar_dashboard_delete_mode">Usunięcia włączone</string>
     <string name="sync_settings_title">Synchronizacja</string>
     <string name="sync_settings_last_success">Ostatnia udana synchronizacja</string>
     <string name="sync_settings_never">Brak udanej synchronizacji</string>

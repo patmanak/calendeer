@@ -27,8 +27,8 @@ No event editor or calendar browsing interface is added.
 Authenticated navigation uses two labeled destinations, Calendars and Settings.
 Calendars combines discovery, synchronization and write preferences into one card
 per persisted calendar. Each card shows its color, name, current status and sync
-switch. A separate Options and details action reveals its independent CREATE and
-title consent switches, supported profiles and synchronization details. Opening a
+switch. A separate Options and details action reveals one Editable switch (off
+means Read-only), supported profiles and synchronization details. Opening a
 card or destination does not enable writes or trigger synchronization. Newly
 discovered calendars remain noninteractive until their scope is persisted.
 Synchronize now and Refresh calendar list remain distinct actions.
@@ -49,7 +49,8 @@ requires attention, including when settings was opened before sign-in.
 
 Each calendar reports retained Android change and recorded conflict counts when
 its local UPDATE/DELETE journal is nonempty. Its details explain that unsupported
-changes remain local, with the separate narrow title option described explicitly.
+changes remain local. Enabling editing permits supported operations, subject to
+current permissions and Proton rights; it does not enable unsupported operations.
 Counts remain visible for paused/unavailable calendars and without calendar
 permission, but disappear on sign-out. Zero counts hide the entire explanation.
 No event contents, event identifiers or resolution actions are presented. This
@@ -60,9 +61,10 @@ navigation. Server human verification takes priority even after sign-in, includi
 when requested during synchronization. Existing credential clearing, secure-window
 protection and explicit cancellation remain in force.
 
-The application label changes without changing its Android application ID, account
-type, Provider ownership markers or local storage names. Existing sessions and
-mirrors are not recreated for branding. Eight supported languages remain available.
+Old complete write consent migrates to Editable; partial consent becomes Read-only
+with an explanation inviting a new choice. This never discards pending work or
+reissues an uncertain request. Fresh calendars default to Read-only. Eight
+supported languages remain available.
 
 ## Artwork provenance
 

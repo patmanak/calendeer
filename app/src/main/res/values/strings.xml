@@ -20,17 +20,8 @@
     <string name="system_title_limits">For personal events without guests or repeats. Existing reminders and event colors are preserved. Enable the corresponding options to change other fields.</string>
     <string name="system_create_pending">Creations waiting or requiring attention: %1$d. An uncertain send is never repeated automatically.</string>
     <string name="system_create_error">Synchronization with Android encountered a problem. Your data is retained.</string>
-    <string name="system_text_mode">Synchronize description and location changes (experimental)</string>
     <string name="system_text_limits">Edit descriptions and locations, including an accompanying title change. For combined date changes, also enable the date option and any other affected option. Existing reminders and colors are preserved; changes to them stay local.</string>
     <string name="system_text_overview">Read-only by default. Creation, title, text, dates and deletion have separate options. Enable the affected options for combined edits. Unsupported changes and pending work are retained.</string>
-    <string name="system_title_limits_with_text">@string/system_title_limits</string>
-    <string name="calendar_dashboard_text_mode">Text changes enabled</string>
-    <string name="system_time_mode">Synchronize date and time changes (experimental)</string>
-    <string name="system_time_limits">Change dates, duration, time zone or switch between timed and all-day events. Enable the affected options when changing title or text too. Existing reminders and colors are preserved. Guests and recurrence remain unsupported.</string>
-    <string name="calendar_dashboard_time_mode">Time changes enabled</string>
-    <string name="system_delete_mode">Synchronize deletions (experimental)</string>
-    <string name="system_delete_limits">Simple imported events only, without repeats, reminders, guests or custom colors. Other deletions stay on Android.</string>
-    <string name="calendar_dashboard_delete_mode">Deletions enabled</string>
     <string name="sync_settings_title">Synchronization</string>
     <string name="sync_settings_last_success">Last successful synchronization</string>
     <string name="sync_settings_never">No successful synchronization yet</string>

@@ -56,7 +56,7 @@ class BridgeApplication : Application() {
     private val createAttempts by lazy { CreateAttemptStore(this) }
     private val localCreateCaptures by lazy { LocalCreateStore(this) }
     private val nativeCalendar by lazy { AndroidCalendarProjection(this) }
-    private val systemCreateWork by lazy { SystemCreateWorkStore(this) }
+    private val systemCreateWork by lazy { SystemCreateWorkStore(this).apply { migrateCalendarModes() } }
     // Production history only. Experimental fixtures keep their isolated journals.
     // No title transport or dispatch admission is exposed to this offline traversal.
     private val titleAttempts by lazy { TitleUpdateAttemptStore(this) }

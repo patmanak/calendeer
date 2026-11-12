@@ -30,10 +30,7 @@ class SystemTimeModeUiDeviceTest {
         summary, enabled = true, status = "IMPORTED", completedAt = null)
     private val imports = mutableStateOf(ImportUiState(listOf(selection), hasPermission = true, authenticated = true))
     private val creates = mutableStateOf(SystemCreateUiState(timeSupportAvailable = true, textSupportAvailable = true))
-    private val textChanges = mutableListOf<Boolean>()
-    private val timeChanges = mutableListOf<Boolean>()
-    private val titleChanges = mutableListOf<Boolean>()
-    private val createChanges = mutableListOf<Boolean>()
+    private val modeChanges = mutableListOf<Boolean>()
 
     private fun start() {
         compose.setContent {
@@ -41,68 +38,60 @@ class SystemTimeModeUiDeviceTest {
                 CalendarDashboard(CalendarCatalogState(CalendarCatalogStatus.READY, listOf(summary),
                     canRefresh = true, account = selection.scope.account), imports.value, creates.value,
                     onRefresh = {}, onSetEnabled = { _, _ -> }, onSync = {}, onRequestPermission = {}, onOpenSettings = {},
-                    onMode = { _, value -> createChanges += value },
-                    onTitlesMode = { _, value -> titleChanges += value },
-                    modifier = Modifier.verticalScroll(rememberScrollState()),
-                    onTextMode = { _, value -> textChanges += value },
-                    onTimeMode = { selected, value -> assertEquals(selection.scope, selected.scope); timeChanges += value })
+                    onMode = { selected, value -> assertEquals(selection.scope, selected.scope); modeChanges += value },
+                    modifier = Modifier.verticalScroll(rememberScrollState()))
             }
         }
         compose.onNodeWithTag(CalendarDashboardTags.OPTIONS).performScrollTo().performClick()
     }
 
-    @Test fun unavailableFeatureNeverExposesConsentEvenWithRetainedPreference() {
+    @Test fun unavailableTimeSupportKeepsOneEditableChoiceWithoutSeparateTimeConsent() {
         creates.value = creates.value.copy(timeSupportAvailable = false, enabled = setOf(selection.scope),
             timesEnabled = setOf(selection.scope))
         start()
         compose.onNodeWithTag("system-time-toggle").assertDoesNotExist()
-        compose.runOnIdle { assertEquals(emptyList<Boolean>(), timeChanges) }
+        compose.onNodeWithTag("system-create-toggle").assertIsOn().assertIsEnabled()
+        compose.runOnIdle { assertEquals(emptyList<Boolean>(), modeChanges) }
     }
 
-    @Test fun openingOptionsDoesNotOptInAndTimeConsentIsIndependentOfTitles() {
+    @Test fun migrationNoticeBelongsOnlyToTheMatchingCalendarScope() {
+        val unrelatedScope = selection.scope.copy(calendar = CalendarId("other-calendar"))
+        creates.value = creates.value.copy(modeReview = setOf(unrelatedScope))
         start()
-        compose.onNodeWithTag("system-time-toggle").assertIsOff().assertIsNotEnabled()
+        compose.onNodeWithText(compose.activity.getString(R.string.calendar_mode_migration)).assertDoesNotExist()
+        compose.onNodeWithTag("system-create-toggle").assertIsOff()
         compose.runOnIdle {
-            assertEquals(emptyList<Boolean>(), timeChanges)
-            assertEquals(emptyList<Boolean>(), titleChanges)
-            assertEquals(emptyList<Boolean>(), createChanges)
-            creates.value = creates.value.copy(enabled = setOf(selection.scope))
+            assertEquals(emptyList<Boolean>(), modeChanges)
+            creates.value = creates.value.copy(modeReview = setOf(selection.scope))
         }
-        compose.onNodeWithTag("system-time-toggle").assertIsOff().assertIsEnabled().performScrollTo().performClick()
-        compose.runOnIdle {
-            assertEquals(listOf(true), timeChanges)
-            assertEquals(emptyList<Boolean>(), titleChanges)
-            assertEquals(emptyList<Boolean>(), createChanges)
-        }
-        compose.onNodeWithTag("system-title-toggle").assertIsOff()
-        compose.onNodeWithTag("system-text-toggle").assertIsOff()
-        compose.runOnIdle { assertEquals(emptyList<Boolean>(), textChanges) }
+        compose.onNodeWithText(compose.activity.getString(R.string.calendar_mode_migration)).assertExists()
+        compose.onNodeWithTag("system-create-toggle").assertIsOff()
+        compose.runOnIdle { assertEquals(emptyList<Boolean>(), modeChanges) }
     }
 
     @Test fun revokedPermissionOrSelectionBlocksEnablingButAlwaysAllowsTurningOff() {
-        creates.value = creates.value.copy(enabled = setOf(selection.scope))
         imports.value = imports.value.copy(hasPermission = false)
         start()
-        compose.onNodeWithTag("system-time-toggle").assertIsNotEnabled()
+        compose.onNodeWithTag("system-create-toggle").assertIsOff().assertIsNotEnabled()
         compose.runOnIdle { imports.value = imports.value.copy(hasPermission = true,
             selections = listOf(selection.copy(enabled = false))) }
-        compose.onNodeWithTag("system-time-toggle").assertIsNotEnabled()
+        compose.onNodeWithTag("system-create-toggle").assertIsNotEnabled()
         compose.runOnIdle { imports.value = imports.value.copy(selections = listOf(selection.copy(available = false))) }
-        compose.onNodeWithTag("system-time-toggle").assertIsNotEnabled()
+        compose.onNodeWithTag("system-create-toggle").assertIsNotEnabled()
         compose.runOnIdle {
             imports.value = imports.value.copy(hasPermission = false)
-            creates.value = creates.value.copy(enabled = emptySet(), timesEnabled = setOf(selection.scope))
+            creates.value = creates.value.copy(enabled = setOf(selection.scope))
         }
-        compose.onNodeWithTag("system-time-toggle").assertIsOn().assertIsEnabled().performScrollTo().performClick()
-        compose.runOnIdle { assertEquals(listOf(false), timeChanges) }
+        compose.onNodeWithTag("system-create-toggle").assertIsOn().assertIsEnabled().performScrollTo().performClick()
+        compose.runOnIdle { assertEquals(listOf(false), modeChanges) }
     }
 
     @Test fun signingOutRemovesTheOptionWithoutChangingRetainedConsent() {
         creates.value = creates.value.copy(enabled = setOf(selection.scope), timesEnabled = setOf(selection.scope))
         start()
-        compose.onNodeWithTag("system-time-toggle").assertIsOn()
+        compose.onNodeWithTag("system-create-toggle").assertIsOn()
         compose.runOnIdle { imports.value = imports.value.copy(authenticated = false) }
-        compose.onNodeWithTag("system-time-toggle").assertDoesNotExist()
-        compose.runOnIdle { assertEquals(emptyList<Boolean>(), timeChanges) }
+        compose.onNodeWithTag("system-create-toggle").assertDoesNotExist()
+        compose.runOnIdle { assertEquals(emptyList<Boolean>(), modeChanges) }
     }
 }

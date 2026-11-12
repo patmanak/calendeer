@@ -20,6 +20,7 @@
     <string name="calendar_dashboard_local">Opgeslagen lokale wijzigingen: %1$d · Conflicten: %2$d</string>
     <string name="calendar_dashboard_outgoing">Wachten op verzending of controle: %1$d</string>
     <string name="calendar_dashboard_read_only">Alleen-lezen</string>
-    <string name="calendar_dashboard_create_mode">Afspraken maken toegestaan</string>
-    <string name="calendar_dashboard_title_mode">Afspraken maken en titels wijzigen toegestaan</string>
+    <string name="calendar_mode_editable">Bewerkbaar</string>
+    <string name="calendar_mode_description">Synchroniseer ondersteunde wijzigingen van Android naar Proton wanneer deze agenda bewerken toestaat. Niet-ondersteunde wijzigingen en openstaande bewerkingen blijven bewaard.</string>
+    <string name="calendar_mode_migration">Eerdere instellingen die slechts bepaalde wijzigingen toestonden, zijn als alleen-lezen behouden. Kies Bewerkbaar om alle ondersteunde wijzigingen toe te staan.</string>
 </resources>

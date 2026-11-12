@@ -39,7 +39,9 @@ Samsung/One UI is outside 0.1. Signature management remains deferred by the owne
   settings display the connected account. Security-key-only login and all account
   variants are not qualified. [Authentication](research/AUTH_INTEGRATION.md).
 - Violet deer interface, eight languages, light/dark/system themes, calendar
-  selection and per-operation experimental consent. Sync settings expose Android
+  selection and one Read-only / Editable mode per calendar. Previous partial write
+  choices migrate to Read-only with an explanation; complete consent stays editable.
+  Existing work and uncertain outcomes are retained. Sync settings expose Android
   switches, the last successful cycle, interval and an optional one-time battery
   offer. Disabled push is explained; manual requests receive visible
   feedback. [Design](DESIGN.md), [permissions](PERMISSIONS.md).

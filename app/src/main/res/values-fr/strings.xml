@@ -19,17 +19,8 @@
     <string name="system_title_limits">Pour les événements personnels sans invité ni répétition. Les rappels et les couleurs existants sont conservés. Activez les options correspondantes pour modifier les autres champs.</string>
     <string name="system_create_pending">Créations en attente ou à vérifier : %1$d. Un envoi incertain n’est jamais répété automatiquement.</string>
     <string name="system_create_error">La synchronisation avec Android a rencontré un problème. Vos données sont conservées.</string>
-    <string name="system_text_mode">Synchroniser les changements de description et de lieu (expérimental)</string>
     <string name="system_text_limits">Modifiez la description et le lieu, ainsi que le titre qui les accompagne. Si vous changez aussi les dates, activez les options concernées. Les rappels et les couleurs sont conservés ; leur modification reste locale.</string>
     <string name="system_text_overview">Lecture seule par défaut. La création, le titre, le texte, les dates et la suppression ont des options séparées. Activez les options concernées pour une modification combinée. Les changements non pris en charge et les opérations en attente sont conservés.</string>
-    <string name="system_title_limits_with_text">@string/system_title_limits</string>
-    <string name="calendar_dashboard_text_mode">Modifications de texte activées</string>
-    <string name="system_time_mode">Synchroniser les changements de date et d’heure (expérimental)</string>
-    <string name="system_time_limits">Modifiez les dates, la durée, le fuseau ou passez entre horaires et journée entière. Activez les options concernées si vous modifiez aussi le titre ou le texte. Les rappels et les couleurs sont conservés. Invités et répétitions restent non pris en charge.</string>
-    <string name="calendar_dashboard_time_mode">Changements d’horaires activés</string>
-    <string name="system_delete_mode">Synchroniser les suppressions (expérimental)</string>
-    <string name="system_delete_limits">Événements importés simples, sans répétition, rappel, invité ni couleur personnalisée. Les autres suppressions restent sur Android.</string>
-    <string name="calendar_dashboard_delete_mode">Suppressions activées</string>
     <string name="sync_settings_title">Synchronisation</string>
     <string name="sync_settings_last_success">Dernière synchronisation réussie</string>
     <string name="sync_settings_never">Aucune synchronisation réussie pour le moment</string>

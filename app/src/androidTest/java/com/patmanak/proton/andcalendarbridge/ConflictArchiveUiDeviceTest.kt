@@ -185,7 +185,6 @@ class ConflictArchiveUiDeviceTest {
                     onRequestPermission = { error("Archive navigation must not request permission") },
                     onOpenSettings = { error("Archive navigation must not open settings") },
                     onMode = { _, _ -> error("Archive navigation must not enable creation") },
-                    onTitlesMode = { _, _ -> error("Archive navigation must not enable titles") },
                     modifier = Modifier.verticalScroll(rememberScrollState()),
                     onOpenConflicts = { opened = it })
             }

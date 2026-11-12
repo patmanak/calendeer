@@ -20,6 +20,7 @@
     <string name="calendar_dashboard_local">Gespeicherte lokale Änderungen: %1$d · Konflikte: %2$d</string>
     <string name="calendar_dashboard_outgoing">Warten auf Versand oder Prüfung: %1$d</string>
     <string name="calendar_dashboard_read_only">Schreibgeschützt</string>
-    <string name="calendar_dashboard_create_mode">Erstellen von Terminen erlaubt</string>
-    <string name="calendar_dashboard_title_mode">Erstellen von Terminen und Titeländerungen erlaubt</string>
+    <string name="calendar_mode_editable">Bearbeitbar</string>
+    <string name="calendar_mode_description">Unterstützte Änderungen von Android mit Proton synchronisieren, wenn dieser Kalender die Bearbeitung erlaubt. Nicht unterstützte Änderungen und ausstehende Vorgänge bleiben erhalten.</string>
+    <string name="calendar_mode_migration">Bisherige teilweise Schreibfreigaben wurden als schreibgeschützt übernommen. Wähle „Bearbeitbar“, um alle unterstützten Änderungen zu erlauben.</string>
 </resources>

@@ -43,6 +43,7 @@ data class SystemCreateUiState(
     val timeSupportAvailable: Boolean = false,
     val deletesEnabled: Set<CalendarScope> = emptySet(),
     val deleteSupportAvailable: Boolean = false,
+    val modeReview: Set<CalendarScope> = emptySet(),
 ) {
     override fun toString() = "SystemCreateUiState(REDACTED, busy=$busy, failed=$failed)"
 }
@@ -135,12 +136,12 @@ class SystemCreateController(
     }
 
     /** Disable and epoch invalidation happen synchronously, even while network work is suspended. */
-    fun setEnabled(selection: ImportStore.Selection, enabled: Boolean) {
+    fun setEnabled(selection: ImportStore.Selection, enabled: Boolean, unified: Boolean = false) {
         val target = selection.scope
         val current = imports.state.value
         if (enabled && (!current.authenticated || !current.hasPermission ||
             current.selections.none { it.scope == target && it.enabled && it.available })) return
-        work.setMode(target, enabled)
+        if (unified) work.setEditableMode(target, enabled) else work.setMode(target, enabled)
         epochs.computeIfAbsent(target) { AtomicLong() }.incrementAndGet()
         imports.systemCreatePolicyChanged(target, enabled)
         scope.launch {
@@ -561,6 +562,7 @@ class SystemCreateController(
         val times = selections.map { it.scope }.filter { work.timesEnabled(it) }.toSet()
         val deletes = selections.map { it.scope }.filter { work.deletesEnabled(it) }.toSet()
         mutableState.update { it.copy(enabled = enabled, titlesEnabled = titles, textsEnabled = texts,
+            modeReview = selections.map { it.scope }.filter { work.modeReviewRequired(it) }.toSet(),
             textSupportAvailable = textSupportAvailable, timesEnabled = times,
             timeSupportAvailable = timeSupportAvailable, deletesEnabled = deletes, deleteSupportAvailable = deleteSupportAvailable, pending = pending) }
     }

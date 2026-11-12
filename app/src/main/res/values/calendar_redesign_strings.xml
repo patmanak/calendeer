@@ -20,6 +20,7 @@
     <string name="calendar_dashboard_local">Saved local changes: %1$d · Conflicts: %2$d</string>
     <string name="calendar_dashboard_outgoing">Waiting to be sent or checked: %1$d</string>
     <string name="calendar_dashboard_read_only">Read-only</string>
-    <string name="calendar_dashboard_create_mode">Event creation allowed</string>
-    <string name="calendar_dashboard_title_mode">Event creation and title changes allowed</string>
+    <string name="calendar_mode_editable">Editable</string>
+    <string name="calendar_mode_description">Sync supported changes from Android to Proton when this calendar permits editing. Unsupported changes and pending work are retained.</string>
+    <string name="calendar_mode_migration">Previous partial write settings were kept read-only. Choose Editable to allow all supported changes.</string>
 </resources>

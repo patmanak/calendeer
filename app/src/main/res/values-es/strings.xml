@@ -19,17 +19,8 @@
     <string name="system_title_limits">Para eventos personales sin invitados ni repeticiones. Se conservan los recordatorios y colores existentes. Activa las opciones correspondientes para cambiar otros campos.</string>
     <string name="system_create_pending">Creaciones pendientes o por revisar: %1$d. Un envío incierto nunca se repite automáticamente.</string>
     <string name="system_create_error">Se ha producido un problema al sincronizar con Android. Tus datos se conservan.</string>
-    <string name="system_text_mode">Sincronizar cambios de descripción y ubicación (experimental)</string>
     <string name="system_text_limits">Edita la descripción y la ubicación, incluido un cambio de título asociado. Si también cambias las fechas, activa las opciones correspondientes. Se conservan los recordatorios y colores; sus cambios permanecen locales.</string>
     <string name="system_text_overview">Solo lectura por defecto. La creación, el título, el texto, las fechas y la eliminación tienen opciones separadas. Activa las opciones afectadas para cambios combinados. Se conservan los cambios no compatibles y las operaciones pendientes.</string>
-    <string name="system_title_limits_with_text">@string/system_title_limits</string>
-    <string name="calendar_dashboard_text_mode">Cambios de texto activados</string>
-    <string name="system_time_mode">Sincronizar cambios de fecha y hora (experimental)</string>
-    <string name="system_time_limits">Cambia fechas, duración o zona horaria, o alterna entre eventos con hora y de todo el día. Activa las opciones correspondientes si también cambias el título o el texto. Se conservan los recordatorios y colores. No se admiten invitados ni repeticiones.</string>
-    <string name="calendar_dashboard_time_mode">Cambios de horario activados</string>
-    <string name="system_delete_mode">Sincronizar eliminaciones (experimental)</string>
-    <string name="system_delete_limits">Solo eventos importados simples, sin repeticiones, recordatorios, invitados ni colores personalizados. Las demás eliminaciones permanecen en Android.</string>
-    <string name="calendar_dashboard_delete_mode">Eliminaciones activadas</string>
     <string name="sync_settings_title">Sincronización</string>
     <string name="sync_settings_last_success">Última sincronización correcta</string>
     <string name="sync_settings_never">Aún no hay ninguna sincronización correcta</string>

@@ -19,17 +19,8 @@
     <string name="system_title_limits">Für persönliche Termine ohne Gäste oder Wiederholungen. Vorhandene Erinnerungen und Terminfarben bleiben erhalten. Aktiviere die passenden Optionen für andere Felder.</string>
     <string name="system_create_pending">Wartende oder zu prüfende Erstellungen: %1$d. Ein ungewisser Versand wird nie automatisch wiederholt.</string>
     <string name="system_create_error">Bei der Synchronisierung mit Android ist ein Problem aufgetreten. Ihre Daten bleiben erhalten.</string>
-    <string name="system_text_mode">Änderungen an Beschreibung und Ort synchronisieren (experimentell)</string>
     <string name="system_text_limits">Ändere Beschreibung und Ort, auch zusammen mit dem Titel. Aktiviere bei gleichzeitigen Datumsänderungen die betreffenden Optionen. Vorhandene Erinnerungen und Farben bleiben erhalten; Änderungen daran bleiben lokal.</string>
     <string name="system_text_overview">Standardmäßig nur lesen. Erstellen, Titel, Text, Datum und Löschen haben eigene Optionen. Aktiviere bei kombinierten Änderungen die betreffenden Optionen. Nicht unterstützte Änderungen und ausstehende Vorgänge bleiben erhalten.</string>
-    <string name="system_title_limits_with_text">@string/system_title_limits</string>
-    <string name="calendar_dashboard_text_mode">Textänderungen aktiviert</string>
-    <string name="system_time_mode">Datums- und Zeitänderungen synchronisieren (experimentell)</string>
-    <string name="system_time_limits">Ändere Datum, Dauer oder Zeitzone und wechsle zwischen Uhrzeiten und ganztägigen Terminen. Aktiviere die betreffenden Optionen auch für Titel und Text. Erinnerungen und Farben bleiben erhalten. Gäste und Wiederholungen werden nicht unterstützt.</string>
-    <string name="calendar_dashboard_time_mode">Zeitänderungen aktiviert</string>
-    <string name="system_delete_mode">Löschungen synchronisieren (experimentell)</string>
-    <string name="system_delete_limits">Nur einfache importierte Termine ohne Wiederholungen, Erinnerungen, Gäste oder eigene Farben. Andere Löschungen bleiben auf Android.</string>
-    <string name="calendar_dashboard_delete_mode">Löschungen aktiviert</string>
     <string name="sync_settings_title">Synchronisierung</string>
     <string name="sync_settings_last_success">Letzte erfolgreiche Synchronisierung</string>
     <string name="sync_settings_never">Noch keine erfolgreiche Synchronisierung</string>

@@ -1,11 +1,12 @@
 # Personal event edits, format 2
 
-The personal-edit family extends the independent title, text and date options.
+The personal-edit family combines supported title, text and date changes.
 It handles a combined edit in one protected request: title, description/location,
 and dates may change together. Supported date changes include timed/all-day
 transitions and changes of named time zone. All-day end dates remain exclusive.
-Each changed field requires its own enabled calendar option. CREATE mode and
-current account, selection and calendar permissions remain prerequisites.
+The calendar must be Editable, with current account access, selection and calendar
+permissions. The effective mode supplies the internal per-field admission gates
+until the legacy families are retired; those gates are not separate user options.
 
 Known personal display reminders and an explicit event color can accompany the
 edit only when unchanged. Recurrence, organizers, attendees, invitations, unknown

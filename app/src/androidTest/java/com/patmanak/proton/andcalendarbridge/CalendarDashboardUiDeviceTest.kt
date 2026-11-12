@@ -38,11 +38,7 @@ class CalendarDashboardUiDeviceTest {
     private var permissions = 0
     private var settings = 0
     private val selectionChanges = mutableListOf<Boolean>()
-    private val createChanges = mutableListOf<Boolean>()
-    private val titleChanges = mutableListOf<Boolean>()
-    private val textChanges = mutableListOf<Boolean>()
-    private val timeChanges = mutableListOf<Boolean>()
-    private val deleteChanges = mutableListOf<Boolean>()
+    private val modeChanges = mutableListOf<Boolean>()
 
     private fun start() {
         compose.setContent {
@@ -51,12 +47,8 @@ class CalendarDashboardUiDeviceTest {
                     onRefresh = { refreshes++ },
                     onSetEnabled = { selected, enabled -> assertEquals(selection.scope, selected.scope); selectionChanges += enabled },
                     onSync = { syncs++ }, onRequestPermission = { permissions++ }, onOpenSettings = { settings++ },
-                    onMode = { selected, enabled -> assertEquals(selection.scope, selected.scope); createChanges += enabled },
-                    onTitlesMode = { selected, enabled -> assertEquals(selection.scope, selected.scope); titleChanges += enabled },
-                    modifier = Modifier.verticalScroll(rememberScrollState()),
-                    onTextMode = { selected, enabled -> assertEquals(selection.scope, selected.scope); textChanges += enabled },
-                    onTimeMode = { selected, enabled -> assertEquals(selection.scope, selected.scope); timeChanges += enabled },
-                    onDeleteMode = { selected, enabled -> assertEquals(selection.scope, selected.scope); deleteChanges += enabled })
+                    onMode = { selected, enabled -> assertEquals(selection.scope, selected.scope); modeChanges += enabled },
+                    modifier = Modifier.verticalScroll(rememberScrollState()))
             }
         }
     }
@@ -65,15 +57,15 @@ class CalendarDashboardUiDeviceTest {
         start()
         compose.onAllNodesWithText(summary.title).assertCountEquals(1)
         compose.onAllNodesWithTag(CalendarDashboardTags.CARD).assertCountEquals(1)
+        compose.onNodeWithText(compose.activity.getString(R.string.calendar_dashboard_read_only)).assertExists()
         compose.onNodeWithTag("system-create-toggle").assertDoesNotExist()
         compose.onNodeWithTag(CalendarDashboardTags.OPTIONS).performScrollTo().performClick()
         compose.onNodeWithTag("system-create-toggle").assertIsOff()
-        compose.onNodeWithTag("system-title-toggle").assertIsOff().assertIsNotEnabled()
+        compose.onNodeWithTag("system-title-toggle").assertDoesNotExist()
         compose.onNodeWithTag(CalendarDashboardTags.OPTIONS).performScrollTo().performClick()
         compose.onNodeWithTag("system-create-toggle").assertDoesNotExist()
         compose.runOnIdle {
-            assertEquals(emptyList<Boolean>(), createChanges)
-            assertEquals(emptyList<Boolean>(), titleChanges)
+            assertEquals(emptyList<Boolean>(), modeChanges)
             assertEquals(emptyList<Boolean>(), selectionChanges)
             assertEquals(0, permissions)
             assertEquals(0, syncs)
@@ -97,18 +89,19 @@ class CalendarDashboardUiDeviceTest {
         compose.onNodeWithTag(CalendarImportTags.SYNC).assertIsNotEnabled()
     }
 
-    @Test fun writeOptionsRequireTheSameExplicitIndependentConsent() {
+    @Test fun editableModeChangesOnlyAfterExplicitChoiceAndRenderedState() {
         start()
         compose.onNodeWithTag(CalendarDashboardTags.OPTIONS).performScrollTo().performClick()
-        compose.onNodeWithTag("system-title-toggle").assertIsNotEnabled()
-        compose.onNodeWithTag("system-create-toggle").performScrollTo().performClick()
+        compose.onNodeWithTag("system-create-toggle").assertIsOff().assertIsEnabled().performScrollTo().performClick()
         compose.runOnIdle {
-            assertEquals(listOf(true), createChanges)
-            assertEquals(emptyList<Boolean>(), titleChanges)
+            assertEquals(listOf(true), modeChanges)
+        }
+        compose.onNodeWithTag("system-create-toggle").assertIsOff()
+        compose.runOnIdle {
             creates.value = creates.value.copy(enabled = setOf(selection.scope))
         }
-        compose.onNodeWithTag("system-title-toggle").assertIsOff().assertIsEnabled().performScrollTo().performClick()
-        compose.runOnIdle { assertEquals(listOf(true), titleChanges) }
+        compose.onNodeWithTag("system-create-toggle").assertIsOn().performScrollTo().performClick()
+        compose.runOnIdle { assertEquals(listOf(true, false), modeChanges) }
     }
 
     @Test fun missingPermissionBlocksNewWriteModesButNeverBlocksRevokingConsent() {
@@ -117,44 +110,25 @@ class CalendarDashboardUiDeviceTest {
         start()
         compose.onNodeWithTag(CalendarDashboardTags.OPTIONS).performScrollTo().performClick()
         compose.onNodeWithTag("system-create-toggle").assertIsNotEnabled()
-        compose.onNodeWithTag("system-title-toggle").assertIsNotEnabled()
         compose.onNodeWithTag(CalendarImportTags.TOGGLE).assertIsNotEnabled()
-        compose.runOnIdle { creates.value = creates.value.copy(enabled = setOf(selection.scope), titlesEnabled = setOf(selection.scope)) }
-        compose.onNodeWithTag("system-create-toggle").assertIsEnabled().performScrollTo().performClick()
-        compose.onNodeWithTag("system-title-toggle").assertIsEnabled().performScrollTo().performClick()
-        compose.runOnIdle { assertEquals(listOf(false), createChanges); assertEquals(listOf(false), titleChanges) }
+        compose.runOnIdle { creates.value = creates.value.copy(enabled = setOf(selection.scope)) }
+        compose.onNodeWithTag("system-create-toggle").assertIsOn().assertIsEnabled().performScrollTo().performClick()
+        compose.runOnIdle { assertEquals(listOf(false), modeChanges) }
     }
 
-    @Test fun deletionOptionRequiresSupportAndUsesOnlyItsIndependentConsentCallback() {
-        creates.value = creates.value.copy(textSupportAvailable = true, timeSupportAvailable = true)
+    @Test fun supportedOperationsNeverAddSeparateConsentChoices() {
         start()
         compose.onNodeWithTag(CalendarDashboardTags.OPTIONS).performScrollTo().performClick()
-        compose.onNodeWithTag("system-delete-toggle").assertDoesNotExist()
-        compose.runOnIdle { creates.value = creates.value.copy(deleteSupportAvailable = true) }
-        compose.onNodeWithTag("system-delete-toggle").assertIsOff().assertIsNotEnabled()
-        compose.runOnIdle { creates.value = creates.value.copy(enabled = setOf(selection.scope)) }
-        compose.onNodeWithTag("system-delete-toggle").assertIsOff().assertIsEnabled().performScrollTo().performClick()
-        compose.runOnIdle {
-            assertEquals(listOf(true), deleteChanges)
-            assertEquals(emptyList<Boolean>(), createChanges)
-            assertEquals(emptyList<Boolean>(), titleChanges)
-            assertEquals(emptyList<Boolean>(), textChanges)
-            assertEquals(emptyList<Boolean>(), timeChanges)
-            creates.value = creates.value.copy(deletesEnabled = setOf(selection.scope))
+        for (supported in listOf(false, true)) {
+            compose.runOnIdle { creates.value = creates.value.copy(textSupportAvailable = supported,
+                timeSupportAvailable = supported, deleteSupportAvailable = supported) }
+            compose.onAllNodesWithTag("system-create-toggle").assertCountEquals(1)
+            compose.onNodeWithTag("system-create-toggle").assertIsOff().assertIsEnabled()
+            for (tag in listOf("system-title-toggle", "system-text-toggle", "system-time-toggle", "system-delete-toggle")) {
+                compose.onNodeWithTag(tag).assertDoesNotExist()
+            }
         }
-        compose.onNodeWithTag("system-title-toggle").assertIsOff()
-        compose.onNodeWithTag("system-text-toggle").assertIsOff()
-        compose.onNodeWithTag("system-time-toggle").assertIsOff()
-        compose.onNodeWithTag("system-delete-toggle").assertIsOn().performScrollTo().performClick()
-        compose.runOnIdle {
-            assertEquals(listOf(true, false), deleteChanges)
-            assertEquals(emptyList<Boolean>(), createChanges)
-            assertEquals(emptyList<Boolean>(), titleChanges)
-            assertEquals(emptyList<Boolean>(), textChanges)
-            assertEquals(emptyList<Boolean>(), timeChanges)
-            creates.value = creates.value.copy(deleteSupportAvailable = false)
-        }
-        compose.onNodeWithTag("system-delete-toggle").assertDoesNotExist()
+        compose.runOnIdle { assertEquals(emptyList<Boolean>(), modeChanges) }
     }
 
     @Test fun permissionsAndGlobalActionsAreExplicitAndSeparate() {
@@ -201,8 +175,7 @@ class CalendarDashboardUiDeviceTest {
             hasAnyAncestor(hasTestTag(SystemSyncAttentionTags.DETAILS))).assertExists()
         compose.runOnIdle {
             assertEquals(0, syncs); assertEquals(0, refreshes); assertEquals(0, permissions); assertEquals(0, settings)
-            assertEquals(emptyList<Boolean>(), createChanges); assertEquals(emptyList<Boolean>(), titleChanges)
-            assertEquals(emptyList<Boolean>(), textChanges); assertEquals(emptyList<Boolean>(), selectionChanges)
+            assertEquals(emptyList<Boolean>(), modeChanges); assertEquals(emptyList<Boolean>(), selectionChanges)
         }
         compose.onNodeWithTag(SystemSyncAttentionTags.RETRY).performScrollTo().performClick()
         compose.runOnIdle { assertEquals(1, syncs); assertEquals(true, creates.value.failed) }
@@ -210,8 +183,7 @@ class CalendarDashboardUiDeviceTest {
         compose.onNodeWithTag(SystemSyncAttentionTags.WHY).performScrollTo().performClick()
         compose.onNodeWithTag(SystemSyncAttentionTags.DETAILS).assertDoesNotExist()
         compose.runOnIdle {
-            assertEquals(emptyList<Boolean>(), createChanges); assertEquals(emptyList<Boolean>(), titleChanges)
-            assertEquals(emptyList<Boolean>(), textChanges); assertEquals(emptyList<Boolean>(), selectionChanges)
+            assertEquals(emptyList<Boolean>(), modeChanges); assertEquals(emptyList<Boolean>(), selectionChanges)
         }
     }
 
@@ -253,7 +225,7 @@ class CalendarDashboardUiDeviceTest {
         creates.value = creates.value.copy(failed = true)
         compose.setContent {
             MaterialTheme {
-                SystemCreatePanel(imports.value, creates.value, onMode = { _, enabled -> createChanges += enabled },
+                SystemCreatePanel(imports.value, creates.value, onMode = { _, enabled -> modeChanges += enabled },
                     modifier = Modifier.verticalScroll(rememberScrollState()))
             }
         }
@@ -262,7 +234,7 @@ class CalendarDashboardUiDeviceTest {
         compose.onNodeWithTag(SystemSyncAttentionTags.DETAILS).assertExists()
         compose.onNode(hasText(compose.activity.getString(R.string.system_title_limits)) and
             hasAnyAncestor(hasTestTag(SystemSyncAttentionTags.DETAILS))).assertExists()
-        compose.runOnIdle { assertEquals(emptyList<Boolean>(), createChanges); assertEquals(0, syncs) }
+        compose.runOnIdle { assertEquals(emptyList<Boolean>(), modeChanges); assertEquals(0, syncs) }
     }
 
     @Test fun discoveryWithoutAPersistedScopeDoesNotInventAnActionableSelection() {
