@@ -7,9 +7,10 @@ or reminder notifications. This is current status, not an execution log.
 ## Current milestone — 0.1 for F-Droid
 
 Scope: incoming synchronization, simple-event editing through personal-v2,
-safe migration and retirement of legacy title/text/time paths, hourly incoming
-refresh. Recurrence editing, reminder/guest changes and new outgoing families
-are outside this milestone. Read-only remains the default per calendar.
+safe migration and retirement of legacy title/text/time paths, hourly refresh,
+and V05 reminder/color/series/occurrence/guest editing. These are release targets;
+current outgoing capability remains narrower. Read-only is the default. See the
+[accepted specification](SPECIFICATION.md). Guests may be deferred only by the owner.
 
 Scheduling follows the DAVx5 model: the thin calendar SyncAdapter accepts Android
 change/manual triggers, enqueues expedited WorkManager work and waits at most ten
@@ -18,14 +19,15 @@ retry and the app owns actual status. The Android 14+ pending latch is cleared.
 One network-constrained WorkManager periodic pull runs at 15 / 30 / 60 default /
 120 / 360 minutes; native Android periodic syncs are removed. Android automatic
 switches control push only. App actions are manual and bypass those switches;
-periodic pull continues while push is OFF. The URI watcher remains temporarily;
+periodic receiving continues while push is OFF. B1 still requires periodic send
+then receive when push is allowed. The URI watcher remains temporarily;
 retire it only after Android-triggered upload is qualified in E4.
 
 Exit: working scope, one grouped physical-device/live-test-account E4 run
-(closed-app local edit, refresh from two calendar clients, offline/reconnect,
-reboot, permission revocation, Samsung deep sleep with/without exemption,
-auto-sync OFF), green remote CI and signing decision. LineageOS results do not
-qualify One UI. Signature management remains deferred by the owner.
+(closed-app local edit, Refresh from /e/OS Calendar and Etar, Google Calendar if
+possible, offline/reconnect, reboot, permission revocation, prolonged idle
+with/without exemption and auto-sync OFF), green remote CI and signing decision.
+Samsung/One UI is outside 0.1. Signature management remains deferred by the owner.
 
 ## Current capabilities
 
