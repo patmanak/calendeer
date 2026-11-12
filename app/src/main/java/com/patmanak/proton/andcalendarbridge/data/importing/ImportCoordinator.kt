@@ -14,9 +14,6 @@ import com.patmanak.proton.andcalendarbridge.data.outgoing.SystemPersonalLocalOw
 import com.patmanak.proton.andcalendarbridge.sync.*
 import com.patmanak.proton.andcalendarbridge.sync.catalog.CalendarCatalogState
 import com.patmanak.proton.andcalendarbridge.sync.catalog.CalendarCatalogStatus
-import com.patmanak.proton.andcalendarbridge.sync.catalog.CalendarCatalogPort
-import com.patmanak.proton.andcalendarbridge.sync.catalog.CalendarCatalogResult
-import com.patmanak.proton.andcalendarbridge.sync.catalog.CalendarCatalogFailure
 import com.patmanak.proton.andcalendarbridge.sync.catalog.CalendarSummary
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicReference
@@ -27,59 +24,6 @@ import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
-data class ImportUiState(val selections: List<ImportStore.Selection> = emptyList(),
-    val hasPermission: Boolean = false, val authenticated: Boolean = false, val busy: Boolean = false,
-    val selectionsLoaded: Boolean = false)
-enum class CreateAssociationResult { INACTIVE, UNRESOLVED, WAITING_IMPORT, WAITING_PROVIDER, ASSOCIATED }
-enum class LocalEditCaptureResult { INACTIVE, UNQUALIFIED, RETAINED, CONFLICT, UNAVAILABLE }
-sealed interface RetainedLocalChangeListing {
-    data class Available(val page: RetainedLocalChangePage) : RetainedLocalChangeListing {
-        override fun toString() = "RetainedLocalChangeListing.Available(REDACTED)"
-    }
-    data object Inactive : RetainedLocalChangeListing
-    data object Unqualified : RetainedLocalChangeListing
-    data object Unavailable : RetainedLocalChangeListing
-}
-sealed interface LocalEditInspection {
-    data class Available(val review: LocalEditReview) : LocalEditInspection {
-        override fun toString() = "LocalEditInspection.Available(REDACTED)"
-    }
-    data object Inactive : LocalEditInspection
-    data object Unqualified : LocalEditInspection
-    data object Unavailable : LocalEditInspection
-}
-enum class LocalTitlePreparationResult { INACTIVE, UNQUALIFIED, RETAINED, HISTORICAL, CONFLICT, UNSUPPORTED, UNAVAILABLE }
-sealed interface LocalDeleteInspection {
-    data class Available(val review: LocalDeleteReview) : LocalDeleteInspection {
-        override fun toString() = "LocalDeleteInspection.Available(REDACTED)"
-    }
-    data object Inactive : LocalDeleteInspection
-    data object Unqualified : LocalDeleteInspection
-    data object Unavailable : LocalDeleteInspection
-}
-enum class LocalCreatePreparationResult { INACTIVE, UNQUALIFIED, RETAINED, UNSUPPORTED, UNAVAILABLE }
-enum class LocalCreateSubmissionResult { INACTIVE, UNQUALIFIED, RETAINED, UNRESOLVED, UNSUPPORTED, UNAVAILABLE }
-enum class CapturedCreateBindingResult { INACTIVE, UNRESOLVED, RETAINED }
-enum class CapturedCreateAttachmentResult { INACTIVE, UNRESOLVED, ATTACHED }
-enum class CapturedCreateBaselineResult { INACTIVE, UNRESOLVED, RETAINED }
-enum class CapturedCreateReconciliationResult { INACTIVE, UNRESOLVED, UNSUPPORTED, UNCHANGED, RETAINED, CONFLICT }
-enum class CapturedCreateAcknowledgementResult { INACTIVE, UNRESOLVED, UNSUPPORTED, ACKNOWLEDGED }
-enum class CapturedCreateCleanResult { INACTIVE, UNRESOLVED, CLEAN }
-enum class CapturedCreateHandoffResult { INACTIVE, UNRESOLVED, WAITING, HANDED_OFF }
-enum class TitleUpdateAcknowledgementResult { INACTIVE, UNRESOLVED, ACKNOWLEDGED }
-enum class TitleUpdateCompletionResult { INACTIVE, UNRESOLVED, COMPLETED }
-enum class LocalTitleAttemptRetentionResult { INACTIVE, UNQUALIFIED, UNSUPPORTED, UNRESOLVED, RETAINED, HISTORICAL, CONFLICT, UNAVAILABLE }
-sealed interface LocalTitleAttemptPreparation {
-    data class Prepared(val record: TitleUpdateAttemptRecord) : LocalTitleAttemptPreparation {
-        override fun toString() = "LocalTitleAttemptPreparation.Prepared(REDACTED)"
-    }
-    data object Inactive : LocalTitleAttemptPreparation
-    data object Unqualified : LocalTitleAttemptPreparation
-    data object Unsupported : LocalTitleAttemptPreparation
-    data object Unresolved : LocalTitleAttemptPreparation
-    data object Conflict : LocalTitleAttemptPreparation
-    data object Unavailable : LocalTitleAttemptPreparation
-}
 /** One process owner for foreground/workers and explicitly requested, offline conflict history. */
 class ImportCoordinator(
     private val context: Context,
@@ -106,17 +50,6 @@ class ImportCoordinator(
     private val mutableConflictArchiveEpoch = MutableStateFlow(0L)
     /** Invalidates presentation memory even when a brief session/permission loss is conflated. */
     val conflictArchiveEpoch = mutableConflictArchiveEpoch.asStateFlow()
-    /** Inspection never renews server rights or grants mutation/acknowledgement authority. */
-    val conflictArchiveReader: ConflictArchiveReader = object : ConflictArchiveReader {
-        override suspend fun list(query: ConflictArchiveQuery): ConflictArchiveRead<ConflictArchivePage> =
-            readConflictArchive(query.scope) { store.conflictArchives(query) }
-        override suspend fun detail(ref: ConflictArchiveRef): ConflictArchiveRead<ConflictArchiveDetail> =
-            readConflictArchive(ref.scope) { store.conflictArchive(ref) }
-        override suspend fun observations(query: ConflictObservationQuery): ConflictArchiveRead<ConflictObservationPage> =
-            readConflictArchive(query.ref.scope) {
-                if (store.conflictArchive(query.ref) == null) null else store.conflictObservations(query)
-            }
-    }
     @Volatile private var authenticated = false
     @Volatile private var generation = 0L
     private val createPolicyRevision = AtomicLong()
@@ -158,6 +91,25 @@ class ImportCoordinator(
         authenticated = { authenticated }, hasCalendarPermissions = ::hasCalendarPermissions,
         isCurrent = ::isCurrent, handoffSource = ::handoffSource,
     )
+
+    private val titleRecovery = ImportCoordinatorTitleRecovery(
+        store, remote, projection, mutex,
+        generation = { generation }, policyRevision = { createPolicyRevision.get() },
+        authenticated = { authenticated }, systemCreatesEnabled = systemCreatesEnabled,
+        systemTitlesEnabled = systemTitlesEnabled, hasCalendarPermissions = ::hasCalendarPermissions,
+        isCurrent = ::isCurrent, capturedRawHold = ::capturedRawHold, handoffSource = ::handoffSource,
+    )
+
+    private val localChanges = ImportCoordinatorLocalChanges(
+        store, remote, projection, mutex, projectionWork, titleWrites,
+        generation = { generation }, policyRevision = { createPolicyRevision.get() },
+        authenticated = { authenticated }, systemCreatesEnabled = systemCreatesEnabled,
+        hasCalendarPermissions = ::hasCalendarPermissions, isCurrent = ::isCurrent,
+        capturedRawHold = ::capturedRawHold,
+    )
+
+    /** Inspection never renews server rights or grants mutation/acknowledgement authority. */
+    val conflictArchiveReader: ConflictArchiveReader = localChanges.conflictArchiveReader
 
     private val editAccess = ImportCoordinatorEditAccess(
         store, remote, projection, mutex,
@@ -613,282 +565,46 @@ class ImportCoordinator(
           catch (_: Exception) { CreateAssociationResult.UNRESOLVED }
     }
 
-    /** Explicit capture followed by title-only preparation under one session/policy observation.
-     * Capture is durable before preparation. Failure or cancellation keeps that intent; a retry
-     * never substitutes later Provider content. No acknowledgement, dispatch or observer is enabled.
-     */
     suspend fun captureAndPrepareLocalTitle(target: CalendarScope, eventId: EventId, id: MutationId,
         timestamp: java.time.Instant, port: CalendarLocalEditPreparationPort): LocalTitlePreparationResult =
-        mutex.withLock {
-            val expected = generation
-            val policy = createPolicyRevision.get()
-            try {
-                currentCoroutineContext().ensureActive()
-                when (captureLocalEditLocked(target, eventId, id, expected, policy)) {
-                    LocalEditCaptureResult.RETAINED -> {
-                        currentCoroutineContext().ensureActive()
-                        titleWrites.prepareLocalTitleLocked(target, eventId, id, timestamp, port, expected, policy)
-                    }
-                    LocalEditCaptureResult.INACTIVE -> LocalTitlePreparationResult.INACTIVE
-                    LocalEditCaptureResult.UNQUALIFIED -> LocalTitlePreparationResult.UNQUALIFIED
-                    LocalEditCaptureResult.CONFLICT -> LocalTitlePreparationResult.CONFLICT
-                    LocalEditCaptureResult.UNAVAILABLE -> LocalTitlePreparationResult.UNAVAILABLE
-                }
-            } catch (cancelled: CancellationException) { throw cancelled }
-              catch (_: Exception) { LocalTitlePreparationResult.UNAVAILABLE }
-              finally {
-                store.admitTransaction = { false }
-                projection.admitOperation = { false }
-            }
-        }
+        localChanges.captureAndPrepareLocalTitle(target, eventId, id, timestamp, port)
 
-    /** Internal inspection/recovery only. Network eligibility never grants submission admission. */
     suspend fun inspectAndRecoverLocalTitles(query: TitleUpdateWorkQuery, journal: TitleUpdateRecoveryJournal,
-        port: CalendarTitleUpdateSubmissionPort, allowNetwork: Boolean = false): TitleUpdateRecoveryProgress = mutex.withLock {
-        recoverLocalTitlesLocked(query, journal, port, allowNetwork)
-    }
+        port: CalendarTitleUpdateSubmissionPort, allowNetwork: Boolean = false): TitleUpdateRecoveryProgress =
+        titleRecovery.inspectAndRecoverLocalTitles(query, journal, port, allowNetwork)
 
-    /** One internal offline page. No inspection, preparation or submission capability. */
     suspend fun recoverLocalTitles(query: TitleUpdateWorkQuery,
-        journal: TitleUpdateOfflineRecoveryJournal): TitleUpdateOfflineRecoveryProgress = mutex.withLock {
-        recoverLocalTitlesLocked(query, journal)
-    }
+        journal: TitleUpdateOfflineRecoveryJournal): TitleUpdateOfflineRecoveryProgress =
+        titleRecovery.recoverLocalTitles(query, journal)
 
-    /** Opt-in network inspection only; durable historical proofs keep their offline admission. */
     suspend fun inspectSystemTitles(query: TitleUpdateWorkQuery, journal: TitleUpdateRecoveryJournal,
         port: CalendarTitleUpdateSubmissionPort, admission: (CalendarScope) -> Boolean,
-        proofRetained: () -> Unit): TitleUpdateRecoveryProgress = mutex.withLock {
-        recoverLocalTitlesLocked(query, journal, port, allowNetwork = true,
-            networkAdmission = admission, proofRetained = proofRetained)
-    }
+        proofRetained: () -> Unit): TitleUpdateRecoveryProgress =
+        titleRecovery.inspectSystemTitles(query, journal, port, admission, proofRetained)
 
-    private suspend fun recoverLocalTitlesLocked(query: TitleUpdateWorkQuery,
-        journal: TitleUpdateOfflineRecoveryJournal, inspection: CalendarTitleUpdateSubmissionPort? = null,
-        allowNetwork: Boolean = false, networkAdmission: ((CalendarScope) -> Boolean)? = null,
-        proofRetained: () -> Unit = {}): TitleUpdateRecoveryProgress {
-        val target = query.scope
-        val expected = generation
-        val policy = createPolicyRevision.get()
-        val active = { authenticated && generation == expected && createPolicyRevision.get() == policy &&
-            systemCreatesEnabled(target) && hasCalendarPermissions() }
-        var completed = 0
-        var held = 0
-        var failed = 0
-        fun progress(next: TitleUpdateWorkCursor? = null, inactive: Boolean = false) =
-            TitleUpdateOfflineRecoveryProgress(completed, held, failed, next, inactive)
-        suspend fun available(): Boolean {
-            currentCoroutineContext().ensureActive()
-            if (!active() || !isCurrent(expected, target.account)) return false
-            val selected = store.selections(target.account).singleOrNull { it.scope == target }
-            return selected?.enabled == true && selected.available && active()
-        }
-        return try {
-            if (!available()) return progress(inactive = true)
-            check(journal.completionProtocol == 1) { "Incompatible title recovery journal" }
-            val recovery = if (inspection != null) {
-                check(journal is TitleUpdateRecoveryJournal) { "Incompatible title inspection journal" }
-                TitleUpdateGuardedResultRecovery(journal, journal, inspection)
-            } else null
-            val page = journal.page(query)
-            if (!available()) return progress(inactive = true)
-            val next = page.next
-            check(page.scope == target && page.entries.size <= query.limit &&
-                (next == null || (next.scope == target && next.protocol == 1 &&
-                    next.afterEvent == page.entries.lastOrNull()?.eventId))) { "Invalid title recovery page" }
-            for (reference in page.entries) {
-                if (!available()) return progress(inactive = true)
-                // The helpers close their leases; install this invocation's same epoch again.
-                store.admitTransaction = { it == target && active() }
-                try {
-                    val record = journal.read(target, reference.id)?.frozen()
-                    if (!available()) return progress(inactive = true)
-                    if (record == null) { held++; continue }
-                    check(record.scope == target && record.id == reference.id &&
-                        record.preparation.intent.base.eventId == reference.eventId) { "Invalid title recovery binding" }
-                    // Metadata may have changed state since discovery. Only the complete record counts.
-                    if (record.state != TitleUpdateAttemptState.OUTCOME_UNKNOWN ||
-                        record.preparation.intent.format != remote.format ||
-                        store.transaction(target) { checkpoint?.format } != record.preparation.intent.format) {
-                        if (!available()) return progress(inactive = true)
-                        held++; continue
-                    }
-                    if (!available()) return progress(inactive = true)
-                    val historical = journal.readVerified(target, reference.id)
-                    var inspectionSourceFrozen = false
-                    var inspectionRole: CapturedCreateHandoffRecord? = null
-                    suspend fun networkAvailable(): Boolean {
-                        if (!available()) return false
-                        if (networkAdmission == null) return true
-                        if (!systemTitlesEnabled(target) || !networkAdmission(target) ||
-                            !LocalTitleOwnerQualification.systemTitleProfile(record.preparation.intent)) return false
-                        val role = store.capturedHandoff(target, reference.eventId)
-                        if (!available()) return false
-                        val hold = capturedRawHold(target)
-                        currentCoroutineContext().ensureActive()
-                        if (!available() || hold.scopeBlocked || (inspectionSourceFrozen && role != inspectionRole)) return false
-                        if (role == null) {
-                            if (hold.holds(reference.eventId)) return false
-                        } else {
-                            // Historical inspection must survive a later native edit. Sending and
-                            // acknowledgement separately require their exact current owner/frame.
-                            if (role.state != CapturedCreateHandoffState.RELEASED ||
-                                role.frame.format != record.preparation.intent.format ||
-                                !handoffSource(role.frame, active)) return false
-                            if (!available()) return false
-                        }
-                        val currentRole = store.capturedHandoff(target, reference.eventId)
-                        if (!available() || currentRole != role) return false
-                        val currentHold = capturedRawHold(target)
-                        currentCoroutineContext().ensureActive()
-                        if (!available() || currentHold.scopeBlocked ||
-                            (role == null && currentHold.holds(reference.eventId)) ||
-                            !systemTitlesEnabled(target) || !networkAdmission(target)) return false
-                        inspectionRole = role
-                        inspectionSourceFrozen = true
-                        return true
-                    }
-                    val result = historical ?: if (recovery != null && networkAvailable()) recovery.recover(
-                        target, reference.id, allowNetwork, admit = { it == target && active() &&
-                            (networkAdmission == null || (systemTitlesEnabled(target) && networkAdmission(target))) },
-                        checkAccess = { networkAvailable() }) else null
-                    if (historical == null && result != null) proofRetained()
-                    if (!available()) return progress(inactive = true)
-                    if (result == null) { held++; continue }
-                    check(result.record == record.copy(protectedEvidence = null)) { "Invalid title recovery result" }
-                    when (acknowledgeLocalTitleLocked(target, reference.eventId, reference.id, journal, expected, policy)) {
-                        TitleUpdateAcknowledgementResult.INACTIVE -> return progress(inactive = true)
-                        TitleUpdateAcknowledgementResult.UNRESOLVED -> { held++; continue }
-                        TitleUpdateAcknowledgementResult.ACKNOWLEDGED -> Unit
-                    }
-                    if (!available()) return progress(inactive = true)
-                    val completion = completeLocalTitleLocked(target, reference.eventId, reference.id, journal, expected, policy)
-                    if (!available()) return progress(inactive = true)
-                    when (completion) {
-                        TitleUpdateCompletionResult.INACTIVE -> return progress(inactive = true)
-                        TitleUpdateCompletionResult.UNRESOLVED -> held++
-                        TitleUpdateCompletionResult.COMPLETED -> completed++
-                    }
-                } catch (cancelled: CancellationException) { throw cancelled }
-                  catch (_: Exception) {
-                      if (!available()) return progress(inactive = true)
-                      failed++
-                  }
-            }
-            progress(next = next)
-        } catch (cancelled: CancellationException) { throw cancelled }
-          catch (_: Exception) {
-              if (!active()) progress(inactive = true)
-              else {
-                  // A failed page/access read gives no safe continuation. Restart at the first page.
-                  if (completed + held + failed < TitleUpdateWorkQuery.MAX_PAGE_SIZE) failed++
-                  progress()
-              }
-          } finally {
-              store.admitTransaction = { false }
-              projection.admitOperation = { false }
-          }
-    }
-
-    /** Recovery passes its original epoch; constructing a helper must never renew admission. */
-    private fun localTitleCompletion(target: CalendarScope, expected: Long, policy: Long) =
-        LocalTitleCompletion(target, store, projection,
-            currentFormat = { remote.format },
-            active = { authenticated && generation == expected && createPolicyRevision.get() == policy &&
-                systemCreatesEnabled(target) && hasCalendarPermissions() },
-            currentAccount = { isCurrent(expected, target.account) })
-
-    /** Internal simple title acknowledgement only. Reads an already durable verified result;
-     * never prepares, inspects the service or dispatches UPDATE. A fresh reservation permits one
-     * conditional native metadata write. Reopening only inspects the retained nonce.
-     */
     suspend fun acknowledgeLocalTitle(target: CalendarScope, eventId: EventId, attempt: MutationId,
-        journal: TitleUpdateResultJournal): TitleUpdateAcknowledgementResult = mutex.withLock {
-        acknowledgeLocalTitleLocked(target, eventId, attempt, journal, generation, createPolicyRevision.get())
-    }
+        journal: TitleUpdateResultJournal): TitleUpdateAcknowledgementResult =
+        titleRecovery.acknowledgeLocalTitle(target, eventId, attempt, journal)
 
-    private suspend fun acknowledgeLocalTitleLocked(target: CalendarScope, eventId: EventId, attempt: MutationId,
-        journal: TitleUpdateResultJournal, expected: Long, policy: Long): TitleUpdateAcknowledgementResult {
-        return localTitleCompletion(target, expected, policy).acknowledge(eventId, attempt, journal)
-    }
-
-    /** Internal durable closure only; no Provider write or service request. The two journals
-     * commit independently: a restored ACK without completion keeps the attempt's hold and
-     * can be resumed by reading its exact historical proof, including after a later edit.
-     */
     suspend fun completeLocalTitle(target: CalendarScope, eventId: EventId, attempt: MutationId,
-        journal: TitleUpdateCompletionJournal): TitleUpdateCompletionResult = mutex.withLock {
-        completeLocalTitleLocked(target, eventId, attempt, journal, generation, createPolicyRevision.get())
-    }
+        journal: TitleUpdateCompletionJournal): TitleUpdateCompletionResult =
+        titleRecovery.completeLocalTitle(target, eventId, attempt, journal)
 
-    private suspend fun completeLocalTitleLocked(target: CalendarScope, eventId: EventId, attempt: MutationId,
-        journal: TitleUpdateCompletionJournal, expected: Long, policy: Long): TitleUpdateCompletionResult {
-        return localTitleCompletion(target, expected, policy).complete(eventId, attempt, journal)
-    }
+    suspend fun captureLocalEdit(target: CalendarScope, eventId: EventId, id: MutationId): LocalEditCaptureResult =
+        localChanges.captureLocalEdit(target, eventId, id)
 
-    private fun localChangeCapture(target: CalendarScope, expected: Long, active: () -> Boolean) =
-        LocalChangeCapture(target, store, projection,
-            currentFormat = { remote.format }, active = active,
-            currentAccount = { isCurrent(expected, target.account) },
-            requireUnheld = { event -> if (capturedRawHold(target).holds(event)) throw ImportCoordinatorProjection.Pending() },
-            baseline = { event -> projectionWork.captureBaseline(expected, target, event) })
-
-    /** Explicit internal UPDATE snapshot only. The dirty Provider row is never acknowledged. */
-    suspend fun captureLocalEdit(target: CalendarScope, eventId: EventId, id: MutationId): LocalEditCaptureResult = mutex.withLock {
-        captureLocalEditLocked(target, eventId, id, generation, createPolicyRevision.get())
-    }
-
-    /** Offline observer capture. Reuse the durable owner until it is closed; a later cycle
-     * receives a new identity, never the event's fixed identity from a previous upload.
-     */
     suspend fun captureSystemLocalEdit(target: CalendarScope, eventId: EventId,
-        beforeNewOwner: suspend () -> Unit = {}): LocalEditCaptureResult = mutex.withLock {
-        captureLocalEditLocked(target, eventId, null, generation, createPolicyRevision.get(), requireSystemMode = true,
-            beforeNewOwner = beforeNewOwner)
-    }
+        beforeNewOwner: suspend () -> Unit = {}): LocalEditCaptureResult =
+        localChanges.captureSystemLocalEdit(target, eventId, beforeNewOwner)
 
-    private suspend fun captureLocalEditLocked(target: CalendarScope, eventId: EventId, id: MutationId?,
-        expected: Long, policy: Long, requireSystemMode: Boolean = false,
-        beforeNewOwner: suspend () -> Unit = {}): LocalEditCaptureResult {
-        val active = { authenticated && generation == expected && createPolicyRevision.get() == policy && hasCalendarPermissions() &&
-            (!requireSystemMode || systemCreatesEnabled(target)) }
-        if (!isCurrent(expected, target.account) || !active()) return LocalEditCaptureResult.INACTIVE
-        return localChangeCapture(target, expected, active).edit(eventId, id, beforeNewOwner)
-    }
+    suspend fun retainedLocalChanges(query: RetainedLocalChangeQuery): RetainedLocalChangeListing =
+        localChanges.retainedLocalChanges(query)
 
-    private fun localChangeHistory(target: CalendarScope, expected: Long, policy: Long) =
-        LocalChangeHistory(target, store, projection,
-            active = { authenticated && generation == expected && createPolicyRevision.get() == policy && hasCalendarPermissions() },
-            currentAccount = { isCurrent(expected, target.account) })
+    suspend fun inspectLocalEdit(target: CalendarScope, eventId: EventId, id: MutationId): LocalEditInspection =
+        localChanges.inspectLocalEdit(target, eventId, id)
 
-    /** Local SQL history only. A missing dossier still passes the final session/cancellation gate. */
-    private suspend fun <T : Any> readConflictArchive(target: CalendarScope,
-        read: suspend () -> T?): ConflictArchiveRead<T> = mutex.withLock {
-        val expected = generation
-        val policy = createPolicyRevision.get()
-        localChangeHistory(target, expected, policy).readArchive(read)
-    }
-
-    /** Explicit metadata discovery. Each page requires a fresh historical account/permission gate. */
-    suspend fun retainedLocalChanges(query: RetainedLocalChangeQuery): RetainedLocalChangeListing = mutex.withLock {
-        val target = query.scope
-        val expected = generation
-        val policy = createPolicyRevision.get()
-        localChangeHistory(target, expected, policy).list(query)
-    }
-
-    /** Explicit local history inspection. Never reads Provider contents or renews remote rights. */
-    suspend fun inspectLocalEdit(target: CalendarScope, eventId: EventId, id: MutationId): LocalEditInspection = mutex.withLock {
-        val expected = generation
-        val policy = createPolicyRevision.get()
-        localChangeHistory(target, expected, policy).inspectEdit(eventId, id)
-    }
-
-    /** Explicit DELETE history only; never acknowledges a deletion or supplies an undo image. */
-    suspend fun inspectLocalDelete(target: CalendarScope, eventId: EventId, id: MutationId): LocalDeleteInspection = mutex.withLock {
-        val expected = generation
-        val policy = createPolicyRevision.get()
-        localChangeHistory(target, expected, policy).inspectDelete(eventId, id)
-    }
+    suspend fun inspectLocalDelete(target: CalendarScope, eventId: EventId, id: MutationId): LocalDeleteInspection =
+        localChanges.inspectLocalDelete(target, eventId, id)
 
     suspend fun submitAndRetainLocalTitleAttempt(record: TitleUpdateAttemptRecord,
         attempts: TitleUpdateAttemptJournal, results: TitleUpdateResultJournal,
@@ -926,16 +642,9 @@ class ImportCoordinator(
     private suspend fun currentSystemTitleHandoff(role: CapturedCreateHandoffRecord, intent: LocalEditIntent,
         active: () -> Boolean): Boolean = titleWrites.currentSystemTitleHandoff(role, intent, active)
 
-    /** Explicit internal DELETE snapshot. No observation, upload, or Android acknowledgement. */
     suspend fun captureLocalDelete(target: CalendarScope, eventId: EventId, id: MutationId,
-        beforeNewOwner: suspend () -> Unit = {}): LocalEditCaptureResult = mutex.withLock {
-        val expected = generation
-        val policy = createPolicyRevision.get()
-        if (!isCurrent(expected, target.account) || !hasCalendarPermissions())
-            return@withLock LocalEditCaptureResult.INACTIVE
-        val active = { authenticated && generation == expected && createPolicyRevision.get() == policy && hasCalendarPermissions() }
-        localChangeCapture(target, expected, active).delete(eventId, id, beforeNewOwner)
-    }
+        beforeNewOwner: suspend () -> Unit = {}): LocalEditCaptureResult =
+        localChanges.captureLocalDelete(target, eventId, id, beforeNewOwner)
 
     suspend fun captureLocalCreate(target: CalendarScope, eventRow: Long, localId: LocalEventId,
         id: MutationId, timestamp: java.time.Instant): LocalEditCaptureResult =
