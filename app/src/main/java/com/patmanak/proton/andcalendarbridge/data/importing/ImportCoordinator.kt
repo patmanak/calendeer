@@ -12,7 +12,6 @@ import com.patmanak.proton.andcalendarbridge.data.outgoing.SystemDeleteLocalOwne
 import com.patmanak.proton.andcalendarbridge.data.outgoing.SystemTimeLocalOwner
 import com.patmanak.proton.andcalendarbridge.data.outgoing.SystemPersonalLocalOwner
 import com.patmanak.proton.andcalendarbridge.data.outgoing.SystemPersonalEditProfile
-import com.patmanak.proton.andcalendarbridge.data.outgoing.PersonalLocalOwnerSnapshot
 import com.patmanak.proton.andcalendarbridge.sync.*
 import com.patmanak.proton.andcalendarbridge.sync.catalog.CalendarCatalogState
 import com.patmanak.proton.andcalendarbridge.sync.catalog.CalendarCatalogStatus
@@ -140,6 +139,13 @@ class ImportCoordinator(
         selected = { target -> state.value.selections.any { it.scope == target && it.enabled && it.available } },
     )
 
+    private val projectionWork = ImportCoordinatorProjection(
+        store, remote, projection, creates,
+        generation = { generation }, policyRevision = { createPolicyRevision.get() },
+        authenticated = { authenticated }, hasCalendarPermissions = ::hasCalendarPermissions,
+        isCurrent = ::isCurrent, handoffSource = ::handoffSource,
+    )
+
     private val editAccess = ImportCoordinatorEditAccess(
         store, remote, projection, mutex,
         generation = { generation }, policyRevision = { createPolicyRevision.get() },
@@ -223,104 +229,10 @@ class ImportCoordinator(
      */
     fun systemPersonalEvidenceAdmission(target: CalendarScope): (CalendarScope) -> Boolean = editAdmission.captureEvidence(target)
 
-    /** Local-only gateway: callbacks can run while the Proton session mutex is already held. */
-    internal val personalOwners: SystemPersonalLocalOwner = object : SystemPersonalLocalOwner {
-        override suspend fun observe(scope: CalendarScope, event: EventId, owner: MutationId,
-            admit: (CalendarScope) -> Boolean): PersonalLocalOwnerSnapshot? =
-            withScopedPersonalOwner(scope, admit, consent = true, denied = null) { access ->
-                val intent = access.read { store.localEdit(scope, event) } ?: return@withScopedPersonalOwner null
-                if (intent.id != owner || !SystemPersonalEditProfile.accepts(intent)) return@withScopedPersonalOwner null
-                val frozen = PersonalEditCandidate(intent).intent
-                val preparation = access.read { store.personalEditPreparation(scope, event) }
-                if (!personalSource(frozen, preparation, access)) return@withScopedPersonalOwner null
-                PersonalLocalOwnerSnapshot(frozen, preparation)
-            }
-
-        override suspend fun retain(preparation: PersonalEditPreparation,
-            admit: (CalendarScope) -> Boolean): PersonalEditPreparation? {
-            currentCoroutineContext().ensureActive()
-            val frozen = freezePersonalPreparation(preparation)
-            return withScopedPersonalOwner(frozen.intent.scope, admit, consent = true, denied = null) { access ->
-                val retained = access.read { store.personalEditPreparation(frozen.intent.scope, frozen.intent.base.eventId) }
-                if (retained != null && !samePersonalPreparation(retained, frozen)) return@withScopedPersonalOwner null
-                if (!personalSource(frozen.intent, retained, access)) return@withScopedPersonalOwner null
-                val outcome = access.read { store.retainCurrentPersonalPreparation(frozen) }
-                if (outcome !in listOf(PersonalPreparationAdmission.STORED, PersonalPreparationAdmission.HISTORICAL))
-                    return@withScopedPersonalOwner null
-                val durable = access.read { store.personalEditPreparation(frozen.intent.scope, frozen.intent.base.eventId) }
-                if (!samePersonalPreparation(durable, frozen) || !personalSource(frozen.intent, frozen, access))
-                    return@withScopedPersonalOwner null
-                freezePersonalPreparation(requireNotNull(durable))
-            }
-        }
-
-        override suspend fun qualify(preparation: PersonalEditPreparation, admit: (CalendarScope) -> Boolean): Boolean {
-            currentCoroutineContext().ensureActive()
-            val frozen = freezePersonalPreparation(preparation)
-            return withScopedPersonalOwner(frozen.intent.scope, admit, consent = true, denied = false) { access ->
-                personalSource(frozen.intent, frozen, access)
-            }
-        }
-
-        override suspend fun submit(record: PersonalUpdateAttemptRecord, journal: PersonalUpdateRecoveryJournal,
-            port: CalendarPersonalUpdatePort, admit: (CalendarScope) -> Boolean,
-            admitEvidence: (CalendarScope) -> Boolean): PersonalUpdateSubmissionObservation {
-            val operation = currentCoroutineContext()
-            operation.ensureActive()
-            val frozen = record.frozen()
-            val target = frozen.scope
-            val accountEvidence = systemPersonalEvidenceAdmission(target)
-            val lease = EditSubmissionLease(target, operation, accountEvidence, admitEvidence)
-            val evidence = lease.evidence
-            try {
-                if (frozen.state != PersonalUpdateAttemptState.PREPARED || frozen.protectedEvidence != null ||
-                    port.personalUpdateFormat != frozen.format ||
-                    frozen.id != PersonalUpdateAttemptIdentity.requestId(frozen.preparation, frozen.format))
-                    return PersonalUpdateSubmissionObservation.Unknown
-                return withScopedPersonalOwner(target, admit, consent = true, denied = PersonalUpdateSubmissionObservation.Unknown,
-                    finalAccessRequired = false) { access ->
-                    val sending = lease.sending(access::active) { port.personalUpdateFormat == frozen.format }
-                    suspend fun source(requested: CalendarScope): Boolean = lease.source(requested, sending) {
-                        personalSource(frozen.preparation.intent, frozen.preparation, access)
-                    }
-                    if (!sending(target) || access.read { journal.read(target, frozen.id, sending) } != frozen ||
-                        !source(target)) return@withScopedPersonalOwner PersonalUpdateSubmissionObservation.Unknown
-                    // Lock order is import then authenticated adapter. The callback never retakes the import lock.
-                    val observation = port.submit(frozen, journal, sending, ::source, evidence)
-                    operation.ensureActive()
-                    if (observation !is PersonalUpdateSubmissionObservation.Verified || !evidence(target) ||
-                        observation.record.copy(state = PersonalUpdateAttemptState.PREPARED, protectedEvidence = null) != frozen ||
-                        observation.record.protectedEvidence == null) return@withScopedPersonalOwner PersonalUpdateSubmissionObservation.Unknown
-                    // Response facts survive editing-policy revocation. No ACK authority is derived here.
-                    val durable = journal.read(target, frozen.id, evidence)
-                    operation.ensureActive()
-                    if (!evidence(target) || durable == null || durable != observation.record)
-                        return@withScopedPersonalOwner PersonalUpdateSubmissionObservation.Unknown
-                    PersonalUpdateSubmissionObservation.Verified(durable, observation.event)
-                }
-            } finally {
-                lease.close()
-            }
-        }
-
-        override suspend fun acknowledge(result: PersonalUpdateVerifiedResult, journal: PersonalUpdateRecoveryJournal,
-            admit: (CalendarScope) -> Boolean): Boolean {
-            currentCoroutineContext().ensureActive()
-            val frozen = result.snapshot()
-            return withScopedPersonalOwner(frozen.record.scope, admit, consent = false, denied = false) { access ->
-                acknowledgePersonal(frozen, journal, access)
-            }
-        }
-
-        override suspend fun complete(result: PersonalUpdateVerifiedResult, journal: PersonalUpdateRecoveryJournal,
-            admit: (CalendarScope) -> Boolean): Boolean {
-            currentCoroutineContext().ensureActive()
-            val frozen = result.snapshot()
-            return withScopedPersonalOwner(frozen.record.scope, admit, consent = false, denied = false) { access ->
-                completePersonal(frozen, journal, access)
-            }
-        }
-    }
+    internal val personalOwners: SystemPersonalLocalOwner = ImportCoordinatorPersonalOwner(
+        store, remote, projection, editAccess, ::personalSendingEnabled, ::personalConsent,
+        ::systemPersonalEvidenceAdmission, ::handoffSource,
+    ).owner
 
     fun systemDeleteRunAdmission(target: CalendarScope): (CalendarScope) -> Boolean = deleteAdmission(target, true)
     fun systemDeleteProofAdmission(target: CalendarScope): (CalendarScope) -> Boolean = deleteAdmission(target, false)
@@ -346,12 +258,6 @@ class ImportCoordinator(
     suspend fun reconcileReservedDeleteChange(target: CalendarScope, event: EventId, deleted: Boolean, dirty: Boolean): Boolean =
         deleteOwner.reconcileReservedDeleteChange(target, event, deleted, dirty)
 
-    private suspend fun <T> withScopedEditOwner(target: CalendarScope, admit: (CalendarScope) -> Boolean,
-        consent: Boolean, denied: T, finalAccessRequired: Boolean = true,
-        sendingEnabled: (CalendarScope) -> Boolean = systemTimesEnabled,
-        action: suspend (ImportCoordinatorEditAccess.Access) -> T): T =
-        editAccess.withScopedEditOwner(target, admit, consent, denied, finalAccessRequired, sendingEnabled, action)
-
     private fun personalSendingEnabled(scope: CalendarScope): Boolean =
         systemTitlesEnabled(scope) || systemTextsEnabled(scope) || systemTimesEnabled(scope)
 
@@ -362,125 +268,6 @@ class ImportCoordinator(
             PersonalEditField.TIME -> systemTimesEnabled(intent.scope)
         } }
     } catch (_: Exception) { false }
-
-    private suspend fun <T> withScopedPersonalOwner(target: CalendarScope, admit: (CalendarScope) -> Boolean,
-        consent: Boolean, denied: T, finalAccessRequired: Boolean = true,
-        action: suspend (ImportCoordinatorEditAccess.Access) -> T): T =
-        withScopedEditOwner(target, admit, consent, denied, finalAccessRequired, ::personalSendingEnabled, action)
-
-    private fun freezePersonalPreparation(value: PersonalEditPreparation) =
-        PersonalEditPreparation(value.intent, value.timestamp, value.format, value.protectedPayload)
-
-    private fun samePersonalPreparation(left: PersonalEditPreparation?, right: PersonalEditPreparation?): Boolean =
-        if (left == null || right == null) left == null && right == null else
-            left.intent == right.intent && left.timestamp == right.timestamp && left.format == right.format &&
-                left.protectedPayload == right.protectedPayload
-
-    /** Exact SQL and native source, including complete immutable origin for a handed-off CREATE. */
-    private suspend fun personalSource(intent: LocalEditIntent, preparation: PersonalEditPreparation?,
-        access: ImportCoordinatorEditAccess.Access): Boolean {
-        val target = access.target
-        val event = intent.base.eventId
-        if (intent.scope != target || !SystemPersonalEditProfile.accepts(intent) || !personalConsent(intent) || intent.format != remote.format) return false
-        suspend fun sql(): Boolean {
-            if (remote.format != intent.format) return false
-            if (access.read { store.localEdit(target, event) } != intent) return false
-            val eligibility = access.read { store.assessPersonalPreparation(intent) }
-            if (eligibility != if (preparation == null) PersonalPreparationAdmission.ELIGIBLE
-                else PersonalPreparationAdmission.HISTORICAL) return false
-            return samePersonalPreparation(access.read { store.personalEditPreparation(target, event) }, preparation) &&
-                remote.format == intent.format
-        }
-        return editAccess.currentEditSource(intent, access, ::sql, personal = true)
-    }
-
-    private suspend fun currentPersonalResult(result: PersonalUpdateVerifiedResult, journal: PersonalUpdateRecoveryJournal,
-        access: ImportCoordinatorEditAccess.Access): Boolean {
-        val record = result.record
-        if (record.scope != access.target || record.state != PersonalUpdateAttemptState.OUTCOME_UNKNOWN ||
-            record.preparation.intent.format != remote.format ||
-            access.read { store.transaction(access.target) { checkpoint?.format } } != record.preparation.intent.format)
-            return false
-        val durable = access.read { journal.read(access.target, record.id, access.admit) } ?: return false
-        return durable.copy(protectedEvidence = null) == record &&
-            access.read { journal.readVerified(access.target, record.id, access.admit) } == result &&
-            access.read { store.transaction(access.target) { checkpoint?.format } } == record.preparation.intent.format &&
-            remote.format == record.preparation.intent.format
-    }
-
-    private suspend fun acknowledgePersonal(result: PersonalUpdateVerifiedResult, journal: PersonalUpdateRecoveryJournal,
-        access: ImportCoordinatorEditAccess.Access): Boolean {
-        if (projection.personalUpdateAcknowledgementProtocol != 1 || !currentPersonalResult(result, journal, access)) return false
-        val target = access.target
-        val attempt = result.record.id
-        val intent = result.record.preparation.intent
-        val event = result.event.eventId
-        val existing = access.read { store.personalUpdateAcknowledgement(target, event, attempt) }
-        if (existing != null && !existing.receipt.matches(result)) return false
-        if (existing?.state == PersonalUpdateAcknowledgementState.RESTORED)
-            return currentPersonalResult(result, journal, access)
-        val reservation = if (existing != null) PersonalUpdateAcknowledgementReservation(existing, false) else {
-            val role = access.read { store.capturedHandoff(target, event) }
-            if (!editAccess.currentEditNativeSource(intent, role, access, personal = true) || !currentPersonalResult(result, journal, access)) return false
-            access.read { store.preparePersonalUpdateAcknowledgement(result, role?.frame) } ?: return false
-        }
-        val retained = reservation.record
-        if (!retained.receipt.matches(result) ||
-            access.read { store.personalUpdateAcknowledgement(target, event, attempt) } != retained ||
-            !currentPersonalResult(result, journal, access)) return false
-        if (reservation.fresh) {
-            val owner = access.read { store.localEdit(target, event) }
-            val echoedOwner = owner?.state == LocalEditState.CONFLICT && owner.copy(state = LocalEditState.PAUSED) == intent
-            if ((owner != intent && !echoedOwner) || !samePersonalPreparation(
-                    access.read { store.personalEditPreparation(target, event) }, result.record.preparation)) return false
-            if (!editAccess.currentEditAcknowledgementRole(intent, retained.receipt.handoff, access)) return false
-        }
-        val historicalFrame = retained.receipt.handoff
-        if (historicalFrame != null && !access.read { handoffSource(historicalFrame, access::active) }) return false
-        val witness = recoverPersonalAcknowledgement(reservation.fresh,
-            projection.personalUpdateAcknowledgementRecoveryProtocol,
-            inspect = { access.read { projection.inspectPersonalUpdateAcknowledgement(retained.receipt) } },
-            qualifyCurrentOwner = {
-                val owner = access.read { store.localEdit(target, event) }
-                val echoedOwner = owner?.state == LocalEditState.CONFLICT && owner.copy(state = LocalEditState.PAUSED) == intent
-                val role = access.read { store.capturedHandoff(target, event) }
-                (owner == intent || echoedOwner) &&
-                    samePersonalPreparation(access.read { store.personalEditPreparation(target, event) }, result.record.preparation) &&
-                    editAccess.currentEditAcknowledgementRole(intent, retained.receipt.handoff, access) &&
-                    role?.frame == retained.receipt.handoff && editAccess.currentEditNativeSource(intent, role, access, personal = true) &&
-                    currentPersonalResult(result, journal, access) &&
-                    access.read { store.personalUpdateAcknowledgement(target, event, attempt) } == retained
-            },
-            applyFresh = { access.read { projection.acknowledgePersonalUpdate(retained.receipt) } },
-            resume = { access.read { projection.resumePersonalUpdateAcknowledgement(retained.receipt) } },
-        ) ?: return false
-        if (witness.receipt.snapshot() != retained.receipt || !currentPersonalResult(result, journal, access) ||
-            access.read { store.personalUpdateAcknowledgement(target, event, attempt) } != retained) return false
-        if (historicalFrame != null && !access.read { handoffSource(historicalFrame, access::active) }) return false
-        if (!access.read { store.restorePersonalUpdateAcknowledgement(witness) }) return false
-        return access.read { store.personalUpdateAcknowledgement(target, event, attempt) } ==
-            PersonalUpdateAcknowledgementRecord(retained.receipt, PersonalUpdateAcknowledgementState.RESTORED) &&
-            currentPersonalResult(result, journal, access)
-    }
-
-    private suspend fun completePersonal(result: PersonalUpdateVerifiedResult, journal: PersonalUpdateRecoveryJournal,
-        access: ImportCoordinatorEditAccess.Access): Boolean {
-        if (journal.completionProtocol != 1 || !currentPersonalResult(result, journal, access)) return false
-        val target = access.target
-        val event = result.event.eventId
-        val attempt = result.record.id
-        val acknowledgement = access.read { store.personalUpdateAcknowledgement(target, event, attempt) } ?: return false
-        if (acknowledgement.state != PersonalUpdateAcknowledgementState.RESTORED || !acknowledgement.receipt.matches(result)) return false
-        val completion = PersonalUpdateCompletion.of(result, acknowledgement)
-        val retained = access.read { journal.readCompletion(target, attempt, access.admit) }
-        if (retained != null && retained != completion) return false
-        if (!currentPersonalResult(result, journal, access) ||
-            access.read { store.personalUpdateAcknowledgement(target, event, attempt) } != acknowledgement) return false
-        if (retained == null && !access.read { journal.retainCompletion(completion, access.admit) }) return false
-        return access.read { journal.readCompletion(target, attempt, access.admit) } == completion &&
-            access.read { store.personalUpdateAcknowledgement(target, event, attempt) } == acknowledgement &&
-            currentPersonalResult(result, journal, access)
-    }
 
     suspend fun configureSystemCalendar(target: CalendarScope): Boolean = mutex.withLock {
         val expected = generation
@@ -1019,8 +806,8 @@ class ImportCoordinator(
         LocalChangeCapture(target, store, projection,
             currentFormat = { remote.format }, active = active,
             currentAccount = { isCurrent(expected, target.account) },
-            requireUnheld = { event -> if (capturedRawHold(target).holds(event)) throw CapturedProjectionPending() },
-            baseline = { event -> captureBaseline(expected, target, event) })
+            requireUnheld = { event -> if (capturedRawHold(target).holds(event)) throw ImportCoordinatorProjection.Pending() },
+            baseline = { event -> projectionWork.captureBaseline(expected, target, event) })
 
     /** Explicit internal UPDATE snapshot only. The dirty Provider row is never acknowledged. */
     suspend fun captureLocalEdit(target: CalendarScope, eventId: EventId, id: MutationId): LocalEditCaptureResult = mutex.withLock {
@@ -1885,177 +1672,8 @@ class ImportCoordinator(
         capturedCreateHandoff(target, captures, journal, expected, active).reconcile(localId, id, attempt, mutation, beforeNewOwner)
     }
 
-    private class CapturedProjectionPending : IllegalStateException("Captured creation reconciliation pending")
-    private suspend fun capturedRawHold(target: CalendarScope): CapturedProjectionHold {
-        val dispatch = creates?.capturedProjectionHold(target, remote.format) ?: CapturedProjectionHold()
-        val provenance = try { store.capturedProvenanceEvents(target) }
-        catch (_: IllegalArgumentException) { return dispatch.copy(scopeBlocked = true) }
-        return dispatch.copy(events = dispatch.events + provenance)
-    }
-    private suspend fun capturedProjectionHold(target: CalendarScope): CapturedProjectionHold {
-        val raw = capturedRawHold(target)
-        if (raw.scopeBlocked || raw.events.isEmpty()) return raw
-        val expected = generation
-        val policy = createPolicyRevision.get()
-        val active = { authenticated && generation == expected && createPolicyRevision.get() == policy && hasCalendarPermissions() }
-        val released = mutableSetOf<EventId>()
-        for (event in raw.events) {
-            try {
-                val role = store.capturedHandoff(target, event) ?: continue
-                if (role.state == CapturedCreateHandoffState.RELEASED && !role.waiting &&
-                    handoffSource(role.frame, active) && store.capturedHandoffCanProject(role.frame) && active()) released += event
-            } catch (cancelled: CancellationException) { throw cancelled }
-            catch (_: Exception) { /* Malformed or lost provenance remains held; other events can drain. */ }
-        }
-        return raw.copy(events = raw.events - released)
-    }
-
-    // Keep the hold read and status publication out of the larger import coroutine.
-    private suspend fun publishImportProgress(target: CalendarScope, status: String, completedAt: Long? = null) {
-        val held = capturedProjectionHold(target).blocksProjection
-        val locallyHeld = store.heldProjectionCount(target) > 0
-        val visible = when {
-            held -> "CREATE_PENDING"
-            locallyHeld && status in setOf("IMPORTED", "PARTIAL", "SERIES_PENDING", "HISTORY_GAP") -> "INCOMPLETE"
-            else -> status
-        }
-        store.status(target, visible, if (held || locallyHeld) null else completedAt)
-    }
-    private suspend fun requireProjectionAvailable(target: CalendarScope, eventId: EventId) {
-        if (store.transaction(target) { hasPendingMutation(eventId) }) throw CapturedProjectionPending()
-        if (capturedProjectionHold(target).holds(eventId)) throw CapturedProjectionPending()
-    }
-    private suspend fun runnableProjections(target: CalendarScope, limit: Int = 100): List<ProjectionIntent> {
-        val hold = capturedProjectionHold(target)
-        return if (hold.scopeBlocked) emptyList() else store.pending(target, limit, hold.events)
-    }
-    private suspend fun nativeChangesBlock(intent: ProjectionIntent): Boolean = projection.hasOwnedLocalChanges(intent,
-        if (intent.change is RemoteChange.Deleted) store.deletedSeriesUid(intent.scope, intent.change.eventId) else null)
-
-    private suspend fun captureBaseline(expected: Long, target: CalendarScope, eventId: EventId): RemoteChange.Upsert? {
-        if (capturedRawHold(target).holds(eventId)) throw CapturedProjectionPending()
-        requireProjectionAvailable(target, eventId)
-        val receipt = store.projectionReceipt(target, eventId)
-        val recovered = receipt?.let { recoverProjection(expected, it) } ?: false
-        val base = store.projectedBaseline(target, eventId) ?: return null
-        // An opaque revision alone cannot choose between different prepared contents.
-        if (receipt != null && !recovered && receipt.change != base && receipt.change.revision == base.revision) return null
-        return base
-    }
-
-    /** A marker proves the historical write, not that the current Provider content is unchanged. */
-    private suspend fun recoverProjection(expected: Long, receipt: ProjectionReceipt): Boolean {
-        requireProjectionAvailable(receipt.scope, receipt.change.eventId)
-        store.requireDirectProjection(receipt.scope, receipt.change.eventId)
-        if (receipt.format != remote.format || receipt.protocol != projection.projectionReceiptProtocol) return false
-        val witness = projection.inspectProjectionReceipt(receipt) ?: return false
-        check(witness.receipt == receipt) { "Projection witness differs" }
-        if (!isCurrent(expected, receipt.scope.account)) throw CancellationException("Inactive projection recovery")
-        requireProjectionAvailable(receipt.scope, receipt.change.eventId)
-        return store.restoreProjection(witness)
-    }
-
-    /** Kept out of the larger import coroutine; preparation precedes every tracked Provider write. */
-    private suspend fun projectPending(intent: ProjectionIntent, expected: Long) {
-        if (capturedRawHold(intent.scope).holds(intent.change.eventId)) {
-            projectCapturedHandoff(intent, expected)
-            return
-        }
-        requireProjectionAvailable(intent.scope, intent.change.eventId)
-        store.requireDirectProjection(intent.scope, intent.change.eventId)
-        val outstanding = store.projectionReceipt(intent.scope, intent.change.eventId)
-        var representation: ProjectedEventReference? = null
-        val recovered = outstanding?.let { recoverProjection(expected, it) } ?: false
-        // A historical receipt can be recovered without consuming newer native edits. Once
-        // inspected, an unsupported local change holds only this event, including old receipts.
-        if (nativeChangesBlock(intent))
-            throw CalendarProjectionException(CalendarProjectionFailure.LOCAL_CHANGE_PENDING)
-        if (recovered && outstanding?.change == intent.change) return
-        if (outstanding != null) {
-            if (!recovered && (outstanding.change != intent.change || outstanding.format != remote.format ||
-                outstanding.protocol != projection.projectionReceiptProtocol)) {
-                throw CalendarProjectionException(CalendarProjectionFailure.PROVIDER_REJECTED)
-            }
-            if (!recovered) representation = outstanding.representation
-        }
-        requireProjectionAvailable(intent.scope, intent.change.eventId)
-        if (projection.projectionReceiptProtocol == 1 && ProjectionReceipt.supports(intent.change)) {
-            // Preserve an existing explicit direct preparation rather than substituting NULL.
-            val prepared = store.prepareProjection(intent, remote.format, representation)
-            store.requireDirectProjection(intent.scope, intent.change.eventId)
-            val witness = projection.applyTracked(prepared)
-            check(witness.receipt == prepared) { "Projection witness differs" }
-            if (!isCurrent(expected, intent.scope.account)) throw CancellationException("Inactive projection acknowledgement")
-            requireProjectionAvailable(intent.scope, intent.change.eventId)
-            check(store.restoreProjection(witness)) { "Projection acknowledgement remains unresolved" }
-        } else {
-            store.requireDirectProjection(intent.scope, intent.change.eventId)
-            projection.apply(intent, if (intent.change is RemoteChange.Deleted)
-                store.deletedSeriesUid(intent.scope, intent.change.eventId) else null)
-            requireProjectionAvailable(intent.scope, intent.change.eventId)
-            store.acknowledge(intent)
-        }
-    }
-
-    /** The durable transfer authorizes only conditional specialized updates, never generic ACK. */
-    private suspend fun projectCapturedHandoff(intent: ProjectionIntent, expected: Long) {
-        val target = intent.scope
-        val event = intent.change.eventId
-        val policy = createPolicyRevision.get()
-        val active = { authenticated && generation == expected && createPolicyRevision.get() == policy && hasCalendarPermissions() }
-        val previousStore = store.admitTransaction
-        val previousProjection = projection.admitOperation
-        store.admitTransaction = { it == target && active() }
-        projection.admitOperation = active
-        var frame: CapturedCreateHandoffFrame? = null
-        suspend fun available(): Boolean = isCurrent(expected, target.account) && active() &&
-            store.selections(target.account).singleOrNull { it.scope == target }?.let { it.enabled && it.available } == true && active()
-        suspend fun waitForResolution() {
-            if (active()) frame?.let { store.waitCapturedHandoff(it) }
-        }
-        try {
-            if (!available()) throw CancellationException("Inactive captured projection")
-            var role = store.capturedHandoff(target, event) ?: return
-            frame = role.frame
-            if (role.state != CapturedCreateHandoffState.RELEASED || role.waiting || !handoffSource(role.frame, active) ||
-                !store.capturedHandoffCanProject(role.frame)) return
-            var prepared = store.capturedHandoffProjection(role.frame)
-            if (prepared != null) {
-                val proof = projection.inspectCapturedHandoffProjection(prepared)
-                if (!available()) throw CancellationException("Inactive captured recovery")
-                if (!handoffSource(role.frame, active)) { waitForResolution(); return }
-                if (proof != null) {
-                    check(proof.plan == prepared) { "Captured projection proof differs" }
-                    check(store.restoreCapturedHandoffProjection(proof)) { "Captured projection recovery unresolved" }
-                    role = store.capturedHandoff(target, event) ?: return
-                    frame = role.frame
-                    prepared = null
-                }
-            }
-            // Recovery can advance the reference and leave a different/newer queue entry.
-            val current = store.capturedHandoffPending(role.frame) ?: return
-            if (!store.capturedHandoffCanProject(role.frame) || !supportsCapturedHandoff(current.change)) {
-                waitForResolution(); return
-            }
-            if (prepared != null && prepared.receipt.change != current.change) { waitForResolution(); return }
-            val clean = projection.inspectCapturedHandoffBase(role.frame)
-            if (!available()) throw CancellationException("Inactive captured qualification")
-            if (clean?.frame != role.frame || !handoffSource(role.frame, active)) { waitForResolution(); return }
-            val plan = prepared ?: store.prepareCapturedHandoffProjection(role.frame, current)
-            if (!available()) throw CancellationException("Inactive captured write")
-            if (!handoffSource(role.frame, active)) { waitForResolution(); return }
-            val proof = projection.applyCapturedHandoffProjection(plan)
-            if (!available()) throw CancellationException("Inactive captured acknowledgement")
-            if (proof?.plan != plan || !handoffSource(role.frame, active)) { waitForResolution(); return }
-            check(store.restoreCapturedHandoffProjection(proof)) { "Captured projection acknowledgement unresolved" }
-        } catch (failure: CalendarProjectionException) {
-            if (failure.category in setOf(CalendarProjectionFailure.PROVIDER_REJECTED,
-                    CalendarProjectionFailure.IDENTITY_CONFLICT, CalendarProjectionFailure.CALENDAR_MISSING)) waitForResolution() else throw failure
-        } finally {
-            store.admitTransaction = previousStore
-            projection.admitOperation = previousProjection
-        }
-    }
+    private suspend fun capturedRawHold(target: CalendarScope): CapturedProjectionHold =
+        projectionWork.capturedRawHold(target)
 
     fun permissionsChanged() {
         val previouslyGranted = state.value.hasPermission
@@ -2243,19 +1861,19 @@ class ImportCoordinator(
             val bootstrap = bootstrapInitialPage(calendarScope, allowNetwork, deltaReady)
             if (!isCurrent(expected, account)) return null
             suspend fun drain(): Boolean {
-                for (intent in runnableProjections(calendarScope)) {
+                for (intent in projectionWork.runnableProjections(calendarScope)) {
                     if (!isCurrent(expected, account)) throw CancellationException()
-                    try { projectPending(intent, expected) }
+                    try { projectionWork.projectPending(intent, expected) }
                     catch (failure: CalendarProjectionException) {
                         val racedLocalChange = failure.category in setOf(CalendarProjectionFailure.PROVIDER_REJECTED,
-                            CalendarProjectionFailure.IDENTITY_CONFLICT) && nativeChangesBlock(intent)
+                            CalendarProjectionFailure.IDENTITY_CONFLICT) && projectionWork.nativeChangesBlock(intent)
                         if (failure.category != CalendarProjectionFailure.LOCAL_CHANGE_PENDING && !racedLocalChange) throw failure
                         // Retain the exact intent and receipt; a fresh observation may
                         // rearm it, but this continuation must let other events progress.
                         store.holdLocalProjection(intent)
                     }
                 }
-                return runnableProjections(calendarScope, 1).isNotEmpty()
+                return projectionWork.runnableProjections(calendarScope, 1).isNotEmpty()
             }
             var remaining = drain()
             if (stagedEngine != null && !remaining) {
@@ -2292,7 +1910,7 @@ class ImportCoordinator(
                     else -> "IMPORTED"
                 }
                 if (!isCurrent(expected, account)) return null
-                publishImportProgress(calendarScope, status,
+                projectionWork.publishImportProgress(calendarScope, status,
                     if (!blocked && progress.traversalComplete && !remaining && deltaProgress?.blocked != true &&
                         deltaProgress?.workRemaining != true &&
                         !historyGap && !missingSeries && !mappingRemaining &&
@@ -2302,20 +1920,20 @@ class ImportCoordinator(
                 remaining = remaining || incompleteNetwork || (allowNetwork && mappingRemaining)
             } else if (network && selection.nextAttempt > System.currentTimeMillis()) {
                 retry = true
-                publishImportProgress(calendarScope, "PENDING")
+                projectionWork.publishImportProgress(calendarScope, "PENDING")
             } else if (network && !remaining) {
                 val progress = engine.importPages(calendarScope)
                 remaining = drain() || !progress.traversalComplete || store.mappingRescanPending(calendarScope)
                 val missingSeries = store.blockedSeriesCount(calendarScope) > 0
                 if (!isCurrent(expected, account)) return null
-                publishImportProgress(calendarScope, if (remaining) "PENDING" else if (missingSeries) "SERIES_PENDING"
+                projectionWork.publishImportProgress(calendarScope, if (remaining) "PENDING" else if (missingSeries) "SERIES_PENDING"
                     else if (selection.historyGap) "HISTORY_GAP" else "IMPORTED",
                     if (remaining || selection.historyGap || missingSeries)
                         null else System.currentTimeMillis())
             } else {
                 // Local work must not overwrite the reason the last network run was blocked.
                 val blocked = selection.status in setOf("NETWORK", "UNSUPPORTED", "ERROR", "AUTH", "CAPACITY", "LOCAL_KEYS")
-                publishImportProgress(calendarScope, if (blocked) selection.status else if (remaining || store.mappingRescanPending(calendarScope)) "PENDING" else
+                projectionWork.publishImportProgress(calendarScope, if (blocked) selection.status else if (remaining || store.mappingRescanPending(calendarScope)) "PENDING" else
                     if (store.complete(calendarScope)) {
                         if (store.blockedSeriesCount(calendarScope) > 0) "SERIES_PENDING"
                         else if (store.deferredCount(calendarScope) > 0) "PARTIAL"
@@ -2358,7 +1976,7 @@ class ImportCoordinator(
             // Storage errors can also happen while publishing status or refreshing UI.
             // Let the worker boundary back off without depending on another DB write.
             if (retryableImportFailure(failure)) throw failure
-            store.status(calendarScope, if (failure is CapturedProjectionPending) "CREATE_PENDING" else "ERROR")
+            store.status(calendarScope, if (failure is ImportCoordinatorProjection.Pending) "CREATE_PENDING" else "ERROR")
         }
         return when { retry -> ImportRunResult.RETRY; continuation -> ImportRunResult.CONTINUE; else -> ImportRunResult.COMPLETE }
     }
