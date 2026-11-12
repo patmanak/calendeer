@@ -794,12 +794,12 @@ class ImportCoordinator(
 
     /** Current native contents only. The caller retains the observed role and typed SQL proof. */
     private suspend fun currentEditNativeSource(intent: LocalEditIntent, role: CapturedCreateHandoffRecord?,
-        access: ScopedEditOwnerAccess): Boolean {
+        access: ScopedEditOwnerAccess, personal: Boolean = false): Boolean {
         val target = access.target
         val event = intent.base.eventId
         val hold = access.read { capturedRawHold(target) }
         if (hold.scopeBlocked || (role == null && hold.holds(event))) return false
-        val content = if (role == null) access.read { if (SystemPersonalEditProfile.accepts(intent)) projection.captureOwnedPersonalEdit(target, intent.base) else projection.captureOwnedSimpleEdit(target, intent.base) }?.content else {
+        val content = if (role == null) access.read { if (personal || SystemPersonalEditProfile.requiresExtendedSnapshot(intent)) projection.captureOwnedPersonalEdit(target, intent.base) else projection.captureOwnedSimpleEdit(target, intent.base) }?.content else {
             if (!access.read { currentSystemTitleHandoff(role, intent, access::active) }) return false
             val observed = access.read { projection.captureCapturedHandoffCurrent(role.frame) }
                 as? CapturedHandoffCurrentObservation.Supported
@@ -810,12 +810,12 @@ class ImportCoordinator(
 
     /** Recheck the same typed SQL owner/capsule before and after the shared native observations. */
     private suspend fun currentEditSource(intent: LocalEditIntent, access: ScopedEditOwnerAccess,
-        sql: suspend () -> Boolean): Boolean {
+        sql: suspend () -> Boolean, personal: Boolean = false): Boolean {
         val target = access.target
         val event = intent.base.eventId
         if (!sql()) return false
         val role = access.read { store.capturedHandoff(target, event) }
-        if (!currentEditNativeSource(intent, role, access)) return false
+        if (!currentEditNativeSource(intent, role, access, personal)) return false
         if (role != null && !access.read { currentSystemTitleHandoff(role, intent, access::active) }) return false
         val after = access.read { capturedRawHold(target) }
         if (after.scopeBlocked || (role == null && after.holds(event)) ||
@@ -1045,7 +1045,7 @@ class ImportCoordinator(
             return samePersonalPreparation(access.read { store.personalEditPreparation(target, event) }, preparation) &&
                 remote.format == intent.format
         }
-        return currentEditSource(intent, access, ::sql)
+        return currentEditSource(intent, access, ::sql, personal = true)
     }
 
     private suspend fun currentPersonalResult(result: PersonalUpdateVerifiedResult, journal: PersonalUpdateRecoveryJournal,
@@ -1075,7 +1075,7 @@ class ImportCoordinator(
             return currentPersonalResult(result, journal, access)
         val reservation = if (existing != null) PersonalUpdateAcknowledgementReservation(existing, false) else {
             val role = access.read { store.capturedHandoff(target, event) }
-            if (!currentEditNativeSource(intent, role, access) || !currentPersonalResult(result, journal, access)) return false
+            if (!currentEditNativeSource(intent, role, access, personal = true) || !currentPersonalResult(result, journal, access)) return false
             access.read { store.preparePersonalUpdateAcknowledgement(result, role?.frame) } ?: return false
         }
         val retained = reservation.record
@@ -1101,7 +1101,7 @@ class ImportCoordinator(
                 (owner == intent || echoedOwner) &&
                     samePersonalPreparation(access.read { store.personalEditPreparation(target, event) }, result.record.preparation) &&
                     currentEditAcknowledgementRole(intent, retained.receipt.handoff, access) &&
-                    role?.frame == retained.receipt.handoff && currentEditNativeSource(intent, role, access) &&
+                    role?.frame == retained.receipt.handoff && currentEditNativeSource(intent, role, access, personal = true) &&
                     currentPersonalResult(result, journal, access) &&
                     access.read { store.personalUpdateAcknowledgement(target, event, attempt) } == retained
             },
@@ -1845,7 +1845,7 @@ class ImportCoordinator(
         if (!active()) return false
         val hold = capturedRawHold(target)
         if (!active() || hold.scopeBlocked || (role == null && hold.holds(event))) return false
-        val content = if (role == null) (if (SystemPersonalEditProfile.accepts(intent))
+        val content = if (role == null) (if (SystemPersonalEditProfile.requiresExtendedSnapshot(intent))
             projection.captureOwnedPersonalEdit(target, intent.base)
             else projection.captureOwnedSimpleEdit(target, intent.base))?.content else {
             if (!currentSystemTitleHandoff(role, intent, active)) return false
@@ -1877,7 +1877,7 @@ class ImportCoordinator(
     suspend fun prepareSystemTitle(target: CalendarScope, event: EventId, owner: MutationId,
         attempt: MutationId, timestamp: java.time.Instant, journal: TitleUpdatePreparationJournal,
         localPort: CalendarLocalEditPreparationPort, titlePort: CalendarTitleUpdateSubmissionPort,
-        admission: (CalendarScope) -> Boolean): LocalTitleAttemptPreparation {
+        admission: (CalendarScope) -> Boolean, existingOnly: Boolean = false): LocalTitleAttemptPreparation {
         var expected = -1L
         var policy = -1L
         var capsule: LocalEditPreparation? = null
@@ -1892,7 +1892,7 @@ class ImportCoordinator(
                 val intent = store.localEdit(target, event) ?: return@withLock LocalTitleAttemptPreparation.Unqualified
                 if (intent.id != owner || !systemTitleSource(intent, active)) return@withLock LocalTitleAttemptPreparation.Unsupported
                 val retained = store.localEditPreparation(target, event)
-                if (!active()) return@withLock LocalTitleAttemptPreparation.Inactive
+                if (existingOnly && retained == null) return@withLock LocalTitleAttemptPreparation.Unsupported
                 val actualTime = retained?.timestamp ?: timestamp
                 val result = prepareLocalTitleLocked(target, event, owner, actualTime, localPort, expected, policy,
                     systemTitle = true, admission = admission)

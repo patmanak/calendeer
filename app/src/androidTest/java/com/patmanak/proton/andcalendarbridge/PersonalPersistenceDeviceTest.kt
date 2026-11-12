@@ -8,6 +8,7 @@ import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.patmanak.proton.andcalendarbridge.data.importing.*
+import com.patmanak.proton.andcalendarbridge.data.outgoing.SystemPersonalEditProfile
 import com.patmanak.proton.andcalendarbridge.data.outgoing.TitleUpdateAttemptStore
 import com.patmanak.proton.andcalendarbridge.sync.*
 import com.patmanak.proton.andcalendarbridge.sync.catalog.CalendarSummary
@@ -278,6 +279,76 @@ class PersonalPersistenceDeviceTest {
             assertEquals(later, reopened.localEdit(scope, base.eventId))
             assertEquals(PersonalUpdateAcknowledgementState.RESTORED,
                 reopened.personalUpdateAcknowledgement(scope, base.eventId, proof.attempt.id)!!.state)
+        }
+    }
+    @Test fun freshSimpleTitleTextAndTimeUsePersonalPreparationsAndReopen() = importFixture { store, name ->
+        val edits = listOf(ordinary("fresh-title"), text(ordinary("fresh-text")).preparation.intent,
+            temporal(ordinary("fresh-time")).preparation.intent)
+        for (edit in edits) {
+            assertTrue(SystemPersonalEditProfile.accepts(edit))
+            seed(store, edit.base)
+            assertEquals(edit, store.captureLocalEdit(edit))
+            assertEquals(PersonalPreparationAdmission.STORED, store.retainCurrentPersonalPreparation(preparation(edit)))
+        }
+        val before = snapshot(store.readableDatabase, listOf("local_edits", "personal_edit_preparations"))
+        store.close()
+        ImportStore(context, name).use { reopened ->
+            assertEquals(before, snapshot(reopened.readableDatabase, before.keys.toList()))
+            for (edit in edits) {
+                assertPreparation(preparation(edit), reopened.personalEditPreparation(scope, edit.base.eventId))
+                assertEquals(PersonalPreparationAdmission.HISTORICAL, reopened.retainCurrentPersonalPreparation(preparation(edit)))
+                assertNull(reopened.localEditPreparation(scope, edit.base.eventId))
+                assertNull(reopened.localTextEditPreparation(scope, edit.base.eventId))
+                assertNull(reopened.localTimeEditPreparation(scope, edit.base.eventId))
+            }
+        }
+    }
+    @Test fun legacyPreparationsBlockPersonalTakeoverAndReopenWithoutChangingAnyBytes() = importFixture { store, name ->
+        val title = title(ordinary("owned-title")).preparation
+        val text = text(ordinary("owned-text")).preparation
+        val time = temporal(ordinary("owned-time")).preparation
+        val edits = listOf(title.intent, text.intent, time.intent)
+        for (edit in edits) {
+            seed(store, edit.base)
+            assertEquals(edit, store.captureLocalEdit(edit))
+        }
+        assertEquals(LocalTitlePreparationAdmission.STORED, store.retainCurrentLocalTitlePreparation(title))
+        assertEquals(LocalTextPreparationAdmission.STORED, store.retainCurrentLocalTextPreparation(text))
+        assertEquals(LocalTimePreparationAdmission.STORED, store.retainCurrentLocalTimePreparation(time))
+        val before = snapshot(store.readableDatabase, tables(store.readableDatabase))
+        for (edit in edits) {
+            assertEquals(PersonalPreparationAdmission.UNQUALIFIED, store.retainCurrentPersonalPreparation(preparation(edit)))
+        }
+        assertEquals(before, snapshot(store.readableDatabase, before.keys.toList()))
+        store.close()
+        ImportStore(context, name).use { reopened ->
+            assertEquals(before, snapshot(reopened.readableDatabase, before.keys.toList()))
+            for (edit in edits) {
+                assertEquals(edit, reopened.localEdit(scope, edit.base.eventId))
+                assertEquals(PersonalPreparationAdmission.UNQUALIFIED, reopened.retainCurrentPersonalPreparation(preparation(edit)))
+                assertNull(reopened.personalEditPreparation(scope, edit.base.eventId))
+            }
+            assertEquals(before, snapshot(reopened.readableDatabase, before.keys.toList()))
+        }
+    }
+    @Test fun unknownLegacyRequestsRejectPersonalAdoptionAndKeepExactWireOnReopen() = journalFixture { store, name ->
+        val title = title(ordinary("unknown-title"))
+        val text = text(ordinary("unknown-text"))
+        val time = temporal(ordinary("unknown-time"))
+        assertTrue(store.remember(title, allow)); assertTrue(store.claim(title, allow))
+        assertTrue(store.textJournal.remember(text, allow)); assertTrue(store.textJournal.claim(text, allow))
+        assertTrue(store.timeJournal.remember(time, allow)); assertTrue(store.timeJournal.claim(time, allow))
+        val edits = listOf(title.preparation.intent, text.preparation.intent, time.preparation.intent)
+        val before = snapshot(store.readableDatabase, tables(store.readableDatabase))
+        for (edit in edits) assertFalse(store.personalJournal.remember(personal(edit), allow))
+        assertEquals(before, snapshot(store.readableDatabase, before.keys.toList()))
+        store.close()
+        TitleUpdateAttemptStore(context, name).use { reopened ->
+            assertEquals(title.copy(state = TitleUpdateAttemptState.OUTCOME_UNKNOWN), reopened.read(scope, title.id))
+            assertEquals(text.copy(state = TextUpdateAttemptState.OUTCOME_UNKNOWN), reopened.textJournal.read(scope, text.id, allow))
+            assertEquals(time.copy(state = TimeUpdateAttemptState.OUTCOME_UNKNOWN), reopened.timeJournal.read(scope, time.id, allow))
+            for (edit in edits) assertFalse(reopened.personalJournal.remember(personal(edit), allow))
+            assertEquals(before, snapshot(reopened.readableDatabase, before.keys.toList()))
         }
     }
     @Test fun incompatibleImportAdditionRollsBackVersionAndEarlierCreatesWithoutTouchingOldRows() = importFixture { store, name ->

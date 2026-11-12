@@ -235,9 +235,29 @@ class TitleUpdateAcknowledgementIntegrationDeviceTest {
 
         private suspend fun prepareProduction(capsule: ControlledCapsulePort, port: ControlledTitlePort,
             timestamp: Instant = preparation.timestamp.plusSeconds(7200),
-            admission: (CalendarScope) -> Boolean = { it == target && titlesAllowed }) = coordinator.prepareSystemTitle(
+            admission: (CalendarScope) -> Boolean = { it == target && titlesAllowed }, existingOnly: Boolean = false) = coordinator.prepareSystemTitle(
                 target, base.eventId, preparation.intent.id, MutationId(UUID.randomUUID().toString()), timestamp,
-                journal, capsule, port, admission)
+                journal, capsule, port, admission, existingOnly)
+
+        suspend fun existingOnlyRejectsNewCapsulesAndKeepsTheOriginalPreparation() {
+            check(preparedOnly)
+            toggleTitles(true)
+            val capsule = ControlledCapsulePort(); val port = ControlledTitlePort(); val before = values()
+            allowSql()
+            assertEquals(1, store.writableDatabase.delete("local_edit_preparations", null, null))
+            assertEquals(LocalTitleAttemptPreparation.Unsupported, prepareProduction(capsule, port, existingOnly = true))
+            assertEquals(0, capsule.guardedCalls); assertEquals(0, capsule.forbiddenCalls)
+            assertEquals(0, port.preparations); assertEquals(0, port.submissions)
+            assertEquals(before, values()); assertNull(journal.read(target, prepared.id))
+            allowSql(); assertNull(store.localEditPreparation(target, base.eventId))
+            assertTrue(store.retainLocalEditPreparation(preparation))
+            reserveProductionIdentity()
+            val retained = prepareProduction(capsule, port, existingOnly = true) as LocalTitleAttemptPreparation.Prepared
+            assertEquals(prepared, retained.record)
+            assertEquals(0, capsule.guardedCalls); assertEquals(0, capsule.forbiddenCalls)
+            assertEquals(1, port.preparations); assertEquals(0, port.submissions)
+            assertEquals(before, values())
+        }
 
         suspend fun productionTitleOptionOffNeverCallsPorts() {
             val capsule = ControlledCapsulePort(); val port = ControlledTitlePort(); val before = values()
@@ -1735,6 +1755,9 @@ class TitleUpdateAcknowledgementIntegrationDeviceTest {
         try { fixture.seed(); fixture.block() } finally { fixture.close() }
     }
 
+    @Test fun existingOnlyRejectsNewTitleCapsulesButKeepsPreparedHistory() = fixture(allDay = false, preparedOnly = true) {
+        existingOnlyRejectsNewCapsulesAndKeepsTheOriginalPreparation()
+    }
     @Test fun ordinaryTimedGuardedSubmissionCompletesOfflineAfterOwnerReopening() = fixture(allDay = false, preparedOnly = true) {
         guardedSubmissionCompletesOfflineAfterReopening()
     }

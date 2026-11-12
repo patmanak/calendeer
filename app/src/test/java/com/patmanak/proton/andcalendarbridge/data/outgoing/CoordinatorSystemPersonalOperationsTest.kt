@@ -92,14 +92,9 @@ class CoordinatorSystemPersonalOperationsTest {
         assertEquals(listOf("ack", "complete"), f.calls)
     }
 
-    @Test fun deniedAndNonTimeWorkCannotReachPreparationOrTransport() = runBlocking {
+    @Test fun deniedAndDeletionWorkCannotReachPreparationOrTransport() = runBlocking {
         val denied = PersonalOperationsFixture(); denied.allowed = false
         denied.process(); assertTrue(denied.calls.isEmpty())
-        val title = PersonalOperationsFixture()
-        val legacyBase = title.base.copy(colorRgb = null, details = EventDetails())
-        title.observedIntent = title.intent.copy(base = title.intent.base.copy(content = legacyBase),
-            content = legacyBase.copy(title = "Legacy title"))
-        title.process(); assertEquals(listOf("observe"), title.calls)
         val deletion = PersonalOperationsFixture()
         deletion.operations.process(deletion.scope, deletion.reference.copy(kind = MutationKind.DELETE),
             MutationId("unused"), deletion.stamp, { true }) { fail("Unexpected proof") }

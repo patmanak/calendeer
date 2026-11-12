@@ -22,7 +22,7 @@ import org.junit.Test
 
 /** Actual reopened SQLite/coordinator; controlled native ports, no HTTP or system UI. */
 class PersonalAcknowledgementRecoveryCoordinatorDeviceTest {
-    private class Fixture {
+    private class Fixture(val simpleTitle: Boolean = false) {
         val context = ApplicationProvider.getApplicationContext<Context>()
         private val token = UUID.randomUUID().toString()
         private val name = "personal-ack-recovery-$token.db"
@@ -32,8 +32,8 @@ class PersonalAcknowledgementRecoveryCoordinatorDeviceTest {
         val base = RemoteChange.Upsert(EventId("event"), Revision("base"), EventContent("Before",
             EventTime.Timed(Instant.parse("2030-05-01T09:00:00Z"), Instant.parse("2030-05-01T10:00:00Z"), ZoneOffset.UTC),
             details = EventDetails()))
-        val intent = LocalEditIntent(MutationId("local"), scope, format, base, base.content.copy(title = "After",
-            description = "Changed", time = EventTime.AllDay(LocalDate.of(2030, 5, 2), LocalDate.of(2030, 5, 5))))
+        val intent = LocalEditIntent(MutationId("local"), scope, format, base, if (simpleTitle) base.content.copy(title = "After") else
+            base.content.copy(title = "After", description = "Changed", time = EventTime.AllDay(LocalDate.of(2030, 5, 2), LocalDate.of(2030, 5, 5))))
         val preparation = PersonalEditPreparation(intent, Instant.parse("2030-05-01T00:00:00Z"), format, "synthetic-personal-capsule")
         val prepared = PersonalUpdateAttemptRecord(MutationId("attempt"), preparation, format, "synthetic-personal-wire")
         val unknown = prepared.copy(state = PersonalUpdateAttemptState.OUTCOME_UNKNOWN)
@@ -45,6 +45,9 @@ class PersonalAcknowledgementRecoveryCoordinatorDeviceTest {
         var permission = true
         var general = true
         var nativeContent = intent.content
+        var personalSourceAllowed = true
+        var legacySourceAllowed = false
+        var legacyReads = 0
         var applied = false
         var recoveryProtocol: Int? = 1
         var resumeCalls = 0
@@ -60,9 +63,13 @@ class PersonalAcknowledgementRecoveryCoordinatorDeviceTest {
             override suspend fun apply(intent: ProjectionIntent, seriesUid: String?) = error("No native import")
             override val personalUpdateAcknowledgementProtocol get() = 1
             override val personalUpdateAcknowledgementRecoveryProtocol get() = recoveryProtocol
-            override suspend fun captureOwnedPersonalEdit(scope: CalendarScope, base: RemoteChange.Upsert): OwnedLocalEditSnapshot {
+            override suspend fun captureOwnedPersonalEdit(scope: CalendarScope, base: RemoteChange.Upsert): OwnedLocalEditSnapshot? {
                 check(admitOperation()); assertEquals(this@Fixture.scope, scope); assertEquals(this@Fixture.base, base)
-                return OwnedLocalEditSnapshot(7, 51, nativeContent)
+                return if (personalSourceAllowed) OwnedLocalEditSnapshot(7, 51, nativeContent) else null
+            }
+            override suspend fun captureOwnedSimpleEdit(scope: CalendarScope, base: RemoteChange.Upsert): OwnedLocalEditSnapshot? {
+                check(admitOperation()); legacyReads++
+                return if (legacySourceAllowed) OwnedLocalEditSnapshot(7, 51, nativeContent) else null
             }
             override suspend fun acknowledgePersonalUpdate(receipt: PersonalUpdateAcknowledgementReceipt): AppliedPersonalUpdateAcknowledgement? =
                 error("The reopened receipt must not use the fresh-only path")
@@ -104,8 +111,8 @@ class PersonalAcknowledgementRecoveryCoordinatorDeviceTest {
             assertTrue(reservation.fresh)
             store.close(); store = ImportStore(context, name)
             coordinator = ImportCoordinator(context, store, remote, projection, jobs, scheduler,
-                systemCreatesEnabled = { general }, systemTitlesEnabled = { false },
-                systemTextsEnabled = { false }, systemTimesEnabled = { false })
+                systemCreatesEnabled = { general }, systemTitlesEnabled = { simpleTitle },
+                systemTextsEnabled = { simpleTitle }, systemTimesEnabled = { simpleTitle })
             coordinator.authenticationChanged(true)
             withTimeout(10_000) { while (networkSchedules.get() == 0) delay(10) }
         }
@@ -116,10 +123,24 @@ class PersonalAcknowledgementRecoveryCoordinatorDeviceTest {
             store.close(); shared.close(); context.deleteDatabase(name); context.deleteDatabase(journalName)
         }
     }
-    private fun fixture(block: suspend Fixture.() -> Unit) = runBlocking {
+    private fun fixture(simpleTitle: Boolean = false, block: suspend Fixture.() -> Unit) = runBlocking {
         assumeTrue(InstrumentationRegistry.getArguments().getString("providerFixture") == "true")
-        val fixture = Fixture()
+        val fixture = Fixture(simpleTitle)
         try { fixture.seed(); fixture.block() } finally { fixture.close() }
+    }
+    @Test fun simplePersonalOwnerUsesPersonalNativeReaderForQualificationAndAck() = fixture(simpleTitle = true) {
+        assertNotNull(coordinator.personalOwners.observe(scope, base.eventId, intent.id,
+            coordinator.systemPersonalRunAdmission(scope)))
+        assertTrue(recover()); assertEquals(1, nativeWrites); assertEquals(0, legacyReads)
+    }
+    @Test fun refusedPersonalNativeSourceCannotFallBackToLegacyForASimpleEdit() = fixture(simpleTitle = true) {
+        personalSourceAllowed = false
+        legacySourceAllowed = true
+        assertNull(coordinator.personalOwners.observe(scope, base.eventId, intent.id,
+            coordinator.systemPersonalRunAdmission(scope)))
+        assertFalse(recover()); assertEquals(0, nativeWrites)
+        assertEquals(0, legacyReads)
+        assertEquals(unknown, journal.read(scope, prepared.id) { true })
     }
     @Test fun reopenedPendingBeforeNativeWriteFinishesWithOriginalNonceAndNoTransport() = fixture {
         assertTrue(recover()); assertEquals(1, resumeCalls); assertEquals(1, nativeWrites)

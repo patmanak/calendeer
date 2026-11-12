@@ -13,6 +13,7 @@ class CoordinatorSystemTitleOperations(
     private val journal: TitleUpdateAttemptStore,
     private val capsulePort: CalendarLocalEditPreparationPort,
     private val titlePort: CalendarTitleUpdateSubmissionPort,
+    private val existingOnly: Boolean = false,
 ) : SystemTitleUpdateOperations {
     override suspend fun discover(query: RetainedLocalChangeQuery) = imports.retainedLocalChanges(query)
 
@@ -20,7 +21,7 @@ class CoordinatorSystemTitleOperations(
         timestamp: Instant, admission: (CalendarScope) -> Boolean, proofRetained: () -> Unit): Boolean {
         if (!admission(scope)) return false
         val prepared = imports.prepareSystemTitle(scope, reference.eventId, reference.mutationId, attempt, timestamp,
-            journal, capsulePort, titlePort, admission)
+            journal, capsulePort, titlePort, admission, existingOnly)
         currentCoroutineContext().ensureActive()
         if (prepared !is LocalTitleAttemptPreparation.Prepared) return prepared == LocalTitleAttemptPreparation.Unavailable
         if (!admission(scope)) return false

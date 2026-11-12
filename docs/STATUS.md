@@ -52,7 +52,8 @@ Samsung/One UI is outside 0.1. Signature management remains deferred by the owne
 - Simple CREATE, personal-v2 combined title/text/date edits and DELETE use retained
   intent identity, guarded preparation/submission/readback and exact native/SQL
   acknowledgement. Timed/all-day events and qualified zone changes are supported.
-  Existing title/text/time paths remain live pending safe migration to personal-v2.
+  Fresh eligible title/text/date edits use personal-v2. Legacy paths only finish
+  retained capsules and historical recovery; their removal remains pending.
   [Personal edits](PERSONAL_UPDATE.md), [deletion](DELETE_SUBMISSION.md).
 - UNKNOWN is inspect-only, never reset/resend. Unsupported local changes and
   conflicts retain their variants. Native permission/account/generation and consent

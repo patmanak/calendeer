@@ -12,6 +12,26 @@ import org.junit.Test
 
 /** Host orchestration contracts only; no SQLite, Provider, crypto or service qualification. */
 class CoordinatorSystemTimeOperationsTest {
+    @Test fun existingOnlySkipsFreshPreparationButFinishesTheOriginalCapsule() = runBlocking {
+        val f = TimeOperationsFixture(existingOnly = true)
+        assertFalse(f.process())
+        assertEquals(listOf("observe"), f.calls)
+        assertNull(f.saved)
+        f.calls.clear()
+        f.retained = f.preparation
+        f.process()
+        assertFalse("capsule" in f.calls)
+        val retained = f.saved!!.preparation
+        assertEquals(f.preparation.intent, retained.intent)
+        assertEquals(f.preparation.timestamp, retained.timestamp)
+        assertEquals(f.preparation.format, retained.format)
+        assertEquals(f.preparation.protectedPayload, retained.protectedPayload)
+        assertNotNull(f.completion)
+        f.calls.clear()
+        f.process()
+        assertFalse("submit" in f.calls)
+        assertFalse("capsule" in f.calls)
+    }
     @Test fun preparedWorkRetainsProofThenWakesThenAcknowledgesAndCompletes() = runBlocking {
         val f = TimeOperationsFixture()
         assertFalse(f.process())
@@ -208,7 +228,7 @@ class CoordinatorSystemTimeOperationsTest {
 }
 
 /** Strict single-owner in-memory boundary, deliberately independent of SQL/crypto implementation. */
-internal class TimeOperationsFixture(allDay: Boolean = false) {
+internal class TimeOperationsFixture(allDay: Boolean = false, existingOnly: Boolean = false) {
     val scope = CalendarScope(AccountId("fixture-account"), CalendarId("fixture-calendar"), 2)
     val stamp = Instant.parse("2033-03-20T09:00:00Z")
     val base = EventContent("Original title", if (allDay)
@@ -377,7 +397,7 @@ internal class TimeOperationsFixture(allDay: Boolean = false) {
             cancelHere("discover")
             error("Discovery was not requested by these direct owner/recovery tests")
         },
-        evidenceAdmission = { target ->
+        existingOnly = existingOnly, evidenceAdmission = { target ->
             var open = sessionOpen
             val lease: (CalendarScope) -> Boolean = { requested ->
                 if (!sessionOpen) open = false

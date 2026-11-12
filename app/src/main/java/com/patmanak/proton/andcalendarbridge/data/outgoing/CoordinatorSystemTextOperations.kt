@@ -16,11 +16,12 @@ class CoordinatorSystemTextOperations(
     private val submissions: CalendarTextUpdateSubmissionPort,
     private val discoverLocal: suspend (RetainedLocalChangeQuery) -> RetainedLocalChangeListing,
     private val evidenceAdmission: (CalendarScope) -> ((CalendarScope) -> Boolean) = { target -> { it == target } },
+    private val existingOnly: Boolean = false,
 ) : SystemTitleUpdateOperations {
     constructor(imports: ImportCoordinator, journal: TextUpdateRecoveryJournal,
-        capsules: CalendarLocalTextPreparationPort, submissions: CalendarTextUpdateSubmissionPort) :
+        capsules: CalendarLocalTextPreparationPort, submissions: CalendarTextUpdateSubmissionPort, existingOnly: Boolean = false) :
         this(imports.localTextOwners, journal, capsules, submissions, imports::retainedLocalChanges,
-            imports::systemTextEvidenceAdmission)
+            imports::systemTextEvidenceAdmission, existingOnly)
 
     override suspend fun discover(query: RetainedLocalChangeQuery) = checked { discoverLocal(query) }
 
@@ -49,6 +50,7 @@ class CoordinatorSystemTextOperations(
             if (!active() || source.intent.scope != scope || source.intent.id != reference.mutationId ||
                 source.intent.base.eventId != reference.eventId || !SystemTextEditProfile.accepts(source.intent)) return false
             val prepared = source.preparation ?: run {
+                if (existingOnly) return false
                 val fresh = checked { capsules.prepareLocalText(source.intent, timestamp, lease) } ?: return false
                 if (!active() || fresh.intent != source.intent || fresh.timestamp != timestamp) return false
                 checked { owners.retain(fresh, lease) } ?: return false

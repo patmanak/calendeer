@@ -16,11 +16,12 @@ class CoordinatorSystemTimeOperations(
     private val submissions: CalendarTimeUpdateSubmissionPort,
     private val discoverLocal: suspend (RetainedLocalChangeQuery) -> RetainedLocalChangeListing,
     private val evidenceAdmission: (CalendarScope) -> ((CalendarScope) -> Boolean) = { target -> { it == target } },
+    private val existingOnly: Boolean = false,
 ) : SystemTitleUpdateOperations {
     constructor(imports: ImportCoordinator, journal: TimeUpdateRecoveryJournal,
-        capsules: CalendarLocalTimePreparationPort, submissions: CalendarTimeUpdateSubmissionPort) :
+        capsules: CalendarLocalTimePreparationPort, submissions: CalendarTimeUpdateSubmissionPort, existingOnly: Boolean = false) :
         this(imports.localTimeOwners, journal, capsules, submissions, imports::retainedLocalChanges,
-            imports::systemTimeEvidenceAdmission)
+            imports::systemTimeEvidenceAdmission, existingOnly)
 
     override suspend fun discover(query: RetainedLocalChangeQuery) = checked { discoverLocal(query) }
 
@@ -49,6 +50,7 @@ class CoordinatorSystemTimeOperations(
             if (!active() || source.intent.scope != scope || source.intent.id != reference.mutationId ||
                 source.intent.base.eventId != reference.eventId || !SystemTimeEditProfile.accepts(source.intent)) return false
             val prepared = source.preparation ?: run {
+                if (existingOnly) return false
                 val fresh = checked { capsules.prepareLocalTime(source.intent, timestamp, lease) } ?: return false
                 if (!active() || fresh.intent != source.intent || fresh.timestamp != timestamp) return false
                 checked { owners.retain(fresh, lease) } ?: return false

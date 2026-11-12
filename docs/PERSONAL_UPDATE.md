@@ -18,9 +18,12 @@ reminder notifications; the system calendar continues to own that behavior.
 
 `PersonalEditCandidate` freezes the full raw observation, including ordered
 reminders and color. Preparation and request formats are version 2, with distinct
-identities, tags and fingerprints. Existing title/text/time formats remain strict
-and their persisted requests are never reinterpreted as personal edits. Eligible
-legacy observations continue through their existing families.
+identities, tags and fingerprints. Fresh eligible observations, including simple
+title/text/date edits, use personal-v2. Production title/text/time paths only finish
+already retained capsules and inspect/acknowledge their historical requests. Their
+formats remain strict and are never reinterpreted as personal edits. A retained
+legacy capsule or unresolved request blocks personal adoption; its intent and
+wire keep their original identity. Removing these compatibility paths is pending.
 
 Proton Core supplies encryption, signing, session-key handling and protected local
 storage. The existing pinned Proton-derived scanner/serializer is extended to
@@ -36,6 +39,8 @@ migrations are additive and retain old capsules and proofs byte for byte.
 
 ## Android and recovery
 
+Personal qualification and acknowledgement use the personal native reader even
+for a title-only edit; they never borrow the legacy reader's weaker provenance.
 The Provider snapshot proves exact ownership, base revision, dirty status, dates,
 text and color. Reminder count, IDs, offsets and ALERT method are asserted in the
 same Provider batch as the event row. Attendees and extended properties must be
