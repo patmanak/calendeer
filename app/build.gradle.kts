@@ -30,7 +30,7 @@ android {
     namespace = "com.patmanak.proton.andcalendarbridge"
     compileSdk = 37
     defaultConfig {
-        applicationId = "com.patmanak.proton.andcalendarbridge"
+        applicationId = "com.patmanak.calendeer"
         minSdk = 31
         targetSdk = 37
         versionCode = releaseVersionCode?.toInt() ?: checkedInVersionCode.toInt()

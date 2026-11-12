@@ -11,7 +11,8 @@ are not a claim that Calendar's dependencies have already been qualified.
 The minimum compatibility baseline is Android 12/API 31, target/compile API 37.
 Android 17 runtime qualification remains separate from successful SDK 37 builds
 and API 35 regressions; see [build security](BUILD_SECURITY.md#android-api-37-baseline).
-The development application identity is `com.patmanak.proton.andcalendarbridge`.
+The application identity is `com.patmanak.calendeer`; its native account type is
+`com.patmanak.calendeer.account`. Internal Kotlin/Gradle namespaces remain unchanged.
 The application ID is selected for this project; the Android compatibility
 baseline remains provisional. No release has been published.
 

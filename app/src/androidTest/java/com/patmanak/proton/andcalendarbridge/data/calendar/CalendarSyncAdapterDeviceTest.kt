@@ -27,6 +27,8 @@ class CalendarSyncAdapterDeviceTest {
     private val context = ApplicationProvider.getApplicationContext<android.content.Context>()
 
     @Test fun registeredCalendarAdapterSupportsUploadsWithoutParallelRuns() {
+        assertEquals("com.patmanak.calendeer", context.packageName)
+        assertEquals("com.patmanak.calendeer.account", AndroidCalendarProjection.ACCOUNT_TYPE)
         val adapter = ContentResolver.getSyncAdapterTypes().single {
             it.accountType == AndroidCalendarProjection.ACCOUNT_TYPE && it.authority == SystemSyncWork.AUTHORITY
         }

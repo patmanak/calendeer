@@ -1767,7 +1767,7 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
     private data class Selection(val sql: String, val args: Array<String>)
 
     companion object {
-        const val ACCOUNT_TYPE = "com.patmanak.proton.andcalendarbridge.account"
+        const val ACCOUNT_TYPE = "com.patmanak.calendeer.account"
         private const val OWNER_MARKER = "calendar-bridge-projection-v1"
         private const val FINITE_RECEIPT_PREFIX = "calendeer-finite-"
         private val projectionLock = Mutex()

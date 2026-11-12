@@ -1,5 +1,8 @@
 # Android store metadata
 
+Application ID: `com.patmanak.calendeer`. The disabled F-Droid recipe has the
+matching metadata filename; internal Kotlin namespaces are not store identities.
+
 The English and French listings describe Calendeer's current bridge capabilities,
 including the default read-only mode and experimental, limited write options.
 They do not announce an F-Droid release. Changelog filenames are Android

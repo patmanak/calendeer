@@ -4,6 +4,10 @@ Calendeer bridges Proton Calendar and Android's Calendar Provider. Viewing,
 editing and reminders belong to calendar clients; the bridge has no event editor
 or reminder notifications. This is current status, not an execution log.
 
+Application ID: `com.patmanak.calendeer`; native account type:
+`com.patmanak.calendeer.account`. This installs separately from earlier development
+builds and needs a new sign-in; their sessions/data are not transferred or deleted.
+
 ## Current milestone — 0.1 for F-Droid
 
 Scope: incoming synchronization, simple-event editing through personal-v2,

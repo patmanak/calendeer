@@ -66,7 +66,7 @@ class PreferencesDeviceTest {
     @Test fun renamedApplicationLaunchesAndRecreates() {
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
             scenario.onActivity { activity ->
-                assertEquals("com.patmanak.proton.andcalendarbridge", activity.packageName)
+                assertEquals("com.patmanak.calendeer", activity.packageName)
                 assertTrue(activity.window.decorView.isAttachedToWindow)
             }
             scenario.recreate()

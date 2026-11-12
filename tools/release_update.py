@@ -14,7 +14,7 @@ import re
 import subprocess
 import tempfile
 
-APPLICATION_ID = "com.patmanak.proton.andcalendarbridge"
+APPLICATION_ID = "com.patmanak.calendeer"
 WITNESS_FIELDS = ("session", "selections", "providerRows", "durableHistory")
 
 

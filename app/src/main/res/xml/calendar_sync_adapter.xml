@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <sync-adapter xmlns:android="http://schemas.android.com/apk/res/android"
-    android:accountType="com.patmanak.proton.andcalendarbridge.account"
+    android:accountType="com.patmanak.calendeer.account"
     android:contentAuthority="com.android.calendar"
     android:userVisible="true"
     android:supportsUploading="true"

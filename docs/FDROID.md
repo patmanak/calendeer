@@ -1,6 +1,6 @@
 # F-Droid distribution preparation
 
-Calendeer is not included in F-Droid. The [draft recipe](../fdroid/metadata/com.patmanak.proton.andcalendarbridge.yml)
+Calendeer is not included in F-Droid. The [draft recipe](../fdroid/metadata/com.patmanak.calendeer.yml)
 is disabled at application and build level, with update checks and automatic
 builds off. It describes the existing development baseline, code `1` and name
 `0.1.0-dev`; it does not create a release or a tag. The selected native source
@@ -27,10 +27,12 @@ filenames aligned with Android versionCode. The draft refuses public
 either Gradle phase so the checked-in version is used. Version `0.1.0-dev` is preparation
 only. Before a release, choose its real name/code, review the resulting manifest
 and APK, and select the exact source commit containing its inputs and listing.
-The draft pins development source commit
-`ee6b19c1494664eae21b9f0e63ab2fed53d2bfad`; keep it disabled. A later release
-version needs its own reviewed immutable inputs. No stable-tag pattern or
-auto-update policy is asserted yet.
+The disabled draft now follows `main` for the new application identity. Before
+enabling it, pin a reviewed immutable candidate containing that identity and
+repeat build-server checks. The earlier measured source baseline
+`ee6b19c1494664eae21b9f0e63ab2fed53d2bfad` used the old application ID; its native
+source-build evidence below does not qualify the renamed APK or a new release.
+No stable-tag pattern or auto-update policy is asserted yet.
 
 ## Linux build candidate
 
@@ -86,8 +88,8 @@ commit and remove the application/build disable fields so checks do not skip it:
 
 ```sh
 fdroid readmeta
-fdroid lint com.patmanak.proton.andcalendarbridge
-fdroid build --server --verbose com.patmanak.proton.andcalendarbridge:1
+fdroid lint com.patmanak.calendeer
+fdroid build --server --verbose com.patmanak.calendeer:1
 ```
 
 Keep the tracked recipe disabled until all release gates pass. YAML parsing or
