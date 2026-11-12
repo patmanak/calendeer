@@ -27,7 +27,6 @@ import com.patmanak.proton.andcalendarbridge.data.importing.ImportStorePageState
 import com.patmanak.proton.andcalendarbridge.data.importing.ImportStorePageState.hasLocalMutation
 import com.patmanak.proton.andcalendarbridge.data.importing.ImportStoreLocalPreparations.titleAcknowledgementOwner
 import com.patmanak.proton.andcalendarbridge.data.importing.ImportStoreLocalPreparations.editAcknowledgementOwner
-import com.patmanak.proton.andcalendarbridge.data.importing.ImportStoreLocalPreparations.readInspectionDeleteOwner
 import com.patmanak.proton.andcalendarbridge.data.importing.ImportStoreLocalPreparations.sameTextPreparation
 import com.patmanak.proton.andcalendarbridge.data.importing.ImportStoreLocalPreparations.supportedLocalTextIntent
 import com.patmanak.proton.andcalendarbridge.data.importing.ImportStoreLocalPreparations.readLocalTextEditPreparation
@@ -61,7 +60,6 @@ import com.patmanak.proton.andcalendarbridge.data.importing.ImportStoreUpdateAck
 import com.patmanak.proton.andcalendarbridge.data.importing.ImportStoreUpdateAcknowledgements.archiveTitleUpdateAcknowledgement
 import android.content.Context
 import android.database.sqlite.SQLiteDatabase
-import android.database.sqlite.SQLiteException
 import android.database.sqlite.SQLiteOpenHelper
 import com.patmanak.proton.andcalendarbridge.data.importing.ImportPayloadCodec.decodeChange
 import com.patmanak.proton.andcalendarbridge.data.importing.ImportPayloadCodec.decodeCheckpoint
@@ -69,17 +67,9 @@ import com.patmanak.proton.andcalendarbridge.data.importing.ImportPayloadCodec.e
 import com.patmanak.proton.andcalendarbridge.data.importing.ImportPayloadCodec.encodeCheckpoint
 import com.patmanak.proton.andcalendarbridge.data.importing.ImportPayloadCodec.key
 import com.patmanak.proton.andcalendarbridge.data.importing.ImportPayloadCodec.requirePreparationSnapshotBudget
-import com.patmanak.proton.andcalendarbridge.data.importing.ImportSeriesSql.MasterState
-import com.patmanak.proton.andcalendarbridge.data.importing.ImportSeriesSql.masterStates
-import com.patmanak.proton.andcalendarbridge.data.importing.ImportSqlValues.archiveString
-import com.patmanak.proton.andcalendarbridge.data.importing.ImportSqlValues.archiveText
-import com.patmanak.proton.andcalendarbridge.data.importing.ImportSqlValues.stagedQuery
-import com.patmanak.proton.andcalendarbridge.data.serialization.DeleteAcknowledgementCodec
 import com.patmanak.proton.andcalendarbridge.sync.*
 import com.patmanak.proton.andcalendarbridge.sync.catalog.CalendarSummary
-import java.nio.charset.CodingErrorAction
 import java.util.UUID
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
@@ -96,6 +86,7 @@ enum class PersonalPreparationAdmission { ELIGIBLE, STORED, HISTORICAL, INACTIVE
 class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
     SQLiteOpenHelper(context, name, null, 23), SyncStore {
     private val lock = Mutex()
+    private val localMutations = ImportStoreLocalMutationSql(::conflicts)
     /** Check the run lease both before its transaction and before durable commit. */
     @Volatile var admitTransaction: (CalendarScope) -> Boolean = { true }
     override fun onConfigure(db: SQLiteDatabase) {
@@ -350,24 +341,7 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
 
     /** CAS acknowledgement: a newer pending value cannot be consumed by an old provider write. */
     suspend fun acknowledge(intent: ProjectionIntent): Int = stagingMutation(intent.scope) { db ->
-        requireOrdinaryLocalCapture(db, intent.scope, intent.change.eventId)
-        val outstanding = readProjectionReceipt(db, intent.scope, intent.change.eventId)
-        require(outstanding?.representation == null && outstanding?.previousRepresentation == null) { "Represented projection requires tracked acknowledgement" }
-        require(readProjectionBase(db, intent.scope, intent.change.eventId)?.representation?.representation != ProjectionRepresentation.FINITE_DAILY_V1) {
-            "Represented baseline requires tracked projection"
-        }
-        val consumed = db.update("records", ContentValues().apply { put("pending", 0) },
-            "scope=? AND event=? AND payload=? AND pending=1 AND NOT EXISTS " +
-                "(SELECT 1 FROM local_edits l WHERE l.scope=records.scope AND l.event=records.event)",
-            arrayOf(key(intent.scope), intent.change.eventId.value, encodeChange(intent.change)))
-        if (consumed != 0) when (intent.change) {
-            is RemoteChange.Upsert -> db.insertWithOnConflict("projection_bases", null, ContentValues().apply {
-                put("scope", key(intent.scope)); put("event", intent.change.eventId.value); put("payload", encodeChange(intent.change))
-                putNull("representation")
-            }, SQLiteDatabase.CONFLICT_REPLACE).also { check(it != -1L) }
-            is RemoteChange.Deleted -> db.delete("projection_bases", "scope=? AND event=?", arrayOf(key(intent.scope), intent.change.eventId.value))
-        }
-        consumed
+        localMutations.acknowledge(db, intent)
     }
 
     /** Bounded canonical ID metadata only; native keys must never be treated as remote IDs.
@@ -726,76 +700,20 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
     /** Bounded metadata index only. No captured contents, preparation payloads or write authority. */
     suspend fun retainedLocalChanges(query: RetainedLocalChangeQuery): RetainedLocalChangePage =
         stagingMutation(query.scope) { db ->
-            try {
-                // Bound strings before loading a CursorWindow, including the look-ahead row.
-                val columns = "CASE WHEN typeof(event)='text' AND length(CAST(event AS BLOB)) BETWEEN 1 AND 4096 THEN CAST(event AS BLOB) END, " +
-                    "CASE WHEN typeof(mutation)='text' AND length(CAST(mutation AS BLOB)) BETWEEN 1 AND 4096 THEN CAST(mutation AS BLOB) END, " +
-                    "CASE WHEN typeof(kind)='text' AND length(CAST(kind AS BLOB)) <= 6 THEN kind END, " +
-                    "CASE WHEN typeof(state)='text' AND length(CAST(state AS BLOB)) <= 8 THEN state END"
-                val position = if (query.cursor == null) "" else " AND event COLLATE BINARY > ?"
-                val completed = completedDeleteEvents(db,query.scope)
-                val args = buildList {
-                    add(key(query.scope)); query.cursor?.let { add(it.afterEvent.value) }
-                    add((query.limit.toLong() + 1 + completed.size).toString())
-                }.toTypedArray()
-                val rows = db.rawQuery("SELECT $columns FROM local_edits WHERE scope=?$position " +
-                    "ORDER BY event COLLATE BINARY LIMIT ?", args).use { row ->
-                    buildList {
-                        while (row.moveToNext()) {
-                            require((0..3).none { row.isNull(it) })
-                            fun identity(column: Int) = Charsets.UTF_8.newDecoder()
-                                .onMalformedInput(CodingErrorAction.REPORT).onUnmappableCharacter(CodingErrorAction.REPORT)
-                                .decode(java.nio.ByteBuffer.wrap(row.getBlob(column))).toString()
-                            val event = EventId(identity(0))
-                            if (event in completed) continue
-                            add(RetainedLocalChangeRef(event, MutationId(identity(1)),
-                                MutationKind.valueOf(row.getString(2)), LocalEditState.valueOf(row.getString(3))))
-                            if (size == query.limit + 1) break
-                        }
-                    }
-                }
-                RetainedLocalChangePage.fromOrderedMetadata(query, rows)
-            } catch (cancelled: CancellationException) { throw cancelled }
-              catch (failure: SQLiteException) { throw failure }
-              catch (_: Exception) { throw IllegalStateException("Invalid retained change metadata") }
-        }
+        localMutations.retainedLocalChanges(db, query)
+    }
 
     /** Atomic historical SQL read, including paused/unavailable calendars. No preparation/upload admission. */
     suspend fun inspectLocalEdit(scope: CalendarScope, eventId: EventId, mutationId: MutationId): LocalEditReview? =
         stagingMutation(scope) { db ->
-            val update = db.rawQuery("SELECT kind FROM local_edits WHERE scope=? AND event=?",
-                arrayOf(key(scope), eventId.value)).use { it.moveToFirst() && it.getString(0) == "UPDATE" }
-            if (!update) return@stagingMutation null
-            val owner = readPreparationOwner(db, scope, eventId) ?: return@stagingMutation null
-            if (owner.id != mutationId) return@stagingMutation null
-            val imported = stagedQuery(db, "SELECT payload FROM records WHERE scope=? AND event=?",
-                arrayOf(key(scope), eventId.value)).use { if (it.moveToFirst()) decodeChange(it.getString(0)) else null }
-            val format = db.rawQuery("SELECT checkpoint FROM calendars WHERE scope=?", arrayOf(key(scope))).use {
-                if (!it.moveToFirst() || it.isNull(0)) null else decodeCheckpoint(scope, it.getString(0)).format
-            }
-            val retained = readLocalEditPreparation(db, scope, eventId)
-            LocalEditReview(owner, readBaseline(db, scope, eventId), imported, format,
-                hasRawEventRow(db, "deferred_events", scope, eventId),
-                retained?.let { RetainedLocalTitleInfo(it.format, it.timestamp) })
-        }
+        localMutations.inspectLocalEdit(db, scope, eventId, mutationId)
+    }
 
     /** Exact DELETE history only. A remote tombstone never consumes the local intention. */
     suspend fun inspectLocalDelete(scope: CalendarScope, eventId: EventId, mutationId: MutationId): LocalDeleteReview? =
         stagingMutation(scope) { db ->
-            val exact = db.rawQuery("SELECT 1 FROM local_edits WHERE scope=? AND event=? AND mutation=? AND kind='DELETE'",
-                arrayOf(key(scope), eventId.value, mutationId.value)).use { it.moveToFirst() }
-            if (!exact) return@stagingMutation null
-            check(!hasForeignLocalPreparation(db, scope, eventId, null)) { "Deletion has incompatible preparation" }
-            val owner = readInspectionDeleteOwner(db, scope, eventId) ?: return@stagingMutation null
-            check(owner.id == mutationId)
-            val imported = stagedQuery(db, "SELECT payload FROM records WHERE scope=? AND event=?",
-                arrayOf(key(scope), eventId.value)).use { if (it.moveToFirst()) decodeChange(it.getString(0)) else null }
-            val format = db.rawQuery("SELECT checkpoint FROM calendars WHERE scope=?", arrayOf(key(scope))).use {
-                if (!it.moveToFirst() || it.isNull(0)) null else decodeCheckpoint(scope, it.getString(0)).format
-            }
-            LocalDeleteReview(owner, readBaseline(db, scope, eventId), imported, format,
-                hasRawEventRow(db, "deferred_events", scope, eventId))
-        }
+        localMutations.inspectLocalDelete(db, scope, eventId, mutationId)
+    }
 
     /** SQL observation only; does not inspect Android or refresh remote access. */
     suspend fun assessLocalTextPreparation(intent: LocalEditIntent): LocalTextPreparationAdmission {
@@ -975,34 +893,12 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
      * This is queue state, never permission to overwrite a later dirty Provider row.
      */
     private fun requeueDistinctUpdateObservation(db: SQLiteDatabase, intent: LocalEditIntent,
-        handoff: CapturedCreateHandoffFrame?, acknowledgedPayload: String) {
-        val scope = intent.scope
-        val event = intent.base.eventId
-        val condition = "scope=? AND event=? AND payload<>? AND pending=0 AND NOT EXISTS " +
-            "(SELECT 1 FROM deferred_events d WHERE d.scope=records.scope AND d.event=records.event) " +
-            "AND NOT EXISTS (SELECT 1 FROM local_edits l WHERE l.scope=records.scope AND l.event=records.event)"
-        val args = arrayOf(key(scope), event.value, acknowledgedPayload)
-        val change = stagedQuery(db, "SELECT payload FROM records WHERE $condition", args).use { row ->
-            if (row.moveToFirst()) decodeChange(row.getString(0)) else null
-        } ?: return
-        check(change.eventId == event) { "Invalid retained update observation" }
-        if (handoff != null && !supportsCapturedHandoff(change)) return
-        val recurrence = (change as? RemoteChange.Upsert)?.content?.recurrence
-        if (recurrence != null && !recurrence.isMaster && masterStates(db, scope)[recurrence.uid] == MasterState.INACTIVE) return
-        check(db.update("records", ContentValues().apply { put("pending", 1) }, condition, args) == 1) {
-            "Retained update observation changed"
-        }
-    }
+        handoff: CapturedCreateHandoffFrame?, acknowledgedPayload: String): Unit =
+        localMutations.requeueDistinctUpdateObservation(db, intent, handoff, acknowledgedPayload)
 
     private fun ordinaryUpdateAcknowledgement(db: SQLiteDatabase, intent: LocalEditIntent,
-        handoff: CapturedCreateHandoffFrame?): Boolean {
-        val scope = intent.scope
-        val event = intent.base.eventId
-        if (listOf("captured_create_bases", "captured_create_acknowledgements", "captured_create_handoffs")
-            .any { hasRawEventRow(db, it, scope, event) }) return false
-        val pending = readProjectionReceipt(db, scope, event) ?: return true
-        return redundantUpdateProjection(pending, intent, handoff)
-    }
+        handoff: CapturedCreateHandoffFrame?): Boolean =
+        localMutations.ordinaryUpdateAcknowledgement(db, intent, handoff)
 
     /** A dirty edit can interrupt a tracked no-change projection after preparation.
      * This plan carries no content beyond the edit intent's original baseline.
@@ -1010,33 +906,14 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
      */
     private fun redundantUpdateProjection(pending: ProjectionReceipt, intent: LocalEditIntent,
         handoff: CapturedCreateHandoffFrame?): Boolean =
-        handoff == null && pending.scope == intent.scope && pending.protocol == 1 &&
-            pending.format == intent.format && pending.change == intent.base &&
-            pending.previousBase == intent.base && pending.representation == null && pending.previousRepresentation == null
+        localMutations.redundantUpdateProjection(pending, intent, handoff)
 
     private fun retireRedundantUpdateProjection(db: SQLiteDatabase, intent: LocalEditIntent,
-        handoff: CapturedCreateHandoffFrame?) {
-        val pending = readProjectionReceipt(db, intent.scope, intent.base.eventId) ?: return
-        check(redundantUpdateProjection(pending, intent, handoff)) { "Update projection obligation changed" }
-        check(db.delete("projection_receipts", "scope=? AND event=? AND nonce=? AND payload=? AND adapter=? AND version=? " +
-            "AND previous_base=? AND protocol=? AND representation IS NULL AND previous_representation IS NULL",
-            arrayOf(key(pending.scope), pending.change.eventId.value, pending.nonce, encodeChange(pending.change),
-                pending.format.id, pending.format.version.toString(), encodeChange(checkNotNull(pending.previousBase)),
-                pending.protocol.toString())) == 1) { "Update projection obligation changed" }
-    }
+        handoff: CapturedCreateHandoffFrame?): Unit =
+        localMutations.retireRedundantUpdateProjection(db, intent, handoff)
 
-    private fun textAcknowledgementSource(db: SQLiteDatabase, receipt: TextUpdateAcknowledgementReceipt): Boolean {
-        val scope = receipt.intent.scope
-        val event = receipt.intent.base.eventId
-        if (hasForeignLocalPreparation(db, scope, event, "local_text_edit_preparations")) return false
-        val frame = receipt.handoff ?: return ordinaryUpdateAcknowledgement(db, receipt.intent, receipt.handoff)
-        if (!activeProjectionScope(db, scope) || !acknowledgementFormatMatches(db, scope, receipt.intent.format) ||
-            hasRawEventRow(db, "projection_receipts", scope, event)) return false
-        // This reader validates the full immutable origin/PROVEN acknowledgement and current base.
-        // The ordinary handoff clean guard cannot be reused while this exact local intent is held.
-        val current = readCapturedHandoff(db, scope, event) ?: return false
-        return current.state == CapturedCreateHandoffState.RELEASED && current.waiting && current.frame == frame
-    }
+    private fun textAcknowledgementSource(db: SQLiteDatabase, receipt: TextUpdateAcknowledgementReceipt): Boolean =
+        localMutations.textAcknowledgementSource(db, receipt)
 
     /** Text/time use the shared edit snapshot reader; title keeps its profile-specific reader. */
     /** A verified result can be imported before its first ACK receipt is reserved.
@@ -1045,26 +922,14 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
      * checked by the caller in the same transaction.
      */
     private fun exactUpdateResultEcho(db: SQLiteDatabase, intent: LocalEditIntent,
-        projection: ProjectionReceipt, owner: LocalEditIntent?): Boolean {
-        val scope = intent.scope
-        val event = intent.base.eventId
-        if (owner?.state != LocalEditState.CONFLICT ||
-            owner.copy(state = LocalEditState.PAUSED) != intent || !activeProjectionScope(db, scope) ||
-            !acknowledgementFormatMatches(db, scope, intent.format) || readBaseline(db, scope, event) != intent.base ||
-            hasRawEventRow(db, "deferred_events", scope, event)) return false
-        val observed = stagedQuery(db, "SELECT payload FROM records WHERE scope=? AND event=?",
-            arrayOf(key(scope), event.value)).use { if (it.moveToFirst()) decodeChange(it.getString(0)) else null }
-        return observed == projection.change
-    }
+        projection: ProjectionReceipt, owner: LocalEditIntent?): Boolean =
+        localMutations.exactUpdateResultEcho(db, intent, projection, owner)
 
     private fun directUpdateAcknowledgementBase(db: SQLiteDatabase, scope: CalendarScope, event: EventId): Boolean =
-        db.rawQuery("SELECT 1 FROM projection_bases WHERE scope=? AND event=? AND representation IS NULL",
-            arrayOf(key(scope), event.value)).use { it.moveToFirst() }
+        localMutations.directUpdateAcknowledgementBase(db, scope, event)
 
     private fun acknowledgementFormatMatches(db: SQLiteDatabase, scope: CalendarScope, format: AdapterFormat): Boolean =
-        db.rawQuery("SELECT checkpoint FROM calendars WHERE scope=?", arrayOf(key(scope))).use {
-            it.moveToFirst() && !it.isNull(0) && decodeCheckpoint(scope, it.getString(0)).format == format
-        }
+        localMutations.acknowledgementFormatMatches(db, scope, format)
 
     private fun archiveTextUpdateAcknowledgement(db: SQLiteDatabase, record: TextUpdateAcknowledgementRecord) =
         ImportStoreUpdateAcknowledgements.archiveTextUpdateAcknowledgement(db, record, ::checkStagingCapacity)
@@ -1245,18 +1110,8 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
         }
     }
 
-    private fun timeAcknowledgementSource(db: SQLiteDatabase, receipt: TimeUpdateAcknowledgementReceipt): Boolean {
-        val scope = receipt.intent.scope
-        val event = receipt.intent.base.eventId
-        if (hasForeignLocalPreparation(db, scope, event, "local_time_edit_preparations")) return false
-        val frame = receipt.handoff ?: return ordinaryUpdateAcknowledgement(db, receipt.intent, receipt.handoff)
-        if (!activeProjectionScope(db, scope) || !acknowledgementFormatMatches(db, scope, receipt.intent.format) ||
-            hasRawEventRow(db, "projection_receipts", scope, event)) return false
-        // This reader validates the full immutable origin/PROVEN acknowledgement and current base.
-        // The ordinary handoff clean guard cannot be reused while this exact local intent is held.
-        val current = readCapturedHandoff(db, scope, event) ?: return false
-        return current.state == CapturedCreateHandoffState.RELEASED && current.waiting && current.frame == frame
-    }
+    private fun timeAcknowledgementSource(db: SQLiteDatabase, receipt: TimeUpdateAcknowledgementReceipt): Boolean =
+        localMutations.timeAcknowledgementSource(db, receipt)
 
     private fun archiveTimeUpdateAcknowledgement(db: SQLiteDatabase, record: TimeUpdateAcknowledgementRecord) =
         ImportStoreUpdateAcknowledgements.archiveTimeUpdateAcknowledgement(db, record, ::checkStagingCapacity)
@@ -1438,18 +1293,8 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
         }
     }
 
-    private fun personalAcknowledgementSource(db: SQLiteDatabase, receipt: PersonalUpdateAcknowledgementReceipt): Boolean {
-        val scope = receipt.intent.scope
-        val event = receipt.intent.base.eventId
-        if (hasForeignLocalPreparation(db, scope, event, "personal_edit_preparations")) return false
-        val frame = receipt.handoff ?: return ordinaryUpdateAcknowledgement(db, receipt.intent, receipt.handoff)
-        if (!activeProjectionScope(db, scope) || !acknowledgementFormatMatches(db, scope, receipt.intent.format) ||
-            hasRawEventRow(db, "projection_receipts", scope, event)) return false
-        // This reader validates the full immutable origin/PROVEN acknowledgement and current base.
-        // The ordinary handoff clean guard cannot be reused while this exact local intent is held.
-        val current = readCapturedHandoff(db, scope, event) ?: return false
-        return current.state == CapturedCreateHandoffState.RELEASED && current.waiting && current.frame == frame
-    }
+    private fun personalAcknowledgementSource(db: SQLiteDatabase, receipt: PersonalUpdateAcknowledgementReceipt): Boolean =
+        localMutations.personalAcknowledgementSource(db, receipt)
 
     private fun archivePersonalUpdateAcknowledgement(db: SQLiteDatabase, record: PersonalUpdateAcknowledgementRecord) =
         ImportStoreUpdateAcknowledgements.archivePersonalUpdateAcknowledgement(db, record, ::checkStagingCapacity)
@@ -1667,37 +1512,16 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
         }
     }
 
-    private fun titleAcknowledgementSource(db: SQLiteDatabase, receipt: TitleUpdateAcknowledgementReceipt): Boolean {
-        val scope = receipt.intent.scope
-        val event = receipt.intent.base.eventId
-        if (hasForeignLocalPreparation(db, scope, event, "local_edit_preparations")) return false
-        val frame = receipt.handoff ?: return ordinaryUpdateAcknowledgement(db, receipt.intent, receipt.handoff)
-        if (!activeProjectionScope(db, scope) || !acknowledgementFormatMatches(db, scope, receipt.intent.format) ||
-            hasRawEventRow(db, "projection_receipts", scope, event)) return false
-        // This reader validates the full immutable origin/PROVEN acknowledgement and current base.
-        // The ordinary handoff clean guard cannot be reused while this exact local intent is held.
-        val current = readCapturedHandoff(db, scope, event) ?: return false
-        return current.state == CapturedCreateHandoffState.RELEASED && current.waiting && current.frame == frame
-    }
+    private fun titleAcknowledgementSource(db: SQLiteDatabase, receipt: TitleUpdateAcknowledgementReceipt): Boolean =
+        localMutations.titleAcknowledgementSource(db, receipt)
 
     /** Historical inspection only: a frozen PAUSED snapshot never resets the current conflict state. */
     suspend fun localEditPreparation(scope: CalendarScope, eventId: EventId): LocalEditPreparation? =
         stagingMutation(scope) { db -> readLocalEditPreparation(db, scope, eventId) }
 
     /** Decode the complete immutable binding before using even its completion state. */
-    private fun readDeleteAcknowledgement(db: SQLiteDatabase, scope: CalendarScope, event: EventId): DeleteAcknowledgementRecord? = try {
-        stagedQuery(db, "SELECT ${archiveText("mutation",4096)},${archiveText("attempt",4096)},${archiveText("payload",1048576)},${archiveText("state",16)} FROM delete_acknowledgements WHERE scope=? AND event=?",
-            arrayOf(key(scope),event.value)).use { row ->
-            if (!row.moveToFirst()) null else {
-                val receipt = DeleteAcknowledgementCodec.decode(archiveString(row,2))
-                require(receipt.intent.scope == scope && receipt.intent.base.eventId == event &&
-                    receipt.intent.id.value == archiveString(row,0) && receipt.attempt.id.value == archiveString(row,1))
-                DeleteAcknowledgementRecord(receipt,DeleteAcknowledgementState.valueOf(archiveString(row,3)))
-            }
-        }
-    } catch (failure: CancellationException) { throw failure }
-      catch (failure: SQLiteException) { throw failure }
-      catch (_: Exception) { throw IllegalStateException("Invalid retained delete acknowledgement") }
+    private fun readDeleteAcknowledgement(db: SQLiteDatabase, scope: CalendarScope, event: EventId): DeleteAcknowledgementRecord? =
+        localMutations.readDeleteAcknowledgement(db, scope, event)
 
     suspend fun deleteAcknowledgement(scope: CalendarScope, event: EventId, attempt: MutationId): DeleteAcknowledgementRecord? =
         stagingMutation(scope) { db -> readDeleteAcknowledgement(db,scope,event)?.takeIf { it.receipt.attempt.id == attempt } }
@@ -1705,44 +1529,14 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
     suspend fun deleteAcknowledgement(scope: CalendarScope, event: EventId): DeleteAcknowledgementRecord? =
         stagingMutation(scope) { db -> readDeleteAcknowledgement(db,scope,event) }
 
-    private fun matchingDeleteReservation(db: SQLiteDatabase, scope: CalendarScope, event: EventId): Boolean {
-        val record = readDeleteAcknowledgement(db,scope,event) ?: return false
-        val owner = readInspectionDeleteOwner(db,scope,event) ?: return false
-        return owner.copy(state = LocalEditState.PAUSED) == record.receipt.intent && conflicts(db).currentFormat(scope) == owner.format
-    }
+    private fun matchingDeleteReservation(db: SQLiteDatabase, scope: CalendarScope, event: EventId): Boolean =
+        localMutations.matchingDeleteReservation(db, scope, event)
 
-    private fun completedDeleteEvents(db: SQLiteDatabase, scope: CalendarScope): Set<EventId> {
-        val events = stagedQuery(db,"SELECT ${archiveText("event",4096)} FROM delete_acknowledgements WHERE scope=?",arrayOf(key(scope))).use { rows ->
-            buildList { while (rows.moveToNext()) add(EventId(archiveString(rows,0))) }
-        }
-        return events.filterTo(mutableSetOf()) { event ->
-            val record = checkNotNull(readDeleteAcknowledgement(db,scope,event))
-            val owner = readInspectionDeleteOwner(db,scope,event)
-            record.state == DeleteAcknowledgementState.RESTORED && owner == record.receipt.intent
-        }
-    }
+    private fun completedDeleteEvents(db: SQLiteDatabase, scope: CalendarScope): Set<EventId> =
+        localMutations.completedDeleteEvents(db, scope)
 
-    private fun qualifyLocalDelete(db: SQLiteDatabase, intent: LocalDeleteIntent, allowReservedAbsence: Boolean): Boolean {
-        val scope = intent.scope; val event = intent.base.eventId
-        if (intent.state != LocalEditState.PAUSED || !activeProjectionScope(db,scope)) return false
-        // Freeze validates the narrow supported deletion profile without creating new identities.
-        try { DeleteSubmissionPolicy.freezeIntent(intent) } catch (_: IllegalArgumentException) { return false }
-        if (listOf("captured_create_bases","captured_create_acknowledgements","captured_create_handoffs")
-            .any { hasRawEventRow(db,it,scope,event) }) return false
-        val reservation = readDeleteAcknowledgement(db,scope,event)
-        if (reservation != null && reservation.receipt.intent != intent) return false
-        if (hasForeignLocalPreparation(db,scope,event,null) ||
-            hasRawEventRow(db,"deferred_events",scope,event)) return false
-        val pendingProjection = readProjectionReceipt(db,scope,event)
-        if (pendingProjection != null && !redundantDeleteProjection(pendingProjection,intent)) return false
-        if (conflicts(db).currentFormat(scope) != intent.format || readInspectionDeleteOwner(db,scope,event) != intent ||
-            readProjectionBase(db,scope,event)?.let { it.change != intent.base ||
-                it.representation?.representation?.let { value -> value != ProjectionRepresentation.DIRECT_V1 } == true } != false) return false
-        val current = stagedQuery(db,"SELECT payload FROM records WHERE scope=? AND event=?",arrayOf(key(scope),event.value)).use {
-            if (it.moveToFirst()) decodeChange(it.getString(0)) else null
-        }
-        return current == intent.base || allowReservedAbsence && current is RemoteChange.Deleted && matchingDeleteReservation(db,scope,event)
-    }
+    private fun qualifyLocalDelete(db: SQLiteDatabase, intent: LocalDeleteIntent, allowReservedAbsence: Boolean): Boolean =
+        localMutations.qualifyLocalDelete(db, intent, allowReservedAbsence)
 
     suspend fun qualifyLocalDelete(intent: LocalDeleteIntent): Boolean = stagingMutation(intent.scope) { db ->
         qualifyLocalDelete(db,intent,true)
@@ -1752,70 +1546,27 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
      * obligation through preparation and sending; only a proven native DELETE ACK supersedes it.
      */
     private fun redundantDeleteProjection(pending: ProjectionReceipt, intent: LocalDeleteIntent): Boolean =
-        pending.scope == intent.scope && pending.protocol == 1 && pending.format == intent.format &&
-            pending.change == intent.base && pending.previousBase == intent.base &&
-            pending.representation == null && pending.previousRepresentation == null
+        localMutations.redundantDeleteProjection(pending, intent)
 
-    private fun retireRedundantDeleteProjection(db: SQLiteDatabase, intent: LocalDeleteIntent) {
-        val pending = readProjectionReceipt(db,intent.scope,intent.base.eventId) ?: return
-        check(redundantDeleteProjection(pending,intent)) { "Deletion projection obligation changed" }
-        check(db.delete("projection_receipts", "scope=? AND event=? AND nonce=? AND payload=? AND adapter=? AND version=? " +
-            "AND previous_base=? AND protocol=? AND representation IS NULL AND previous_representation IS NULL",
-            arrayOf(key(pending.scope),pending.change.eventId.value,pending.nonce,encodeChange(pending.change),
-                pending.format.id,pending.format.version.toString(),encodeChange(checkNotNull(pending.previousBase)),
-                pending.protocol.toString())) == 1) { "Deletion projection obligation changed" }
-    }
+    private fun retireRedundantDeleteProjection(db: SQLiteDatabase, intent: LocalDeleteIntent): Unit =
+        localMutations.retireRedundantDeleteProjection(db, intent)
 
     /** Reservation precedes network claim; it is never native acknowledgement authority. */
     suspend fun prepareDeleteAcknowledgement(record: DeleteAttemptRecord): DeleteAcknowledgementReservation? = stagingMutation(record.scope) { db ->
-        val frozen = record.frozen(); val identity = DeleteAttemptIdentity.of(frozen)
-        val existing = readDeleteAcknowledgement(db,frozen.scope,frozen.eventId)
-        if (existing != null) return@stagingMutation if (existing.receipt.attempt == identity && existing.receipt.intent == frozen.intent &&
-            qualifyLocalDelete(db,frozen.intent,true))
-            DeleteAcknowledgementReservation(existing,false) else null
-        if (frozen.state != DeleteAttemptState.PREPARED || !qualifyLocalDelete(db,frozen.intent,false)) return@stagingMutation null
-        val receipt = DeleteAcknowledgementReceipt(identity,frozen.intent,UUID.randomUUID().toString())
-        db.insertOrThrow("delete_acknowledgements",null,ContentValues().apply {
-            put("scope",key(frozen.scope)); put("event",frozen.eventId.value); put("mutation",frozen.intent.id.value)
-            put("attempt",frozen.id.value); put("payload",DeleteAcknowledgementCodec.encode(receipt)); put("state","PENDING")
-        })
-        checkStagingCapacity(db)
-        DeleteAcknowledgementReservation(DeleteAcknowledgementRecord(receipt,DeleteAcknowledgementState.PENDING),true)
+        localMutations.prepareDeleteAcknowledgement(db, record)
     }
 
     suspend fun restoreDeleteAcknowledgement(witness: AppliedDeleteAcknowledgement): Boolean = stagingMutation(witness.receipt.intent.scope) { db ->
-        val receipt = witness.receipt.snapshot(); val scope = receipt.intent.scope; val event = receipt.intent.base.eventId
-        val retained = readDeleteAcknowledgement(db,scope,event) ?: return@stagingMutation false
-        if (retained.receipt != receipt || !qualifyLocalDelete(db,receipt.intent,true)) return@stagingMutation false
-        if (retained.state == DeleteAcknowledgementState.RESTORED) return@stagingMutation true
-        retireRedundantDeleteProjection(db,receipt.intent)
-        db.update("records",ContentValues().apply { put("pending",0) },"scope=? AND event=?",arrayOf(key(scope),event.value))
-        db.update("delete_acknowledgements",ContentValues().apply { put("state","RESTORED") },
-            "scope=? AND event=? AND mutation=? AND attempt=? AND payload=? AND state='PENDING'",
-            arrayOf(key(scope),event.value,receipt.intent.id.value,receipt.attempt.id.value,DeleteAcknowledgementCodec.encode(receipt))) == 1
+        localMutations.restoreDeleteAcknowledgement(db, witness)
     }
 
     suspend fun conflictLocalDelete(intent: LocalDeleteIntent, observed: RemoteChange.Upsert): Boolean = stagingMutation(intent.scope) { db ->
-        val scope = intent.scope; val event = intent.base.eventId
-        val owner = readInspectionDeleteOwner(db,scope,event) ?: return@stagingMutation false
-        if (owner.copy(state = LocalEditState.PAUSED) != intent || observed.eventId != event || observed == intent.base ||
-            conflicts(db).currentFormat(scope) != intent.format) return@stagingMutation false
-        val archive = checkNotNull(conflicts(db).ensure(scope,event,true))
-        conflicts(db).append(archive,ConflictObservationKind.VERIFIED,ConflictObservationOrigin.RECEIVED,
-            intent.format,observed.revision,null,encodeChange(observed))
-        db.update("local_edits",ContentValues().apply { put("state","CONFLICT") },"scope=? AND event=? AND mutation=? AND kind='DELETE'",
-            arrayOf(key(scope),event.value,intent.id.value)) == 1
+        localMutations.conflictLocalDelete(db, intent, observed)
     }
 
     /** Caller has observed a changed native snapshot; do not fabricate remote evidence. */
     suspend fun conflictAcknowledgedDelete(intent: LocalDeleteIntent): Boolean = stagingMutation(intent.scope) { db ->
-        val scope = intent.scope; val event = intent.base.eventId
-        val retained = readDeleteAcknowledgement(db,scope,event) ?: return@stagingMutation false
-        val owner = readInspectionDeleteOwner(db,scope,event) ?: return@stagingMutation false
-        if (retained.receipt.intent != intent || owner.copy(state=LocalEditState.PAUSED) != intent) return@stagingMutation false
-        conflicts(db).ensure(scope,event,true)
-        db.update("local_edits",ContentValues().apply { put("state","CONFLICT") },"scope=? AND event=? AND mutation=? AND kind='DELETE'",
-            arrayOf(key(scope),event.value,intent.id.value)) == 1
+        localMutations.conflictAcknowledgedDelete(db, intent)
     }
 
     suspend fun localDelete(scope: CalendarScope, eventId: EventId): LocalDeleteIntent? = access { db ->
@@ -1826,91 +1577,26 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
     }
     /** Capture and projection suppression share one database transaction. No dispatch/reset exists. */
     suspend fun captureLocalEdit(intent: LocalEditIntent): LocalEditIntent = stagingMutation(intent.scope) { db ->
-        require(intent.state == LocalEditState.PAUSED) { "Caller cannot declare conflict state" }
-        check(isAvailable(db, intent.scope) && db.rawQuery("SELECT enabled FROM calendars WHERE scope=?",
-            arrayOf(key(intent.scope))).use { it.moveToFirst() && it.getInt(0) != 0 }) { "Inactive local capture scope" }
-        requireOrdinaryLocalCapture(db, intent.scope, intent.base.eventId)
-        val previous = readLocalEdit(db, intent.scope, intent.base.eventId)
-        if (previous != null) {
-            require(previous.copy(state = LocalEditState.PAUSED) == intent) { "Local edit is immutable" }
-            return@stagingMutation previous
-        }
-        require(!hasLocalMutation(db, intent.scope, intent.base.eventId)) { "Local mutation kind collision" }
-        require(readBaseline(db, intent.scope, intent.base.eventId) == intent.base) { "Stale projection baseline" }
-        val hasDeferred = db.rawQuery("SELECT 1 FROM deferred_events WHERE scope=? AND event=?",
-            arrayOf(key(intent.scope), intent.base.eventId.value)).use { it.moveToFirst() }
-        val remote = db.rawQuery("SELECT payload FROM records WHERE scope=? AND event=?",
-            arrayOf(key(intent.scope), intent.base.eventId.value)).use { if (it.moveToFirst()) decodeChange(it.getString(0)) else null }
-        val captured = intent.copy(state = if (hasDeferred || remote != intent.base) LocalEditState.CONFLICT else LocalEditState.PAUSED)
-        db.insertOrThrow("local_edits", null, ContentValues().apply {
-            put("kind", "UPDATE")
-            put("scope", key(intent.scope)); put("mutation", intent.id.value); put("event", intent.base.eventId.value)
-            put("adapter", intent.format.id); put("version", intent.format.version); put("base", encodeChange(intent.base))
-            put("local", encodeChange(intent.base.copy(content = intent.content))); put("state", captured.state.name)
-        })
-        db.update("records", ContentValues().apply { put("pending", 0) }, "scope=? AND event=?",
-            arrayOf(key(intent.scope), intent.base.eventId.value))
-        conflicts(db).ensure(intent.scope, intent.base.eventId)
-        captured
+        localMutations.captureLocalEdit(db, intent)
     }
+
     /** Retain a qualified Android tombstone snapshot without consuming its flags or sending DELETE. */
     suspend fun captureLocalDelete(intent: LocalDeleteIntent): LocalDeleteIntent = stagingMutation(intent.scope) { db ->
-        require(intent.state == LocalEditState.PAUSED) { "Caller cannot declare conflict state" }
-        check(activeProjectionScope(db, intent.scope)) { "Inactive local capture scope" }
-        requireOrdinaryLocalCapture(db, intent.scope, intent.base.eventId)
-        val previous = readLocalDelete(db, intent.scope, intent.base.eventId)
-        if (previous != null) {
-            require(previous.copy(state = LocalEditState.PAUSED) == intent) { "Local deletion is immutable" }
-            return@stagingMutation previous
-        }
-        require(!hasLocalMutation(db, intent.scope, intent.base.eventId)) { "Local mutation kind collision" }
-        require(readBaseline(db, intent.scope, intent.base.eventId) == intent.base) { "Stale projection baseline" }
-        val hasDeferred = db.rawQuery("SELECT 1 FROM deferred_events WHERE scope=? AND event=?",
-            arrayOf(key(intent.scope), intent.base.eventId.value)).use { it.moveToFirst() }
-        val remote = db.rawQuery("SELECT payload FROM records WHERE scope=? AND event=?",
-            arrayOf(key(intent.scope), intent.base.eventId.value)).use { if (it.moveToFirst()) decodeChange(it.getString(0)) else null }
-        val captured = intent.copy(state = if (hasDeferred || remote != intent.base) LocalEditState.CONFLICT else LocalEditState.PAUSED)
-        db.insertOrThrow("local_edits", null, ContentValues().apply {
-            put("scope", key(intent.scope)); put("mutation", intent.id.value); put("event", intent.base.eventId.value); put("kind", "DELETE")
-            put("adapter", intent.format.id); put("version", intent.format.version); put("base", encodeChange(intent.base))
-            put("local", encodeChange(intent.base.copy(content = intent.content))); put("state", captured.state.name)
-        })
-        db.update("records", ContentValues().apply { put("pending", 0) }, "scope=? AND event=?",
-            arrayOf(key(intent.scope), intent.base.eventId.value))
-        conflicts(db).ensure(intent.scope, intent.base.eventId)
-        captured
+        localMutations.captureLocalDelete(db, intent)
     }
-    private data class ProjectionBase(val change: RemoteChange.Upsert, val representation: ProjectedEventReference?) {
-        override fun toString() = "ProjectionBase(redacted)"
-    }
-    private fun readProjectionBase(db: SQLiteDatabase, scope: CalendarScope, eventId: EventId): ProjectionBase? =
-        db.rawQuery("SELECT payload,representation FROM projection_bases WHERE scope=? AND event=?",
-            arrayOf(key(scope), eventId.value)).use {
-            if (!it.moveToFirst()) null else {
-                val change = decodeChange(it.getString(0)) as? RemoteChange.Upsert ?: error("Invalid projection baseline")
-                check(change.eventId == eventId) { "Projection baseline identity mismatch" }
-                ProjectionBase(change, ProjectionRepresentationCodec.decode(change, if (it.isNull(1)) null else it.getString(1)))
-            }
-        }
+
+    private fun readProjectionBase(db: SQLiteDatabase, scope: CalendarScope, eventId: EventId): ImportStoreLocalMutationSql.ProjectionBase? =
+        localMutations.readProjectionBase(db, scope, eventId)
+
     private fun readBaseline(db: SQLiteDatabase, scope: CalendarScope, eventId: EventId): RemoteChange.Upsert? =
-        readProjectionBase(db, scope, eventId)?.change
+        localMutations.readBaseline(db, scope, eventId)
+
     private fun readLocalEdit(db: SQLiteDatabase, scope: CalendarScope, eventId: EventId): LocalEditIntent? =
-        db.rawQuery("SELECT mutation,adapter,version,base,local,state FROM local_edits WHERE scope=? AND event=? AND kind='UPDATE'",
-            arrayOf(key(scope), eventId.value)).use { if (!it.moveToFirst()) null else LocalEditIntent(
-            MutationId(it.getString(0)), scope, AdapterFormat(it.getString(1), it.getInt(2)),
-            decodeChange(it.getString(3)) as RemoteChange.Upsert, (decodeChange(it.getString(4)) as RemoteChange.Upsert).content,
-            LocalEditState.valueOf(it.getString(5))) }
+        localMutations.readLocalEdit(db, scope, eventId)
+
     private fun readLocalDelete(db: SQLiteDatabase, scope: CalendarScope, eventId: EventId): LocalDeleteIntent? =
-        db.rawQuery("SELECT mutation,adapter,version,base,local,state FROM local_edits WHERE scope=? AND event=? AND kind='DELETE'",
-            arrayOf(key(scope), eventId.value)).use {
-            if (!it.moveToFirst()) null else {
-                val base = decodeChange(it.getString(3)) as RemoteChange.Upsert
-                val local = decodeChange(it.getString(4)) as RemoteChange.Upsert
-                check(base.eventId == eventId && local.eventId == eventId && local.revision == base.revision) { "Local deletion identity mismatch" }
-                LocalDeleteIntent(MutationId(it.getString(0)), scope, AdapterFormat(it.getString(1), it.getInt(2)),
-                    base, local.content, LocalEditState.valueOf(it.getString(5)))
-            }
-        }
+        localMutations.readLocalDelete(db, scope, eventId)
+
     /** Stable keyset pagination: retries may remove rows without skipping subsequent issues. */
     suspend fun deferred(scope: CalendarScope, limit: Int = 4, afterEventId: EventId? = null): List<DeferredCalendarEvent> = access { db ->
         ImportStorePageState.deferred(db, scope, limit, afterEventId)
@@ -1967,9 +1653,9 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
     private suspend fun <T> access(action: (SQLiteDatabase) -> T): T = withContext(Dispatchers.IO) {
         lock.withLock { action(writableDatabase) }
     }
-    private fun isAvailable(db: SQLiteDatabase, scope: CalendarScope): Boolean = db.rawQuery(
-        "SELECT available FROM calendars WHERE scope=?", arrayOf(key(scope)),
-    ).use { it.moveToFirst() && it.getInt(0) != 0 }
+    private fun isAvailable(db: SQLiteDatabase, scope: CalendarScope): Boolean =
+        localMutations.isAvailable(db, scope)
+
     companion object {
         const val STAGING_BUDGET_BYTES: Long = 32L * 1024 * 1024
     }
