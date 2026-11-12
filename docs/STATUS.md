@@ -11,12 +11,14 @@ safe migration and retirement of legacy title/text/time paths, hourly incoming
 refresh. Recurrence editing, reminder/guest changes and new outgoing families
 are outside this milestone. Read-only remains the default per calendar.
 
-Scheduling: a thin calendar SyncAdapter on the existing account supports uploads,
-manual refresh and Android periodic sync. It awaits bounded WorkManager execution
-and reports its outcome; synchronization logic remains in the existing workers.
-Android replaces the six-hour WorkManager periodic trigger: 15 min / 30 min /
-1 h default / 2 h / 6 h. Automatic work respects account and master sync settings.
-The URI watcher remains temporarily, subject to the same automatic-sync policy;
+Scheduling follows the DAVx5 model: the thin calendar SyncAdapter accepts Android
+change/manual triggers, enqueues expedited WorkManager work and waits at most ten
+minutes without cancelling it. Android always receives success; WorkManager owns
+retry and the app owns actual status. The Android 14+ pending latch is cleared.
+One network-constrained WorkManager periodic pull runs at 15 / 30 / 60 default /
+120 / 360 minutes; native Android periodic syncs are removed. Android automatic
+switches control push only. App actions are manual and bypass those switches;
+periodic pull continues while push is OFF. The URI watcher remains temporarily;
 retire it only after Android-triggered upload is qualified in E4.
 
 Exit: working scope, one grouped physical-device/live-test-account E4 run
@@ -33,7 +35,7 @@ qualify One UI. Signature management remains deferred by the owner.
 - Violet deer interface, eight languages, light/dark/system themes, calendar
   selection and per-operation experimental consent. Sync settings expose Android
   switches, the last successful cycle, interval and an optional one-time battery
-  offer. Disabled automatic sync is explained; manual requests receive visible
+  offer. Disabled push is explained; manual requests receive visible
   feedback. [Design](DESIGN.md), [permissions](PERMISSIONS.md).
 - Incoming data uses bounded sealed staging, offline decoding, retained keys,
   opaque cursors/change feeds and rolling coverage. Dirty unsupported events hold

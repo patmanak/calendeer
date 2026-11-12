@@ -33,11 +33,11 @@
     <string name="sync_settings_title">Synchronizacja</string>
     <string name="sync_settings_last_success">Ostatnia udana synchronizacja</string>
     <string name="sync_settings_never">Brak udanej synchronizacji</string>
-    <string name="sync_settings_account_auto">Automatyczna synchronizacja tego konta</string>
-    <string name="sync_settings_master_auto">Automatyczna synchronizacja Androida (wszystkie konta)</string>
+    <string name="sync_settings_account_auto">Synchronizacja po zmianach lokalnych</string>
+    <string name="sync_settings_master_auto">Automatyczne wyzwalanie Androida (wszystkie konta)</string>
     <string name="sync_settings_enabled">Włączona</string>
     <string name="sync_settings_disabled">Wyłączona</string>
-    <string name="sync_settings_schedule_note">Android może opóźniać synchronizację w tle, aby oszczędzać baterię. Oba ustawienia automatycznej synchronizacji muszą być włączone.</string>
+    <string name="sync_settings_schedule_note">Ustawienia Androida sterują synchronizacją po zmianach lokalnych. Okresowe sprawdzanie i żądania w Calendeer pozostają dostępne.</string>
     <string name="sync_settings_interval_value">Odstęp: %1$s</string>
     <string name="sync_settings_interval">Odstęp synchronizacji</string>
     <string name="sync_settings_android">Otwórz ustawienia synchronizacji Androida</string>
@@ -51,8 +51,8 @@
     <string name="sync_settings_battery_explanation">Android może opóźniać synchronizację, aby oszczędzać baterię. Możesz wykluczyć Calendeer z optymalizacji baterii. Może to zwiększyć zużycie energii. Kontynuuj, aby sprawdzić okno Androida, lub zachowaj obecne ustawienie.</string>
     <string name="sync_settings_battery_continue">Kontynuuj</string>
     <string name="sync_settings_battery_decline">Zachowaj obecne ustawienie</string>
-    <string name="sync_settings_paused">Automatyczna synchronizacja jest wyłączona. Wybrane kalendarze czekają na naciśnięcie Synchronizuj lub ponowne włączenie synchronizacji w ustawieniach Androida.</string>
-    <string name="sync_request_accepted">Żądanie wysłane do Androida.</string>
+    <string name="sync_settings_paused">Synchronizacja po zmianach lokalnych jest wyłączona. Okresowe sprawdzanie i żądania w Calendeer pozostają dostępne.</string>
+    <string name="sync_request_accepted">Zażądano synchronizacji.</string>
     <string name="sync_request_account_not_ready">Konto nie jest jeszcze gotowe. Sprawdź połączenie z kontem i dostęp do kalendarzy, a następnie spróbuj ponownie.</string>
     <string name="sync_request_unavailable">Nie można zażądać synchronizacji. Spróbuj ponownie.</string>
 </resources>

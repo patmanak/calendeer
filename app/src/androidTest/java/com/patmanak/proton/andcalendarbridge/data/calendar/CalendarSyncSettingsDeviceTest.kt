@@ -12,10 +12,17 @@ import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.util.UUID
+import android.annotation.SuppressLint
+import androidx.work.WorkManager
+import androidx.work.NetworkType
+import androidx.work.impl.model.WorkSpec
+import java.util.concurrent.TimeUnit
 
 /** Disposable local scheduling metadata only; never changes the master switch or Proton. */
 @RunWith(AndroidJUnit4::class)
+@SuppressLint("RestrictedApi") // Inspect only the exact fixture's persisted WorkSpec (WM 2.8 has no public interval getter).
 class CalendarSyncSettingsDeviceTest {
+    private fun workName(account: Account) = "sync-fixture-periodic-${account.name}"
     private suspend fun fixture(test: suspend (AndroidCalendarSyncSettings, Account, Context) -> Unit) {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val suffix = UUID.randomUUID().toString()
@@ -29,9 +36,10 @@ class CalendarSyncSettingsDeviceTest {
         val jobs = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         val accounts = AccountManager.get(context)
         assertTrue(accounts.addAccountExplicitly(account, null, null))
-        try { test(AndroidCalendarSyncSettings(isolated, jobs), account, isolated) }
+        try { test(AndroidCalendarSyncSettings(isolated, jobs, workName(account)), account, isolated) }
         finally {
             jobs.cancel()
+            WorkManager.getInstance(context).cancelUniqueWork(workName(account)).result.get(10, TimeUnit.SECONDS)
             ContentResolver.setSyncAutomatically(account, SystemSyncWork.AUTHORITY, false)
             ContentResolver.cancelSync(account, SystemSyncWork.AUTHORITY)
             ContentResolver.getPeriodicSyncs(account, SystemSyncWork.AUTHORITY).forEach {
@@ -42,21 +50,38 @@ class CalendarSyncSettingsDeviceTest {
         }
     }
 
-    private suspend fun period(account: Account, seconds: Long) = withTimeout(10_000) {
+    private suspend fun period(account: Account, seconds: Long): UUID = withTimeout(10_000) {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val manager = WorkManager.getInstance(context)
         while (true) {
-            val entries = ContentResolver.getPeriodicSyncs(account, SystemSyncWork.AUTHORITY)
-            if (entries.size == 1 && entries.single().period == seconds && entries.single().extras.isEmpty) break
+            val entries = manager.getWorkInfosForUniqueWork(workName(account)).get(10, TimeUnit.SECONDS)
+                .filter { !it.state.isFinished }
+            if (entries.size == 1) {
+                // Room is runtime-only transitively; do not add a shipped dependency for this assertion.
+                val database = manager.javaClass.getMethod("getWorkDatabase").invoke(manager)
+                val dao = database.javaClass.getMethod("workSpecDao").invoke(database)
+                val spec = dao.javaClass.getMethod("getWorkSpec", String::class.java)
+                    .invoke(dao, entries.single().id.toString()) as WorkSpec?
+                if (spec != null && spec.intervalDuration == seconds * 1000) {
+                    assertEquals(NetworkType.CONNECTED, spec.constraints.requiredNetworkType)
+                    assertTrue(spec.input.getBoolean(SystemSyncWork.PULL, false))
+                    assertEquals(account.name, spec.input.getString(SystemSyncWork.ACCOUNT))
+                    assertTrue(ContentResolver.getPeriodicSyncs(account, SystemSyncWork.AUTHORITY).isEmpty())
+                    return@withTimeout entries.single().id
+                }
+            }
             delay(50)
         }
+        @Suppress("UNREACHABLE_CODE") error("Unreachable")
     }
 
     @Test fun oneHourDefaultAndAllIntervalsReplaceRatherThanAccumulate() = runBlocking { fixture { settings, account, _ ->
         settings.bind(account)
-        period(account, 3600)
+        val id = period(account, 3600)
         assertEquals(60, settings.state.value.intervalMinutes)
         for (minutes in listOf(15, 30, 120, 360, 60)) {
             settings.setIntervalMinutes(minutes)
-            period(account, minutes * 60L)
+            assertEquals("Updating the interval must not replace a running executor", id, period(account, minutes * 60L))
         }
         try { settings.setIntervalMinutes(16); fail("Unsupported frequency accepted") }
         catch (_: IllegalArgumentException) { }
@@ -74,6 +99,23 @@ class CalendarSyncSettingsDeviceTest {
         settings.refresh()
         assertFalse(settings.state.value.automatic)
         assertFalse(settings.automaticAllowed())
+        period(account, 1800) // Push OFF must not disable periodic pull.
+    } }
+
+    @Test fun nativePeriodicSchedulesAreRemovedIncludingAfterEnablingPush() = runBlocking { fixture { settings, account, _ ->
+        settings.bind(account)
+        ContentResolver.setSyncAutomatically(account, SystemSyncWork.AUTHORITY, false)
+        ContentResolver.setSyncAutomatically(account, SystemSyncWork.AUTHORITY, true)
+        val extras = android.os.Bundle().apply { putBoolean("fixture_period", true) }
+        ContentResolver.addPeriodicSync(account, SystemSyncWork.AUTHORITY, extras, 3600)
+        withTimeout(10_000) {
+            while (ContentResolver.getPeriodicSyncs(account, SystemSyncWork.AUTHORITY).isEmpty()) delay(50)
+        }
+        settings.removeAndroidPeriodics(account)
+        withTimeout(10_000) {
+            while (ContentResolver.getPeriodicSyncs(account, SystemSyncWork.AUTHORITY).isNotEmpty()) delay(50)
+        }
+        period(account, 3600)
     } }
 
     @Test fun offerIsPersistedOnceAndSuccessTimeNeverCrossesAnUnboundAccount() = runBlocking { fixture { settings, account, isolated ->

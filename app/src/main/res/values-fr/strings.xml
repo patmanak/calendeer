@@ -33,11 +33,11 @@
     <string name="sync_settings_title">Synchronisation</string>
     <string name="sync_settings_last_success">Dernière synchronisation réussie</string>
     <string name="sync_settings_never">Aucune synchronisation réussie pour le moment</string>
-    <string name="sync_settings_account_auto">Synchronisation automatique de ce compte</string>
-    <string name="sync_settings_master_auto">Synchronisation automatique Android (tous les comptes)</string>
+    <string name="sync_settings_account_auto">Synchronisation après modification locale</string>
+    <string name="sync_settings_master_auto">Déclenchement Android (tous les comptes)</string>
     <string name="sync_settings_enabled">Activée</string>
     <string name="sync_settings_disabled">Désactivée</string>
-    <string name="sync_settings_schedule_note">Android peut retarder la synchronisation en arrière-plan pour économiser la batterie. Les deux réglages de synchronisation automatique doivent être activés.</string>
+    <string name="sync_settings_schedule_note">Les réglages Android commandent l’envoi après modification locale. La vérification périodique et les demandes faites dans Calendeer restent disponibles.</string>
     <string name="sync_settings_interval_value">Intervalle : %1$s</string>
     <string name="sync_settings_interval">Intervalle de synchronisation</string>
     <string name="sync_settings_android">Ouvrir les réglages de synchronisation Android</string>
@@ -51,8 +51,8 @@
     <string name="sync_settings_battery_explanation">Android peut retarder la synchronisation pour économiser la batterie. Vous pouvez exclure Calendeer de l’optimisation de la batterie. Cela peut augmenter la consommation. Continuez pour consulter la fenêtre Android, ou conservez le réglage actuel.</string>
     <string name="sync_settings_battery_continue">Continuer</string>
     <string name="sync_settings_battery_decline">Conserver le réglage actuel</string>
-    <string name="sync_settings_paused">La synchronisation automatique est désactivée. Les calendriers sélectionnés attendent un appui sur Synchroniser ou sa réactivation dans les réglages Android.</string>
-    <string name="sync_request_accepted">Demande transmise à Android.</string>
+    <string name="sync_settings_paused">L’envoi déclenché par une modification locale est désactivé. Les vérifications périodiques et les demandes dans Calendeer restent disponibles.</string>
+    <string name="sync_request_accepted">Synchronisation demandée.</string>
     <string name="sync_request_account_not_ready">Le compte n’est pas encore prêt. Vérifiez la connexion du compte et l’accès aux calendriers, puis réessayez.</string>
     <string name="sync_request_unavailable">Impossible de demander la synchronisation. Réessayez.</string>
 </resources>

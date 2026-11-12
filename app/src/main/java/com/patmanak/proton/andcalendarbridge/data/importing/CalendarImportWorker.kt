@@ -14,7 +14,8 @@ class CalendarImportWorker(context: Context, parameters: WorkerParameters) : Cor
     override suspend fun doWork(): Result {
         val app = applicationContext as BridgeApplication
         if (inputData.getString(SystemSyncWork.ACCOUNT) != null) return systemWork(app)
-        if (!app.calendarSyncSettings.automaticAllowed()) return Result.success()
+        val manual = inputData.getBoolean(SystemSyncWork.MANUAL, false)
+        if (!manual && !app.calendarSyncSettings.automaticAllowed()) return Result.success()
         app.allowNormalScheduling()
         val network = inputData.getBoolean("network", false)
         var normalAccount: com.patmanak.proton.andcalendarbridge.sync.AccountId? = null
@@ -28,13 +29,13 @@ class CalendarImportWorker(context: Context, parameters: WorkerParameters) : Cor
                 val active = if (state.destination == AuthenticationDestination.AUTHENTICATED)
                     com.patmanak.proton.andcalendarbridge.protonauth.ProtonAuthentication.events(app).currentAccount() else null
                 normalAccount = active
-                active != null && SystemSyncWork.automaticAllowed(
-                    com.patmanak.proton.andcalendarbridge.data.calendar.AndroidCalendarProjection(app).accountFor(active))
+                active != null && (manual || SystemSyncWork.automaticAllowed(
+                    com.patmanak.proton.andcalendarbridge.data.calendar.AndroidCalendarProjection(app).accountFor(active)))
             }
         } }, run = {
             val fresh = runAttemptCount == 0 && !inputData.getBoolean("resume", false)
             runPass(app, network, fresh, fresh, false, false, requireNotNull(normalAccount))
-        }, continueWork = { app.imports.enqueueContinuation(network) })
+        }, continueWork = { WorkManagerImportScheduler(app, manual = manual).continueWork(network) })
         return when (result) {
             ImportRunResult.RETRY -> Result.retry()
             ImportRunResult.CONTINUE -> error("Continuation must be scheduled before completion")
@@ -46,6 +47,7 @@ class CalendarImportWorker(context: Context, parameters: WorkerParameters) : Cor
         val expected = android.accounts.Account(requireNotNull(inputData.getString(SystemSyncWork.ACCOUNT)),
             com.patmanak.proton.andcalendarbridge.data.calendar.AndroidCalendarProjection.ACCOUNT_TYPE)
         val manual = inputData.getBoolean(SystemSyncWork.MANUAL, false)
+        val pull = inputData.getBoolean(SystemSyncWork.PULL, false)
         var accountId: com.patmanak.proton.andcalendarbridge.sync.AccountId? = null
         suspend fun admit(): SystemSyncOutcome? {
             val state = withContext(Dispatchers.Main.immediate) {
@@ -63,7 +65,7 @@ class CalendarImportWorker(context: Context, parameters: WorkerParameters) : Cor
             accountId = active
             if (!com.patmanak.proton.andcalendarbridge.data.calendar.AndroidCalendarProjection(app).hasPermissions())
                 return SystemSyncOutcome.PERMISSION
-            if (!manual && !SystemSyncWork.automaticAllowed(expected)) return SystemSyncOutcome.DISABLED
+            if (requiresPushSettings(manual, pull) && !SystemSyncWork.automaticAllowed(expected)) return SystemSyncOutcome.DISABLED
             app.imports.authenticationChanged(true)
             app.imports.refreshProviderWakeState()
             return null
@@ -71,7 +73,7 @@ class CalendarImportWorker(context: Context, parameters: WorkerParameters) : Cor
         val outcome = try {
             executeSystemSync(::admit, { first -> runPass(app, true,
                 first && runAttemptCount == 0, false, true, inputData.getBoolean(SystemSyncWork.UPLOAD, false),
-                requireNotNull(accountId)) })
+                requireNotNull(accountId), pullOnly = pull) })
         } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
           catch (_: Exception) { SystemSyncOutcome.RETRY }
         if (outcome == SystemSyncOutcome.SUCCESS) SystemSyncWork.recordSuccess(app, expected)
@@ -81,17 +83,14 @@ class CalendarImportWorker(context: Context, parameters: WorkerParameters) : Cor
 
     private suspend fun runPass(app: BridgeApplication, network: Boolean, incomingFresh: Boolean,
         outgoingFresh: Boolean, providerWake: Boolean, uploadOnly: Boolean,
-        expectedAccount: com.patmanak.proton.andcalendarbridge.sync.AccountId? = null): ImportRunResult {
-        val incoming = if (uploadOnly) ImportRunResult.COMPLETE else try {
+        expectedAccount: com.patmanak.proton.andcalendarbridge.sync.AccountId? = null,
+        pullOnly: Boolean = false): ImportRunResult = executeCalendarPass(pullOnly, incoming = {
+        if (uploadOnly) ImportRunResult.COMPLETE else try {
             app.imports.run(network, fresh = incomingFresh, expectedAccount = expectedAccount)
         } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
           catch (_: Exception) { ImportRunResult.RETRY }
-        val outgoing = app.systemCreates.run(network, fresh = outgoingFresh, providerWake = providerWake,
+    }, outgoing = {
+        app.systemCreates.run(network, fresh = outgoingFresh, providerWake = providerWake,
             expectedAccount = expectedAccount)
-        return when {
-            outgoing == ImportRunResult.RETRY || incoming == ImportRunResult.RETRY -> ImportRunResult.RETRY
-            outgoing == ImportRunResult.CONTINUE || incoming == ImportRunResult.CONTINUE -> ImportRunResult.CONTINUE
-            else -> ImportRunResult.COMPLETE
-        }
-    }
+    })
 }

@@ -34,11 +34,11 @@
     <string name="sync_settings_title">Synchronization</string>
     <string name="sync_settings_last_success">Last successful synchronization</string>
     <string name="sync_settings_never">No successful synchronization yet</string>
-    <string name="sync_settings_account_auto">Automatic synchronization for this account</string>
-    <string name="sync_settings_master_auto">Android automatic synchronization (all accounts)</string>
+    <string name="sync_settings_account_auto">Sync after local changes</string>
+    <string name="sync_settings_master_auto">Android automatic triggers (all accounts)</string>
     <string name="sync_settings_enabled">Enabled</string>
     <string name="sync_settings_disabled">Disabled</string>
-    <string name="sync_settings_schedule_note">Android may delay background synchronization to save battery. Both automatic synchronization settings must be enabled.</string>
+    <string name="sync_settings_schedule_note">Android settings control synchronization triggered by local changes. Periodic checks and requests made in Calendeer remain available.</string>
     <string name="sync_settings_interval_value">Interval: %1$s</string>
     <string name="sync_settings_interval">Synchronization interval</string>
     <string name="sync_settings_android">Open Android sync settings</string>
@@ -52,8 +52,8 @@
     <string name="sync_settings_battery_explanation">Android can delay synchronization to save battery. You can optionally exclude Calendeer from battery optimization. This may use more battery. Continue to review the Android dialog, or keep the current setting.</string>
     <string name="sync_settings_battery_continue">Continue</string>
     <string name="sync_settings_battery_decline">Keep current setting</string>
-    <string name="sync_settings_paused">Automatic synchronization is off. Selected calendars will wait until you tap Synchronize or turn automatic synchronization back on in Android settings.</string>
-    <string name="sync_request_accepted">Request sent to Android.</string>
+    <string name="sync_settings_paused">Sync triggered by local changes is off. Periodic checks and requests made in Calendeer remain available.</string>
+    <string name="sync_request_accepted">Synchronization requested.</string>
     <string name="sync_request_account_not_ready">The account is not ready yet. Check your account connection and calendar access, then try again.</string>
     <string name="sync_request_unavailable">Unable to request synchronization. Try again.</string>
 </resources>

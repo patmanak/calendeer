@@ -39,17 +39,24 @@ class CalendarSyncAdapterDeviceTest {
         val result = SyncResult()
         CalendarSyncAdapter(context).onPerformSync(Account("synthetic", "invalid.fixture"),
             Bundle(), SystemSyncWork.AUTHORITY, null, result)
-        assertEquals(1L, result.stats.numAuthExceptions)
+        assertFalse("Android must receive success even when this account is rejected", result.hasError())
     }
 
-    @Test fun androidReceivesRealOutcomeRatherThanEnqueueSuccess() {
+    @Test fun androidAlwaysReceivesSuccessAndWorkManagerOwnsRetries() {
         val adapter = CalendarSyncAdapter(context)
         for (outcome in SystemSyncOutcome.entries) {
             val result = SyncResult()
             adapter.report(outcome, result)
-            assertEquals(outcome !in setOf(SystemSyncOutcome.SUCCESS, SystemSyncOutcome.DISABLED), result.hasError())
-            if (outcome == SystemSyncOutcome.RETRY) assertEquals(1L, result.stats.numIoExceptions)
+            assertFalse("Android must not own retry for $outcome", result.hasError())
         }
+    }
+
+    @Test @android.annotation.SuppressLint("RestrictedApi")
+    fun nativeRequestsAreExpeditedWithAQuotaFallbackAndTenMinuteBound() {
+        val request = SystemSyncWork.request(Account("synthetic", AndroidCalendarProjection.ACCOUNT_TYPE), false, true)
+        assertTrue(request.workSpec.expedited)
+        assertEquals(androidx.work.OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST, request.workSpec.outOfQuotaPolicy)
+        assertEquals(600_000L, SystemSyncWork.WAIT_MILLIS)
     }
 
     @Test fun absentWorkCannotBeReportedAsCompleted() {

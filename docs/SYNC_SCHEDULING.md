@@ -1,81 +1,85 @@
 # Synchronization scheduling
 
-## Android entry points and execution
+## Android change triggers and manual refresh
 
-A calendar SyncAdapter is registered on the existing Calendeer account type and
-`com.android.calendar`, with uploads enabled and no parallel adapter threads.
-Android can request upload after native edits, manual synchronization or periodic
-refresh. A native signal is only a scheduling hint: it grants no account ownership,
-calendar permission, write consent or authority to resend an uncertain request.
+A thin calendar SyncAdapter is registered on the existing Calendeer account type
+and com.android.calendar, with uploads enabled and no parallel adapter threads.
+Android supplies local-change or manual-refresh hints. The adapter enqueues an
+independent expedited CalendarImportWorker, falling back to ordinary work when
+expedited quota is exhausted. Enqueue acknowledgement plus result waiting share
+a ten-minute bound. Timeout, interruption or failure ends the wait without
+cancelling the independent executor.
 
-The adapter enqueues an independent `CalendarImportWorker` request and waits up to
-two minutes. It waits for actual completion, not just enqueue acknowledgement.
-Callbacks have distinct IDs and no WorkManager dependency chain; cancelling one
-cannot cancel another callback. Interruption or timeout ends only the adapter's
-wait and reports RETRY; the independent executor continues. It is not cancelled
-because Android stopped waiting, including an interrupted enqueue acknowledgement. Auth,
-permission, stale-account and transient failures are reported to Android. A retry,
-missing result or exhausted wait is never reported as success.
+Android always receives success: it must not own another retry loop. Actual
+outcomes remain in WorkManager and Calendeer; this acknowledgement does not prove
+a Proton delivery. On Android 14+, the adapter calls the two-argument native
+ContentResolver.cancelSync(account, authority) in finally to clear the pending
+latch (issue 320542002). This operates only on an admitted Calendeer account;
+it never cancels its WorkManager job.
 
-The system profile restores authentication without enabling ordinary fresh outgoing
-recovery. It validates the exact active account before each pass; both coordinators
-also bind execution to the expected account under their existing mutexes. Incoming
-refresh may be fresh on the first pass; outgoing work always uses `fresh=false`
-and `providerWake=true`. UNKNOWN stays inspect-only and paused CREATEs stay paused.
-Manual Android extras bypass automatic scheduling settings, never these admissions.
+The system profile validates the expected active account before each pass, and
+both coordinators bind execution under their existing mutexes. It reuses the
+existing incoming/outgoing implementation. Incoming refresh may be fresh on the
+first pass; outgoing uses fresh=false/providerWake=true. Native upload-only work
+skips incoming refresh. UNKNOWN stays inspect-only and paused CREATEs stay paused.
+A scheduling hint never grants account ownership, permissions or write consent.
 
-The worker reuses the existing incoming/outgoing pass and drains continuation pages
-inside its own execution (up to sixteen passes). It does not report success after
-scheduling a hidden successor. More pages or transient failure use normal persistent
-WorkManager retry. Only an admitted completed system cycle records its local success
-time. This does not mean unsupported/held events were uploaded; their existing
-status remains visible.
+The executor drains up to sixteen passes inside the same work item. More pages
+or transient failures use WorkManager retry; a hidden successor is not counted
+as completed work. Only an admitted completed cycle records its local success
+time. Unsupported and held events keep their own existing status.
 
-## Periodic sync and automatic settings
+## Periodic pull
 
-Android is the sole periodic owner: 15 minutes, 30 minutes, one hour by default,
-two hours or six hours. Reconfiguration replaces the account's previous periodic
-schedule instead of accumulating schedules. The old six-hour WorkManager job is
-cancelled at startup and is no longer created. WorkManager remains the executor,
-with network constraints, durable queues and existing backoff.
+WorkManager is the sole periodic owner: one network-constrained periodic work
+item at 15, 30, 60 (default), 120 or 360 minutes. UPDATE preserves the existing
+periodic identity and an active executor when configuration changes. Its input
+binds it to the selected native account; restoration must still validate the real
+session, permissions and account. Periodic pull runs the incoming pipeline only,
+so a disabled push trigger cannot indirectly send a pending local edit.
 
-The newly introduced Android channel is enabled once per account. Later startup,
-refresh and interval changes preserve the user's per-account switch; the app never
-enables Android's global master switch. Automatic workers and the temporary URI
-path check both switches. Disabling automatic sync cancels automatic executors and
-leaves durable domain intent intact. Manual refresh remains available while the
-automatic switches are OFF. Authentication, account, permissions and operation
-consent are still required.
+All native Android periodic schedules for Calendeer are removed at startup;
+binding and native settings changes also remove schedules, including defaults
+created by setSyncAutomatically. That setting is retained only for content-change
+push. It is initialized once per account; later configuration preserves the user's
+choice. The global master switch is never enabled by Calendeer.
 
-Settings show the per-account and global Android states, configured interval and
-last successful system cycle, scoped to the connected account. When automatic sync
-is OFF, the calendar and settings screens explain that selected calendars wait for
-a manual sync or reactivation. The manual action confirms a request to Android or
-shows a visible account-not-ready/request-unavailable message. Android can delay
-jobs and periodic sync in Doze, standby or under quotas. An interval is not a
-maximum delivery delay. A calendar client's refresh button must actually request
-Android synchronization; merely reloading its own view cannot trigger the adapter.
+## Actions in Calendeer and automatic switches
 
-## Temporary URI compatibility path
+Opening Calendeer, changing calendar synchronization/editing options, Synchronize
+and Retry are explicit manual requests. They enqueue WorkManager work directly,
+including local/offline processing, even when Android automatic sync is OFF.
+Manual local/network continuations retain their origin and cannot be lost behind
+an older automatic KEEP work item. State observers do not acquire manual authority
+merely because the app was previously opened.
 
-The existing one-shot Events URI watcher remains until real Android-triggered
-upload is qualified in the milestone's grouped E4 run. Its durable signal transfer,
-rearm-before-capture, dirty-content fingerprint and bounded offline capture remain.
-It now respects automatic-sync settings and binds post-authentication execution to
-the actual account. Clean imports/ACKs and unchanged held contents do not cause an
-outgoing pass; the watcher itself can still wake on unrelated authority changes.
-Retiring this path after E4 also removes that remaining broad wake cost.
+The account and master switches gate native change-triggered push and the temporary
+URI path. Only push-tagged work is cancelled when those settings are disabled;
+manual work and periodic pull remain independent. Authentication, current account,
+permissions, write opt-ins and durable request identity are still rechecked.
+Settings explain this distinction and display the switches, interval and last
+successful cycle. Manual feedback confirms a persisted request or explains why
+the account/request is unavailable.
 
-## Battery and qualification
+## Temporary URI path, battery and evidence
 
-Calendeer offers an explanation of battery exemption once. Continuing opens the
-standard Android permission dialog; refusal leaves the existing choice untouched.
-PowerManager state is reread on return. This needs no push SDK, event notification,
-foreground service or exact alarm. Exemption does not guarantee a deadline, network
-availability or exemption from an OEM's separate restrictions.
+The Events URI watcher remains until Android-triggered upload is qualified in E4.
+Its durable handoff, rearm-before-capture, bounded offline capture and dirty-content
+fingerprint remain. It is push-gated, revalidates the actual account after auth
+and preserves pending intent. Clean imports/ACKs and unchanged held contents do
+not initiate outgoing work. Retiring it after E4 removes the remaining broad
+wake cost and the duplicate URI/native scheduling path (R2).
 
-E3 covers targeted execution, native settings/periodic metadata and account
-admissions. E4 remains grouped at milestone exit: closed-app edit, refresh from two
-calendar clients, periodic operation in deep sleep with/without exemption,
-auto-sync OFF, offline/reconnect, reboot and permission revocation. Source review,
-synthetic Android fixtures and successful enqueue are not live Proton/OEM evidence.
+Battery exemption is offered once, with explanation and a standard Android dialog
+only after the user's action. Refusal leaves the choice unchanged; PowerManager
+is checked on return. No push SDK, event notification, foreground service or exact
+alarm is added. Intervals and exemption guarantee neither deadlines nor OEM access.
+
+E3 covers targeted worker/metadata/account contracts. E4 remains grouped at
+milestone exit: closed-app edits, refresh from two clients, periodic deep sleep
+with/without exemption, push OFF with manual/pull still available, offline/reconnect,
+reboot and permission revocation. Calendar clients must actually request Android
+sync; source and fixture tests cannot establish live Proton/OEM compatibility.
+
+Scheduling reference: [DAVx5 at 4557610](https://github.com/bitfireAT/davx5-ose/tree/4557610e89152a674913b720dc42d7cdbe9da983/core/src/main/kotlin/at/bitfire/davdroid/sync),
+particularly SyncAdapterImpl, SyncFrameworkIntegration and AutomaticSyncManager.

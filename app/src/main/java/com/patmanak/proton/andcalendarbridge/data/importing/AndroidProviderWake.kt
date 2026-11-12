@@ -80,7 +80,7 @@ internal class AndroidProviderWake(context: Context) {
         catch (_: IllegalArgumentException) { false }
 
     private companion object {
-        const val WORK_TAG = "calendar-import"
+        const val WORK_TAG = SystemSyncWork.AUTOMATIC_TAG
         const val WATCH_TAG = "calendar-provider-watch"
     }
 }

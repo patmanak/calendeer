@@ -33,11 +33,11 @@
     <string name="sync_settings_title">Sincronização</string>
     <string name="sync_settings_last_success">Última sincronização bem-sucedida</string>
     <string name="sync_settings_never">Ainda não há sincronizações bem-sucedidas</string>
-    <string name="sync_settings_account_auto">Sincronização automática desta conta</string>
-    <string name="sync_settings_master_auto">Sincronização automática do Android (todas as contas)</string>
+    <string name="sync_settings_account_auto">Sincronizar após alterações locais</string>
+    <string name="sync_settings_master_auto">Ativação automática Android (todas as contas)</string>
     <string name="sync_settings_enabled">Ativada</string>
     <string name="sync_settings_disabled">Desativada</string>
-    <string name="sync_settings_schedule_note">O Android pode adiar a sincronização em segundo plano para poupar bateria. Ambas as definições de sincronização automática devem estar ativadas.</string>
+    <string name="sync_settings_schedule_note">As definições Android controlam a sincronização após alterações locais. As verificações periódicas e os pedidos no Calendeer continuam disponíveis.</string>
     <string name="sync_settings_interval_value">Intervalo: %1$s</string>
     <string name="sync_settings_interval">Intervalo de sincronização</string>
     <string name="sync_settings_android">Abrir definições de sincronização do Android</string>
@@ -51,8 +51,8 @@
     <string name="sync_settings_battery_explanation">O Android pode adiar a sincronização para poupar bateria. Pode excluir o Calendeer da otimização da bateria. Isto pode aumentar o consumo. Continue para rever o diálogo do Android ou mantenha a definição atual.</string>
     <string name="sync_settings_battery_continue">Continuar</string>
     <string name="sync_settings_battery_decline">Manter a definição atual</string>
-    <string name="sync_settings_paused">A sincronização automática está desativada. Os calendários selecionados aguardam que toque em Sincronizar ou a reative nas definições do Android.</string>
-    <string name="sync_request_accepted">Pedido enviado ao Android.</string>
+    <string name="sync_settings_paused">A sincronização após alterações locais está desativada. As verificações periódicas e os pedidos no Calendeer continuam disponíveis.</string>
+    <string name="sync_request_accepted">Sincronização pedida.</string>
     <string name="sync_request_account_not_ready">A conta ainda não está pronta. Verifique a ligação da conta e o acesso aos calendários e tente novamente.</string>
     <string name="sync_request_unavailable">Não foi possível pedir a sincronização. Tente novamente.</string>
 </resources>

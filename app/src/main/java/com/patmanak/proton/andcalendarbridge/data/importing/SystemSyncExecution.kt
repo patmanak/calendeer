@@ -3,6 +3,21 @@ package com.patmanak.proton.andcalendarbridge.data.importing
 
 internal enum class SystemSyncOutcome { SUCCESS, RETRY, AUTH, PERMISSION, STALE, DISABLED }
 
+/** Only unsolicited Android push requires the native automatic-sync switches. */
+internal fun requiresPushSettings(manual: Boolean, pull: Boolean): Boolean = !manual && !pull
+
+/** Periodic pull cannot send a dirty local edit when native push is disabled. */
+internal suspend fun executeCalendarPass(pullOnly: Boolean, incoming: suspend () -> ImportRunResult,
+    outgoing: suspend () -> ImportRunResult): ImportRunResult {
+    val received = incoming()
+    val sent = if (pullOnly) ImportRunResult.COMPLETE else outgoing()
+    return when {
+        received == ImportRunResult.RETRY || sent == ImportRunResult.RETRY -> ImportRunResult.RETRY
+        received == ImportRunResult.CONTINUE || sent == ImportRunResult.CONTINUE -> ImportRunResult.CONTINUE
+        else -> ImportRunResult.COMPLETE
+    }
+}
+
 /** A failed/interrupted wait is not authority to cancel the independent executor. */
 internal fun relaySystemSync(enqueue: () -> Unit, await: () -> SystemSyncOutcome): SystemSyncOutcome = try {
     enqueue()

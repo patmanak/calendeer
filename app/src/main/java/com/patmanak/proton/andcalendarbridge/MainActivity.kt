@@ -75,12 +75,15 @@ class MainActivity : ComponentActivity() {
             val syncFeedback = remember { androidx.compose.material3.SnackbarHostState() }
             val feedbackScope = androidx.compose.runtime.rememberCoroutineScope()
             val onManualSync: () -> Unit = {
-                val message = when (preferences.calendarSyncSettings.requestManual()) {
-                    ManualSyncRequestResult.REQUESTED -> R.string.sync_request_accepted
-                    ManualSyncRequestResult.ACCOUNT_NOT_READY -> R.string.sync_request_account_not_ready
-                    ManualSyncRequestResult.UNAVAILABLE -> R.string.sync_request_unavailable
+                com.patmanak.proton.andcalendarbridge.data.importing.WorkManagerImportScheduler(this, manual = true).requestLocal()
+                feedbackScope.launch {
+                    val message = when (preferences.calendarSyncSettings.requestManual()) {
+                        ManualSyncRequestResult.REQUESTED -> R.string.sync_request_accepted
+                        ManualSyncRequestResult.ACCOUNT_NOT_READY -> R.string.sync_request_account_not_ready
+                        ManualSyncRequestResult.UNAVAILABLE -> R.string.sync_request_unavailable
+                    }
+                    syncFeedback.showSnackbar(getString(message))
                 }
-                feedbackScope.launch { syncFeedback.showSnackbar(getString(message)) }
             }
             val accountLabelAllowed = !verification.isRequired && !authenticationState.isSubmitting &&
                 !authenticationState.isCleanupRequired && !authenticationState.isCleanupInProgress &&
@@ -134,17 +137,19 @@ class MainActivity : ComponentActivity() {
                     },
                     calendarContent = {
                         AutomaticSyncNotice(syncSettings)
-                        CalendarDashboard(catalogState, importState, systemCreates, catalog::refresh, preferences.imports::setEnabled,
+                        CalendarDashboard(catalogState, importState, systemCreates,
+                            { catalog.refresh(); onManualSync() },
+                            { selection, enabled -> preferences.imports.setEnabled(selection, enabled); onManualSync() },
                             onManualSync,
                             onRequestPermission = { calendarPermissions.launch(arrayOf(
                                 Manifest.permission.READ_CALENDAR, Manifest.permission.WRITE_CALENDAR)) },
                             onOpenSettings = { startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
                                 "package:$packageName".toUri())) },
-                            onMode = preferences.systemCreates::setEnabled,
-                            onTitlesMode = preferences.systemCreates::setTitlesEnabled,
-                            onTextMode = preferences.systemCreates::setTextsEnabled,
-                            onTimeMode = preferences.systemCreates::setTimesEnabled,
-                            onDeleteMode = preferences.systemCreates::setDeletesEnabled,
+                            onMode = { selection, enabled -> preferences.systemCreates.setEnabled(selection, enabled); onManualSync() },
+                            onTitlesMode = { selection, enabled -> preferences.systemCreates.setTitlesEnabled(selection, enabled); onManualSync() },
+                            onTextMode = { selection, enabled -> preferences.systemCreates.setTextsEnabled(selection, enabled); onManualSync() },
+                            onTimeMode = { selection, enabled -> preferences.systemCreates.setTimesEnabled(selection, enabled); onManualSync() },
+                            onDeleteMode = { selection, enabled -> preferences.systemCreates.setDeletesEnabled(selection, enabled); onManualSync() },
                             onOpenConflicts = { selection -> archiveScope = selection.scope })
                     },
                 )
@@ -169,5 +174,9 @@ class MainActivity : ComponentActivity() {
         (application as BridgeApplication).languagePreferences.refresh()
         (application as BridgeApplication).calendarSyncSettings.refresh()
         (application as BridgeApplication).imports.permissionsChanged()
+        com.patmanak.proton.andcalendarbridge.data.importing.WorkManagerImportScheduler(this, manual = true).apply {
+            requestLocal()
+            requestNetwork()
+        }
     }
 }

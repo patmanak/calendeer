@@ -33,11 +33,11 @@
     <string name="sync_settings_title">Synchronisatie</string>
     <string name="sync_settings_last_success">Laatste geslaagde synchronisatie</string>
     <string name="sync_settings_never">Nog geen geslaagde synchronisatie</string>
-    <string name="sync_settings_account_auto">Automatische synchronisatie voor dit account</string>
-    <string name="sync_settings_master_auto">Automatische synchronisatie van Android (alle accounts)</string>
+    <string name="sync_settings_account_auto">Synchroniseren na lokale wijzigingen</string>
+    <string name="sync_settings_master_auto">Automatische Android-triggers (alle accounts)</string>
     <string name="sync_settings_enabled">Ingeschakeld</string>
     <string name="sync_settings_disabled">Uitgeschakeld</string>
-    <string name="sync_settings_schedule_note">Android kan synchronisatie op de achtergrond uitstellen om de batterij te sparen. Beide instellingen voor automatische synchronisatie moeten zijn ingeschakeld.</string>
+    <string name="sync_settings_schedule_note">De Android-instellingen regelen synchronisatie na lokale wijzigingen. Periodieke controles en verzoeken vanuit Calendeer blijven beschikbaar.</string>
     <string name="sync_settings_interval_value">Interval: %1$s</string>
     <string name="sync_settings_interval">Synchronisatie-interval</string>
     <string name="sync_settings_android">Android-synchronisatie-instellingen openen</string>
@@ -51,8 +51,8 @@
     <string name="sync_settings_battery_explanation">Android kan synchronisatie uitstellen om de batterij te sparen. Je kunt Calendeer uitsluiten van batterijoptimalisatie. Dit kan meer batterij verbruiken. Ga verder om het Android-dialoogvenster te bekijken of behoud de huidige instelling.</string>
     <string name="sync_settings_battery_continue">Doorgaan</string>
     <string name="sync_settings_battery_decline">Huidige instelling behouden</string>
-    <string name="sync_settings_paused">Automatische synchronisatie staat uit. Geselecteerde agenda’s wachten totdat je op Synchroniseren tikt of automatische synchronisatie weer inschakelt in de Android-instellingen.</string>
-    <string name="sync_request_accepted">Verzoek naar Android verzonden.</string>
+    <string name="sync_settings_paused">Synchronisatie na lokale wijzigingen staat uit. Periodieke controles en verzoeken vanuit Calendeer blijven beschikbaar.</string>
+    <string name="sync_request_accepted">Synchronisatie aangevraagd.</string>
     <string name="sync_request_account_not_ready">Het account is nog niet gereed. Controleer de accountverbinding en agendatoegang en probeer het opnieuw.</string>
     <string name="sync_request_unavailable">Synchronisatie kan niet worden aangevraagd. Probeer het opnieuw.</string>
 </resources>

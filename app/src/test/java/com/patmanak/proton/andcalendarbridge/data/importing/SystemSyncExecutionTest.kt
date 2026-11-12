@@ -6,6 +6,25 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class SystemSyncExecutionTest {
+    @Test fun periodicPullDoesNotRunTheOutgoingPipeline() = runBlocking {
+        var sent = false
+        assertEquals(ImportRunResult.COMPLETE, executeCalendarPass(true,
+            { ImportRunResult.COMPLETE }, { sent = true; ImportRunResult.CONTINUE }))
+        assertFalse(sent)
+    }
+
+    @Test fun fullManualSyncRunsBothPipelinesAndKeepsTheirContinuation() = runBlocking {
+        var sent = false
+        assertEquals(ImportRunResult.CONTINUE, executeCalendarPass(false,
+            { ImportRunResult.COMPLETE }, { sent = true; ImportRunResult.CONTINUE }))
+        assertTrue(sent)
+    }
+    @Test fun onlyAndroidPushRequiresAutomaticSettings() {
+        assertTrue(requiresPushSettings(manual = false, pull = false))
+        assertFalse(requiresPushSettings(manual = true, pull = false))
+        assertFalse(requiresPushSettings(manual = false, pull = true))
+        assertFalse(requiresPushSettings(manual = true, pull = true))
+    }
     @Test fun interruptedEnqueueDoesNotWaitAndRestoresTheInterruptFlag() {
         try {
             assertEquals(SystemSyncOutcome.RETRY, relaySystemSync(

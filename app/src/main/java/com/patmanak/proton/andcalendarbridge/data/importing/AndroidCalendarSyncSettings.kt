@@ -4,9 +4,9 @@ package com.patmanak.proton.andcalendarbridge.data.importing
 import android.accounts.Account
 import android.content.Context
 import android.content.ContentResolver
-import android.os.Bundle
 import android.os.PowerManager
 import androidx.work.WorkManager
+import androidx.work.ExistingPeriodicWorkPolicy
 import com.patmanak.proton.andcalendarbridge.BridgeApplication
 import com.patmanak.proton.andcalendarbridge.data.calendar.AndroidCalendarProjection
 import com.patmanak.proton.andcalendarbridge.protonauth.ProtonAuthentication
@@ -26,7 +26,8 @@ data class CalendarSyncSettingsState(
 )
 
 /** Android owns triggers; these preferences are presentation/scheduling metadata, never intent storage. */
-class AndroidCalendarSyncSettings(context: Context, private val scope: CoroutineScope) {
+class AndroidCalendarSyncSettings(context: Context, private val scope: CoroutineScope,
+    private val periodicWorkName: String = SystemSyncWork.PERIODIC_WORK) {
     private val context = context.applicationContext
     private val prefs = context.getSharedPreferences(SystemSyncWork.PREFS, Context.MODE_PRIVATE)
     private val mutable = MutableStateFlow(CalendarSyncSettingsState())
@@ -39,11 +40,13 @@ class AndroidCalendarSyncSettings(context: Context, private val scope: Coroutine
     private val preferenceListener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, _ -> refresh() }
 
     fun start(app: BridgeApplication) {
-        WorkManager.getInstance(context).cancelUniqueWork("calendar-import-periodic")
+        android.accounts.AccountManager.get(context).getAccountsByType(AndroidCalendarProjection.ACCOUNT_TYPE)
+            .forEach(::removeAndroidPeriodics)
         prefs.registerOnSharedPreferenceChangeListener(preferenceListener)
         observer = ContentResolver.addStatusChangeListener(ContentResolver.SYNC_OBSERVER_TYPE_SETTINGS) {
             scope.launch {
                 refresh()
+                bound?.let(::removeAndroidPeriodics)
                 if (bound != null && !automaticAllowed()) cancelAutomaticWork()
                 else if (automaticAllowed()) {
                     val pending = app.providerWake.registration.ensureArmed()
@@ -72,7 +75,10 @@ class AndroidCalendarSyncSettings(context: Context, private val scope: Coroutine
     @Synchronized internal fun bind(account: Account?) {
         if (bound != account) {
             check(prefs.edit().putString("bound_account", account?.name).commit())
-            if (account == null) cancelAutomaticWork()
+            if (account == null) {
+                cancelAutomaticWork()
+                WorkManager.getInstance(context).cancelUniqueWork(periodicWorkName)
+            }
         }
         bound = account
         if (account != null && SystemSyncWork.installed(context, account)) {
@@ -81,6 +87,7 @@ class AndroidCalendarSyncSettings(context: Context, private val scope: Coroutine
                 configurePeriodic(account, minutes)
                 configured = account to minutes
             }
+            removeAndroidPeriodics(account)
         } else configured = null
         refresh()
         if (account != null && !automaticAllowed()) cancelAutomaticWork()
@@ -94,13 +101,14 @@ class AndroidCalendarSyncSettings(context: Context, private val scope: Coroutine
             ContentResolver.setSyncAutomatically(account, SystemSyncWork.AUTHORITY, true)
             check(prefs.edit().putBoolean(initialized, true).commit())
         }
-        val existing = ContentResolver.getPeriodicSyncs(account, SystemSyncWork.AUTHORITY)
-        val seconds = minutes * 60L
-        if (existing.size != 1 || existing.single().period != seconds || !existing.single().extras.isEmpty) {
-            for (periodic in existing) ContentResolver.removePeriodicSync(account, SystemSyncWork.AUTHORITY, periodic.extras)
-            ContentResolver.addPeriodicSync(account, SystemSyncWork.AUTHORITY, Bundle.EMPTY, seconds)
-        }
-        WorkManager.getInstance(context).cancelUniqueWork("calendar-import-periodic")
+        removeAndroidPeriodics(account)
+        WorkManager.getInstance(context).enqueueUniquePeriodicWork(periodicWorkName,
+            ExistingPeriodicWorkPolicy.UPDATE, SystemSyncWork.periodicRequest(account, minutes))
+    }
+
+    internal fun removeAndroidPeriodics(account: Account) {
+        for (periodic in ContentResolver.getPeriodicSyncs(account, SystemSyncWork.AUTHORITY))
+            ContentResolver.removePeriodicSync(account, SystemSyncWork.AUTHORITY, periodic.extras)
     }
 
     fun setIntervalMinutes(minutes: Int) {
@@ -110,16 +118,16 @@ class AndroidCalendarSyncSettings(context: Context, private val scope: Coroutine
         bind(bound)
     }
 
-    fun requestManual(): ManualSyncRequestResult = try {
+    suspend fun requestManual(): ManualSyncRequestResult = try { withContext(Dispatchers.IO) {
         val account = bound
         if (account == null || !SystemSyncWork.installed(context, account)) ManualSyncRequestResult.ACCOUNT_NOT_READY
         else {
-            ContentResolver.requestSync(account, SystemSyncWork.AUTHORITY,
-                Bundle().apply { putBoolean(ContentResolver.SYNC_EXTRAS_MANUAL, true)
-                    putBoolean(ContentResolver.SYNC_EXTRAS_EXPEDITED, true) })
+            WorkManager.getInstance(context).enqueue(SystemSyncWork.request(account, manual = true, upload = false))
+                .awaitPersisted()
             ManualSyncRequestResult.REQUESTED
         }
-    } catch (_: Exception) { ManualSyncRequestResult.UNAVAILABLE }
+    } } catch (cancelled: CancellationException) { throw cancelled }
+        catch (_: Exception) { ManualSyncRequestResult.UNAVAILABLE }
 
     fun markBatteryOfferSeen(): Boolean {
         if (prefs.getBoolean("battery_offer_seen", false)) return false
@@ -142,7 +150,6 @@ class AndroidCalendarSyncSettings(context: Context, private val scope: Coroutine
     private fun cancelAutomaticWork() {
         val manager = WorkManager.getInstance(context)
         manager.cancelAllWorkByTag(SystemSyncWork.AUTOMATIC_TAG)
-        manager.cancelAllWorkByTag("calendar-import")
     }
 
     private fun interval() = prefs.getInt("interval_minutes", 60).takeIf { it in INTERVALS } ?: 60

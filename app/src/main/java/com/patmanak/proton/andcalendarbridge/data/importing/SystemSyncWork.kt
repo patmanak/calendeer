@@ -19,10 +19,13 @@ internal object SystemSyncWork {
     const val ACCOUNT = "system_account"
     const val MANUAL = "system_manual"
     const val UPLOAD = "system_upload"
+    const val PULL = "system_pull"
     const val OUTCOME = "system_outcome"
     const val AUTOMATIC_TAG = "calendar-system-auto"
     const val AUTHORITY = CalendarContract.AUTHORITY
     const val PREFS = "android-calendar-sync"
+    const val PERIODIC_WORK = "calendar-import-periodic"
+    const val WAIT_MILLIS = 600_000L
 
     fun automaticAllowed(account: Account): Boolean = ContentResolver.getMasterSyncAutomatically() &&
         ContentResolver.getSyncAutomatically(account, AUTHORITY)
@@ -37,10 +40,18 @@ internal object SystemSyncWork {
         OneTimeWorkRequestBuilder<CalendarImportWorker>()
             .setInputData(workDataOf(ACCOUNT to account.name, MANUAL to manual, UPLOAD to upload, "network" to true))
             .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
+            .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
             .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
             .also { if (!manual) it.addTag(AUTOMATIC_TAG) }.build()
 
-    fun await(context: Context, id: UUID, timeoutMillis: Long = 120_000): SystemSyncOutcome {
+    fun periodicRequest(account: Account, minutes: Int): PeriodicWorkRequest {
+        require(minutes in AndroidCalendarSyncSettings.INTERVALS)
+        return PeriodicWorkRequestBuilder<CalendarImportWorker>(minutes.toLong(), TimeUnit.MINUTES)
+            .setInputData(workDataOf(ACCOUNT to account.name, PULL to true, "network" to true))
+            .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build()).build()
+    }
+
+    fun await(context: Context, id: UUID, timeoutMillis: Long = WAIT_MILLIS): SystemSyncOutcome {
         val manager = WorkManager.getInstance(context)
         val deadline = SystemClock.elapsedRealtime() + timeoutMillis
         while (SystemClock.elapsedRealtime() < deadline) {
