@@ -33,7 +33,7 @@ class LocalCreateIntentTest {
     @Test fun newlyCreatedEmptyDetailsMustBeKnownRatherThanInferredRemoteUnknown() {
         assertEquals(content, LocalCreateIntent(reservation, content).content)
         refused { LocalCreateIntent(reservation, content.copy(details = null)) }
-        refused { LocalCreateIntent(reservation, content.copy(colorRgb = 0x112233)) }
+        assertEquals(0x112233, LocalCreateIntent(reservation, content.copy(colorRgb = 0x112233)).content.colorRgb)
     }
     @Test fun timedSnapshotRetainsTimezoneAndRefusesFractionalSeconds() {
         val time = EventTime.Timed(Instant.parse("2030-10-27T00:30:00Z"),
@@ -42,9 +42,10 @@ class LocalCreateIntentTest {
         refused { LocalCreateIntent(reservation, content.copy(time = time.copy(start = time.start.plusNanos(1)))) }
         refused { LocalCreateIntent(reservation, content.copy(time = time.copy(end = time.end.plusNanos(1)))) }
     }
-    @Test fun recurrenceAndNonemptyDetailsCannotBecomePartialCreates() {
+    @Test fun recurrenceCannotBecomePartialCreateButPersonalRemindersAreRetained() {
         refused { LocalCreateIntent(reservation, content.copy(recurrence = EventRecurrence("fixture-uid", "FREQ=DAILY"))) }
-        refused { LocalCreateIntent(reservation, content.copy(details = EventDetails(reminders = listOf(EventReminder(15))))) }
+        val rich = content.copy(details = EventDetails(reminders = listOf(EventReminder(15))))
+        assertEquals(rich, LocalCreateIntent(reservation, rich).content)
     }
     @Test fun allDayExclusiveEndAndOriginalTextStayIntact() {
         val text = content.copy(title = "Fête 🦌", description = "Line one\nLine two", location = "Meeting room")

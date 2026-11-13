@@ -49,15 +49,25 @@ data class CapturedCreateDispatchIdentity(
                 } catch (_: CharacterCodingException) { throw IllegalArgumentException("Invalid captured text") }
                 digest.update(ByteBuffer.allocate(4).putInt(bytes.size).array()); digest.update(bytes)
             }
-            field("calendeer-captured-create-content-v1")
             val content = intent.content
+            val knownEmpty = content.details == EventDetails() && content.colorRgb == null
+            field(if (knownEmpty) "calendeer-captured-create-content-v1" else "calendeer-captured-create-personal-content-v1")
             field(content.title); field(content.description); field(content.location)
             when (val time = content.time) {
                 is EventTime.AllDay -> { field("ALL_DAY"); field(time.start.toString()); field(time.endExclusive.toString()) }
                 is EventTime.Timed -> { field("TIMED"); field(time.start.toString()); field(time.end.toString()); field(time.zone.id) }
             }
-            // LocalCreateIntent already refuses unknown/nonempty personal or unsupported shared fields.
-            field("KNOWN_EMPTY_DETAILS"); field("NO_RECURRENCE"); field("NO_COLOR")
+            if (knownEmpty) {
+                // Historical bytes are immutable, including these fixed tags.
+                field("KNOWN_EMPTY_DETAILS"); field("NO_RECURRENCE"); field("NO_COLOR")
+            } else {
+                val details = requireNotNull(content.details)
+                field("KNOWN_PERSONAL_DETAILS"); field(details.reminders.size.toString())
+                details.reminders.forEach { field(it.minutesBefore.toString()) }
+                field("NO_ORGANIZER"); field("NO_ATTENDEES"); field("NO_RECURRENCE")
+                if (content.colorRgb == null) field("NO_COLOR")
+                else { field("RGB_COLOR"); field(content.colorRgb.toString()) }
+            }
             return digest.digest().joinToString("") { "%02x".format(it.toInt() and 0xff) }
         }
     }

@@ -158,13 +158,14 @@ class CapturedCreateHandoffTest {
             assertThrows(IllegalArgumentException::class.java) { content.copy(colorRgb = color) }
         assertFalse(supportsPersonalHandoff(RemoteChange.Deleted(change.eventId, change.revision)))
     }
-    @Test fun transferReceiptNeverAdmitsRichOriginalCreationEvidence() {
+    @Test fun transferReceiptOwnsItsOriginalAndRefusesUnboundRichCreationEvidence() {
         val reminders = mutableListOf<EventReminder>()
         val original = baseline.copy(change = change.copy(content = content.copy(details = EventDetails(reminders))))
         reminders += EventReminder(10)
-        assertThrows(IllegalArgumentException::class.java) {
-            CapturedCreateHandoffReceipt(ack.copy(baseline = original), UUID(0, 35).toString())
-        }
+        assertEquals(EventDetails(), original.change.content.details)
+        assertEquals(original, CapturedCreateHandoffReceipt(ack.copy(baseline = original), UUID(0, 35).toString()).acknowledgement.baseline)
+        assertThrows(IllegalArgumentException::class.java) { baseline.copy(change = change.copy(
+            content = content.copy(details = EventDetails(reminders)))) }
     }
     private val scope = CalendarScope(AccountId("fixture"), CalendarId("calendar"), 0)
     private val content = EventContent("?", EventTime.AllDay(LocalDate.of(2030, 10, 1), LocalDate.of(2030, 10, 2)),

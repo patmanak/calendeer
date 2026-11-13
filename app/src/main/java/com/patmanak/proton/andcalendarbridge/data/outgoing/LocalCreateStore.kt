@@ -117,7 +117,7 @@ class LocalCreateStore(context: Context, name: String = "calendar-local-create-v
             val reservation = intent.reservation
             val captured = checkNotNull(read(db, reservation.scope, reservation.localId)) { "Submission requires captured work" }
             check(captured.reservation == reservation && captured.content != null &&
-                LocalCreateIntent(reservation, decodeContent(captured.content, reservation)) == intent) { "Submission requires exact captured content" }
+                LocalCreateIntent(reservation, LocalCreateContentCodec.decodeContent(captured.content, reservation)) == intent) { "Submission requires exact captured content" }
             val existing = readSubmissionRow(db, reservation.scope, reservation.localId)
             if (existing != null) {
                 check(existing.reservation == value) { "Local submission reservation is immutable" }
@@ -172,7 +172,7 @@ class LocalCreateStore(context: Context, name: String = "calendar-local-create-v
                 fun string(name: String) = cursor.getString(cursor.getColumnIndexOrThrow(name))
                 val captured = checkNotNull(read(db, scope, localId)) { "Submission capture missing" }
                 check(captured.content != null && captured.content == string("captured_content")) { "Submission snapshot differs" }
-                val intent = LocalCreateIntent(captured.reservation, decodeContent(captured.content, captured.reservation))
+                val intent = LocalCreateIntent(captured.reservation, LocalCreateContentCodec.decodeContent(captured.content, captured.reservation))
                 val reservation = LocalCreateSubmissionReservation(intent, MutationId(string("attempt")),
                     AdapterFormat(string("adapter"), cursor.getInt(cursor.getColumnIndexOrThrow("version"))))
                 val payloadIndex = cursor.getColumnIndexOrThrow("payload")
@@ -207,7 +207,7 @@ class LocalCreateStore(context: Context, name: String = "calendar-local-create-v
         guardedRead(scope) { db -> read(db, scope, localId)?.reservation }
     suspend fun readIntent(scope: CalendarScope, localId: LocalEventId): LocalCreateIntent? =
         guardedRead(scope) { db -> read(db, scope, localId)?.let { (reservation, payload) ->
-            payload?.let { LocalCreateIntent(reservation, decodeContent(it, reservation)) }
+            payload?.let { LocalCreateIntent(reservation, LocalCreateContentCodec.decodeContent(it, reservation)) }
         } }
 
     /** Retain only after qualified stamp/inspection. The first exact content is immutable. */
@@ -217,11 +217,11 @@ class LocalCreateStore(context: Context, name: String = "calendar-local-create-v
         check(row != null && row.reservation == reservation) { "Local create requires its exact reservation" }
         val payload = row.content
         if (payload != null) {
-            val existing = LocalCreateIntent(reservation, decodeContent(payload, reservation))
+            val existing = LocalCreateIntent(reservation, LocalCreateContentCodec.decodeContent(payload, reservation))
             check(existing == intent) { "Local create intent is immutable" }
             existing
         } else {
-            check(db.update("local_creates", ContentValues().apply { put("content", encodeContent(intent)) },
+            check(db.update("local_creates", ContentValues().apply { put("content", LocalCreateContentCodec.encodeContent(intent)) },
                 "$IDENTITY AND mutation=? AND adapter=? AND version=? AND created_at=? AND marker_protocol=? AND content IS NULL",
                 identity(reservation.scope, reservation.localId) + arrayOf(reservation.id.value, reservation.format.id,
                     reservation.format.version.toString(), reservation.timestamp.toString(), reservation.markerProtocol.toString())) == 1) {
@@ -239,7 +239,7 @@ class LocalCreateStore(context: Context, name: String = "calendar-local-create-v
         val reservation = intent.reservation
         val row = read(db, reservation.scope, reservation.localId)
         check(row != null && row.reservation == reservation && row.content != null) { "Preparation requires its exact captured intent" }
-        check(LocalCreateIntent(reservation, decodeContent(row.content, reservation)) == intent) { "Preparation requires immutable captured content" }
+        check(LocalCreateIntent(reservation, LocalCreateContentCodec.decodeContent(row.content, reservation)) == intent) { "Preparation requires immutable captured content" }
         val existing = preparation(row)
         if (existing != null) {
             check(existing == value) { "Local create preparation is immutable" }
@@ -263,7 +263,7 @@ class LocalCreateStore(context: Context, name: String = "calendar-local-create-v
     private fun preparation(row: LocalCreateRow): LocalCreatePreparation? {
         val format = row.preparationFormat ?: return null
         check(row.content != null && row.protectedPayload != null) { "Incomplete local create preparation" }
-        return LocalCreatePreparation(LocalCreateIntent(row.reservation, decodeContent(row.content, row.reservation)), format, row.protectedPayload)
+        return LocalCreatePreparation(LocalCreateIntent(row.reservation, LocalCreateContentCodec.decodeContent(row.content, row.reservation)), format, row.protectedPayload)
     }
     private fun readPreparationColumns(cursor: Cursor): Pair<AdapterFormat?, String?> {
         val adapter = cursor.getColumnIndexOrThrow("prep_adapter")
@@ -294,37 +294,6 @@ class LocalCreateStore(context: Context, name: String = "calendar-local-create-v
             }
         }
 
-    private fun encodeContent(intent: LocalCreateIntent): String = JSONObject().apply {
-        put("schema", 1); put("reservation", encodeReservation(intent.reservation)); put("knownEmptyDetails", true)
-        put("title", intent.content.title); put("description", intent.content.description); put("location", intent.content.location)
-        when (val time = intent.content.time) {
-            is EventTime.AllDay -> { put("allDay", true); put("start", time.start.toString()); put("end", time.endExclusive.toString()) }
-            is EventTime.Timed -> { put("allDay", false); put("start", time.start.toString()); put("end", time.end.toString()); put("zone", time.zone.id) }
-        }
-    }.toString()
-    private fun encodeReservation(reservation: LocalCreateReservation) = JSONObject().apply {
-        put("id", reservation.id.value); put("localId", reservation.localId.value)
-        put("account", reservation.scope.account.value); put("calendar", reservation.scope.calendar.value); put("generation", reservation.scope.generation)
-        put("adapter", reservation.format.id); put("version", reservation.format.version)
-        put("timestamp", reservation.timestamp.toString()); put("markerProtocol", reservation.markerProtocol)
-    }
-    private fun decodeContent(payload: String, reservation: LocalCreateReservation): EventContent = JSONObject(payload).let { json ->
-        require(json.getInt("schema") == 1 && json.getBoolean("knownEmptyDetails")) { "Unsupported local create content" }
-        val fields = setOf("schema", "reservation", "knownEmptyDetails", "title", "description", "location", "allDay", "start", "end") +
-            if (json.getBoolean("allDay")) emptySet() else setOf("zone")
-        require(json.keys().asSequence().toSet() == fields) { "Unsupported local create fields" }
-        val stored = json.getJSONObject("reservation")
-        require(stored.keys().asSequence().toSet() == setOf("id", "localId", "account", "calendar", "generation",
-            "adapter", "version", "timestamp", "markerProtocol")) { "Unsupported local create identity fields" }
-        val storedReservation = LocalCreateReservation(MutationId(stored.getString("id")), LocalEventId(stored.getString("localId")),
-            CalendarScope(AccountId(stored.getString("account")), CalendarId(stored.getString("calendar")), stored.getLong("generation")),
-            AdapterFormat(stored.getString("adapter"), stored.getInt("version")), Instant.parse(stored.getString("timestamp")),
-            stored.getInt("markerProtocol"))
-        check(storedReservation == reservation) { "Foreign local create content" }
-        val time = if (json.getBoolean("allDay")) EventTime.AllDay(LocalDate.parse(json.getString("start")), LocalDate.parse(json.getString("end")))
-            else EventTime.Timed(Instant.parse(json.getString("start")), Instant.parse(json.getString("end")), ZoneId.of(json.getString("zone")))
-        EventContent(json.getString("title"), time, json.getString("description"), json.getString("location"), details = EventDetails())
-    }
     private fun identity(scope: CalendarScope, localId: LocalEventId) =
         arrayOf(scope.account.value, scope.calendar.value, scope.generation.toString(), localId.value)
 
@@ -354,4 +323,65 @@ class LocalCreateStore(context: Context, name: String = "calendar-local-create-v
         lock.withLock { action(writableDatabase) }
     }
     private companion object { const val IDENTITY = "account=? AND calendar=? AND generation=? AND local_event=?" }
+}
+
+/** Versioned captured content only; historical schema 1 remains the known-empty encoding. */
+internal object LocalCreateContentCodec {
+    fun encodeContent(intent: LocalCreateIntent): String = JSONObject().apply {
+        val knownEmpty = intent.content.details == EventDetails() && intent.content.colorRgb == null
+        put("schema", if (knownEmpty) 1 else 2); put("reservation", encodeReservation(intent.reservation))
+        if (knownEmpty) put("knownEmptyDetails", true) else {
+            put("reminders", org.json.JSONArray().apply { intent.content.details!!.reminders.forEach { put(it.minutesBefore) } })
+            put("colorRgb", intent.content.colorRgb ?: JSONObject.NULL)
+        }
+        put("title", intent.content.title); put("description", intent.content.description); put("location", intent.content.location)
+        when (val time = intent.content.time) {
+            is EventTime.AllDay -> { put("allDay", true); put("start", time.start.toString()); put("end", time.endExclusive.toString()) }
+            is EventTime.Timed -> { put("allDay", false); put("start", time.start.toString()); put("end", time.end.toString()); put("zone", time.zone.id) }
+        }
+    }.toString()
+    private fun encodeReservation(reservation: LocalCreateReservation) = JSONObject().apply {
+        put("id", reservation.id.value); put("localId", reservation.localId.value)
+        put("account", reservation.scope.account.value); put("calendar", reservation.scope.calendar.value); put("generation", reservation.scope.generation)
+        put("adapter", reservation.format.id); put("version", reservation.format.version)
+        put("timestamp", reservation.timestamp.toString()); put("markerProtocol", reservation.markerProtocol)
+    }
+    fun decodeContent(payload: String, reservation: LocalCreateReservation): EventContent = JSONObject(payload).let { json ->
+        val schema = json.getInt("schema")
+        require(schema == 1 && json.getBoolean("knownEmptyDetails") || schema == 2) { "Unsupported local create content" }
+        val fields = setOf("schema", "reservation", "title", "description", "location", "allDay", "start", "end") +
+            (if (schema == 1) setOf("knownEmptyDetails") else setOf("reminders", "colorRgb")) +
+            if (json.getBoolean("allDay")) emptySet() else setOf("zone")
+        require(json.keys().asSequence().toSet() == fields) { "Unsupported local create fields" }
+        val stored = json.getJSONObject("reservation")
+        require(stored.keys().asSequence().toSet() == setOf("id", "localId", "account", "calendar", "generation",
+            "adapter", "version", "timestamp", "markerProtocol")) { "Unsupported local create identity fields" }
+        val storedReservation = LocalCreateReservation(MutationId(stored.getString("id")), LocalEventId(stored.getString("localId")),
+            CalendarScope(AccountId(stored.getString("account")), CalendarId(stored.getString("calendar")), stored.getLong("generation")),
+            AdapterFormat(stored.getString("adapter"), stored.getInt("version")), Instant.parse(stored.getString("timestamp")),
+            stored.getInt("markerProtocol"))
+        check(storedReservation == reservation) { "Foreign local create content" }
+        val time = if (json.getBoolean("allDay")) EventTime.AllDay(LocalDate.parse(json.getString("start")), LocalDate.parse(json.getString("end")))
+            else EventTime.Timed(Instant.parse(json.getString("start")), Instant.parse(json.getString("end")), ZoneId.of(json.getString("zone")))
+        val reminders = if (schema == 1) emptyList() else json.getJSONArray("reminders").let { array ->
+            require(array.length() <= 5)
+            List(array.length()) { index ->
+                val value = array.get(index)
+                require(value is Int || value is Long)
+                val minutes = (value as Number).toLong()
+                require(minutes in Int.MIN_VALUE.toLong()..Int.MAX_VALUE.toLong())
+                EventReminder(minutes.toInt())
+            }
+        }
+        val color = if (schema == 1 || json.isNull("colorRgb")) null else {
+            val value = json.get("colorRgb")
+            require(value is Int || value is Long)
+            val rgb = (value as Number).toLong()
+            require(rgb in 0..0xffffff)
+            rgb.toInt()
+        }
+        require(schema == 1 || reminders.isNotEmpty() || color != null) { "Schema 2 requires rich personal content" }
+        LocalCreateIntent(reservation, EventContent(json.getString("title"), time, json.getString("description"),
+            json.getString("location"), colorRgb = color, details = EventDetails(reminders))).content
+    }
 }

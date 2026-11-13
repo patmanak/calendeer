@@ -21,6 +21,24 @@ import org.junit.runner.RunWith
 /** Isolated SQLite fixtures only. No session, network or Calendar Provider/row locator access. */
 @RunWith(AndroidJUnit4::class)
 class LocalCreateStoreDeviceTest {
+    @Test fun personalCaptureSchemaKeepsRemindersAndColorAcrossReopenWithoutChangingOldRows() = fixture { context, name, store ->
+        store.reserve(reservation); store.retain(intent)
+        val legacy = payload(store)
+        val richReservation = reservation.copy(id = MutationId("rich-capture"), localId = LocalEventId(UUID.randomUUID().toString()))
+        val rich = LocalCreateIntent(richReservation, content.copy(colorRgb = 0, details = EventDetails(listOf(EventReminder(10), EventReminder(-10)))))
+        assertTrue(store.reserve(richReservation)); assertEquals(rich, store.retain(rich))
+        val personal = payload(store, richReservation.localId)
+        assertEquals(1, JSONObject(legacy).getInt("schema")); assertEquals(2, JSONObject(personal).getInt("schema"))
+        store.close()
+        LocalCreateStore(context, name).use { reopened ->
+            assertEquals(intent, reopened.readIntent(scope, reservation.localId)); assertEquals(legacy, payload(reopened))
+            assertEquals(rich, reopened.readIntent(scope, richReservation.localId))
+            assertEquals(personal, payload(reopened, richReservation.localId)); assertFalse(reopened.reserve(richReservation))
+            refused { reopened.retain(rich.copy(content = rich.content.copy(colorRgb = 1))) }
+            assertEquals(personal, payload(reopened, richReservation.localId))
+            assertEquals(3, reopened.readableDatabase.version)
+        }
+    }
     private val scope = CalendarScope(AccountId("local-create-fixture"), CalendarId("calendar"), 0)
     private val reservation = LocalCreateReservation(MutationId("fixture-create"),
         LocalEventId("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"), scope, AdapterFormat("local-create-fixture", 1),

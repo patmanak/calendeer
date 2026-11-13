@@ -8,11 +8,13 @@ import java.nio.charset.CodingErrorAction
 /** Supported current local content behind an exact attachment and sent reference.
  * Point-in-time evidence only: never authority to clean Android or release projection later.
  */
-data class CapturedCreateCurrent(val baseline: CapturedCreateBaseline, val content: EventContent, val deleted: Boolean,
+class CapturedCreateCurrent(val baseline: CapturedCreateBaseline, content: EventContent, val deleted: Boolean,
     val acknowledgement: CapturedCreateAcknowledgementReceipt? = null) {
+    val content = freezeCapturedCreateContent(content)
     init {
         require(acknowledgement == null || acknowledgement.baseline == baseline)
-        require(content.details == EventDetails() && content.recurrence == null && content.colorRgb == null)
+        // Preserve the original pre-handoff profile for historical known-empty captures.
+        if (supportsCapturedHandoff(baseline.change)) require(this.content.details == EventDetails() && this.content.colorRgb == null)
         val time = content.time
         if (time is EventTime.Timed) require(time.start.nano == 0 && time.end.nano == 0)
         try {
@@ -22,6 +24,17 @@ data class CapturedCreateCurrent(val baseline: CapturedCreateBaseline, val conte
         } catch (_: CharacterCodingException) { throw IllegalArgumentException("Invalid current captured text") }
     }
     val unchanged: Boolean get() = !deleted && content == baseline.change.content
+    fun copy(baseline: CapturedCreateBaseline = this.baseline, content: EventContent = this.content,
+        deleted: Boolean = this.deleted, acknowledgement: CapturedCreateAcknowledgementReceipt? = this.acknowledgement) =
+        CapturedCreateCurrent(baseline, content, deleted, acknowledgement)
+    operator fun component1() = baseline
+    operator fun component2() = content
+    operator fun component3() = deleted
+    operator fun component4() = acknowledgement
+    override fun equals(other: Any?) = other is CapturedCreateCurrent && baseline == other.baseline && content == other.content &&
+        deleted == other.deleted && acknowledgement == other.acknowledgement
+    override fun hashCode() = 31 * (31 * (31 * baseline.hashCode() + content.hashCode()) + deleted.hashCode()) +
+        (acknowledgement?.hashCode() ?: 0)
     override fun toString() = "CapturedCreateCurrent(REDACTED)"
 }
 

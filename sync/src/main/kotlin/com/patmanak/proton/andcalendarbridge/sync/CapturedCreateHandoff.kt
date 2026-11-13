@@ -12,7 +12,7 @@ data class CapturedCreateHandoffReceipt(
     init {
         require(protocol == 1 && nonce.matches(Regex("[a-f0-9]{8}(-[a-f0-9]{4}){3}-[a-f0-9]{12}")))
         require(nonce != acknowledgement.nonce && nonce != acknowledgement.baseline.receipt.nonce)
-        require(supportsCapturedHandoff(acknowledgement.baseline.change))
+        require(supportsPersonalCapturedOrigin(acknowledgement.baseline))
     }
     val scope: CalendarScope get() = acknowledgement.baseline.scope
     val format: AdapterFormat get() = acknowledgement.baseline.format
@@ -32,7 +32,7 @@ class CapturedCreateHandoffFrame(
     val receipt: CapturedCreateHandoffReceipt = receipt.let {
         val acknowledgement = it.acknowledgement
         val baseline = acknowledgement.baseline
-        require(supportsCapturedHandoff(baseline.change))
+        require(supportsPersonalCapturedOrigin(baseline))
         it.copy(acknowledgement = acknowledgement.copy(baseline = baseline.copy(
             change = baseline.change.copy(content = freezeHandoffContent(baseline.change.content)))))
     }
@@ -130,7 +130,11 @@ private fun freezeHandoffContent(content: EventContent): EventContent {
         attendees = java.util.Collections.unmodifiableList(details.attendees.toList())))
 }
 
-/** Current content after transfer; original creation admission remains the strict profile below. */
+/** Original personal creation admission requires the complete frozen dispatch identity. */
+fun supportsPersonalCapturedOrigin(baseline: CapturedCreateBaseline): Boolean =
+    supportsPersonalHandoff(baseline.change) && baseline.receipt.binding.identity.matchesContent(baseline.change.content)
+
+/** Current content after transfer; historical admission remains the strict profile below. */
 fun supportsPersonalHandoff(change: RemoteChange): Boolean {
     val value = (change as? RemoteChange.Upsert)?.content ?: return false
     val details = value.details ?: return false

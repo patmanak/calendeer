@@ -24,13 +24,29 @@ data class LocalCreateReservation(
 }
 
 /** First committed supported snapshot, permanently paused. No dispatch or remote association. */
-data class LocalCreateIntent(val reservation: LocalCreateReservation, val content: EventContent) {
+class LocalCreateIntent(val reservation: LocalCreateReservation, content: EventContent) {
+    val content: EventContent = freezeCapturedCreateContent(content)
     init {
-        require(content.recurrence == null && content.details == EventDetails() && content.colorRgb == null)
         val time = content.time
         if (time is EventTime.Timed) require(time.start.nano == 0 && time.end.nano == 0)
     }
+    fun copy(reservation: LocalCreateReservation = this.reservation, content: EventContent = this.content) =
+        LocalCreateIntent(reservation, content)
+    operator fun component1() = reservation
+    operator fun component2() = content
+    override fun equals(other: Any?) = other is LocalCreateIntent && reservation == other.reservation && content == other.content
+    override fun hashCode() = 31 * reservation.hashCode() + content.hashCode()
     override fun toString() = "LocalCreateIntent(REDACTED)"
+}
+
+/** Own and revalidate personal metadata, including lists supplied through mutable callers. */
+internal fun freezeCapturedCreateContent(content: EventContent): EventContent {
+    val details = requireNotNull(content.details) { "Known personal details required" }
+    val frozen = details.copy(
+        reminders = java.util.Collections.unmodifiableList(details.reminders.toList()),
+        attendees = java.util.Collections.unmodifiableList(details.attendees.toList()))
+    require(content.recurrence == null && frozen.organizer == null && frozen.attendees.isEmpty())
+    return content.copy(details = frozen)
 }
 
 /** Immutable adapter-protected preparation of one captured snapshot, never dispatch admission. */
