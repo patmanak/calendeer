@@ -43,7 +43,8 @@ internal class ProtonEventDecryptor(private val crypto: CryptoContext, private v
     suspend fun decodeCreated(session: CatalogSession, calendar: String, bootstrap: JsonObject, row: JsonObject,
         uid: String, policy: CreatedEventReadbackPolicy = CreatedEventReadbackPolicy.SHARED_ONLY_V1): RemoteChange.Upsert? {
         if (!policy.accepts(row) || row.string("UID") != uid || row.array("SharedEvents").map { (it as JsonObject).number("Type") }.sorted() != listOf(2L, 3L) ||
-            row.array("CalendarEvents").isNotEmpty() || row.array("AttendeesEvents").isNotEmpty()) return null
+            (row.array("CalendarEvents").isNotEmpty() && policy != CreatedEventReadbackPolicy.PERSONAL_EDIT_V2) || row.array("AttendeesEvents").isNotEmpty()) return null
+        if (policy == CreatedEventReadbackPolicy.PERSONAL_EDIT_V2) try { ProtonPersonalEventWire.qualify(row) } catch (_: Exception) { return null }
         return decodePage(session.userId, calendar, bootstrap, listOf(row), uid).changes.singleOrNull()
     }
     suspend fun decodePage(user: UserId, calendar: String, bootstrap: JsonObject, rows: List<JsonObject>, expectedUid: String? = null): EventDecodeResult {
@@ -244,7 +245,7 @@ internal class ProtonEventDecryptor(private val crypto: CryptoContext, private v
         // Reuse original signature verification, full-base decode, writer selection and the
         // original shared session key. Only the plaintext policy and protected format differ.
         val prepared = prepareSharedTextFragments(session, frozen.scope, frozen.base.eventId, frozen.base.revision,
-            uid, frozen.base.content.title, metadata, frozenBootstrap, frozenRow, requireEmptyPersonal = true,
+            uid, frozen.base.content.title, metadata, frozenBootstrap, frozenRow, requireEmptyPersonal = true, calendarSignedProfile = true,
             expectedBase = frozen.base) { basis ->
             ProtonSharedTextPatcher.patchPersonalAt(basis.originalPlaintext, uid, frozen.base.content,
                 frozen.content, timestamp)
@@ -253,7 +254,7 @@ internal class ProtonEventDecryptor(private val crypto: CryptoContext, private v
         val record = try {
             ProtonPersonalPreparationCodec(protector).sealLocal(frozen, uid, timestamp,
                 ProtonTimestampedSharedPersonal(prepared.originalRow, prepared.clearSharedPart,
-                    prepared.encryptedSharedPart, prepared.changed, defaults))
+                    prepared.encryptedSharedPart, prepared.changed, defaults, prepared.calendarPart))
         } catch (cancelled: CancellationException) { throw cancelled }
           catch (failure: Exception) { context.ensureActive(); throw failure }
         context.ensureActive()
@@ -277,6 +278,7 @@ internal class ProtonEventDecryptor(private val crypto: CryptoContext, private v
         expectedRevision: Revision, expectedUid: String, expectedTitle: String,
         metadata: JsonObject, bootstrap: JsonObject, row: JsonObject, requireEmptyPersonal: Boolean,
         expectedBase: RemoteChange.Upsert? = null,
+        calendarSignedProfile: Boolean = false,
         patch: (ProtonSharedTitleBasis) -> ProtonEventTextParts): ProtonTimestampedSharedText {
         try {
             val context = currentCoroutineContext()
@@ -287,7 +289,7 @@ internal class ProtonEventDecryptor(private val crypto: CryptoContext, private v
                 context.ensureActive()
                 val original = basis.originalRow
                 // Personal partitions can contain their own DTSTAMP; never silently retain stale dates.
-                if (requireEmptyPersonal && (original.array("CalendarEvents").isNotEmpty() ||
+                if (requireEmptyPersonal && ((!calendarSignedProfile && original.array("CalendarEvents").isNotEmpty()) ||
                     original.array("AttendeesEvents").isNotEmpty())) unsupportedEvents()
                 // Decode the same frozen observation with the already unlocked keys and addresses.
                 // Compare before patching/signing/sealing; never normalize away an intent mismatch.
@@ -330,8 +332,16 @@ internal class ProtonEventDecryptor(private val crypto: CryptoContext, private v
                     JsonObject(secretPart + mapOf("Data" to JsonPrimitive(encrypted),
                         "Signature" to JsonPrimitive(selected.signingKey.signText(crypto, patched.encryptedShared))))
                 }
+                val calendarPart = if (!calendarSignedProfile) null else ProtonPersonalCalendarPart.original(original)?.let { part ->
+                    if (!selected.address.email.equals(part.string("Author"), ignoreCase = true) ||
+                        !verify(part, part.string("Data"), addresses)) unsupportedEvents()
+                    val next = ProtonSharedTextPatcher.calendarPart(part.string("Data"), expectedUid,
+                        basis.originalPlaintext.clearShared, patched.clearShared)
+                    if (next == part.string("Data")) part else JsonObject(part + mapOf("Data" to JsonPrimitive(next),
+                        "Signature" to JsonPrimitive(selected.signingKey.signText(crypto, next))))
+                }
                 context.ensureActive()
-                ProtonTimestampedSharedText(original, replacementClear, replacementSecret, changed = true)
+                ProtonTimestampedSharedText(original, replacementClear, replacementSecret, changed = true, calendarPart = calendarPart)
             }
         } catch (cancelled: CancellationException) { throw cancelled }
           catch (failure: RemoteImportException) {

@@ -53,6 +53,8 @@ class CalendarInheritedNotificationsLiveDeviceTest {
             if (record == null) {
                 val original = ProtonInheritedNotificationsProbe.find(app, target, prefix)
                 assertTrue("Web-created fixture must still inherit defaults", original.inherited)
+                assertEquals("Web fixture wire profile", "QUALIFIED", original.personalWireShape)
+                assertEquals("Web fixture shared profile", "QUALIFIED", original.sharedProfile)
                 assertEquals(listOf(EventReminder(15)), original.event.content.details!!.reminders)
                 val intent = LocalEditIntent(MutationId("web-default-intent-20261113"), target,
                     ProtonAuthentication.events(app).format, original.event,
@@ -66,11 +68,9 @@ class CalendarInheritedNotificationsLiveDeviceTest {
             val retained = checkNotNull(record)
             val result = if (retained.state == PersonalUpdateAttemptState.OUTCOME_UNKNOWN)
                 updates.inspect(retained, journal, ::active)
-            else updates.submit(retained, journal, ::active, { scope ->
-                active(scope) && ProtonInheritedNotificationsProbe.find(app, target, prefix).let {
-                    it.inherited && it.event == retained.preparation.intent.base
-                }
-            }, ::active)
+            // The adapter rereads and verifies the exact prepared original before claiming.
+            // This callback stays local; reentering the authentication facade would deadlock its lock.
+            else updates.submit(retained, journal, ::active, { scope -> active(scope) }, ::active)
             assertTrue("Real adapter must verify the retained request; never reset UNKNOWN", result is PersonalUpdateSubmissionObservation.Verified)
             val verified = result as PersonalUpdateSubmissionObservation.Verified
             assertTrue(journal.retainVerified(PersonalUpdateVerifiedResult.of(verified.record, verified), ::active))
@@ -82,6 +82,7 @@ class CalendarInheritedNotificationsLiveDeviceTest {
             InstrumentationRegistry.getInstrumentation().sendStatus(0, Bundle().apply {
                 putBoolean("web_defaults_null_kept_after_real_update", true)
                 putBoolean("web_defaults_email_configuration_preserved", true)
+                putBoolean("web_defaults_inspection_only", retained.state == PersonalUpdateAttemptState.OUTCOME_UNKNOWN)
             })
         }
     }

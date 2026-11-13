@@ -10,12 +10,15 @@ import kotlinx.serialization.json.JsonObject
  */
 internal class ProtonTimestampedSharedText internal constructor(
     originalRow: JsonObject, clearSharedPart: JsonObject, encryptedSharedPart: JsonObject, val changed: Boolean,
+    calendarPart: JsonObject? = null,
 ) {
     private val originalJson = originalRow.toString()
     private val clearJson = clearSharedPart.toString()
     private val encryptedJson = encryptedSharedPart.toString()
+    private val calendarJson = calendarPart?.toString()
     val originalRow: JsonObject get() = Json.parseToJsonElement(originalJson) as JsonObject
     val clearSharedPart: JsonObject get() = Json.parseToJsonElement(clearJson) as JsonObject
     val encryptedSharedPart: JsonObject get() = Json.parseToJsonElement(encryptedJson) as JsonObject
+    val calendarPart: JsonObject? get() = calendarJson?.let { Json.parseToJsonElement(it) as JsonObject }
     override fun toString() = "ProtonTimestampedSharedText(redacted)"
 }

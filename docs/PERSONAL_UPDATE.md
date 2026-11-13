@@ -47,6 +47,21 @@ null-plus-changed-reminders profile; historical capsule bytes remain unchanged.
 Readback checks both forms. A timed/all-day transition retaining null is held
 before sending when destination defaults would change the intended phone alerts.
 
+Web-created simple events may also carry one signed calendar partition containing
+UID/DTSTAMP and supported TRANSP/STATUS values. An optional `calendarSignedProfile`
+with sub-profile version 1 retains its renewed part inside the existing capsule;
+historical empty-partition capsules gain no fields. Preparation verifies its
+signature, selected author and shared UID/DTSTAMP, preserves unrelated bytes,
+renews DTSTAMP consistently and signs it with Proton Core. The request includes
+`CalendarEventContent`; readback checks the exact retained part and its signature.
+Encrypted calendar parts, recurrence, cancelled status, unknown properties and
+additional partitions remain held. UNKNOWN reconstructs only its retained request.
+Proton web fragments may omit the final CRLF; the scanner preserves that ending
+without accepting LF-only separators. Personal editing also retains absence of
+optional CREATED/LAST-MODIFIED dates, validating chronology and uniqueness when
+present. It advances DTSTAMP/SEQUENCE without inventing missing dates. Historical
+title/text/time metadata profiles retain their stricter date requirements.
+
 Transferred events retain their original captured creation receipt. Only the
 current handoff reference accepts known personal metadata. Frames, observations
 and projection plans own immutable snapshots. Personal ACK preserves reminder

@@ -1007,6 +1007,23 @@ device reminders and explicitly changed color, preserving email values and raw
 unchanged metadata. No upstream cryptographic code or new dependency is copied.
 The existing Proton Core signing/encryption and signed readback remain in use.
 
+The bounded signed-calendar sub-profile follows WebClients commit
+`fddf86f41cd42456959f43f672a41030b417e68d`,
+[`veventHelper.getVeventParts`](https://github.com/ProtonMail/WebClients/blob/fddf86f41cd42456959f43f672a41030b417e68d/packages/shared/lib/calendar/veventHelper.ts),
+[`serialize`](https://github.com/ProtonMail/WebClients/blob/fddf86f41cd42456959f43f672a41030b417e68d/packages/shared/lib/calendar/serialize.ts),
+[`constants`](https://github.com/ProtonMail/WebClients/blob/fddf86f41cd42456959f43f672a41030b417e68d/packages/shared/lib/calendar/constants.ts)
+and [`formatData`](https://github.com/ProtonMail/WebClients/blob/fddf86f41cd42456959f43f672a41030b417e68d/packages/shared/lib/calendar/formatData.ts),
+rechecked on 2026-11-13. Calendar Type 2 carries signed UID/DTSTAMP/STATUS/TRANSP;
+the formatter sends it as `CalendarEventContent`. The bridge admits only one such
+simple part, reuses its bounded raw scanner and Core signature primitives, and
+checks exact readback. It does not add encrypted calendar or recurrence support.
+The same pin's `calendar/helper.ts` wrapper omits the final CRLF. The adaptation
+accepts only that optional final delimiter and preserves the original signed bytes.
+The calendar event actions `sequence.ts` and `dtstamp.ts` and the serializer do not
+invent missing CREATED/LAST-MODIFIED dates; only the personal patch accepts their
+absence, retaining and validating them when present.
+No new upstream implementation or dependency is copied; GPL notices remain.
+
 ## Calendar public-link feed metadata
 
 The `CalendarURL` classification in `ProtonChangeFeedParser` is based on WebClients

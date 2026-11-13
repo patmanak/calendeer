@@ -15,17 +15,17 @@ import java.time.ZoneOffset
  */
 internal object ProtonPersonalEventUpdate {
     fun request(original: JsonObject, clear: JsonObject, encrypted: JsonObject, changed: Boolean,
-        context: JsonObject, before: EventContent, after: EventContent, defaults: JsonObject? = null): JsonObject {
+        context: JsonObject, before: EventContent, after: EventContent, defaults: JsonObject? = null, calendarPart: JsonObject? = null): JsonObject {
         temporalBaseline(original, clear, encrypted, before.time, after.time)
-        return ProtonPersonalEventWire.request(ProtonPersonalMetadataEdit.apply(original, before, after, defaults), clear, encrypted, changed, context)
+        return ProtonPersonalEventWire.request(ProtonPersonalMetadataEdit.apply(original, before, after, defaults), clear, encrypted, changed, context, calendarPart)
     }
     fun matchesReadback(original: JsonObject, clear: JsonObject, encrypted: JsonObject,
-        actual: JsonObject, before: EventContent, after: EventContent, defaults: JsonObject? = null): Boolean = try {
+        actual: JsonObject, before: EventContent, after: EventContent, defaults: JsonObject? = null, calendarPart: JsonObject? = null): Boolean = try {
         val expected = temporalBaseline(original, clear, encrypted, before.time, after.time)
         // Defaults belong to the initial kind, including when the edit changes timed/all-day kind.
         val personal = ProtonPersonalMetadataEdit.apply(original, before, after, defaults)
         ProtonPersonalEventWire.matchesReadback(JsonObject((expected - setOf("Notifications", "Color")) +
-            personal.filterKeys { it in setOf("Notifications", "Color") }), clear, encrypted, actual)
+            personal.filterKeys { it in setOf("Notifications", "Color") }), clear, encrypted, actual, calendarPart)
     } catch (_: Exception) { false }
     fun request(original: JsonObject, clear: JsonObject, encrypted: JsonObject, changed: Boolean,
         context: JsonObject, before: EventTime, after: EventTime): JsonObject {

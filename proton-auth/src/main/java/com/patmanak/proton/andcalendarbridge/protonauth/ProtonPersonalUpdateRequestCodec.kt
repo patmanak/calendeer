@@ -26,11 +26,11 @@ internal class ProtonProtectedPersonalUpdateRequest(val id: MutationId, preparat
 /** Reopened historical structure only; does not establish current access or verify signatures. */
 internal class ProtonPersonalUpdateRequest(fragments: ProtonTimestampedSharedPersonal, context: JsonObject, request: JsonObject) {
     private val frozen = ProtonTimestampedSharedPersonal(fragments.originalRow, fragments.clearSharedPart,
-        fragments.encryptedSharedPart, fragments.changed, fragments.defaults)
+        fragments.encryptedSharedPart, fragments.changed, fragments.defaults, fragments.calendarPart)
     private val contextJson = context.toString()
     private val requestJson = request.toString()
     val fragments: ProtonTimestampedSharedPersonal get() = ProtonTimestampedSharedPersonal(frozen.originalRow,
-        frozen.clearSharedPart, frozen.encryptedSharedPart, frozen.changed, frozen.defaults)
+        frozen.clearSharedPart, frozen.encryptedSharedPart, frozen.changed, frozen.defaults, frozen.calendarPart)
     val context: JsonObject get() = Json.parseToJsonElement(contextJson) as JsonObject
     val request: JsonObject get() = Json.parseToJsonElement(requestJson) as JsonObject
     override fun toString() = "ProtonPersonalUpdateRequest(redacted)"
@@ -80,7 +80,7 @@ internal class ProtonPersonalUpdateRequestCodec(private val protector: EventPayl
 
     private fun request(preparation: PersonalEditPreparation, fragments: ProtonTimestampedSharedPersonal,
         context: JsonObject): JsonObject = ProtonPersonalEventUpdate.request(fragments.originalRow, fragments.clearSharedPart,
-        fragments.encryptedSharedPart, fragments.changed, context, preparation.intent.base.content, preparation.intent.content, fragments.defaults)
+        fragments.encryptedSharedPart, fragments.changed, context, preparation.intent.base.content, preparation.intent.content, fragments.defaults, fragments.calendarPart)
 
     private fun snapshot(value: JsonObject): JsonObject = Json.parseToJsonElement(value.encoded()) as JsonObject
 

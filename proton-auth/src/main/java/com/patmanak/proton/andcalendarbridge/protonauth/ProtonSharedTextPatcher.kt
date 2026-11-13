@@ -36,6 +36,35 @@ internal class ProtonTimePatchException : IllegalStateException("Shared time pat
  * Framing, identity and selected text checks do not certify other properties as safe to upload.
  */
 internal object ProtonSharedTextPatcher {
+    /** Narrow signed calendar partition, preserving every byte except its bound DTSTAMP. */
+    fun calendarPart(original: String, uid: String, sharedBefore: String? = null, sharedAfter: String? = null): String {
+        try {
+            budget(original, "")
+            val observed = inspect(original, false, emptySet())
+            require(observed.uid == uid)
+            val stack = mutableListOf<String>()
+            val seen = mutableSetOf<String>()
+            for (block in blocks(original)) {
+                val (name, header) = property(block.logical)
+                if (name == "BEGIN") { stack += value(block).uppercase(Locale.ROOT); require(stack.size <= 2); continue }
+                if (name == "END") { stack.removeAt(stack.lastIndex); continue }
+                require(header == name)
+                if (stack == listOf("VCALENDAR")) require(name in setOf("VERSION", "PRODID", "CALSCALE"))
+                else {
+                    require(stack == listOf("VCALENDAR", "VEVENT") && seen.add(name))
+                    require(name in setOf("UID", "DTSTAMP", "TRANSP", "STATUS"))
+                    if (name == "TRANSP") require(value(block) in setOf("OPAQUE", "TRANSPARENT"))
+                    if (name == "STATUS") require(value(block) in setOf("CONFIRMED", "TENTATIVE"))
+                }
+            }
+            if (sharedBefore != null) require(observed.stamp == inspect(sharedBefore, false, emptySet()).stamp)
+            if (sharedAfter == null) return original
+            val next = inspect(sharedAfter, false, emptySet())
+            require(next.uid == uid && next.stamp >= observed.stamp)
+            return replaceDates(original, listOf(blocks(original).single { property(it.logical).first == "DTSTAMP" }), next.stamp)
+        } catch (_: Exception) { throw ProtonPersonalPatchException() }
+    }
+
     /** Separate temporal experiment sharing the bounded raw scanner, never a text-format expansion.
      * No authenticity, encryption, request identity or dispatch authority is supplied here.
      */
@@ -135,12 +164,13 @@ internal object ProtonSharedTextPatcher {
             // Text patch has no clock or sequence side effects. Apply all changes before one metadata advance.
             val textPatched = patch(original, changes, expectedUid)
 
-            val clear = metadata(original.clearShared, true)
+            val clear = metadata(original.clearShared, true, optionalModificationDates = true)
             val secret = metadata(textPatched.encryptedShared, false)
             val oldStamp = metadataDate(clear.getValue("DTSTAMP"))
-            val created = metadataDate(clear.getValue("CREATED"))
-            val lastModified = metadataDate(clear.getValue("LAST-MODIFIED"))
-            require(created <= oldStamp && created <= lastModified && timestamp >= oldStamp && timestamp >= lastModified)
+            val created = clear["CREATED"]?.let(::metadataDate)
+            val lastModified = clear["LAST-MODIFIED"]?.let(::metadataDate)
+            require(timestamp >= oldStamp && (lastModified == null || timestamp >= lastModified))
+            require(created == null || (created <= oldStamp && (lastModified == null || created <= lastModified)))
             require(oldStamp == metadataDate(secret.getValue("DTSTAMP")))
             val sequence = value(clear.getValue("SEQUENCE"))
             require(sequence.matches(Regex("[0-9]+")))
@@ -157,8 +187,8 @@ internal object ProtonSharedTextPatcher {
                 property(block.logical).second + ":" + next + "\r\n")
             val nextClear = replace(textPatched.clearShared, sourceDates.map { (name, block) ->
                 Edit(block.start, block.end, serialized.getValue(name))
-            } + listOf(edit(clear.getValue("DTSTAMP"), stamp), edit(clear.getValue("LAST-MODIFIED"), stamp),
-                edit(clear.getValue("SEQUENCE"), (number + 1).toString())))
+            } + listOf(edit(clear.getValue("DTSTAMP"), stamp), edit(clear.getValue("SEQUENCE"), (number + 1).toString())) +
+                listOfNotNull(clear["LAST-MODIFIED"]?.let { edit(it, stamp) }))
             val nextSecret = replace(textPatched.encryptedShared, listOf(edit(secret.getValue("DTSTAMP"), stamp)))
             budget(nextClear, nextSecret)
             val checkedClear = inspect(nextClear, false, emptySet())
@@ -386,10 +416,11 @@ internal object ProtonSharedTextPatcher {
     }
 
     /** The caller has already validated framing; inspect only root/event metadata eligibility. */
-    private fun metadata(text: String, clear: Boolean): Map<String, Block> {
+    private fun metadata(text: String, clear: Boolean, optionalModificationDates: Boolean = false): Map<String, Block> {
         val stack = mutableListOf<String>()
         val selected = mutableMapOf<String, Block>()
-        val required = if (clear) setOf("DTSTAMP", "CREATED", "LAST-MODIFIED", "SEQUENCE") else setOf("DTSTAMP")
+        val required = if (!clear) setOf("DTSTAMP") else if (optionalModificationDates) setOf("DTSTAMP", "SEQUENCE") else setOf("DTSTAMP", "CREATED", "LAST-MODIFIED", "SEQUENCE")
+        val allowed = required + if (clear && optionalModificationDates) setOf("CREATED", "LAST-MODIFIED") else emptySet()
         for (block in blocks(text)) {
             val (name, header) = property(block.logical)
             if (name == "BEGIN") { stack += value(block).uppercase(Locale.ROOT); continue }
@@ -398,11 +429,11 @@ internal object ProtonSharedTextPatcher {
             if (stack != listOf("VCALENDAR", "VEVENT")) continue
             require(name !in NON_SIMPLE_MARKERS)
             if (!clear) require(name !in setOf("CREATED", "LAST-MODIFIED", "SEQUENCE"))
-            if (name in required) {
+            if (name in allowed) {
                 require(header.equals(name, ignoreCase = true) && selected.put(name, block) == null)
             }
         }
-        require(selected.keys == required)
+        require(selected.keys.containsAll(required))
         return selected
     }
 
@@ -425,7 +456,7 @@ internal object ProtonSharedTextPatcher {
 
     /** Offsets and framing only: opaque values and components are never mapped or rewritten. */
     private fun blocks(text: String): List<Block> {
-        require(text.endsWith("\r\n") && !text.startsWith('\uFEFF'))
+        require(!text.startsWith('\uFEFF'))
         val result = mutableListOf<Block>()
         var offset = 0
         var lines = 0
@@ -438,9 +469,12 @@ internal object ProtonSharedTextPatcher {
         }
         while (offset < text.length) {
             require(++lines <= MAX_LINES)
-            val end = text.indexOf("\r\n", offset)
+            val delimiter = text.indexOf("\r\n", offset)
+            val end = if (delimiter < 0) text.length else delimiter
             require(end >= offset)
             val line = text.substring(offset, end)
+            // Proton Web's wrapper omits only this final delimiter. Never normalize signed bytes.
+            if (delimiter < 0) require(line.equals("END:VCALENDAR", ignoreCase = true))
             require(line.isNotEmpty() && line.none { it.isISOControl() && it != '\t' })
             if (line.first() == ' ' || line.first() == '\t') {
                 require(logical.isNotEmpty())
@@ -453,8 +487,8 @@ internal object ProtonSharedTextPatcher {
                 start = offset
                 folded = false
             }
-            blockEnd = end + 2
-            offset = end + 2
+            blockEnd = if (delimiter < 0) end else end + 2
+            offset = blockEnd
         }
         flush()
         return result

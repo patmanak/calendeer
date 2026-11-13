@@ -37,6 +37,29 @@ class ProtonPersonalEditPatchTest {
         assertTrue(result.encryptedShared.contains("SUMMARY:Original\r\nDESCRIPTION:Notes\r\nLOCATION:Place\r\n"))
         assertTrue(result.clearShared.contains(opaque)); assertTrue(result.encryptedShared.contains(opaque))
     }
+    @Test fun absentWebCreationAndModificationDatesStayAbsent() {
+        val source = parts()
+        for (created in listOf(false, true)) for (modified in listOf(false, true)) {
+            var clear = source.clearShared
+            if (!created) clear = clear.replace("CREATED:20261015T120000Z\r\n", "")
+            if (!modified) clear = clear.replace("LAST-MODIFIED:20261016T120000Z\r\n", "")
+            val result = patch(before.copy(title = "Next"), ProtonEventTextParts(clear.removeSuffix("\r\n"), source.encryptedShared.removeSuffix("\r\n")))
+            assertEquals(created, result.clearShared.contains("CREATED:"))
+            assertEquals(modified, result.clearShared.contains("LAST-MODIFIED:"))
+            assertTrue(result.clearShared.contains("SEQUENCE:8\r\n"))
+            assertFalse(result.clearShared.endsWith("\r\n")); assertFalse(result.encryptedShared.endsWith("\r\n"))
+        }
+    }
+    @Test fun optionalDatesStillRequireUniqueValidChronology() {
+        val source = parts()
+        for (clear in listOf(source.clearShared.replace("CREATED:20261015T120000Z", "CREATED:20261018T120000Z"),
+            source.clearShared.replace("LAST-MODIFIED:20261016T120000Z", "LAST-MODIFIED:20261018T120000Z"),
+            source.clearShared.replace("CREATED:20261015T120000Z", "CREATED:20261015T120000Z\r\nCREATED:20261015T120000Z"),
+            source.clearShared.replace("CREATED:20261015T120000Z", "CREATED;X-PARAM=value:20261015T120000Z"),
+            source.clearShared.replace("CREATED:20261015T120000Z", "CREATED:invalid"))) {
+            refuse { patch(before.copy(title = "Next"), ProtonEventTextParts(clear, source.encryptedShared)) }
+        }
+    }
     @Test fun duplicatePropertiesAndParticipantsAreRefused() {
         val source = parts()
         for (line in listOf("DTSTART:20261017T090000Z", "ATTENDEE:mailto:fixture@example.invalid", "RRULE:FREQ=DAILY"))

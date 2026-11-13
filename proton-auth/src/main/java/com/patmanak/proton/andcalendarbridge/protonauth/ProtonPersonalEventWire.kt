@@ -16,7 +16,13 @@ internal fun personalEventUpdateOnlyBytes(payload: String): ByteArray {
         val operation = root.array("Events").single() as JsonObject
         require(operation.keys == setOf("ID", "Event") && operation.string("ID").isNotBlank())
         val event = operation.obj("Event")
-        require(event.keys == setOf("Permissions", "IsOrganizer", "IsBreakingChange", "IsPersonalSingleEdit", "Notifications", "Color", "VideoConferencingData", "SharedEventContent"))
+        val keys = setOf("Permissions", "IsOrganizer", "IsBreakingChange", "IsPersonalSingleEdit", "Notifications", "Color", "VideoConferencingData", "SharedEventContent")
+        require(event.keys == keys || event.keys == keys + "CalendarEventContent")
+        if ("CalendarEventContent" in event) {
+            val part = event.array("CalendarEventContent").single() as JsonObject
+            require(part.keys == setOf("Type", "Data", "Signature") && part.number("Type") == 2L && part.string("Signature").isNotBlank())
+            require(part.string("Data").isNotBlank())
+        }
         require(event.number("Permissions") == 1L && event.number("IsOrganizer") == 1L && event.number("IsBreakingChange") == 0L &&
             event["IsPersonalSingleEdit"] == JsonPrimitive(false) && ProtonPersonalMetadata.valid(event["Notifications"], event["Color"]) && event["VideoConferencingData"] == JsonNull)
         val parts = event.array("SharedEventContent").map { it as JsonObject }
@@ -42,7 +48,8 @@ internal object ProtonPersonalEventWire {
         // GET attendee bitmap SEE or SEE_AND_INVITE, unrelated to calendar WRITE=16.
         // Upstream UPDATE still writes its default SEE=1. Exact GET bitmap must survive readback.
         require(row.number("Permissions") in setOf(1L, 3L) && row.number("IsOrganizer") == 1L && row["IsPersonalSingleEdit"] == JsonPrimitive(false))
-        listOf("CalendarEvents", "AttendeesEvents", "Exdates").forEach { require(row.array(it).isEmpty()) }
+        listOf("AttendeesEvents", "Exdates").forEach { require(row.array(it).isEmpty()) }
+        ProtonPersonalCalendarPart.original(row)
         // Observed GET-only extensions, not a claimed upstream write contract. Compare their explicit readback rules below.
         if ("LastEditTime" in row) require(row.number("LastEditTime") >= 0)
         if ("NotificationOccurrences" in row) require(row.array("NotificationOccurrences").isEmpty())
@@ -63,14 +70,16 @@ internal object ProtonPersonalEventWire {
         require(parts.map { it.number("Type") }.sorted() == listOf(2L, 3L))
         parts.forEach { require(it.keys == setOf("Type", "Data", "Signature", "Author")); listOf("Data", "Signature", "Author").forEach { name -> require(it.string(name).isNotBlank()) } }
     }
-    fun matchesReadback(original: JsonObject, clear: JsonObject, encrypted: JsonObject, actual: JsonObject): Boolean = try {
+    fun matchesReadback(original: JsonObject, clear: JsonObject, encrypted: JsonObject, actual: JsonObject,
+        calendarPart: JsonObject? = null): Boolean = try {
+        ProtonPersonalCalendarPart.validate(original, calendarPart, clear)
         qualify(actual)
         val expectedParts = listOf(clear, encrypted).associateBy { it.number("Type") }
         val actualParts = actual.array("SharedEvents").map { it as JsonObject }.associateBy { it.number("Type") }
         actualParts == expectedParts && actual.number("ModifyTime") >= original.number("ModifyTime") &&
             serverEditClockMatches(original, actual) &&
             JsonObject(actual - setOf("ModifyTime", "LastEditTime", "SharedEvents")) ==
-                JsonObject(original - setOf("ModifyTime", "LastEditTime", "SharedEvents"))
+                JsonObject((original + if (calendarPart == null) emptyMap() else mapOf("CalendarEvents" to JsonArray(listOf(calendarPart)))) - setOf("ModifyTime", "LastEditTime", "SharedEvents"))
     } catch (_: Exception) { false }
 
     /** Narrow measured response transformation, not a revision precondition or a generic ignored field. */
@@ -82,13 +91,16 @@ internal object ProtonPersonalEventWire {
         if (before < 0 || after < 0) return false
         return after == before || (after >= before && after == actual.number("ModifyTime"))
     }
-    fun request(original: JsonObject, clear: JsonObject, encrypted: JsonObject, changed: Boolean, context: JsonObject): JsonObject {
+    fun request(original: JsonObject, clear: JsonObject, encrypted: JsonObject, changed: Boolean, context: JsonObject,
+        calendarPart: JsonObject? = null): JsonObject {
         require(changed)
         qualify(original)
+        ProtonPersonalCalendarPart.validate(original, calendarPart, clear)
         require(context.keys == CONTEXT_KEYS && context.string("member").isNotBlank())
         listOf(clear, encrypted).forEach {
             require(it.keys == setOf("Type", "Data", "Signature", "Author") && it.string("Author").equals(context.string("author"), ignoreCase = true))
         }
+        if (calendarPart != null) require(calendarPart.string("Author").equals(context.string("author"), ignoreCase = true))
         return buildJsonObject {
             put("MemberID", context.string("member")); put("IsImport", 0)
             putJsonArray("Events") { add(buildJsonObject {
@@ -96,6 +108,7 @@ internal object ProtonPersonalEventWire {
                     put("Permissions", 1); put("IsOrganizer", 1); put("IsBreakingChange", 0); put("IsPersonalSingleEdit", false)
                     put("Notifications", original.getValue("Notifications")); put("Color", original["Color"] ?: JsonNull); put("VideoConferencingData", JsonNull)
                     put("SharedEventContent", JsonArray(listOf(clear, encrypted).map { JsonObject(it - "Author") }))
+                    if (calendarPart != null) put("CalendarEventContent", JsonArray(listOf(JsonObject(calendarPart - "Author"))))
                 }
             }) }
         }.also { personalEventUpdateOnlyBytes(it.toString()).fill(0) }

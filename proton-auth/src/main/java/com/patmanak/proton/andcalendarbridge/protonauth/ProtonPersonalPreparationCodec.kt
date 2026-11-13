@@ -25,7 +25,7 @@ internal class ProtonPersonalPreparationCodec(private val protector: EventPayloa
             val original = fragments.originalRow
             val clear = fragments.clearSharedPart
             val encrypted = fragments.encryptedSharedPart
-            validateFragments(frozen, uid, original, clear, encrypted, fragments.changed)
+            validateFragments(frozen, uid, original, clear, encrypted, fragments.changed, fragments.calendarPart)
             validateDefaults(frozen, original, fragments.defaults)
             buildJsonObject {
                 put("kind", KIND); put("version", 2); put("format", PERSONAL_PREPARATION_FORMAT.json())
@@ -33,6 +33,7 @@ internal class ProtonPersonalPreparationCodec(private val protector: EventPayloa
                 put("originalRow", original); put("clearSharedPart", clear); put("encryptedSharedPart", encrypted)
                 put("changed", fragments.changed)
                 fragments.defaults?.let { put("notificationDefaults", it) }
+                fragments.calendarPart?.let { put("calendarSignedProfile", ProtonPersonalCalendarPart.profile(it)) }
             }.encoded()
         }
         val protected = storage { protector.seal(plain) }
@@ -53,7 +54,7 @@ internal class ProtonPersonalPreparationCodec(private val protector: EventPayloa
             bounded(plain); require(UniqueJsonKeys(plain).validate())
             val root = Json.parseToJsonElement(plain) as? JsonObject ?: refuse()
             validateJson(root)
-            require(root.keys in setOf(ROOT_KEYS, ROOT_KEYS + "notificationDefaults") && root.strictString("kind") == KIND && root.strictNumber("version") == 2L)
+            require(root.keys - setOf("notificationDefaults", "calendarSignedProfile") == ROOT_KEYS && root.strictString("kind") == KIND && root.strictNumber("version") == 2L)
             require(root.strictObject("format") == record.format.json())
             require(root.strictObject("localIntent") == frozen.json())
             val bound = root.strictObject("binding")
@@ -64,10 +65,11 @@ internal class ProtonPersonalPreparationCodec(private val protector: EventPayloa
             val original = root.strictObject("originalRow")
             val clear = root.strictObject("clearSharedPart")
             val encrypted = root.strictObject("encryptedSharedPart")
-            validateFragments(frozen, uid, original, clear, encrypted, changed)
+            val calendarPart = if ("calendarSignedProfile" in root) ProtonPersonalCalendarPart.open(root.strictObject("calendarSignedProfile")) else null
+            validateFragments(frozen, uid, original, clear, encrypted, changed, calendarPart)
             val defaults = if ("notificationDefaults" in root) root.strictObject("notificationDefaults") else null
             validateDefaults(frozen, original, defaults)
-            ProtonTimestampedSharedPersonal(original, clear, encrypted, changed, defaults)
+            ProtonTimestampedSharedPersonal(original, clear, encrypted, changed, defaults, calendarPart)
         }
     }
 
@@ -119,12 +121,13 @@ internal class ProtonPersonalPreparationCodec(private val protector: EventPayloa
     }
 
     private fun validateFragments(intent: LocalEditIntent, uid: String, original: JsonObject,
-        clear: JsonObject, encrypted: JsonObject, changed: Boolean) {
+        clear: JsonObject, encrypted: JsonObject, changed: Boolean, calendarPart: JsonObject?) {
         require(original.strictString("ID") == intent.base.eventId.value &&
             original.strictString("CalendarID") == intent.scope.calendar.value && original.strictString("UID") == uid)
         require(original.strictString("SharedKeyPacket").isNotBlank())
         require(original["AddressKeyPacket"] == null || original["AddressKeyPacket"] == JsonNull)
-        require(original.strictArray("CalendarEvents").isEmpty() && original.strictArray("AttendeesEvents").isEmpty())
+        require(original.strictArray("AttendeesEvents").isEmpty())
+        ProtonPersonalCalendarPart.validate(original, calendarPart, clear)
         val parts = original.strictArray("SharedEvents").map { it as? JsonObject ?: refuse() }
         require(parts.size == 2 && parts.map { it.strictNumber("Type") }.sorted() == listOf(2L, 3L))
         val originalClear = parts.single { it.strictNumber("Type") == 2L }

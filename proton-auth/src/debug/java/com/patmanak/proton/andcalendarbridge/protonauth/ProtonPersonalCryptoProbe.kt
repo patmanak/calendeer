@@ -68,7 +68,8 @@ internal object ProtonPersonalCryptoProbe {
             }
             // Build a distinct closed synthetic wire fixture. Unknown source-fixture JSON is
             // deliberately excluded here; no real imported event is trimmed to make it writable.
-            fun source(clear: String,time: EventTime): JsonObject {
+            fun source(clear: String,time: EventTime, trailingNewline: Boolean = true): JsonObject {
+                val secret = if (trailingNewline) secret else secret.removeSuffix("\r\n")
                 val parts=originalRow.array("SharedEvents").map { JsonObject((it as JsonObject)-"UnknownPartMetadata") }
                 return JsonObject(originalRow-"OpaqueMetadata"+temporal(time)+buildJsonObject {
                     put("SharedEvents",JsonArray(listOf(
@@ -88,8 +89,8 @@ internal object ProtonPersonalCryptoProbe {
                 timed to timed.copy(zone=ZoneId.of("Europe/Paris")),timed to timed.copy(zone=ZoneId.of("Etc/UTC")),
                 timed to timed.copy(start=timed.start.plusSeconds(3600),end=timed.end.plusSeconds(7200),zone=ZoneId.of("Europe/Paris")),
                 timed to timed, timed to timed, day to day)
-            for(inherited in listOf(false, true)) for((index,pair) in cases.withIndex()) {
-                stage="PERSONAL_CASE_${index}_INHERITED_$inherited"
+            for(calendarProfile in listOf(false, true)) for(inherited in listOf(false, true)) for((index,pair) in cases.withIndex()) {
+                stage="PERSONAL_CASE_${index}_INHERITED_${inherited}_CALENDAR_$calendarProfile"
                 val (before,after)=pair
                 val bootstrap = if (!inherited) bootstrap else JsonObject(bootstrap + ("CalendarSettings" to buildJsonObject {
                     put("CalendarID", scope.calendar.value)
@@ -99,9 +100,19 @@ internal object ProtonPersonalCryptoProbe {
                     })
                 }))
                 val requestContext=ProtonSimpleEventUpdate.context(selected,metadata,bootstrap)
-                val clear=if(before is EventTime.AllDay) originalClear.replace(oldDates,dayDates) else originalClear
-                val sourceRow=source(clear,before)
-                val row=if(inherited) JsonObject(sourceRow + ("Notifications" to JsonNull)) else sourceRow
+                val clear=(if(before is EventTime.AllDay) originalClear.replace(oldDates,dayDates) else originalClear)
+                    .let { if (calendarProfile) it.replace(Regex("(?m)^(CREATED|LAST-MODIFIED):[^\\r\\n]*\\r\\n"), "").removeSuffix("\r\n") else it }
+                val sourceRow=source(clear,before, trailingNewline = !calendarProfile)
+                val personalText = ("BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:$uid\r\n" +
+                    originalClear.split("\r\n").single { it.startsWith("DTSTAMP:") } +
+                    "\r\nTRANSP:OPAQUE\r\nSTATUS:CONFIRMED\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n").removeSuffix("\r\n")
+                val personalPart = buildJsonObject {
+                    put("Type", 2); put("Data", personalText); put("Signature", sign(personalText)); put("Author", address.email)
+                }
+                val row=JsonObject(sourceRow + buildJsonObject {
+                    if (inherited) put("Notifications", JsonNull)
+                    if (calendarProfile) put("CalendarEvents", JsonArray(listOf(personalPart)))
+                })
                 ProtonPersonalEventWire.qualify(row)
                 val baseline=decoder.decodePage(session.userId,scope.calendar.value,bootstrap,listOf(row),uid).also { check(it.deferred.isEmpty()) }.changes.single()
                 check(baseline.content.time == before && baseline.content.details == EventDetails(listOf(EventReminder(10))) && baseline.content.colorRgb == 0xabcd12)
@@ -111,14 +122,44 @@ internal object ProtonPersonalCryptoProbe {
                     else -> baseline.content.copy(title="Combined title",description="Combined notes",location="Combined place",time=after)
                 }
                 val intent=LocalEditIntent(MutationId("synthetic-personal-$index"),scope,EVENT_FORMAT,baseline,replacement)
+                if (calendarProfile && inherited && index == 0) {
+                    val altered = personalText.replace("TRANSP:OPAQUE", "X-UNKNOWN:retained")
+                    val wrongUid = personalText.replace("UID:$uid", "UID:foreign-uid")
+                    val wrongStamp = personalText.replace(Regex("DTSTAMP:[0-9TZ]+"), "DTSTAMP:20261001T090000Z")
+                    val badParts = listOf(
+                        JsonObject(personalPart + ("Signature" to row.array("SharedEvents").first().jsonObject.getValue("Signature"))),
+                        JsonObject(personalPart + ("Author" to JsonPrimitive("foreign@example.invalid"))),
+                        JsonObject(personalPart + mapOf("Data" to JsonPrimitive(altered), "Signature" to JsonPrimitive(sign(altered)))),
+                        JsonObject(personalPart + mapOf("Data" to JsonPrimitive(wrongUid), "Signature" to JsonPrimitive(sign(wrongUid)))),
+                        JsonObject(personalPart + mapOf("Data" to JsonPrimitive(wrongStamp), "Signature" to JsonPrimitive(sign(wrongStamp)))))
+                    for (bad in badParts) {
+                        val badRow = JsonObject(row + ("CalendarEvents" to JsonArray(listOf(bad))))
+                        val badIntent = intent.copy(base = intent.base.copy(revision = badRow.revision(bootstrap)))
+                        check(runCatching { decoder.prepareAndSealPersonalEdit(session,intent,uid,timestamp,metadata,bootstrap,
+                            badRow,protector()) }.isFailure)
+                        // Rebind the observation too: rejection must not rely only on revision mismatch.
+                        check(runCatching { decoder.prepareAndSealPersonalEdit(session,badIntent,uid,timestamp,metadata,bootstrap,
+                            badRow,protector()) }.isFailure)
+                    }
+                    check(runCatching { decoder.prepareAndSealPersonalEdit(session,intent,uid,timestamp,metadata,bootstrap,
+                        JsonObject(row + ("CalendarKeyPacket" to JsonPrimitive("unexpected-packet"))),protector()) }.isFailure)
+                }
                 val prepared=decoder.prepareAndSealPersonalEdit(session,intent,uid,timestamp,metadata,bootstrap,row,protector())
                 check(if(index < 6) prepared.requiredConsent.containsAll(setOf(PersonalEditField.TITLE,PersonalEditField.TEXT,PersonalEditField.TIME))
                     else prepared.requiredConsent == setOf(if(index == 7) PersonalEditField.COLOR else PersonalEditField.REMINDERS))
                 val fragments=ProtonPersonalPreparationCodec(protector()).openLocal(prepared)
+                check((fragments.calendarPart != null) == calendarProfile)
+                if (calendarProfile) {
+                    val part = checkNotNull(fragments.calendarPart)
+                    check(part.string("Data") == personalText.replace(originalClear.split("\r\n").single { it.startsWith("DTSTAMP:") }, "DTSTAMP:20261003T093000Z"))
+                    check(publicKey.verifyText(crypto, part.string("Data"), part.string("Signature")))
+                }
                 check(fragments.originalRow == row && fragments.originalRow.string("SharedKeyPacket") == originalRow.string("SharedKeyPacket"))
                 val nextClear=fragments.clearSharedPart.string("Data");val nextSecret=decrypt(fragments.encryptedSharedPart)
+                check(nextClear.endsWith("\r\n") == !calendarProfile && nextSecret.endsWith("\r\n") == !calendarProfile)
                 check(nextClear.contains("SEQUENCE:8\r\n") && !nextClear.contains("SEQUENCE:9\r\n"))
-                check(nextClear.contains("LAST-MODIFIED:20261003T093000Z\r\n"))
+                check(nextClear.contains("LAST-MODIFIED:20261003T093000Z\r\n") == !calendarProfile)
+                if (calendarProfile) check(!nextClear.contains("CREATED:") && !nextClear.contains("LAST-MODIFIED:"))
                 for(text in listOf(nextClear,nextSecret)) check(text.contains("DTSTAMP:20261003T093000Z\r\n"))
                 check(nextClear.contains("X-CLEAR;X-PARAM=opaque:keep this  \r\n folded text\t\r\n"))
                 check(nextSecret.contains("X-SECRET;X-PARAM=opaque:first\r\n") && nextSecret.contains("X-SECRET;X-PARAM=opaque:second  \r\n folded text\t\r\n"))
@@ -132,10 +173,12 @@ internal object ProtonPersonalCryptoProbe {
                     """[{"Type":0,"Trigger":"${if(inherited && before is EventTime.AllDay) "-PT2H" else "-PT1H"}"},{"Type":1,"Trigger":"PT0S"},{"Type":1,"Trigger":"-PT20M"}]""") else if(inherited) JsonNull else notifications
                 val expectedColor = JsonPrimitive(if(index == 7) "#123456" else "#aBcD12")
                 check(event["Notifications"] == expectedNotifications && event["Color"] == expectedColor)
+                check(("CalendarEventContent" in event) == calendarProfile)
                 personalEventUpdateOnlyBytes(opened.request.toString()).fill(0)
                 val readback=JsonObject(row+temporal(after)+buildJsonObject {
                     put("SharedEvents",JsonArray(listOf(fragments.clearSharedPart,fragments.encryptedSharedPart)));put("ModifyTime",3)
                     put("Notifications",expectedNotifications); put("Color",expectedColor)
+                    fragments.calendarPart?.let { put("CalendarEvents", JsonArray(listOf(it))) }
                 })
                 var decoded=0
                 val reader=ProtonPersonalUpdateReadbackVerifier(codec,CreateEventVerifier { observed,calendar,observedBootstrap,actual,expectedUid,policy ->
@@ -150,6 +193,14 @@ internal object ProtonPersonalCryptoProbe {
                 val forged=JsonObject(fragments.encryptedSharedPart+("Signature" to fragments.clearSharedPart.getValue("Signature")))
                 val tampered=JsonObject(readback+("SharedEvents" to JsonArray(listOf(fragments.clearSharedPart,forged))))
                 check(decoder.decodeCreated(session,scope.calendar.value,bootstrap,tampered,uid,CreatedEventReadbackPolicy.PERSONAL_EDIT_V2) == null)
+                if (calendarProfile) {
+                    val part = checkNotNull(fragments.calendarPart)
+                    val bad = JsonObject(part + ("Signature" to fragments.clearSharedPart.getValue("Signature")))
+                    check(decoder.decodeCreated(session,scope.calendar.value,bootstrap,
+                        JsonObject(readback + ("CalendarEvents" to JsonArray(listOf(bad)))),uid,CreatedEventReadbackPolicy.PERSONAL_EDIT_V2) == null)
+                    check(reader.verify(session,request,requestContext,bootstrap,
+                        JsonObject(readback + ("CalendarEvents" to JsonArray(listOf(personalPart))))) == null)
+                }
             }
             return "RESULT=SUCCESS"
         } catch(cancelled: CancellationException) { throw cancelled }
