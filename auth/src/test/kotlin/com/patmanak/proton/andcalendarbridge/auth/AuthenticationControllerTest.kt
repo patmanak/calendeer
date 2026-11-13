@@ -21,6 +21,47 @@ import org.junit.Test
 class AuthenticationControllerTest {
     private val dispatcher = StandardTestDispatcher()
 
+    @Test fun `sign out waits for native cleanup and retries it before clearing the session`() = runTest(dispatcher) {
+        val order = mutableListOf<String>()
+        var fail = true
+        val port = FakeAuthenticationFlowPort(restoreResult = AuthenticationStep.Authenticated,
+            cancelResult = { order += "session" })
+        val controller = AuthenticationController(port, AuthenticationMonotonicClock { 0 }, this,
+            beforeSignOut = { order += "calendars"; check(!fail) })
+        advanceUntilIdle()
+        controller.signOut(); advanceUntilIdle()
+        assertEquals(listOf("calendars"), order)
+        assertTrue(controller.state.value.isCleanupRequired)
+        controller.submitSignIn("fixture".toCharArray(), "secret".toCharArray()); advanceUntilIdle()
+        assertEquals(0, port.signInCalls)
+        fail = false
+        controller.cancelAuthentication(); advanceUntilIdle()
+        assertEquals(listOf("calendars", "calendars", "session"), order)
+        assertFalse(controller.state.value.isCleanupRequired)
+    }
+
+    @Test fun `cancelling an unfinished login never removes calendars`() = runTest(dispatcher) {
+        var removals = 0
+        val port = FakeAuthenticationFlowPort(restoreResult = AuthenticationStep.CodeRequired)
+        val controller = AuthenticationController(port, AuthenticationMonotonicClock { 0 }, this,
+            beforeSignOut = { removals++ })
+        advanceUntilIdle(); controller.cancelAuthentication(); advanceUntilIdle()
+        assertEquals(0, removals); assertEquals(1, port.cancelCalls)
+    }
+
+    @Test fun `session cleanup failure repeats idempotent native cleanup without reopening login`() = runTest(dispatcher) {
+        var removals = 0
+        var fail = true
+        val port = FakeAuthenticationFlowPort(restoreResult = AuthenticationStep.Authenticated,
+            cancelResult = { check(!fail) })
+        val controller = AuthenticationController(port, AuthenticationMonotonicClock { 0 }, this,
+            beforeSignOut = { removals++ })
+        advanceUntilIdle(); controller.signOut(); advanceUntilIdle()
+        assertTrue(controller.state.value.isCleanupRequired)
+        fail = false; controller.cancelAuthentication(); advanceUntilIdle()
+        assertEquals(2, removals); assertFalse(controller.state.value.isCleanupRequired)
+    }
+
     @Test
     fun `double submit is ignored and cancellation cannot be overwritten by stale success`() =
         runTest(dispatcher) {

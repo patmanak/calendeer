@@ -1,0 +1,4 @@
+<resources>
+    <string name="auth_sign_out_title">Wylogować się?</string>
+    <string name="auth_sign_out_warning">Kalendarze Calendeer zostaną usunięte z tego telefonu. Oczekujące zmiany nie będą wysyłane; niezsynchronizowane zmiany mogą zostać utracone. Kalendarze Proton nie zostaną usunięte.</string>
+</resources>

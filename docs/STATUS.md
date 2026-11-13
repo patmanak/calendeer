@@ -41,6 +41,8 @@ Samsung/One UI is outside 0.1. Signature management remains deferred by the owne
 - Violet deer interface, eight languages, light/dark/system themes, calendar
   selection and one Read-only / Editable mode per calendar. Previous partial write
   choices migrate to Read-only with an explanation; complete consent stays editable.
+  Sign-out requires OK / Cancel, warns about unsynchronized changes and removes
+  owned native calendars before clearing the session; failed cleanup is retryable.
   Existing work and uncertain outcomes are retained. Sync settings expose Android
   switches, the last successful cycle, interval and an optional one-time battery
   offer. Disabled push is explained; manual requests receive visible
@@ -77,7 +79,7 @@ isolated fresh password login were tested. Remote CI, canonical release/update
 installation, other ABIs/OEMs and signing remain release gates.
 [Distribution](LICENSING.md), [build security](BUILD_SECURITY.md).
 
-Still required: V05 editing, logout confirmation, milestone qualification,
+Still required: V05 editing, milestone qualification,
 unresolved historical associations/conflicts, remote CI and signed packaging.
 Trustworthy comparable modification timestamps remain unavailable for general
 last-writer-wins. GET then PUT is not atomic; concurrent changes can be overwritten.

@@ -1,0 +1,4 @@
+<resources>
+    <string name="auth_sign_out_title">Abmelden?</string>
+    <string name="auth_sign_out_warning">Die Calendeer-Kalender werden von diesem Telefon entfernt. Ausstehende Änderungen werden nicht mehr gesendet; nicht synchronisierte Änderungen können verloren gehen. Ihre Proton-Kalender werden nicht gelöscht.</string>
+</resources>

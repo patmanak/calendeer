@@ -1,0 +1,4 @@
+<resources>
+    <string name="auth_sign_out_title">Sign out?</string>
+    <string name="auth_sign_out_warning">Calendeer calendars will be removed from this phone. Pending changes will stop being sent; unsynchronized changes may be lost. Your Proton calendars will not be deleted.</string>
+</resources>

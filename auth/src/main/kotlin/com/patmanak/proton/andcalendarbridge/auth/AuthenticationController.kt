@@ -65,6 +65,7 @@ class AuthenticationController(
     private val port: AuthenticationFlowPort,
     private val monotonicClock: AuthenticationMonotonicClock,
     private val scope: kotlinx.coroutines.CoroutineScope,
+    private val beforeSignOut: suspend () -> Unit = {},
 ) {
     private val mutableState = MutableStateFlow(AuthenticationState())
     val state: StateFlow<AuthenticationState> = mutableState.asStateFlow()
@@ -75,6 +76,7 @@ class AuthenticationController(
     private var retryReleaseJob: Job? = null
     private var activeSecrets: List<AuthenticationSecret> = emptyList()
     private var disposed = false
+    private var signOutCleanupRequired = false
 
     init {
         launchOperation(AuthenticationDestination.RESTORING) { port.restore() }
@@ -161,6 +163,8 @@ class AuthenticationController(
 
     fun cancelAuthentication() {
         if (disposed || mutableState.value.isCleanupInProgress) return
+        signOutCleanupRequired = signOutCleanupRequired ||
+            mutableState.value.destination == AuthenticationDestination.AUTHENTICATED
         val preservedRetryDeadline = mutableState.value
             .takeIf(AuthenticationState::isRetryBlocked)
             ?.retryBlockedUntilElapsedRealtimeMillis
@@ -187,7 +191,9 @@ class AuthenticationController(
         activeOperation = scope.launch {
             var cleanupSucceeded = false
             try {
+                if (signOutCleanupRequired) beforeSignOut()
                 port.cancel()
+                signOutCleanupRequired = false
                 cleanupSucceeded = true
             } catch (cancellation: CancellationException) {
                 throw cancellation

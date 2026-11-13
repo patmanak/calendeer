@@ -169,6 +169,7 @@ class BridgeApplication : Application() {
             ProtonAuthentication.create(this),
             AuthenticationMonotonicClock(SystemClock::elapsedRealtime),
             authenticationScope,
+            beforeSignOut = imports::disconnectCalendars,
         ).also { controller ->
             authenticationScope.launch {
                 controller.state.map { it.destination == AuthenticationDestination.AUTHENTICATED }

@@ -288,6 +288,11 @@ class ImportCoordinator(
     suspend fun reconcileSystemCalendarAccess() {
         for (target in store.calendarScopes()) configureSystemCalendar(target)
     }
+    suspend fun disconnectCalendars() {
+        authenticationChanged(false)
+        val expected = generation
+        ImportCalendarDisconnect(store, projection, mutex) { !authenticated && generation == expected }.remove()
+    }
 
     suspend fun discoverSystemChanges(target: CalendarScope, afterRow: Long = 0, limit: Int = 25):
         com.patmanak.proton.andcalendarbridge.data.calendar.SystemCalendarChangePage? = mutex.withLock {

@@ -1,0 +1,4 @@
+<resources>
+    <string name="auth_sign_out_title">Se déconnecter ?</string>
+    <string name="auth_sign_out_warning">Les calendriers Calendeer seront retirés de ce téléphone. Les envois en attente seront arrêtés ; les modifications non synchronisées peuvent être perdues. Vos calendriers Proton ne seront pas supprimés.</string>
+</resources>

@@ -19,6 +19,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -95,10 +96,14 @@ internal fun AuthenticationContent(
     // only the transferred mutable arrays have the controller's explicit clearing guarantee.
     var username by remember(state.destination, state.passwordPurpose) { mutableStateOf("") }
     var secret by remember(state.destination, state.passwordPurpose) { mutableStateOf("") }
+    var confirmSignOut by remember(state.destination, state.isCleanupRequired) { mutableStateOf(false) }
     val keyboard = LocalSoftwareKeyboardController.current
     val view = LocalView.current
     fun clearInputs() { username = ""; secret = ""; keyboard?.hide() }
-    fun cancel() { clearInputs(); onCancel() }
+    fun cancel() {
+        clearInputs()
+        if (state.destination == AuthenticationDestination.AUTHENTICATED) confirmSignOut = true else onCancel()
+    }
     val canSubmit = !state.isSubmitting && !state.isCleanupRequired && !state.isRetryBlocked
     fun submit() {
         if (!canSubmit) return
@@ -134,6 +139,15 @@ internal fun AuthenticationContent(
     )) { cancel() }
     AuthenticationWindowProtection(state.destination)
     val connected = state.destination == AuthenticationDestination.AUTHENTICATED
+    if (connected && confirmSignOut) AlertDialog(
+        onDismissRequest = { confirmSignOut = false },
+        title = { Text(stringResource(R.string.auth_sign_out_title)) },
+        text = { Text(stringResource(R.string.auth_sign_out_warning)) },
+        confirmButton = { TextButton(onClick = { confirmSignOut = false; onCancel() },
+            modifier = Modifier.testTag("auth_sign_out_confirm")) { Text(stringResource(android.R.string.ok)) } },
+        dismissButton = { TextButton(onClick = { confirmSignOut = false },
+            modifier = Modifier.testTag("auth_sign_out_cancel")) { Text(stringResource(android.R.string.cancel)) } },
+    )
     Column(modifier.fillMaxWidth().imePadding(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text(stringResource(if (connected) R.string.auth_redesign_account else titleResource(state)),

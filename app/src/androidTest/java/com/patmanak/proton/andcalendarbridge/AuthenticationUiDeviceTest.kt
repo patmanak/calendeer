@@ -40,6 +40,21 @@ import org.junit.runner.RunWith
 /** Sanitized fake boundary only. Never loads a WebView, reads a credential or calls Proton. */
 @RunWith(AndroidJUnit4::class)
 class AuthenticationUiDeviceTest {
+    @Test fun signOutWaitsForConfirmationAndCancelPreservesTheSession() {
+        port.result = AuthenticationStep.Authenticated
+        start()
+        compose.runOnIdle { controller.submitSignIn("fixture".toCharArray(), "fixture".toCharArray()) }
+        compose.onNodeWithTag(AuthenticationTags.CANCEL).performClick()
+        compose.runOnIdle {
+            assertEquals(0, port.cancelCalls)
+            assertEquals(AuthenticationDestination.AUTHENTICATED, controller.state.value.destination)
+        }
+        compose.onNodeWithTag("auth_sign_out_cancel").performClick()
+        compose.runOnIdle { assertEquals(0, port.cancelCalls) }
+        compose.onNodeWithTag(AuthenticationTags.CANCEL).performClick()
+        compose.onNodeWithTag("auth_sign_out_confirm").performClick()
+        compose.runOnIdle { assertEquals(1, port.cancelCalls) }
+    }
     @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private lateinit var controller: AuthenticationController
@@ -148,6 +163,7 @@ class AuthenticationUiDeviceTest {
             assertEquals(0, port.cancelCalls)
         }
         compose.onNodeWithTag(AuthenticationTags.CANCEL).performClick()
+        compose.onNodeWithTag("auth_sign_out_confirm").performClick()
         assertEmpty(AuthenticationTags.USERNAME)
         assertEmpty(AuthenticationTags.SECRET)
         compose.runOnIdle { assertEquals(1, port.cancelCalls) }

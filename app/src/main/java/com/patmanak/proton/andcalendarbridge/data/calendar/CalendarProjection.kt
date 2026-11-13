@@ -102,6 +102,8 @@ interface CalendarProjection {
     suspend fun discoverSystemChanges(scope: CalendarScope, afterRow: Long = 0, limit: Int = 25): SystemCalendarChangePage? = null
     /** Existing owned mirror only; closing access must never create a calendar or account. */
     suspend fun makeCalendarReadOnly(scope: CalendarScope) { error("Access restriction unavailable") }
+    /** Explicit confirmed sign-out only; preserve all unrelated calendars. Idempotent. */
+    suspend fun removeOwnedCalendar(scope: CalendarScope) { error("Calendar removal unavailable") }
     suspend fun apply(intent: ProjectionIntent, seriesUid: String? = null)
     /** Assertion-only observation of dirty/deleted owned rows affected by this projection,
      * including recurrence dependencies. Never grants ownership, a write lease or acknowledgement. */

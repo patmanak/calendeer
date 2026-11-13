@@ -1564,7 +1564,7 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
     }
 
     /** Explicit local removal only. Never call this merely because a calendar disappears remotely. */
-    suspend fun removeOwnedCalendar(scope: CalendarScope) = operation {
+    override suspend fun removeOwnedCalendar(scope: CalendarScope) = operation {
         val account = accountFor(scope.account)
         val existing = calendarRow(scope, account) ?: return@operation
         val uri = syncUri(Calendars.CONTENT_URI, account)
