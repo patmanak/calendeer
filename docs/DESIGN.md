@@ -37,20 +37,24 @@ attention, connection unavailable, paused and waiting states. A completed import
 alone never produces Up to date; retained work and recorded failures remain visible.
 The interval is not an exact next-run deadline. Disabled automatic sending is
 explained without suggesting that receiving or manual synchronization is disabled.
-Calendars combines discovery, synchronization and write preferences into one card
-per persisted calendar. Each card shows its color, name, current status and sync
-switch. A separate Options and details action reveals one Editable switch (off
-means Read-only), supported profiles and synchronization details. Opening a
+Calendars uses one compact row per persisted calendar, showing its color, name,
+Read-only/Editable badge and an independent display switch. Touching the name
+opens a scrollable detail sheet with a separate display control, segmented
+Read-only/Editable choice, three supported-operation summaries and explicit
+upcoming recurrence/guest limits. Opening a
 card or destination does not enable writes or queue event synchronization. Newly
 discovered calendars remain noninteractive until their scope is persisted.
 The catalog refreshes once on entry when available, respecting loading/cooldown;
 this discovery request never shares the manual outgoing synchronization action.
 
 Pending Android projections, held events, history gaps, local conflicts and
-outgoing work remain visible with options collapsed, including for paused
-calendars. Import completion is never presented as full bidirectional convergence.
+outgoing work keep a concise visible notice on their row, including for paused
+calendars. The sheet retains all recorded counts and preservation explanations,
+even without calendar permission; sign-out removes it. A consent already enabled
+can always be revoked there. The concurrency warning appears once in the sheet.
+Import completion is never presented as full bidirectional convergence.
 Permission requests and failures remain actionable. Longer explanations live in
-expandable help rather than repeating throughout the main view.
+details rather than repeating throughout the main view.
 
 Settings groups Account, Appearance and language, and About. Version and
 independent-project information belong in About. Login uses a short introduction,

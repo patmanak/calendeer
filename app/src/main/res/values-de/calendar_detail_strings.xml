@@ -1,0 +1,8 @@
+<resources>
+    <string name="calendar_display_on_device">Auf diesem Telefon anzeigen</string>
+    <string name="calendar_row_attention">Änderungen müssen geprüft werden. Für Details öffnen.</string>
+    <string name="calendar_support_events">✓ Einfache Termine erstellen, bearbeiten und löschen</string>
+    <string name="calendar_support_personal">✓ Erinnerungen und Terminfarben</string>
+    <string name="calendar_support_dates">✓ Ganztägige Termine und Zeitzonen</string>
+    <string name="calendar_support_coming">Wiederholungen und Gäste: demnächst</string>
+</resources>

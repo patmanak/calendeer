@@ -1,0 +1,8 @@
+<resources>
+    <string name="calendar_display_on_device">Mostrar neste telefone</string>
+    <string name="calendar_row_attention">Algumas alterações precisam de atenção. Abra os detalhes.</string>
+    <string name="calendar_support_events">✓ Criar, editar e eliminar eventos simples</string>
+    <string name="calendar_support_personal">✓ Lembretes e cores dos eventos</string>
+    <string name="calendar_support_dates">✓ Eventos de dia inteiro e fusos horários</string>
+    <string name="calendar_support_coming">Repetições e convidados: brevemente</string>
+</resources>

@@ -1,6 +1,9 @@
 package com.patmanak.proton.andcalendarbridge.ui.calendars
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
@@ -18,6 +21,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.*
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
 import com.patmanak.proton.andcalendarbridge.R
 import com.patmanak.proton.andcalendarbridge.data.importing.ImportStore
 import com.patmanak.proton.andcalendarbridge.data.importing.ImportUiState
@@ -134,7 +138,8 @@ private fun CalendarCard(
     var expanded by rememberSaveable { mutableStateOf(false) }
     val createEnabled = selection.scope in creates.enabled
     val outgoing = creates.pending[selection.scope] ?: 0
-    val hasIssues = selection.deferredCount > 0 || selection.historyGap || selection.retainedLocalChangeCount > 0
+    val hasIssues = selection.deferredCount > 0 || selection.historyGap || selection.retainedLocalChangeCount > 0 ||
+        selection.localConflictCount > 0 || selection.scope in creates.legacyUnsupported
     val status = when {
         !selection.available -> R.string.calendar_dashboard_unavailable
         !selection.enabled -> R.string.import_status_paused
@@ -148,65 +153,88 @@ private fun CalendarCard(
     Surface(shape = RoundedCornerShape(24.dp), color = MaterialTheme.colorScheme.surface,
         modifier = Modifier.fillMaxWidth().testTag(CalendarDashboardTags.CARD)) {
         Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Row(Modifier.fillMaxWidth().heightIn(min = 56.dp)
-                .toggleable(selection.enabled, enabled = !imports.busy && selection.available,
-                    role = Role.Switch, onValueChange = { onSetEnabled(selection, it) })
-                .testTag(CalendarImportTags.TOGGLE), verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                CalendarColor(selection.summary)
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(selection.summary.title.ifBlank { stringResource(R.string.catalog_untitled) },
-                        style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                    Text(stringResource(status), style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.testTag(CalendarImportTags.STATUS).semantics { liveRegion = LiveRegionMode.Polite })
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Row(Modifier.weight(1f).heightIn(min = 56.dp).clickable { expanded = true }
+                    .testTag(CalendarDashboardTags.OPTIONS), verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    CalendarColor(selection.summary)
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(selection.summary.title.ifBlank { stringResource(R.string.catalog_untitled) },
+                            style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                        Surface(shape = CircleShape, color = MaterialTheme.colorScheme.secondaryContainer) {
+                            Text(stringResource(if (createEnabled) R.string.calendar_mode_editable else R.string.calendar_dashboard_read_only),
+                                Modifier.padding(horizontal = 10.dp, vertical = 4.dp), style = MaterialTheme.typography.labelMedium)
+                        }
+                        if (status != R.string.calendar_dashboard_ready) Text(stringResource(status), style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.testTag(CalendarImportTags.STATUS))
+                    }
                 }
-                Switch(selection.enabled, onCheckedChange = null, enabled = !imports.busy && selection.available)
+                val displayLabel = stringResource(R.string.calendar_display_on_device)
+                Switch(selection.enabled, onCheckedChange = { onSetEnabled(selection, it) },
+                    enabled = !imports.busy && selection.available,
+                    modifier = Modifier.testTag(CalendarImportTags.TOGGLE).semantics { contentDescription = "$displayLabel · ${selection.summary.title}" })
             }
-            Text(stringResource(if (createEnabled) R.string.calendar_mode_editable else R.string.calendar_dashboard_read_only),
-                style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
-            // Unresolved work stays visible even when options are closed or the calendar is paused.
-            if (selection.scope in creates.legacyUnsupported) Text(stringResource(R.string.calendar_legacy_unsupported),
-                color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall,
-                modifier = Modifier.testTag("legacy-update-unsupported").semantics { liveRegion = LiveRegionMode.Polite })
-            if (selection.deferredCount > 0) PendingText(
-                stringResource(R.string.calendar_dashboard_held, selection.deferredCount), CalendarImportTags.DEFERRED)
-            if (selection.historyGap) PendingText(stringResource(R.string.calendar_dashboard_history), CalendarImportTags.HISTORY_GAP)
-            if (selection.pendingProjectionCount > 0) PendingText(
-                stringResource(R.string.calendar_dashboard_pending, selection.pendingProjectionCount), CalendarImportTags.PROJECTION_PENDING)
-            if (selection.retainedLocalChangeCount > 0) Text(
-                stringResource(R.string.calendar_dashboard_local, selection.retainedLocalChangeCount, selection.localConflictCount),
-                style = MaterialTheme.typography.bodySmall,
-                color = if (selection.localConflictCount > 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.testTag(CalendarImportTags.LOCAL_CHANGES).semantics { liveRegion = LiveRegionMode.Polite })
-            if (outgoing > 0) PendingText(stringResource(R.string.calendar_dashboard_outgoing, outgoing), "system-create-pending")
-            TextButton(onClick = { expanded = !expanded },
-                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag(CalendarDashboardTags.OPTIONS)) {
-                Text(stringResource(if (expanded) R.string.calendar_dashboard_close_options else R.string.calendar_dashboard_options))
-            }
-            if (expanded) {
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                Text(stringResource(R.string.calendar_dashboard_editing), style = MaterialTheme.typography.titleSmall,
-                    modifier = Modifier.semantics { heading() })
-                Text(stringResource(R.string.system_write_concurrency_warning),
+            if (hasIssues || outgoing > 0 || selection.pendingProjectionCount > 0) {
+                Text(stringResource(if (hasIssues) R.string.calendar_row_attention else R.string.calendar_dashboard_waiting),
                     style = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier.testTag("system-write-concurrency-warning"))
-                val canEnable = imports.hasPermission && selection.enabled && selection.available
-                ModeToggle(stringResource(R.string.calendar_mode_editable), createEnabled, createEnabled || canEnable,
-                    "system-create-toggle") { onMode(selection, it) }
-                Text(stringResource(R.string.calendar_mode_description), style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant)
-                if (selection.scope in creates.modeReview) Text(stringResource(R.string.calendar_mode_migration),
-                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                CalendarDetails(selection)
-                TextButton(onClick = { onOpenConflicts(selection) },
-                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag(ConflictArchiveTags.OPEN)) {
-                    Text(stringResource(R.string.conflict_archive_open))
-                }
+                    color = if (hasIssues) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.testTag(CalendarDashboardTags.ISSUE).clickable { expanded = true }
+                        .semantics { liveRegion = LiveRegionMode.Polite })
             }
         }
     }
+    if (expanded) Dialog(onDismissRequest = { expanded = false }) {
+        Surface(shape = RoundedCornerShape(24.dp), modifier = Modifier.fillMaxWidth().heightIn(max = 640.dp)
+            .testTag("calendar_detail_sheet")) {
+            Column(Modifier.verticalScroll(rememberScrollState()).padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(selection.summary.title.ifBlank { stringResource(R.string.catalog_untitled) },
+                        style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f).semantics { heading() })
+                    TextButton(onClick = { expanded = false }, modifier = Modifier.testTag("calendar_detail_close")) { Text(stringResource(R.string.close)) }
+                }
+                ModeToggle(stringResource(R.string.calendar_display_on_device), selection.enabled, !imports.busy && selection.available,
+                    "calendar_detail_display") { onSetEnabled(selection, it) }
+                Text(stringResource(R.string.calendar_dashboard_editing), style = MaterialTheme.typography.titleSmall)
+                SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                    listOf(false, true).forEachIndexed { index, editable ->
+                        SegmentedButton(selected = createEnabled == editable,
+                            onClick = { if (createEnabled != editable) onMode(selection, editable) },
+                            enabled = !editable || (imports.hasPermission && selection.enabled && selection.available),
+                            shape = SegmentedButtonDefaults.itemShape(index, 2),
+                            modifier = Modifier.testTag(if (editable) "system-create-toggle" else "calendar_read_only")) {
+                            Text(stringResource(if (editable) R.string.calendar_mode_editable else R.string.calendar_dashboard_read_only))
+                        }
+                    }
+                }
+                if (selection.scope in creates.modeReview) Text(stringResource(R.string.calendar_mode_migration),
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                for (resource in listOf(R.string.calendar_support_events, R.string.calendar_support_personal, R.string.calendar_support_dates, R.string.calendar_support_coming))
+                    Text(stringResource(resource), style = MaterialTheme.typography.bodySmall)
+                CalendarIssues(selection, creates)
+                if (hasIssues) Text(stringResource(R.string.calendar_mode_description), style = MaterialTheme.typography.bodySmall)
+                CalendarDetails(selection)
+                TextButton(onClick = { onOpenConflicts(selection) },
+                    enabled = imports.hasPermission,
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag(ConflictArchiveTags.OPEN)) {
+                    Text(stringResource(R.string.conflict_archive_open))
+                }
+                Text(stringResource(R.string.system_write_concurrency_warning), style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.testTag("system-write-concurrency-warning"))
+            }
+        }
+    }
+}
+
+@Composable
+private fun CalendarIssues(selection: ImportStore.Selection, creates: SystemCreateUiState) {
+    if (selection.scope in creates.legacyUnsupported) PendingText(stringResource(R.string.calendar_legacy_unsupported), "legacy-update-unsupported")
+    if (selection.deferredCount > 0) PendingText(stringResource(R.string.calendar_dashboard_held, selection.deferredCount), CalendarImportTags.DEFERRED)
+    if (selection.historyGap) PendingText(stringResource(R.string.calendar_dashboard_history), CalendarImportTags.HISTORY_GAP)
+    if (selection.pendingProjectionCount > 0) PendingText(stringResource(R.string.calendar_dashboard_pending, selection.pendingProjectionCount), CalendarImportTags.PROJECTION_PENDING)
+    if (selection.retainedLocalChangeCount > 0) PendingText(stringResource(R.string.calendar_dashboard_local,
+        selection.retainedLocalChangeCount, selection.localConflictCount), CalendarImportTags.LOCAL_CHANGES)
+    val outgoing = creates.pending[selection.scope] ?: 0
+    if (outgoing > 0) PendingText(stringResource(R.string.calendar_dashboard_outgoing, outgoing), "system-create-pending")
 }
 
 @Composable
@@ -250,27 +278,12 @@ private fun CalendarDetails(selection: ImportStore.Selection) {
         style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag(CalendarImportTags.LOCAL_CHANGES_HELP))
 }
 
-@Composable
-private fun SyncHelp() {
-    var expanded by rememberSaveable { mutableStateOf(false) }
-    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        TextButton(onClick = { expanded = !expanded }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
-            .testTag(CalendarDashboardTags.HELP)) { Text(stringResource(R.string.calendar_dashboard_usage)) }
-        if (expanded) {
-            for (resource in listOf(R.string.calendar_mode_description, R.string.import_privacy, R.string.import_window,
-                R.string.import_field_limits, R.string.import_recurrence_limits, R.string.import_pause_help)) {
-                Text(stringResource(resource), style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-        }
-    }
-}
-
 internal object CalendarDashboardTags {
     const val PANEL = "calendar_dashboard"
     const val CARD = "calendar_card"
     const val OPTIONS = "calendar_options"
     const val HELP = "calendar_sync_help"
+    const val ISSUE = "calendar_row_issue"
     const val OUTGOING_ERROR = "calendar_outgoing_error"
 }
 

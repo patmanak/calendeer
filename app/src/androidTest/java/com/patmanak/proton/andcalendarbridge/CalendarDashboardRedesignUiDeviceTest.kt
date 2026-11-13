@@ -53,4 +53,21 @@ class CalendarDashboardRedesignUiDeviceTest {
         }
         compose.runOnIdle { assertEquals(0, sends) }
     }
+    @Test fun touchingTheNameOpensDetailsWithoutTogglingAnything() {
+        start()
+        compose.onNodeWithText(summary.title).performScrollTo().performClick()
+        compose.onNodeWithTag("calendar_detail_sheet").assertExists()
+        compose.onNodeWithTag("system-create-toggle").assertIsNotSelected()
+        compose.runOnIdle { assertEquals(0, visibilityChanges); assertEquals(0, modes); assertEquals(0, sends) }
+        compose.onNodeWithTag("calendar_detail_close").performClick()
+        compose.onNodeWithTag("calendar_detail_sheet").assertDoesNotExist()
+    }
+    @Test fun signingOutClosesAnOpenDetailAndRemovesMetadata() {
+        start()
+        compose.onNodeWithText(summary.title).performScrollTo().performClick()
+        compose.onNodeWithTag("calendar_detail_sheet").assertExists()
+        compose.runOnIdle { state.value = state.value.copy(authenticated = false) }
+        compose.onNodeWithTag("calendar_detail_sheet").assertDoesNotExist()
+        compose.onNodeWithText(summary.title).assertDoesNotExist()
+    }
 }

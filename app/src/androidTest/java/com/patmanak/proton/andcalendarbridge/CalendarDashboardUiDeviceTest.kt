@@ -60,9 +60,9 @@ class CalendarDashboardUiDeviceTest {
         compose.onNodeWithText(compose.activity.getString(R.string.calendar_dashboard_read_only)).assertExists()
         compose.onNodeWithTag("system-create-toggle").assertDoesNotExist()
         compose.onNodeWithTag(CalendarDashboardTags.OPTIONS).performScrollTo().performClick()
-        compose.onNodeWithTag("system-create-toggle").assertIsOff()
+        compose.onNodeWithTag("system-create-toggle").assertIsNotSelected()
         compose.onNodeWithTag("system-title-toggle").assertDoesNotExist()
-        compose.onNodeWithTag(CalendarDashboardTags.OPTIONS).performScrollTo().performClick()
+        compose.onNodeWithTag("calendar_detail_close").performScrollTo().performClick()
         compose.onNodeWithTag("system-create-toggle").assertDoesNotExist()
         compose.runOnIdle {
             assertEquals(emptyList<Boolean>(), modeChanges)
@@ -75,12 +75,14 @@ class CalendarDashboardUiDeviceTest {
     @Test fun unsupportedLegacyWorkStaysVisibleWithoutOptionsPermissionOrEnabledSync() {
         creates.value = creates.value.copy(legacyUnsupported = setOf(selection.scope))
         start()
-        compose.onNodeWithTag("legacy-update-unsupported").assertExists()
-        compose.onNodeWithText(compose.activity.getString(R.string.calendar_legacy_unsupported)).assertExists()
+        compose.onNodeWithTag(CalendarDashboardTags.ISSUE).assertExists()
         compose.onNodeWithTag("system-create-toggle").assertDoesNotExist()
         compose.runOnIdle { imports.value = imports.value.copy(hasPermission = false,
             selections = listOf(selection.copy(enabled = false, available = false))) }
+        compose.onNodeWithTag(CalendarDashboardTags.ISSUE).assertExists()
+        compose.onNodeWithTag(CalendarDashboardTags.OPTIONS).performScrollTo().performClick()
         compose.onNodeWithTag("legacy-update-unsupported").assertExists()
+        compose.onNodeWithText(compose.activity.getString(R.string.calendar_legacy_unsupported)).assertExists()
         compose.runOnIdle { assertEquals(emptyList<Boolean>(), modeChanges); assertEquals(0, syncs) }
         compose.runOnIdle { imports.value = imports.value.copy(authenticated = false) }
         compose.onNodeWithTag("legacy-update-unsupported").assertDoesNotExist()
@@ -91,30 +93,36 @@ class CalendarDashboardUiDeviceTest {
             historyGap = true, pendingProjectionCount = 3, retainedLocalChangeCount = 2, localConflictCount = 1)))
         creates.value = SystemCreateUiState(pending = mapOf(selection.scope to 4))
         start()
+        compose.onNodeWithTag(CalendarDashboardTags.ISSUE).assertExists()
+        compose.onNodeWithTag("system-create-toggle").assertDoesNotExist()
+        compose.onNodeWithTag(CalendarDashboardTags.OPTIONS).performScrollTo().performClick()
         for (tag in listOf(CalendarImportTags.DEFERRED, CalendarImportTags.HISTORY_GAP,
             CalendarImportTags.PROJECTION_PENDING, CalendarImportTags.LOCAL_CHANGES, "system-create-pending")) {
             compose.onNodeWithTag(tag).assertExists()
         }
         compose.onNodeWithText(compose.activity.getString(R.string.calendar_dashboard_ready)).assertDoesNotExist()
-        compose.onNodeWithTag("system-create-toggle").assertDoesNotExist()
+        compose.onNodeWithTag("calendar_detail_close").performScrollTo().performClick()
         compose.runOnIdle { imports.value = imports.value.copy(selections = imports.value.selections.map { it.copy(enabled = false) }) }
+        compose.onNodeWithTag(CalendarDashboardTags.ISSUE).assertExists()
+        compose.onNodeWithTag(CalendarImportTags.SYNC).assertIsNotEnabled()
+        compose.onNodeWithTag(CalendarDashboardTags.OPTIONS).performScrollTo().performClick()
         compose.onNodeWithTag(CalendarImportTags.LOCAL_CHANGES).assertExists()
         compose.onNodeWithTag("system-create-pending").assertExists()
-        compose.onNodeWithTag(CalendarImportTags.SYNC).assertIsNotEnabled()
     }
 
     @Test fun editableModeChangesOnlyAfterExplicitChoiceAndRenderedState() {
         start()
         compose.onNodeWithTag(CalendarDashboardTags.OPTIONS).performScrollTo().performClick()
-        compose.onNodeWithTag("system-create-toggle").assertIsOff().assertIsEnabled().performScrollTo().performClick()
+        compose.onNodeWithTag("system-create-toggle").assertIsNotSelected().assertIsEnabled().performScrollTo().performClick()
         compose.runOnIdle {
             assertEquals(listOf(true), modeChanges)
         }
-        compose.onNodeWithTag("system-create-toggle").assertIsOff()
+        compose.onNodeWithTag("system-create-toggle").assertIsNotSelected()
         compose.runOnIdle {
             creates.value = creates.value.copy(enabled = setOf(selection.scope))
         }
-        compose.onNodeWithTag("system-create-toggle").assertIsOn().performScrollTo().performClick()
+        compose.onNodeWithTag("system-create-toggle").assertIsSelected()
+        compose.onNodeWithTag("calendar_read_only").performScrollTo().performClick()
         compose.runOnIdle { assertEquals(listOf(true, false), modeChanges) }
     }
 
@@ -124,9 +132,10 @@ class CalendarDashboardUiDeviceTest {
         start()
         compose.onNodeWithTag(CalendarDashboardTags.OPTIONS).performScrollTo().performClick()
         compose.onNodeWithTag("system-create-toggle").assertIsNotEnabled()
-        compose.onNodeWithTag(CalendarImportTags.TOGGLE).assertIsNotEnabled()
+        compose.onNodeWithTag("calendar_detail_display").assertIsNotEnabled()
         compose.runOnIdle { creates.value = creates.value.copy(enabled = setOf(selection.scope)) }
-        compose.onNodeWithTag("system-create-toggle").assertIsOn().assertIsEnabled().performScrollTo().performClick()
+        compose.onNodeWithTag("system-create-toggle").assertIsSelected()
+        compose.onNodeWithTag("calendar_read_only").assertIsEnabled().performScrollTo().performClick()
         compose.runOnIdle { assertEquals(listOf(false), modeChanges) }
     }
 
@@ -137,7 +146,7 @@ class CalendarDashboardUiDeviceTest {
             compose.runOnIdle { creates.value = creates.value.copy(textSupportAvailable = supported,
                 timeSupportAvailable = supported, deleteSupportAvailable = supported) }
             compose.onAllNodesWithTag("system-create-toggle").assertCountEquals(1)
-            compose.onNodeWithTag("system-create-toggle").assertIsOff().assertIsEnabled()
+            compose.onNodeWithTag("system-create-toggle").assertIsNotSelected().assertIsEnabled()
             for (tag in listOf("system-title-toggle", "system-text-toggle", "system-time-toggle", "system-delete-toggle")) {
                 compose.onNodeWithTag(tag).assertDoesNotExist()
             }
@@ -249,7 +258,7 @@ class CalendarDashboardUiDeviceTest {
     @Test fun signingOutHidesCalendarMetadataAndRetainedWork() {
         imports.value = imports.value.copy(selections = listOf(selection.copy(retainedLocalChangeCount = 1)))
         start()
-        compose.onNodeWithTag(CalendarImportTags.LOCAL_CHANGES).assertExists()
+        compose.onNodeWithTag(CalendarDashboardTags.ISSUE).assertExists()
         compose.runOnIdle { imports.value = imports.value.copy(authenticated = false) }
         compose.onNodeWithTag(CalendarDashboardTags.PANEL).assertDoesNotExist()
         compose.onAllNodesWithText(summary.title).assertCountEquals(0)

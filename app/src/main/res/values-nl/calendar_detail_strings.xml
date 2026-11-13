@@ -1,0 +1,8 @@
+<resources>
+    <string name="calendar_display_on_device">Tonen op deze telefoon</string>
+    <string name="calendar_row_attention">Sommige wijzigingen vragen aandacht. Open voor details.</string>
+    <string name="calendar_support_events">✓ Eenvoudige afspraken maken, bewerken en verwijderen</string>
+    <string name="calendar_support_personal">✓ Herinneringen en afspraakkleuren</string>
+    <string name="calendar_support_dates">✓ Hele dagen en tijdzones</string>
+    <string name="calendar_support_coming">Herhalingen en gasten: binnenkort</string>
+</resources>
