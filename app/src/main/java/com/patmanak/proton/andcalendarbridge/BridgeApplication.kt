@@ -57,6 +57,13 @@ class BridgeApplication : Application() {
     private val localCreateCaptures by lazy { LocalCreateStore(this) }
     private val nativeCalendar by lazy { AndroidCalendarProjection(this) }
     private val systemCreateWork by lazy { SystemCreateWorkStore(this).apply { migrateCalendarModes() } }
+    internal val signOutWorkCounter by lazy {
+        com.patmanak.proton.andcalendarbridge.data.outgoing.SignOutWorkCounter(
+            { ProtonAuthentication.events(this).currentAccount() }, { imports.conflictArchiveEpoch.value },
+            { authentication.state.value.let { it.destination == AuthenticationDestination.AUTHENTICATED &&
+                !it.isSubmitting && !it.isCleanupRequired && !it.isCleanupInProgress } && !ProtonAuthentication.verification.state.value.isRequired },
+            { account -> imports.store.selections(account) }, systemCreateWork::count)
+    }
     // Production history only. Experimental fixtures keep their isolated journals.
     // No title transport or dispatch admission is exposed to this offline traversal.
     private val titleAttempts by lazy { TitleUpdateAttemptStore(this) }
