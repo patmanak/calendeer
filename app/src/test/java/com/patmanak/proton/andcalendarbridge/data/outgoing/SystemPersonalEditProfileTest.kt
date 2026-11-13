@@ -35,9 +35,22 @@ class SystemPersonalEditProfileTest {
     @Test fun conflictingAndUnchangedObservationsRemainUnsupported() {
         val fixture = TextOperationsFixture()
         assertFalse(SystemPersonalEditProfile.accepts(fixture.intent.copy(state = LocalEditState.CONFLICT)))
-        for (invalid in listOf(fixture.base, fixture.changed.copy(colorRgb = 0x123456))) {
+        for (invalid in listOf(fixture.base)) {
             try { fixture.intent.copy(content = invalid); fail("Invalid intent must be rejected before routing") }
             catch (_: IllegalArgumentException) { }
+        }
+    }
+    @Test fun metadataOnlyChangesRequireEditableModeAndKeepTheirCompletePersonalRoute() {
+        val f = TextOperationsFixture()
+        val variants = listOf(f.base.copy(colorRgb = 0x123456),
+            f.base.copy(details = EventDetails(listOf(EventReminder(10)))))
+        for (content in variants) {
+            val edit = f.intent.copy(content = content)
+            assertTrue(SystemPersonalEditProfile.accepts(edit))
+            assertFalse(com.patmanak.proton.andcalendarbridge.data.importing.PersonalEditConsent.allowed(edit,
+                { true }, { true }, { true }, { false }))
+            assertTrue(com.patmanak.proton.andcalendarbridge.data.importing.PersonalEditConsent.allowed(edit,
+                { false }, { false }, { false }, { true }))
         }
     }
 }

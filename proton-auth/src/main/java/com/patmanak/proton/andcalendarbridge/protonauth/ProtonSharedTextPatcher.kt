@@ -106,8 +106,9 @@ internal object ProtonSharedTextPatcher {
             val secretIdentity = inspect(original.encryptedShared, true, emptySet())
             require(clearIdentity.uid == expectedUid && secretIdentity.uid == expectedUid &&
                 clearIdentity.stamp == secretIdentity.stamp)
-            require(before.details != null && before.details == after.details && before.colorRgb == after.colorRgb)
+            require(before.details != null && after.details != null)
             require(before.details!!.organizer == null && before.details!!.attendees.isEmpty())
+            require(after.details!!.organizer == null && after.details!!.attendees.isEmpty())
             require(before.recurrence == null && after.recurrence == null && before != after)
             val expected = before.time
             val replacement = after.time

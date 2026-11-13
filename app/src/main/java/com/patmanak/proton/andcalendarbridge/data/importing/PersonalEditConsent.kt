@@ -5,11 +5,13 @@ import com.patmanak.proton.andcalendarbridge.sync.*
 
 internal object PersonalEditConsent {
     fun allowed(intent: LocalEditIntent, titles: (CalendarScope) -> Boolean,
-        texts: (CalendarScope) -> Boolean, times: (CalendarScope) -> Boolean): Boolean = try {
+        texts: (CalendarScope) -> Boolean, times: (CalendarScope) -> Boolean,
+        editable: (CalendarScope) -> Boolean): Boolean = try {
         PersonalEditCandidate(intent).requiredConsent.all { field -> when (field) {
             PersonalEditField.TITLE -> titles(intent.scope)
             PersonalEditField.TEXT -> texts(intent.scope)
             PersonalEditField.TIME -> times(intent.scope)
+            PersonalEditField.REMINDERS, PersonalEditField.COLOR -> editable(intent.scope)
         } }
     } catch (_: Exception) { false }
 }

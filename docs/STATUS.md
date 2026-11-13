@@ -58,6 +58,9 @@ Samsung/One UI is outside 0.1. Signature management remains deferred by the owne
   retained unsupported work is visible, while historical UNKNOWN inspection and
   proven acknowledgements keep their original identities and formats.
   [Personal edits](PERSONAL_UPDATE.md), [deletion](DELETE_SUBMISSION.md).
+- Ordinary imported events also support personal reminder/color edits, including
+  removal and calendar-color fallback, while retaining Proton email reminders.
+  Transferred CREATE metadata editing and client journeys still need qualification.
 - UNKNOWN is inspect-only, never reset/resend. Unsupported local changes and
   conflicts retain their variants. Native permission/account/generation and consent
   are rechecked; a system sync request cannot lift a paused CREATE.

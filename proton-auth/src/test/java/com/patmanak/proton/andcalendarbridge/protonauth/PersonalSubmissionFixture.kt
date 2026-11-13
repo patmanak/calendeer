@@ -8,7 +8,8 @@ import kotlinx.serialization.json.*
 import org.junit.Assert.*
 
 /** Real protected codecs, synthetic signatures and controlled transport: no service/crypto claim. */
-internal class PersonalSubmissionFixture(zone: ZoneId = ZoneId.of("UTC")) {
+internal class PersonalSubmissionFixture(zone: ZoneId = ZoneId.of("UTC"),
+    replace: (EventContent) -> EventContent = { it }) {
     private val seed = TitleSubmissionFixture()
     val initial = seed.initial
     val bootstrap = seed.bootstrap
@@ -26,7 +27,7 @@ internal class PersonalSubmissionFixture(zone: ZoneId = ZoneId.of("UTC")) {
     })
     val intent = seed.intent.copy(base = seed.intent.base.copy(revision = originalRow.revision(bootstrap),
         content = seed.content.copy(time = time, description = "Old notes", location = "Old place", colorRgb = 0xabcd12, details = EventDetails(listOf(EventReminder(5))))),
-        content = seed.content.copy(title = "Combined title", time = replacement, description = "New notes", location = "New place", colorRgb = 0xabcd12, details = EventDetails(listOf(EventReminder(5)))))
+        content = replace(seed.content.copy(title = "Combined title", time = replacement, description = "New notes", location = "New place", colorRgb = 0xabcd12, details = EventDetails(listOf(EventReminder(5))))))
     val fragments = ProtonTimestampedSharedPersonal(originalRow, seed.fragments.clearSharedPart, seed.fragments.encryptedSharedPart, true)
     val context = JsonObject(seed.context + buildJsonObject {
         put("permissions", 16); put("flags", 1)

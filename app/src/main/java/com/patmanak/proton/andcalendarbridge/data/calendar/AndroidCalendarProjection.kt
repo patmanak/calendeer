@@ -767,16 +767,21 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
             Events.GUESTS_CAN_INVITE_OTHERS, Events.GUESTS_CAN_SEE_GUESTS, Events.HAS_ALARM,
             Events.SELF_ATTENDEE_STATUS, Events.ACCESS_LEVEL)
         if (emptyFlags.any { if (personal && it == Events.HAS_ALARM)
-                values.getAsInteger(it) != (if (base.content.details!!.reminders.isEmpty()) 0 else 1)
+                values.getAsInteger(it) !in 0..1
                 else !simplePersonalFlag(values, it, personalOwner) } ||
             values.getAsInteger(Events.STATUS) != Events.STATUS_CONFIRMED ||
             values.getAsInteger(Events.AVAILABILITY) != Events.AVAILABILITY_BUSY) return null
         val expectedColor = base.content.colorRgb?.or(0xFF000000.toInt())
-        if (values.getAsInteger(Events.EVENT_COLOR) != expectedColor) return null
+        val rawColor = values.getAsInteger(Events.EVENT_COLOR)
+        if (!personal && rawColor != expectedColor) return null
+        if (personal && rawColor != null && rawColor != 0 && rawColor.ushr(24) != 0xff) return null
         val time = readSimpleTime(values, personalAllDayUtcAlias = personal) ?: return null
+        val reminders = if (personal) personalMetadata.captureReminders(account, row, base.content) ?: return null else null
+        if (reminders != null && values.getAsInteger(Events.HAS_ALARM) != (if (reminders.reminders.isEmpty()) 0 else 1)) return null
         val content = EventContent(values.getAsString(Events.TITLE) ?: "", time,
             values.getAsString(Events.DESCRIPTION) ?: "", values.getAsString(Events.EVENT_LOCATION) ?: "",
-            base.content.colorRgb, details = base.content.details)
+            if (personal) rawColor?.takeUnless { it == 0 }?.and(0xffffff) else base.content.colorRgb,
+            details = if (reminders == null) base.content.details else base.content.details!!.copy(reminders = reminders.reminders))
         if (personal) {
             try {
                 PersonalEditCandidate(LocalEditIntent(MutationId("native-personal-observation"), scope,
@@ -799,7 +804,7 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
             checks += assertion(uri, syncIdentity, row)
             expected += 1
         }
-        if (personal && !assertPersonalReminders(account, row, base.content, checks, expected)) return null
+        if (reminders != null) personalMetadata.assertReminders(reminders, checks, expected)
         val absentChildren = if (personal) listOf(Attendees.CONTENT_URI to Attendees.EVENT_ID,
             ExtendedProperties.CONTENT_URI to ExtendedProperties.EVENT_ID) else listOf(
             Reminders.CONTENT_URI to Reminders.EVENT_ID, Attendees.CONTENT_URI to Attendees.EVENT_ID,
@@ -1395,9 +1400,6 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
     private fun knownPersonalOwner(values: ContentValues, account: Account, content: EventContent): Boolean =
         personalMetadata.knownPersonalOwner(values, account, content)
 
-    private fun assertPersonalReminders(account: Account, row: Long, content: EventContent,
-        checks: MutableList<ContentProviderOperation>, expected: MutableList<Int>): Boolean =
-        personalMetadata.assertPersonalReminders(account, row, content, checks, expected)
 
     /** The original empty-metadata profile remains strict for legacy capture and ACK families. */
     private fun simplePersonalEvent(content: EventContent): Boolean =

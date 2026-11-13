@@ -22,6 +22,40 @@ import org.junit.Test
 
 /** Isolated Provider fixtures; never accesses a Proton session or existing calendars. */
 class PersonalNativeProfileDeviceTest {
+    @Test fun reminderOnlyEditsCaptureAndAcknowledgeTheExactChildrenWithoutReplacingThem() {
+        for (offsets in listOf(emptyList(), listOf(0, 20), listOf(-10, 5), listOf(-525600, 525600)))
+            fixture(simpleTitle = true) {
+                context.contentResolver.delete(sync(Reminders.CONTENT_URI), "${Reminders.EVENT_ID}=?", arrayOf(row.toString()))
+                offsets.forEach(::addReminder)
+                val after = original.copy(details = EventDetails(offsets.map(::EventReminder)))
+                mutate(ContentValues().apply { put(Events.TITLE, original.title); put(Events.DIRTY, 1) })
+                val changed = intent.copy(content = after)
+                val current = receipt.copy(intent = changed, projection = receipt.projection.copy(change = observed.copy(content = after)))
+                val children = reminders()
+                assertEquals(after, projection.captureOwnedPersonalEdit(scope, base)?.content)
+                assertNull(projection.captureOwnedSimpleEdit(scope, base))
+                assertNull(projection.acknowledgePersonalUpdate(receipt))
+                assertEquals(AppliedPersonalUpdateAcknowledgement(current), projection.acknowledgePersonalUpdate(current))
+                assertEquals(children, reminders()); assertEquals("0", field(Events.DIRTY))
+                addReminder(25); mutate(ContentValues().apply { put(Events.DIRTY, 1) })
+                assertEquals(AppliedPersonalUpdateAcknowledgement(current), projection.resumePersonalUpdateAcknowledgement(current))
+                assertEquals("1", field(Events.DIRTY)); assertEquals(children.size + 1, reminders().size)
+            }
+    }
+    @Test fun eventColorAndCalendarFallbackAreCapturedAndAcknowledgedWithoutChangingChildren() {
+        for (color in listOf(0, 0x654321, null)) fixture(simpleTitle = true) {
+            val after = original.copy(colorRgb = color)
+            mutate(ContentValues().apply { put(Events.TITLE, original.title); put(Events.DIRTY, 1)
+                if (color == null) putNull(Events.EVENT_COLOR) else put(Events.EVENT_COLOR, color or 0xff000000.toInt()) })
+            val changed = intent.copy(content = after)
+            val current = receipt.copy(intent = changed, projection = receipt.projection.copy(change = observed.copy(content = after)))
+            val children = reminders()
+            assertEquals(after, projection.captureOwnedPersonalEdit(scope, base)?.content)
+            assertNull(projection.acknowledgePersonalUpdate(receipt))
+            assertEquals(AppliedPersonalUpdateAcknowledgement(current), projection.acknowledgePersonalUpdate(current))
+            assertEquals(children, reminders()); assertEquals("0", field(Events.DIRTY))
+        }
+    }
     @Test fun bareLegacyTitleWithUnqualifiedPersonalMarkerBecomesVisibleAndKeepsItsVariant() =
         fixture(richMetadata = false, simpleTitle = true) {
             val token = UUID.randomUUID().toString()
@@ -152,18 +186,19 @@ class PersonalNativeProfileDeviceTest {
         assertEquals("Later edit", field(Events.TITLE)); assertEquals("1", field(Events.DIRTY))
         assertNull(projection.acknowledgePersonalUpdate(receipt))
     }
-    @Test fun changedReminderOffsetMethodAndExtraRowsBlockCaptureAndAcknowledgement() = fixture {
+    @Test fun changedReminderOffsetsAreCapturedButCannotUseThePreviousAcknowledgement() = fixture {
         for ((column, value) in listOf(Reminders.MINUTES to 11, Reminders.METHOD to Reminders.METHOD_EMAIL)) {
             context.contentResolver.update(sync(Reminders.CONTENT_URI), ContentValues().apply { put(column, value) },
                 "${Reminders.EVENT_ID}=?", arrayOf(row.toString()))
-            assertNull(projection.captureOwnedPersonalEdit(scope, base))
+            if (column == Reminders.METHOD) assertNull(projection.captureOwnedPersonalEdit(scope, base))
+            else assertEquals(listOf(EventReminder(11)), projection.captureOwnedPersonalEdit(scope, base)?.content?.details?.reminders)
             assertNull(projection.acknowledgePersonalUpdate(receipt)); assertEquals("1", field(Events.DIRTY))
             context.contentResolver.update(sync(Reminders.CONTENT_URI), ContentValues().apply {
                 put(Reminders.MINUTES, 10); put(Reminders.METHOD, Reminders.METHOD_ALERT)
             }, "${Reminders.EVENT_ID}=?", arrayOf(row.toString()))
         }
         addReminder(20)
-        assertNull(projection.captureOwnedPersonalEdit(scope, base))
+        assertEquals(listOf(EventReminder(10), EventReminder(20)), projection.captureOwnedPersonalEdit(scope, base)?.content?.details?.reminders)
         assertNull(projection.acknowledgePersonalUpdate(receipt)); assertEquals("1", field(Events.DIRTY))
     }
     @Test fun unknownDetailsParticipantsAndChangedMetadataStayUnqualified() = fixture {
@@ -180,7 +215,7 @@ class PersonalNativeProfileDeviceTest {
         for ((column, value) in listOf(Events.EVENT_COLOR to 0xff654321.toInt())) {
             val old = field(column)!!
             mutate(ContentValues().apply { put(column, value) })
-            assertNull(projection.captureOwnedPersonalEdit(scope, base))
+            assertEquals(0x654321, projection.captureOwnedPersonalEdit(scope, base)?.content?.colorRgb)
             assertNull(projection.acknowledgePersonalUpdate(receipt))
             assertEquals("1", field(Events.DIRTY))
             mutate(ContentValues().apply { put(column, old.toInt()) })

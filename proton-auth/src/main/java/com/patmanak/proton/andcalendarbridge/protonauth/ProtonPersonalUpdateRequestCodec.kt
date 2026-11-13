@@ -80,7 +80,7 @@ internal class ProtonPersonalUpdateRequestCodec(private val protector: EventPayl
 
     private fun request(preparation: PersonalEditPreparation, fragments: ProtonTimestampedSharedPersonal,
         context: JsonObject): JsonObject = ProtonPersonalEventUpdate.request(fragments.originalRow, fragments.clearSharedPart,
-        fragments.encryptedSharedPart, fragments.changed, context, preparation.intent.base.content.time, preparation.intent.content.time)
+        fragments.encryptedSharedPart, fragments.changed, context, preparation.intent.base.content, preparation.intent.content)
 
     private fun snapshot(value: JsonObject): JsonObject = Json.parseToJsonElement(value.encoded()) as JsonObject
 

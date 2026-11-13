@@ -8,10 +8,12 @@ The calendar must be Editable, with current account access, selection and calend
 permissions. The effective mode supplies the internal per-field admission gates
 until the legacy families are retired; those gates are not separate user options.
 
-Known personal display reminders and an explicit event color can accompany the
-edit only when unchanged. Recurrence, organizers, attendees, invitations, unknown
-metadata, changes to reminders/color and ambiguous DST endpoints remain held.
-This is preservation, not a new reminder or color editor. Calendeer never delivers
+Ordinary imported events support changes to display reminders and event color,
+including removal and calendar-color fallback. Before/at/after-start reminders use
+explicit minute offsets. Proton email reminders remain unchanged. Recurrence,
+organizers, attendees, invitations, unknown metadata and ambiguous DST endpoints
+remain held. Transferred local CREATE metadata editing still needs qualification.
+The calendar client provides the editor. Calendeer never delivers
 reminder notifications; the system calendar continues to own that behavior.
 
 ## Wire and local state
@@ -19,11 +21,18 @@ reminder notifications; the system calendar continues to own that behavior.
 `PersonalEditCandidate` freezes the full raw observation, including ordered
 reminders and color. Preparation and request formats are version 2, with distinct
 identities, tags and fingerprints. Fresh eligible observations, including simple
-title/text/date edits, use personal-v2. Production title/text/time paths only finish
-already retained capsules and inspect/acknowledge their historical requests. Their
+title/text/date edits, use personal-v2. Legacy writers are retired; retained work
+is visibly unsupported, with only historical inspection/acknowledgement. Their
 formats remain strict and are never reinterpreted as personal edits. A retained
 legacy capsule or unresolved request blocks personal adoption; its intent and
-wire keep their original identity. Removing these compatibility paths is pending.
+wire keep their original identity.
+
+Metadata editing retains the existing v2 encoding: both complete snapshots and API
+siblings were already frozen. Unchanged fields preserve their raw JSON, including
+email ordering, trigger spelling and color case. Changed reminders replace only
+device notifications, retaining every email entry. Exact readback checks the full
+new metadata. A fixture captured before this extension checks the original capsule,
+request bytes and fingerprints; UNKNOWN remains inspect-only.
 
 Proton Core supplies encryption, signing, session-key handling and protected local
 storage. The existing pinned Proton-derived scanner/serializer is extended to
@@ -44,7 +53,9 @@ for a title-only edit; they never borrow the legacy reader's weaker provenance.
 The Provider snapshot proves exact ownership, base revision, dirty status, dates,
 text and color. Reminder count, IDs, offsets and ALERT method are asserted in the
 same Provider batch as the event row. Attendees and extended properties must be
-absent. Neither capture nor acknowledgement replaces reminder rows. A changed
+absent. Neither capture nor acknowledgement replaces reminder rows. Palette keys,
+email/SMS Provider reminder methods, duplicate offsets and unknown metadata are
+held. An existing receipt cannot consume later reminder/color changes. A changed
 child ID with the same offset/count is still a failed comparison.
 
 For personal all-day capture, the start zone remains canonical `UTC`. An explicit

@@ -260,7 +260,7 @@ class ImportCoordinator(
         systemTitlesEnabled(scope) || systemTextsEnabled(scope) || systemTimesEnabled(scope)
 
     private fun personalConsent(intent: LocalEditIntent): Boolean = PersonalEditConsent.allowed(intent,
-        systemTitlesEnabled, systemTextsEnabled, systemTimesEnabled)
+        systemTitlesEnabled, systemTextsEnabled, systemTimesEnabled, systemCreatesEnabled)
 
     suspend fun configureSystemCalendar(target: CalendarScope): Boolean = mutex.withLock {
         val expected = generation

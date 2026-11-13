@@ -2,6 +2,7 @@
 package com.patmanak.proton.andcalendarbridge.protonauth
 
 import com.patmanak.proton.andcalendarbridge.sync.EventTime
+import com.patmanak.proton.andcalendarbridge.sync.EventContent
 import kotlinx.serialization.json.*
 import java.time.Instant
 import java.time.ZoneId
@@ -13,6 +14,16 @@ import java.time.ZoneOffset
  * Kind and zone transitions use the complete explicit v2 intent. Service scope is recorded in TEMPORAL_UPDATE.md.
  */
 internal object ProtonPersonalEventUpdate {
+    fun request(original: JsonObject, clear: JsonObject, encrypted: JsonObject, changed: Boolean,
+        context: JsonObject, before: EventContent, after: EventContent): JsonObject {
+        temporalBaseline(original, clear, encrypted, before.time, after.time)
+        return ProtonPersonalEventWire.request(ProtonPersonalMetadataEdit.apply(original, before, after), clear, encrypted, changed, context)
+    }
+    fun matchesReadback(original: JsonObject, clear: JsonObject, encrypted: JsonObject,
+        actual: JsonObject, before: EventContent, after: EventContent): Boolean = try {
+        val expected = temporalBaseline(original, clear, encrypted, before.time, after.time)
+        ProtonPersonalEventWire.matchesReadback(ProtonPersonalMetadataEdit.apply(expected, before, after), clear, encrypted, actual)
+    } catch (_: Exception) { false }
     fun request(original: JsonObject, clear: JsonObject, encrypted: JsonObject, changed: Boolean,
         context: JsonObject, before: EventTime, after: EventTime): JsonObject {
         require(changed)

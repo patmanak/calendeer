@@ -25,6 +25,37 @@ import org.junit.runner.RunWith
 /** Opt-in isolated SQLite fixtures. Applied witnesses here qualify SQL only, never native ACK. */
 @RunWith(AndroidJUnit4::class)
 class PersonalPersistenceDeviceTest {
+    @Test fun reminderAndColorOnlyPreparationsReopenWithTheirExactCompleteSnapshots() = importFixture { store, name ->
+        val changes = listOf(
+            ordinary("metadata-reminders").let { it.copy(content = it.base.content.copy(details = EventDetails(listOf(EventReminder(0), EventReminder(30))))) },
+            ordinary("metadata-color").let { it.copy(content = it.base.content.copy(colorRgb = 0x123456)) })
+        for (edit in changes) {
+            seed(store, edit.base); assertEquals(edit, store.captureLocalEdit(edit))
+            assertEquals(PersonalPreparationAdmission.STORED, store.retainCurrentPersonalPreparation(preparation(edit)))
+        }
+        val before = snapshot(store.readableDatabase, listOf("local_edits", "personal_edit_preparations"))
+        store.close()
+        ImportStore(context, name).use { reopened ->
+            assertEquals(before, snapshot(reopened.readableDatabase, before.keys.toList()))
+            for (edit in changes) {
+                assertPreparation(preparation(edit), reopened.personalEditPreparation(scope, edit.base.eventId))
+                assertEquals(PersonalPreparationAdmission.HISTORICAL, reopened.retainCurrentPersonalPreparation(preparation(edit)))
+            }
+        }
+    }
+    @Test fun personalMetadataUnknownWireIsImmutableAcrossJournalReopen() = journalFixture { store, name ->
+        val local = ordinary("metadata-unknown").let { it.copy(content = it.base.content.copy(
+            colorRgb = 0x654321, details = EventDetails(listOf(EventReminder(15))))) }
+        val work = personal(local)
+        assertTrue(store.personalJournal.remember(work, allow)); assertTrue(store.personalJournal.claim(work, allow))
+        val before = snapshot(store.readableDatabase, tables(store.readableDatabase))
+        store.close()
+        TitleUpdateAttemptStore(context, name).use { reopened ->
+            assertEquals(work.copy(state = PersonalUpdateAttemptState.OUTCOME_UNKNOWN), reopened.personalJournal.read(scope, work.id, allow))
+            assertFalse(reopened.personalJournal.claim(work, allow))
+            assertEquals(before, snapshot(reopened.readableDatabase, before.keys.toList()))
+        }
+    }
     @Test fun bareEligibleIntentsStayEligibleAndUnsupportedDatesAreFoundBeyondTheFirstPage() = importFixture { store, _ ->
         for (index in 0..29) {
             val local = ordinary("eligible-%02d".format(index))

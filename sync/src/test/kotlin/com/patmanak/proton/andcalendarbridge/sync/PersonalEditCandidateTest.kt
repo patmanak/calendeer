@@ -4,6 +4,19 @@ import java.time.*
 import org.junit.Assert.*
 import org.junit.Test
 class PersonalEditCandidateTest {
+    @Test fun reminderOnlyChangeIsACompleteFrozenPersonalIntent() {
+        val next = base.copy(details = EventDetails(listOf(EventReminder(0), EventReminder(-10))))
+        val candidate = PersonalEditCandidate(intent(after = next))
+        assertEquals(next, candidate.intent.content)
+        assertEquals(1, candidate.requiredConsent.size)
+    }
+    @Test fun explicitColorAndCalendarDefaultArePersonalChanges() {
+        for (color in listOf(0, 0x123456, null)) {
+            val candidate = PersonalEditCandidate(intent(after = base.copy(colorRgb = color)))
+            assertEquals(color, candidate.intent.content.colorRgb)
+            assertEquals(1, candidate.requiredConsent.size)
+        }
+    }
     private val start = Instant.parse("2026-10-17T09:00:00Z")
     private val time = EventTime.Timed(start, start.plusSeconds(3600), ZoneOffset.UTC)
     private val details = EventDetails(listOf(EventReminder(5), EventReminder(30)))
@@ -46,8 +59,6 @@ class PersonalEditCandidateTest {
         assertNotEquals(first, PersonalUpdateAttemptIdentity.of(record(base.copy(colorRgb = 1))))
         assertNotEquals(first, PersonalUpdateAttemptIdentity.of(record(base.copy(details = EventDetails(listOf(EventReminder(10)))))))
         assertFalse(first.toString().contains("Original"))
-        refuse { intent(after = base.copy(colorRgb = 1)) }
-        refuse { intent(after = base.copy(details = EventDetails())) }
         val unknown = base.copy(details = null)
         refuse { PersonalEditCandidate(intent(unknown, unknown.copy(title = "Next"))) }
     }

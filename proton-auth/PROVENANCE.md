@@ -995,6 +995,18 @@ expected content and current membership. The GET/PUT concurrency limit above
 remains: no atomic remote precondition or general last-modification order is
 invented. See [personal edits](../docs/PERSONAL_UPDATE.md).
 
+## Personal reminder and color editing
+
+`ProtonPersonalMetadataEdit` uses the personal siblings described by the pinned
+[Web formatter](https://github.com/ProtonMail/WebClients/blob/40cc08c12c8fbac7f66521186c7297ddf3e17861/packages/shared/lib/calendar/formatData.ts),
+[Calendar types](https://github.com/ProtonMail/WebClients/blob/40cc08c12c8fbac7f66521186c7297ddf3e17861/packages/shared/lib/interfaces/calendar/Calendar.ts)
+and [notification constants](https://github.com/ProtonMail/WebClients/blob/40cc08c12c8fbac7f66521186c7297ddf3e17861/packages/shared/lib/calendar/constants.ts).
+Source rechecked on 2026-11-13: device notifications use Type 1, email uses Type 0;
+Notifications and Color are explicit update siblings. The adaptation changes only
+device reminders and explicitly changed color, preserving email values and raw
+unchanged metadata. No upstream cryptographic code or new dependency is copied.
+The existing Proton Core signing/encryption and signed readback remain in use.
+
 ## Calendar public-link feed metadata
 
 The `CalendarURL` classification in `ProtonChangeFeedParser` is based on WebClients

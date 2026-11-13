@@ -31,9 +31,13 @@ class ProtonPersonalEditPatchTest {
         assertTrue(patch(before.copy(time=time.copy(zone=ZoneId.of("Europe/Paris")))).clearShared.contains("DTSTART;TZID=Europe/Paris:20261017T110000\r\n"))
         assertTrue(patch(before.copy(time=time.copy(zone=ZoneId.of("Etc/UTC")))).clearShared.contains("DTSTART;TZID=Etc/UTC:20261017T090000\r\n"))
     }
-    @Test fun metadataChangesDuplicatePropertiesAndParticipantsAreRefused() {
-        refuse { patch(before.copy(title="Next",colorRgb=1)) }
-        refuse { patch(before.copy(title="Next",details=EventDetails())) }
+    @Test fun personalOnlyEditAdvancesOneSequenceAndPreservesSharedTextAndUnrelatedFields() {
+        val result = patch(before.copy(details = EventDetails(), colorRgb = null))
+        assertTrue(result.clearShared.contains("SEQUENCE:8\r\n"))
+        assertTrue(result.encryptedShared.contains("SUMMARY:Original\r\nDESCRIPTION:Notes\r\nLOCATION:Place\r\n"))
+        assertTrue(result.clearShared.contains(opaque)); assertTrue(result.encryptedShared.contains(opaque))
+    }
+    @Test fun duplicatePropertiesAndParticipantsAreRefused() {
         val source = parts()
         for (line in listOf("DTSTART:20261017T090000Z", "ATTENDEE:mailto:fixture@example.invalid", "RRULE:FREQ=DAILY"))
             refuse { patch(before.copy(title="Next"), ProtonEventTextParts(source.clearShared.replace(opaque,line+"\r\n"+opaque),source.encryptedShared)) }

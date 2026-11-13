@@ -86,7 +86,8 @@ internal object ProtonPersonalCryptoProbe {
             val dayDates="DTSTART;VALUE=DATE:20261003\r\nDTEND;VALUE=DATE:20261006"
             val cases=listOf(timed to timed.copy(end=timed.end.plusSeconds(3600)),timed to day,day to timed,
                 timed to timed.copy(zone=ZoneId.of("Europe/Paris")),timed to timed.copy(zone=ZoneId.of("Etc/UTC")),
-                timed to timed.copy(start=timed.start.plusSeconds(3600),end=timed.end.plusSeconds(7200),zone=ZoneId.of("Europe/Paris")))
+                timed to timed.copy(start=timed.start.plusSeconds(3600),end=timed.end.plusSeconds(7200),zone=ZoneId.of("Europe/Paris")),
+                timed to timed, timed to timed)
             for((index,pair) in cases.withIndex()) {
                 stage="PERSONAL_CASE_$index"
                 val (before,after)=pair
@@ -95,10 +96,15 @@ internal object ProtonPersonalCryptoProbe {
                 ProtonPersonalEventWire.qualify(row)
                 val baseline=decoder.decodePage(session.userId,scope.calendar.value,bootstrap,listOf(row),uid).also { check(it.deferred.isEmpty()) }.changes.single()
                 check(baseline.content.time == before && baseline.content.details == EventDetails(listOf(EventReminder(10))) && baseline.content.colorRgb == 0xabcd12)
-                val intent=LocalEditIntent(MutationId("synthetic-personal-$index"),scope,EVENT_FORMAT,baseline,
-                    baseline.content.copy(title="Combined title",description="Combined notes",location="Combined place",time=after))
+                val replacement = when(index) {
+                    6 -> baseline.content.copy(details = EventDetails(listOf(EventReminder(0), EventReminder(20))))
+                    7 -> baseline.content.copy(colorRgb = 0x123456)
+                    else -> baseline.content.copy(title="Combined title",description="Combined notes",location="Combined place",time=after)
+                }
+                val intent=LocalEditIntent(MutationId("synthetic-personal-$index"),scope,EVENT_FORMAT,baseline,replacement)
                 val prepared=decoder.prepareAndSealPersonalEdit(session,intent,uid,timestamp,metadata,bootstrap,row,protector())
-                check(prepared.requiredConsent.containsAll(setOf(PersonalEditField.TITLE,PersonalEditField.TEXT,PersonalEditField.TIME)))
+                check(if(index < 6) prepared.requiredConsent.containsAll(setOf(PersonalEditField.TITLE,PersonalEditField.TEXT,PersonalEditField.TIME))
+                    else prepared.requiredConsent == setOf(if(index == 6) PersonalEditField.REMINDERS else PersonalEditField.COLOR))
                 val fragments=ProtonPersonalPreparationCodec(protector()).openLocal(prepared)
                 check(fragments.originalRow == row && fragments.originalRow.string("SharedKeyPacket") == originalRow.string("SharedKeyPacket"))
                 val nextClear=fragments.clearSharedPart.string("Data");val nextSecret=decrypt(fragments.encryptedSharedPart)
@@ -113,10 +119,13 @@ internal object ProtonPersonalCryptoProbe {
                 val request=codec.seal(MutationId("synthetic-personal-request-$index"),prepared,requestContext)
                 val opened=ProtonPersonalUpdateRequestCodec(protector()).open(request)
                 val event=(opened.request.array("Events").single() as JsonObject).obj("Event")
-                check(event["Notifications"] == notifications && event["Color"] == JsonPrimitive("#aBcD12"))
+                val expectedNotifications = if(index == 6) Json.parseToJsonElement("""[{"Type":0,"Trigger":"-PT1H"},{"Type":1,"Trigger":"PT0S"},{"Type":1,"Trigger":"-PT20M"}]""") else notifications
+                val expectedColor = JsonPrimitive(if(index == 7) "#123456" else "#aBcD12")
+                check(event["Notifications"] == expectedNotifications && event["Color"] == expectedColor)
                 personalEventUpdateOnlyBytes(opened.request.toString()).fill(0)
                 val readback=JsonObject(row+temporal(after)+buildJsonObject {
                     put("SharedEvents",JsonArray(listOf(fragments.clearSharedPart,fragments.encryptedSharedPart)));put("ModifyTime",3)
+                    put("Notifications",expectedNotifications); put("Color",expectedColor)
                 })
                 var decoded=0
                 val reader=ProtonPersonalUpdateReadbackVerifier(codec,CreateEventVerifier { observed,calendar,observedBootstrap,actual,expectedUid,policy ->

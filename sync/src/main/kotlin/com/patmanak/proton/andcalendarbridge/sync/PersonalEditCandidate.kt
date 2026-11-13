@@ -14,6 +14,8 @@ class PersonalEditCandidate(intent: LocalEditIntent) {
         if (this@PersonalEditCandidate.intent.base.content.title != this@PersonalEditCandidate.intent.content.title) add(PersonalEditField.TITLE)
         if (this@PersonalEditCandidate.intent.base.content.description != this@PersonalEditCandidate.intent.content.description || this@PersonalEditCandidate.intent.base.content.location != this@PersonalEditCandidate.intent.content.location) add(PersonalEditField.TEXT)
         if (this@PersonalEditCandidate.intent.base.content.time != this@PersonalEditCandidate.intent.content.time) add(PersonalEditField.TIME)
+        if (this@PersonalEditCandidate.intent.base.content.details?.reminders != this@PersonalEditCandidate.intent.content.details?.reminders) add(PersonalEditField.REMINDERS)
+        if (this@PersonalEditCandidate.intent.base.content.colorRgb != this@PersonalEditCandidate.intent.content.colorRgb) add(PersonalEditField.COLOR)
     }.let { java.util.Collections.unmodifiableSet(it) }
     val requiredConsent: Set<PersonalEditField> get() = changedFields
     override fun toString() = "PersonalEditCandidate(REDACTED)"
@@ -25,9 +27,9 @@ class PersonalEditCandidate(intent: LocalEditIntent) {
         val original = intent.base.content
         val replacement = intent.content
         require(original.details != null && original.details.organizer == null && original.details.attendees.isEmpty())
-        require(original.colorRgb == null || original.colorRgb in 0..0xffffff)
+        require(listOf(original, replacement).all { it.colorRgb == null || it.colorRgb in 0..0xffffff })
         require(original.recurrence == null && replacement.recurrence == null)
-        require(replacement.details == original.details && replacement.colorRgb == original.colorRgb)
+        require(replacement.details != null && replacement.details.organizer == null && replacement.details.attendees.isEmpty())
         require(replacement != original)
         for (time in listOf(original.time, replacement.time)) when (time) {
             is EventTime.AllDay -> require(time.start.year in 1970..9999 && time.endExclusive.year in 1970..9999)
@@ -63,4 +65,4 @@ class PersonalEditCandidate(intent: LocalEditIntent) {
     }
 }
 
-enum class PersonalEditField { TITLE, TEXT, TIME }
+enum class PersonalEditField { TITLE, TEXT, TIME, REMINDERS, COLOR }

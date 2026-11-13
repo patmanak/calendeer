@@ -39,8 +39,12 @@ class LocalEditIntentTest {
         val textEdit = intent(personal, personal.content.copy(description = "New notes"))
         refused { LocalTextEditPreparation(textEdit, java.time.Instant.parse("2026-10-01T00:00:00Z"), AdapterFormat("legacy-text", 1), "opaque") }
         refused { LocalEditPreparation.freezeIntent(edit) }
-        refused { intent(personal, personal.content.copy(title = "Edited", details = EventDetails())) }
-        refused { intent(personal, personal.content.copy(title = "Edited", details = details.copy(reminders = listOf(EventReminder(20))))) }
+        for (next in listOf(EventDetails(), details.copy(reminders = listOf(EventReminder(20))))) {
+            val changed = intent(personal, personal.content.copy(details = next))
+            assertEquals(changed, PersonalEditCandidate(changed).intent)
+            refused { LocalEditPreparation.freezeIntent(changed) }
+            refused { LocalTimeEditCandidate(changed) }
+        }
         refused { intent(personal, personal.content.copy(title = "Edited", details = null)) }
     }
     @Test fun organizersParticipantsMetadataChangesAndRecurrenceAreNotDiscarded() {
