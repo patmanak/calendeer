@@ -118,7 +118,7 @@ class CapturedHandoffTitleAcknowledgementStoreDeviceTest {
         assertFalse(archive().contains(work.preparation.protectedPayload)); assertFalse(archive().contains(work.result.record.protectedPayload))
         sourceIntact(work); store.close()
         ImportStore(context, name).use { reopened ->
-            assertEquals(23, reopened.readableDatabase.version)
+            assertEquals(24, reopened.readableDatabase.version)
             assertEquals(first.record, reopened.titleUpdateAcknowledgement(scope, work.frame.eventId))
             assertEquals(first.copy(fresh = false), reopened.prepareTitleUpdateAcknowledgement(work.result, work.frame))
         }

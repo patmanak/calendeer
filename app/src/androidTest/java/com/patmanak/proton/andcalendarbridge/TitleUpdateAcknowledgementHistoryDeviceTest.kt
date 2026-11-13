@@ -187,7 +187,7 @@ class TitleUpdateAcknowledgementHistoryDeviceTest {
         store.writableDatabase.execSQL("DROP TABLE title_update_acknowledgement_history")
         store.writableDatabase.version = 16; store.close()
         ImportStore(context, name).use { reopened ->
-            assertEquals(23, reopened.readableDatabase.version)
+            assertEquals(24, reopened.readableDatabase.version)
             assertTrue(rows(reopened, "title_update_acknowledgement_history").isEmpty())
             assertEquals(canonical, rows(reopened, "title_update_acknowledgements").single()[3])
             val next = cycle(first.result.event, 2); stage(reopened, next); assertTrue(reserve(reopened, next).fresh)
@@ -241,7 +241,7 @@ class TitleUpdateAcknowledgementHistoryDeviceTest {
         store.writableDatabase.execSQL("DROP TABLE title_update_acknowledgement_history")
         store.writableDatabase.version = 16; store.close()
         ImportStore(context, name).use { reopened ->
-            assertEquals(23, reopened.readableDatabase.version)
+            assertEquals(24, reopened.readableDatabase.version)
             assertEquals(canonical, rows(reopened, "title_update_acknowledgements"))
             assertTrue(rows(reopened, "title_update_acknowledgement_history").isEmpty())
             assertEquals(pending.copy(fresh = false), reserve(reopened, first))

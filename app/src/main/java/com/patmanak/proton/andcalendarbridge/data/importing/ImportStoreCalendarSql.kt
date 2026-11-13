@@ -58,6 +58,24 @@ internal class ImportStoreCalendarSql(
         }
     }
 
+    /** Independent of account availability, selection and outgoing work admission. */
+    fun queueNativeRemovals(db: SQLiteDatabase) {
+        db.execSQL("UPDATE calendars SET native_removal_pending=1 WHERE native_removal_pending=0")
+    }
+
+    fun pendingNativeRemovals(db: SQLiteDatabase): List<CalendarScope> =
+        db.query("calendars", arrayOf("account", "calendar", "generation"), "native_removal_pending=1",
+            null, null, null, "rowid").use { cursor ->
+            buildList { while (cursor.moveToNext()) add(CalendarScope(AccountId(cursor.getString(0)),
+                CalendarId(cursor.getString(1)), cursor.getLong(2))) }
+        }
+
+    /** Acknowledges only this scope; repeated or unknown acknowledgements are harmless. */
+    fun completeNativeRemoval(db: SQLiteDatabase, scope: CalendarScope) {
+        db.update("calendars", ContentValues().apply { put("native_removal_pending", 0) },
+            "scope=? AND native_removal_pending=1", arrayOf(key(scope)))
+    }
+
     fun selections(db: SQLiteDatabase, account: AccountId): List<ImportStore.Selection> = run {
         // One metadata-only statement keeps retained/conflicted counts coherent, including inactive scopes.
         db.rawQuery("SELECT c.*, (SELECT COUNT(*) FROM local_edits l WHERE l.scope=c.scope) AS retained_local_changes, " +

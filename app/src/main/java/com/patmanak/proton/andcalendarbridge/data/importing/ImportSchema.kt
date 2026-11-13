@@ -18,7 +18,7 @@ import org.json.JSONArray
  * The store supplies the existing capacity check for migration-time evidence backfill. */
 internal object ImportSchema {
     fun create(db: SQLiteDatabase) {
-        db.execSQL("CREATE TABLE calendars (scope TEXT PRIMARY KEY, account TEXT NOT NULL, calendar TEXT NOT NULL, generation INTEGER NOT NULL, title TEXT NOT NULL, color INTEGER, enabled INTEGER NOT NULL DEFAULT 0, checkpoint TEXT, status TEXT NOT NULL DEFAULT 'PAUSED', completed_at INTEGER, next_attempt INTEGER NOT NULL DEFAULT 0)")
+        db.execSQL("CREATE TABLE calendars (scope TEXT PRIMARY KEY, account TEXT NOT NULL, calendar TEXT NOT NULL, generation INTEGER NOT NULL, title TEXT NOT NULL, color INTEGER, enabled INTEGER NOT NULL DEFAULT 0, checkpoint TEXT, status TEXT NOT NULL DEFAULT 'PAUSED', completed_at INTEGER, next_attempt INTEGER NOT NULL DEFAULT 0, native_removal_pending INTEGER NOT NULL DEFAULT 0 CHECK(native_removal_pending IN (0,1)))")
         db.execSQL("CREATE TABLE records (scope TEXT NOT NULL, event TEXT NOT NULL, payload TEXT NOT NULL, pending INTEGER NOT NULL, PRIMARY KEY(scope,event))")
         createStaging(db)
         createDelta(db)
@@ -42,7 +42,9 @@ internal object ImportSchema {
         createDeleteAcknowledgements(db)
     }
     fun upgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int, checkCapacity: (SQLiteDatabase) -> Unit) {
-        check(oldVersion in 1..22 && newVersion == 23) { "Explicit import schema migration required" }
+        check(oldVersion in 1..23 && newVersion == 24) { "Explicit import schema migration required" }
+        addNativeRemovalPending(db)
+        if (oldVersion == 23) return
         createPersonalPreparationAndAcknowledgements(db)
         if (oldVersion == 22) return
         createDeleteAcknowledgements(db)
@@ -100,6 +102,20 @@ internal object ImportSchema {
             ConflictArchiveSql(db) { checkCapacity(db) }.ensure(scope, EventId(row.third))
         }
         checkCapacity(db)
+    }
+    private fun addNativeRemovalPending(db: SQLiteDatabase) {
+        // Synthetic legacy fixtures may retain this current column while downgrading their version.
+        val exists = db.rawQuery("PRAGMA table_info(calendars)", null).use { rows ->
+            var found = false
+            while (rows.moveToNext()) if (rows.getString(1) == "native_removal_pending") {
+                check(rows.getString(2) == "INTEGER" && rows.getInt(3) == 1 && rows.getString(4) == "0" && rows.getInt(5) == 0) {
+                    "Incompatible native removal pending column"
+                }
+                found = true
+            }
+            found
+        }
+        if (!exists) db.execSQL("ALTER TABLE calendars ADD COLUMN native_removal_pending INTEGER NOT NULL DEFAULT 0 CHECK(native_removal_pending IN (0,1))")
     }
     private fun createConflictArchives(db: SQLiteDatabase) {
         db.execSQL("""CREATE TABLE conflict_archives (

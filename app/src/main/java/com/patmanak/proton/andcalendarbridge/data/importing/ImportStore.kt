@@ -41,7 +41,7 @@ enum class LocalTimePreparationAdmission { ELIGIBLE, STORED, HISTORICAL, INACTIV
 enum class PersonalPreparationAdmission { ELIGIBLE, STORED, HISTORICAL, INACTIVE, UNQUALIFIED, CONFLICT }
 
 class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
-    SQLiteOpenHelper(context, name, null, 23), SyncStore {
+    SQLiteOpenHelper(context, name, null, 24), SyncStore {
     private val lock = Mutex()
     /** Derived read-only status; never changes an intent, capsule or acknowledgement. */
     suspend fun hasUnsupportedLegacyUpdates(scope: CalendarScope): Boolean {
@@ -102,6 +102,10 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
     suspend fun calendarScopes(): List<CalendarScope> = access { db ->
         calendar.calendarScopes(db)
     }
+
+    suspend fun queueNativeRemovals(): Unit = access { calendar.queueNativeRemovals(it) }
+    suspend fun pendingNativeRemovals(): List<CalendarScope> = access { calendar.pendingNativeRemovals(it) }
+    suspend fun completeNativeRemoval(scope: CalendarScope): Unit = access { calendar.completeNativeRemoval(it, scope) }
 
     suspend fun selections(account: AccountId): List<Selection> = access { db ->
         calendar.selections(db, account)
