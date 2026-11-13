@@ -148,11 +148,10 @@ class CalendarDashboardUiDeviceTest {
     @Test fun permissionsAndGlobalActionsAreExplicitAndSeparate() {
         imports.value = imports.value.copy(hasPermission = false)
         start()
-        compose.runOnIdle { assertEquals(0, permissions); assertEquals(0, refreshes); assertEquals(0, syncs) }
+        compose.runOnIdle { assertEquals(0, permissions); assertEquals(1, refreshes); assertEquals(0, syncs) }
         compose.onNodeWithTag(CalendarImportTags.SYNC).assertIsNotEnabled()
         compose.onNodeWithTag(CalendarImportTags.PERMISSION).performScrollTo().performClick()
         compose.onNodeWithTag(CalendarImportTags.SETTINGS).performScrollTo().performClick()
-        compose.onNodeWithTag(CalendarCatalogTags.REFRESH).performScrollTo().performClick()
         compose.runOnIdle {
             assertEquals(1, permissions); assertEquals(1, settings); assertEquals(1, refreshes); assertEquals(0, syncs)
             imports.value = imports.value.copy(hasPermission = true)
@@ -172,7 +171,7 @@ class CalendarDashboardUiDeviceTest {
         compose.onNodeWithTag(CalendarCatalogTags.STALE).assertExists()
         compose.onNodeWithTag(CalendarDashboardTags.OUTGOING_ERROR).assertExists()
         compose.onAllNodesWithText(summary.title).assertCountEquals(1)
-        compose.onNodeWithTag(CalendarCatalogTags.REFRESH).assertIsNotEnabled()
+        compose.onNodeWithTag(CalendarCatalogTags.REFRESH).assertDoesNotExist()
     }
 
     @Test fun attentionExplainsPreservationAndRetriesOnlyAfterExplicitClickWithoutChangingConsent() {
@@ -188,10 +187,10 @@ class CalendarDashboardUiDeviceTest {
         compose.onNode(hasText(compose.activity.getString(R.string.import_field_limits)) and
             hasAnyAncestor(hasTestTag(SystemSyncAttentionTags.DETAILS))).assertExists()
         compose.runOnIdle {
-            assertEquals(0, syncs); assertEquals(0, refreshes); assertEquals(0, permissions); assertEquals(0, settings)
+            assertEquals(0, syncs); assertEquals(1, refreshes); assertEquals(0, permissions); assertEquals(0, settings)
             assertEquals(emptyList<Boolean>(), modeChanges); assertEquals(emptyList<Boolean>(), selectionChanges)
         }
-        compose.onNodeWithTag(SystemSyncAttentionTags.RETRY).performScrollTo().performClick()
+        compose.onNodeWithTag(CalendarImportTags.SYNC).performScrollTo().performClick()
         compose.runOnIdle { assertEquals(1, syncs); assertEquals(true, creates.value.failed) }
         compose.onNodeWithTag(CalendarDashboardTags.OUTGOING_ERROR).assertExists()
         compose.onNodeWithTag(SystemSyncAttentionTags.WHY).performScrollTo().performClick()
@@ -210,15 +209,15 @@ class CalendarDashboardUiDeviceTest {
             ready.copy(selections = listOf(selection.copy(available = false))))
         for (state in blocked) {
             compose.runOnIdle { imports.value = state }
-            compose.onNodeWithTag(SystemSyncAttentionTags.RETRY).assertIsNotEnabled()
+            compose.onNodeWithTag(CalendarImportTags.SYNC).assertIsNotEnabled()
             compose.onNodeWithTag(CalendarImportTags.SYNC).assertIsNotEnabled()
         }
         compose.runOnIdle { imports.value = ready; creates.value = creates.value.copy(busy = true) }
-        compose.onNodeWithTag(SystemSyncAttentionTags.RETRY).assertIsNotEnabled()
+        compose.onNodeWithTag(CalendarImportTags.SYNC).assertIsNotEnabled()
         compose.onNodeWithTag(CalendarImportTags.SYNC).assertIsNotEnabled()
         compose.onNodeWithText(compose.activity.getString(R.string.calendar_dashboard_working)).assertExists()
         compose.runOnIdle { creates.value = creates.value.copy(busy = false) }
-        compose.onNodeWithTag(SystemSyncAttentionTags.RETRY).assertIsEnabled()
+        compose.onNodeWithTag(CalendarImportTags.SYNC).assertIsEnabled()
         compose.onNodeWithTag(CalendarImportTags.SYNC).assertIsEnabled()
         compose.runOnIdle { assertEquals(0, syncs) }
     }
@@ -227,7 +226,7 @@ class CalendarDashboardUiDeviceTest {
         start()
         compose.onNodeWithTag(CalendarDashboardTags.OUTGOING_ERROR).assertDoesNotExist()
         compose.runOnIdle { creates.value = creates.value.copy(failed = true) }
-        compose.onNodeWithTag(SystemSyncAttentionTags.RETRY).assertExists()
+        compose.onNodeWithTag(CalendarImportTags.SYNC).assertExists()
         compose.runOnIdle { creates.value = creates.value.copy(failed = false) }
         compose.onNodeWithTag(CalendarDashboardTags.OUTGOING_ERROR).assertDoesNotExist()
         compose.runOnIdle { creates.value = creates.value.copy(failed = true); imports.value = imports.value.copy(authenticated = false) }

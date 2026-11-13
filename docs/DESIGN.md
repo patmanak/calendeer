@@ -31,13 +31,20 @@ Retained outgoing work and uncertain outcomes remain available for reconciliatio
 No event editor or calendar browsing interface is added.
 
 Authenticated navigation uses two labeled destinations, Calendars and Settings.
+The Calendars page has one synchronization banner with the last successful cycle,
+configured interval and manual synchronization action. It distinguishes working,
+attention, connection unavailable, paused and waiting states. A completed import
+alone never produces Up to date; retained work and recorded failures remain visible.
+The interval is not an exact next-run deadline. Disabled automatic sending is
+explained without suggesting that receiving or manual synchronization is disabled.
 Calendars combines discovery, synchronization and write preferences into one card
 per persisted calendar. Each card shows its color, name, current status and sync
 switch. A separate Options and details action reveals one Editable switch (off
 means Read-only), supported profiles and synchronization details. Opening a
-card or destination does not enable writes or trigger synchronization. Newly
+card or destination does not enable writes or queue event synchronization. Newly
 discovered calendars remain noninteractive until their scope is persisted.
-Synchronize now and Refresh calendar list remain distinct actions.
+The catalog refreshes once on entry when available, respecting loading/cooldown;
+this discovery request never shares the manual outgoing synchronization action.
 
 Pending Android projections, held events, history gaps, local conflicts and
 outgoing work remain visible with options collapsed, including for paused

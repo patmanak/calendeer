@@ -21,6 +21,7 @@ import androidx.compose.ui.unit.dp
 import com.patmanak.proton.andcalendarbridge.R
 import com.patmanak.proton.andcalendarbridge.data.importing.ImportStore
 import com.patmanak.proton.andcalendarbridge.data.importing.ImportUiState
+import com.patmanak.proton.andcalendarbridge.data.importing.CalendarSyncSettingsState
 import com.patmanak.proton.andcalendarbridge.data.outgoing.SystemCreateUiState
 import com.patmanak.proton.andcalendarbridge.sync.catalog.CalendarCatalogState
 import com.patmanak.proton.andcalendarbridge.sync.catalog.CalendarCatalogStatus
@@ -41,26 +42,19 @@ fun CalendarDashboard(
     onMode: (ImportStore.Selection, Boolean) -> Unit,
     modifier: Modifier = Modifier,
     onOpenConflicts: (ImportStore.Selection) -> Unit = {},
+    syncSettings: CalendarSyncSettingsState = CalendarSyncSettingsState(),
 ) {
     if (!imports.authenticated) return
+    LaunchedEffect(catalog.account) {
+        if (catalog.canRefresh && !catalog.isRetryBlocked && catalog.status !in setOf(CalendarCatalogStatus.LOADING, CalendarCatalogStatus.SIGNED_OUT)) onRefresh()
+    }
     Column(modifier.fillMaxWidth().testTag(CalendarDashboardTags.PANEL),
         verticalArrangement = Arrangement.spacedBy(16.dp)) {
         Text(stringResource(R.string.calendars_heading), style = MaterialTheme.typography.headlineMedium,
             fontWeight = FontWeight.SemiBold, modifier = Modifier.semantics { heading() })
-        Text(stringResource(R.string.calendar_dashboard_intro), color = MaterialTheme.colorScheme.onSurfaceVariant)
+        CalendarSyncOverview(catalog, imports, creates, syncSettings, onSync)
         if (!imports.hasPermission) PermissionCard(onRequestPermission, onOpenSettings)
-        val syncing = imports.busy || creates.busy
-        Button(onClick = onSync,
-            enabled = canRequestSystemSync(imports, creates),
-            modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp).testTag(CalendarImportTags.SYNC)) {
-            if (syncing) {
-                CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                Spacer(Modifier.width(10.dp))
-            }
-            Text(stringResource(if (syncing) R.string.calendar_dashboard_working else R.string.calendar_dashboard_sync))
-        }
         CatalogNotice(catalog, imports.selections.isNotEmpty())
-        SystemSyncAttentionCard(imports, creates, onRetry = onSync)
         imports.selections.forEach { selection ->
             key(selection.scope) {
                 CalendarCard(selection, imports, creates, onSetEnabled, onMode, onOpenConflicts)
@@ -82,14 +76,6 @@ fun CalendarDashboard(
                     }
                 }
             } }
-        if (catalog.status != CalendarCatalogStatus.SIGNED_OUT) {
-            TextButton(onClick = onRefresh,
-                enabled = catalog.canRefresh && !catalog.isRetryBlocked && catalog.status != CalendarCatalogStatus.LOADING,
-                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag(CalendarCatalogTags.REFRESH)) {
-                Text(stringResource(R.string.calendar_dashboard_refresh))
-            }
-        }
-        SyncHelp()
     }
 }
 

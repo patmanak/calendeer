@@ -137,9 +137,8 @@ class MainActivity : ComponentActivity() {
                         }
                     },
                     calendarContent = {
-                        AutomaticSyncNotice(syncSettings)
                         CalendarDashboard(catalogState, importState, systemCreates,
-                            { catalog.refresh(); onManualSync() },
+                            { catalog.refresh() },
                             { selection, enabled -> preferences.imports.setEnabled(selection, enabled); onManualSync() },
                             onManualSync,
                             onRequestPermission = { calendarPermissions.launch(arrayOf(
@@ -147,7 +146,7 @@ class MainActivity : ComponentActivity() {
                             onOpenSettings = { startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
                                 "package:$packageName".toUri())) },
                             onMode = { selection, enabled -> preferences.systemCreates.setEnabled(selection, enabled, unified = true); onManualSync() },
-                            onOpenConflicts = { selection -> archiveScope = selection.scope })
+                            onOpenConflicts = { selection -> archiveScope = selection.scope }, syncSettings = syncSettings)
                     },
                 )
                 if (accountLabelAllowed && syncSettings.accountPresent) {

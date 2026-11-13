@@ -107,7 +107,7 @@ private fun enabledLabel(enabled: Boolean): String =
     stringResource(if (enabled) R.string.sync_settings_enabled else R.string.sync_settings_disabled)
 
 @Composable
-private fun intervalLabel(minutes: Int): String = stringResource(when (minutes) {
+internal fun intervalLabel(minutes: Int): String = stringResource(when (minutes) {
     15 -> R.string.sync_settings_15_minutes
     30 -> R.string.sync_settings_30_minutes
     120 -> R.string.sync_settings_2_hours

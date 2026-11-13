@@ -22,12 +22,20 @@ internal fun canRequestSystemSync(imports: ImportUiState, state: SystemCreateUiS
 internal fun SystemSyncAttentionCard(imports: ImportUiState, state: SystemCreateUiState,
     modifier: Modifier = Modifier, onRetry: (() -> Unit)? = null) {
     if (!imports.authenticated || !state.failed) return
-    var expanded by remember { mutableStateOf(false) }
-    Surface(modifier.fillMaxWidth().testTag(CalendarDashboardTags.OUTGOING_ERROR),
+    Surface(modifier.fillMaxWidth(),
         shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.errorContainer,
         contentColor = MaterialTheme.colorScheme.onErrorContainer) {
-        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text(stringResource(R.string.sync_attention_title), style = MaterialTheme.typography.titleMedium,
+        Box(Modifier.padding(20.dp)) { SystemSyncAttentionContent(imports, state, onRetry = onRetry) }
+    }
+}
+
+@Composable
+internal fun SystemSyncAttentionContent(imports: ImportUiState, state: SystemCreateUiState,
+    showHeading: Boolean = true, onRetry: (() -> Unit)? = null) {
+    if (!imports.authenticated || !state.failed) return
+    var expanded by remember { mutableStateOf(false) }
+    Column(Modifier.testTag(CalendarDashboardTags.OUTGOING_ERROR), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            if (showHeading) Text(stringResource(R.string.sync_attention_title), style = MaterialTheme.typography.titleMedium,
                 modifier = Modifier.semantics { heading(); liveRegion = LiveRegionMode.Polite })
             Text(stringResource(R.string.system_create_error), modifier = Modifier.testTag(SystemSyncAttentionTags.PRESERVED))
             if (onRetry != null) Button(onClick = onRetry, enabled = canRequestSystemSync(imports, state),
@@ -44,7 +52,6 @@ internal fun SystemSyncAttentionCard(imports: ImportUiState, state: SystemCreate
                 Text(stringResource(R.string.import_field_limits),
                     style = MaterialTheme.typography.bodySmall)
             }
-        }
     }
 }
 

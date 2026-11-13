@@ -1,0 +1,6 @@
+<resources>
+    <string name="sync_overview_connection">Verbindung nicht verfügbar</string>
+    <string name="sync_overview_ready">Aktuell</string>
+    <string name="sync_overview_last">Letzte Synchronisierung · %1$s</string>
+    <string name="sync_overview_push_off">Automatisches Senden ist aus. Empfang bleibt aktiv.</string>
+</resources>

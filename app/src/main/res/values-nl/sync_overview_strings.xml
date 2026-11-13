@@ -1,0 +1,6 @@
+<resources>
+    <string name="sync_overview_connection">Verbinding niet beschikbaar</string>
+    <string name="sync_overview_ready">Bijgewerkt</string>
+    <string name="sync_overview_last">Laatste synchronisatie · %1$s</string>
+    <string name="sync_overview_push_off">Automatisch verzenden staat uit. Ontvangen blijft actief.</string>
+</resources>
