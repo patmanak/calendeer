@@ -259,13 +259,8 @@ class ImportCoordinator(
     private fun personalSendingEnabled(scope: CalendarScope): Boolean =
         systemTitlesEnabled(scope) || systemTextsEnabled(scope) || systemTimesEnabled(scope)
 
-    private fun personalConsent(intent: LocalEditIntent): Boolean = try {
-        PersonalEditCandidate(intent).requiredConsent.all { field -> when (field) {
-            PersonalEditField.TITLE -> systemTitlesEnabled(intent.scope)
-            PersonalEditField.TEXT -> systemTextsEnabled(intent.scope)
-            PersonalEditField.TIME -> systemTimesEnabled(intent.scope)
-        } }
-    } catch (_: Exception) { false }
+    private fun personalConsent(intent: LocalEditIntent): Boolean = PersonalEditConsent.allowed(intent,
+        systemTitlesEnabled, systemTextsEnabled, systemTimesEnabled)
 
     suspend fun configureSystemCalendar(target: CalendarScope): Boolean = mutex.withLock {
         val expected = generation
