@@ -8,11 +8,12 @@ The calendar must be Editable, with current account access, selection and calend
 permissions. The effective mode supplies the internal per-field admission gates
 until the legacy families are retired; those gates are not separate user options.
 
-Ordinary imported events support changes to display reminders and event color,
+Imported and transferred events support changes to display reminders and event color,
 including removal and calendar-color fallback. Before/at/after-start reminders use
 explicit minute offsets. Proton email reminders remain unchanged. Recurrence,
 organizers, attendees, invitations, unknown metadata and ambiguous DST endpoints
-remain held. Transferred local CREATE metadata editing still needs qualification.
+remain held. Initial CREATE still uses the known-empty profile; reminders/color
+can be edited after its upload and transfer.
 The calendar client provides the editor. Calendeer never delivers
 reminder notifications; the system calendar continues to own that behavior.
 
@@ -33,6 +34,13 @@ email ordering, trigger spelling and color case. Changed reminders replace only
 device notifications, retaining every email entry. Exact readback checks the full
 new metadata. A fixture captured before this extension checks the original capsule,
 request bytes and fingerprints; UNKNOWN remains inspect-only.
+
+Transferred events retain their original known-empty creation receipt. Only the
+current handoff reference accepts known personal metadata. Frames, observations
+and projection plans own immutable snapshots. Personal ACK preserves reminder
+rows; incoming projection changes them only with exact parent/child assertions
+in the same batch. Historical markers recover lost responses without consuming
+later edits. Existing encodings and provenance fingerprints stay unchanged.
 
 Proton Core supplies encryption, signing, session-key handling and protected local
 storage. The existing pinned Proton-derived scanner/serializer is extended to

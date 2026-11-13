@@ -39,8 +39,11 @@ class PersonalUpdateAcknowledgementReceipt(val attempt: PersonalUpdateAttemptIde
                 ProjectionReceipt(intent.scope, intent.format, frozen.event, nonce, intent.base), handoff)
         }
         private fun freezeHandoff(frame: CapturedCreateHandoffFrame): CapturedCreateHandoffFrame {
-            require(supportsCapturedHandoff(frame.base) && supportsCapturedHandoff(frame.receipt.acknowledgement.baseline.change))
-            fun freeze(value: RemoteChange.Upsert) = value.copy(content = value.content.copy(details = EventDetails()))
+            require(supportsPersonalHandoff(frame.base) && supportsCapturedHandoff(frame.receipt.acknowledgement.baseline.change))
+            fun freeze(value: RemoteChange.Upsert) = value.copy(content = value.content.copy(details = value.content.details!!.let {
+                it.copy(reminders = java.util.Collections.unmodifiableList(it.reminders.toList()),
+                    attendees = java.util.Collections.unmodifiableList(it.attendees.toList()))
+            }))
             val acknowledgement = frame.receipt.acknowledgement
             return frame.copy(receipt = frame.receipt.copy(acknowledgement = acknowledgement.copy(
                 baseline = acknowledgement.baseline.copy(change = freeze(acknowledgement.baseline.change)))),

@@ -16,6 +16,7 @@ import com.patmanak.proton.andcalendarbridge.data.calendar.AndroidCalendarProjec
 import com.patmanak.proton.andcalendarbridge.data.importing.*
 import com.patmanak.proton.andcalendarbridge.data.outgoing.LocalCreateStore
 import com.patmanak.proton.andcalendarbridge.data.outgoing.CreateAttemptStore
+import com.patmanak.proton.andcalendarbridge.data.outgoing.TitleUpdateAttemptStore
 import com.patmanak.proton.andcalendarbridge.sync.*
 import com.patmanak.proton.andcalendarbridge.sync.catalog.CalendarSummary
 import java.time.Instant
@@ -33,6 +34,44 @@ import org.junit.runner.RunWith
 /** Native Provider and three real journals; controlled incoming data, no network upload. */
 @RunWith(AndroidJUnit4::class)
 class CapturedHandoffIntegrationDeviceTest {
+    @Test fun transferredMetadataUsesThePersonalOwnerAndAcknowledgesThroughRealSqlAndProvider() = fixture(safePersonal = true) {
+        transferred(); incoming(verifiedEvent); titleMode = true; personalMode = true
+        val database = "personal-handoff-ack-${UUID.randomUUID()}.db"
+        try {
+            TitleUpdateAttemptStore(context, database).use { attempts ->
+                val origin = record()
+                addReminder(); mutate(ContentValues().apply { put(Events.DIRTY, 1); put(Events.EVENT_COLOR, 0xff123456.toInt()) })
+                assertEquals(CapturedCreateReconciliationResult.RETAINED, reconcileTransferred())
+                val local = checkNotNull(edit())
+                val admission = coordinator.systemPersonalRunAdmission(target)
+                assertEquals(local, coordinator.personalOwners.observe(target, verifiedEvent.eventId, local.id, admission)!!.intent)
+                val prep = PersonalEditPreparation(local, timestamp, AdapterFormat("synthetic-personal", 2), "opaque-personal")
+                assertNotNull(coordinator.personalOwners.retain(prep, admission))
+                val wire = PersonalUpdateAttemptRecord(MutationId("handoff-personal-request"), prep, AdapterFormat("synthetic-personal-wire", 2), "opaque-wire")
+                val journal = attempts.personalJournal
+                assertTrue(journal.remember(wire) { true }); assertTrue(journal.claim(wire) { true })
+                val unknown = wire.copy(state = PersonalUpdateAttemptState.OUTCOME_UNKNOWN)
+                val result = PersonalUpdateVerifiedResult.of(unknown, PersonalUpdateSubmissionObservation.Verified(unknown,
+                    local.base.copy(revision = Revision("personal-verified"), content = local.content)))
+                assertTrue(journal.retainVerified(result) { true })
+                assertTrue(coordinator.personalOwners.acknowledge(result, journal, coordinator.systemPersonalProofAdmission(target)))
+                assertTrue(coordinator.personalOwners.complete(result, journal) { true })
+                assertEquals("0", field(Events.DIRTY)); assertEquals(local.content, role()!!.frame.base.content)
+                assertEquals(origin, record()); assertEquals(1, sends)
+                reopen()
+                assertTrue(coordinator.personalOwners.acknowledge(result, journal, coordinator.systemPersonalProofAdmission(target)))
+                mutate(ContentValues().apply { put(Events.DIRTY, 1); put(Events.EVENT_COLOR, 0xff654321.toInt()) })
+                assertEquals(CapturedCreateReconciliationResult.RETAINED, coordinator.reconcileHandoffLocalCreate(target,
+                    localId, id, attempt, MutationId("personal-second-owner")))
+                val next = checkNotNull(edit())
+                assertEquals(local.content, next.base.content)
+                assertEquals(0x654321, next.content.colorRgb)
+                assertNotNull(coordinator.personalOwners.observe(target, verifiedEvent.eventId, next.id,
+                    coordinator.systemPersonalRunAdmission(target)))
+                assertEquals(origin, record()); assertEquals(1, sends)
+            }
+        } finally { context.deleteDatabase(database) }
+    }
     @Test fun missingSystemWorkCanRecoverOnlyTheCompleteHistoricalCreationAndSurviveRestart() = fixture {
         transferred(); titleMode = true
         val marker = field(Events.SYNC_DATA5)
@@ -335,7 +374,7 @@ class CapturedHandoffIntegrationDeviceTest {
         assertEquals("Held during backlog", field(Events.TITLE)); assertTrue(role()!!.waiting); assertEquals(0, handoffWrites)
         assertEquals(ImportRunResult.COMPLETE, drain()); assertEquals(runs - 1, continuations.get())
     }
-    private class Fixture(val context: Context) {
+    private class Fixture(val context: Context, safePersonal: Boolean = false) {
         private val token = UUID.randomUUID().toString()
         private val importName = "dispatch-integration-import-$token.db"
         private val dispatchName = "captured-provider-dispatch-$token.db"
@@ -349,7 +388,8 @@ class CapturedHandoffIntegrationDeviceTest {
         val attempt = MutationId(UUID.randomUUID().toString())
         val timestamp = Instant.parse("2030-10-01T12:00:00Z")
         val content = EventContent("Preparation integration fixture",
-            EventTime.Timed(Instant.parse("2030-10-27T00:30:00Z"), Instant.parse("2030-10-27T02:30:00Z"), ZoneId.of("Europe/Paris")),
+            if (safePersonal) EventTime.Timed(Instant.parse("2030-05-01T09:00:00Z"), Instant.parse("2030-05-01T10:00:00Z"), ZoneId.of("Europe/Paris")) else
+                EventTime.Timed(Instant.parse("2030-10-27T00:30:00Z"), Instant.parse("2030-10-27T02:30:00Z"), ZoneId.of("Europe/Paris")),
             details = EventDetails())
         val intent = LocalCreateIntent(LocalCreateReservation(id, localId, target, format, timestamp), content)
         val projection = AndroidCalendarProjection(context)
@@ -485,8 +525,10 @@ class CapturedHandoffIntegrationDeviceTest {
         }
         private var jobs = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         var titleMode = false
+        var personalMode = false
         var coordinator = ImportCoordinator(context, store, remote, attachmentProjection, jobs, scheduler,
-            creates = creates, localCreates = journal, systemCreatesEnabled = { titleMode })
+            creates = creates, localCreates = journal, systemCreatesEnabled = { titleMode },
+            systemTitlesEnabled = { personalMode && titleMode })
         suspend fun seed() {
             val summary = CalendarSummary(target.calendar, "Calendeer preparation integration fixture")
             store.remember(target.account, listOf(summary)); store.setEnabled(target, true)
@@ -626,7 +668,8 @@ class CapturedHandoffIntegrationDeviceTest {
             store.close(); creates.close(); store = ImportStore(context, importName); creates = CreateAttemptStore(context, dispatchName)
             journal = LocalCreateStore(context, journalName); jobs = CoroutineScope(SupervisorJob() + Dispatchers.Default)
             coordinator = ImportCoordinator(context, store, remote, attachmentProjection, jobs, scheduler,
-                creates = creates, localCreates = journal, systemCreatesEnabled = { titleMode }); start()
+                creates = creates, localCreates = journal, systemCreatesEnabled = { titleMode },
+                systemTitlesEnabled = { personalMode && titleMode }); start()
         }
         suspend fun close() {
             coordinator.authenticationChanged(false); jobs.coroutineContext[Job]!!.cancelAndJoin()
@@ -635,9 +678,9 @@ class CapturedHandoffIntegrationDeviceTest {
             AccountManager.get(context).removeAccountExplicitly(projection.accountFor(target.account))
         }
     }
-    private fun fixture(block: suspend Fixture.() -> Unit) = runBlocking {
+    private fun fixture(safePersonal: Boolean = false, block: suspend Fixture.() -> Unit) = runBlocking {
         assumeTrue(InstrumentationRegistry.getArguments().getString("providerFixture") == "true")
-        val fixture = Fixture(ApplicationProvider.getApplicationContext())
+        val fixture = Fixture(ApplicationProvider.getApplicationContext(), safePersonal)
         assumeTrue(fixture.projection.hasPermissions())
         try { fixture.seed(); fixture.block() } finally { fixture.close() }
     }

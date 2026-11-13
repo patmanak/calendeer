@@ -8,6 +8,7 @@ import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.patmanak.proton.andcalendarbridge.data.importing.ImportStore
+import com.patmanak.proton.andcalendarbridge.data.importing.PersonalPreparationAdmission
 import com.patmanak.proton.andcalendarbridge.sync.*
 import com.patmanak.proton.andcalendarbridge.sync.catalog.CalendarSummary
 import java.time.Instant
@@ -24,6 +25,48 @@ import org.junit.runner.RunWith
 /** Isolated durable handoff transactions; synthetic evidence never qualifies a real Provider write. */
 @RunWith(AndroidJUnit4::class)
 class CapturedHandoffStoreDeviceTest {
+    @Test fun personalMetadataAckReopensWithRichReferenceAndPreservesOriginalCreationProofs() = fixture {
+        val frame = release()
+        val origins = rows("captured_create_bases")
+        val createAcks = rows("captured_create_acknowledgements")
+        val after = content.copy(colorRgb = 0x123456, details = EventDetails(listOf(EventReminder(10))))
+        val first = personalAck(frame, after, "metadata-one")
+        assertEquals(after, first.intent.content)
+        assertTrue(store.restorePersonalUpdateAcknowledgement(AppliedPersonalUpdateAcknowledgement(first)))
+        val advanced = store.capturedHandoff(scope, original.change.eventId)!!.frame
+        assertEquals(after, advanced.base.content)
+        assertEquals(original.change, advanced.receipt.acknowledgement.baseline.change)
+        store.close()
+        ImportStore(context, name).use { reopened ->
+            assertEquals(advanced, reopened.capturedHandoff(scope, original.change.eventId)!!.frame)
+            assertEquals(first, reopened.personalUpdateAcknowledgement(scope, original.change.eventId, first.attempt.id)!!.receipt)
+            val fixture = Fixture(context, name, reopened)
+            val cleared = after.copy(details = EventDetails(), colorRgb = null)
+            val second = fixture.personalAck(advanced, cleared, "metadata-two")
+            assertEquals(after, second.handoff!!.base.content)
+            assertTrue(reopened.restorePersonalUpdateAcknowledgement(AppliedPersonalUpdateAcknowledgement(second)))
+            assertTrue(reopened.restorePersonalUpdateAcknowledgement(AppliedPersonalUpdateAcknowledgement(first)))
+            assertEquals(cleared, reopened.capturedHandoff(scope, original.change.eventId)!!.frame.base.content)
+            assertEquals(after, reopened.personalUpdateAcknowledgement(scope, original.change.eventId, first.attempt.id)!!.receipt.projection.change.content)
+            assertEquals(origins, fixture.rows("captured_create_bases")); assertEquals(createAcks, fixture.rows("captured_create_acknowledgements"))
+        }
+    }
+    @Test fun incomingMetadataProjectionReopensAndCanRemoveTheSameReminderSet() = fixture {
+        val frame = release()
+        val rich = incoming().copy(content = content.copy(colorRgb = 0x654321, details = EventDetails(listOf(EventReminder(0), EventReminder(20)))))
+        val richPlan = plan(frame, rich)
+        assertTrue(store.restoreCapturedHandoffProjection(AppliedCapturedHandoffProjection(richPlan)))
+        val advanced = store.capturedHandoff(scope, original.change.eventId)!!.frame
+        store.close()
+        ImportStore(context, name).use { reopened ->
+            assertEquals(rich.content, reopened.capturedHandoff(scope, original.change.eventId)!!.frame.base.content)
+            val fixture = Fixture(context, name, reopened)
+            val clear = fixture.plan(advanced, incoming(2))
+            assertTrue(reopened.restoreCapturedHandoffProjection(AppliedCapturedHandoffProjection(clear)))
+            assertEquals(content.details, reopened.capturedHandoff(scope, original.change.eventId)!!.frame.base.content.details)
+            assertNull(reopened.capturedHandoff(scope, original.change.eventId)!!.frame.base.content.colorRgb)
+        }
+    }
     private val scope = CalendarScope(AccountId("captured-handoff-fixture"), CalendarId("calendar"), 0)
     private val format = AdapterFormat("synthetic-import", 1)
     private val content = EventContent("Synthetic original",
@@ -46,6 +89,16 @@ class CapturedHandoffStoreDeviceTest {
     private fun scopeKey() = JSONArray().put(scope.account.value).put(scope.calendar.value).put(scope.generation).toString()
 
     private inner class Fixture(val context: Context, val name: String, val store: ImportStore) {
+        suspend fun personalAck(frame: CapturedCreateHandoffFrame, after: EventContent, id: String): PersonalUpdateAcknowledgementReceipt {
+            assertEquals(LocalEditState.PAUSED, store.retainCapturedHandoffLocalChange(CapturedHandoffCurrent(frame, after, false), MutationId(id)))
+            val local = checkNotNull(store.localEdit(scope, frame.eventId))
+            val prepared = PersonalEditPreparation(local, Instant.parse("2030-10-01T00:00:00Z"), AdapterFormat("synthetic-personal", 2), "opaque-$id")
+            assertEquals(PersonalPreparationAdmission.STORED, store.retainCurrentPersonalPreparation(prepared))
+            val record = PersonalUpdateAttemptRecord(MutationId("request-$id"), prepared, AdapterFormat("synthetic-personal-wire", 2), "wire-$id", PersonalUpdateAttemptState.OUTCOME_UNKNOWN)
+            val verified = PersonalUpdateVerifiedResult.of(record, PersonalUpdateSubmissionObservation.Verified(record,
+                frame.base.copy(revision = Revision("verified-$id"), content = after)))
+            return checkNotNull(store.preparePersonalUpdateAcknowledgement(verified, frame)).record.receipt
+        }
         suspend fun prove() {
             val reserved = store.reserveCapturedAcknowledgement(acknowledgement).record.receipt
             store.retainCapturedAcknowledgement(AppliedCapturedCreateAcknowledgement(reserved))
@@ -303,8 +356,9 @@ class CapturedHandoffStoreDeviceTest {
 
     @Test fun deleteRichAndUnknownIncomingStayHeldWithoutChangingTheCurrentBase() = fixture {
         val frame = release()
+        val participant = EventDetails(organizer = EventPerson("fixture@example.invalid"))
         for (change in listOf(RemoteChange.Deleted(frame.eventId, Revision("deleted")), incoming().copy(content = content.copy(details = null)),
-            incoming().copy(content = content.copy(colorRgb = 0xff0000)))) {
+            incoming().copy(content = content.copy(details = participant)))) {
             queue(change); val before = snapshot(); assertFalse(store.capturedHandoffCanProject(frame))
             reject { store.prepareCapturedHandoffProjection(frame, intent(change)) }; unchanged(before); assertEquals(1, pending())
         }

@@ -354,7 +354,7 @@ internal object ImportStoreCapturedSql {
         intent: ProjectionIntent): CapturedHandoffProjection = run {
         val record = requireHandoffFrame(db, frame)
         check(record.state == CapturedCreateHandoffState.RELEASED && !record.waiting) { "Handoff cannot project" }
-        check(intent.scope == frame.scope && intent.change.eventId == frame.eventId && supportsCapturedHandoff(intent.change)) {
+        check(intent.scope == frame.scope && intent.change.eventId == frame.eventId && supportsPersonalHandoff(intent.change)) {
             "Unsupported handoff projection"
         }
         check(!hasLocalMutation(db, frame.scope, frame.eventId) && !hasRawEventRow(db, "deferred_events", frame.scope, frame.eventId) &&
@@ -382,7 +382,7 @@ internal object ImportStoreCapturedSql {
         val pending = readHandoffPending(db, frame.scope, frame.eventId)
         record.state == CapturedCreateHandoffState.RELEASED && !record.waiting &&
             !hasLocalMutation(db, frame.scope, frame.eventId) && !hasRawEventRow(db, "deferred_events", frame.scope, frame.eventId) &&
-            (pending != null || outstanding == null) && pending?.change?.let(::supportsCapturedHandoff) != false
+            (pending != null || outstanding == null) && pending?.change?.let(::supportsPersonalHandoff) != false
     }
 
     fun waitCapturedHandoff(db: SQLiteDatabase, frame: CapturedCreateHandoffFrame): Boolean = run {

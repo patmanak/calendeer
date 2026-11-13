@@ -24,25 +24,43 @@ data class CapturedCreateHandoffReceipt(
 }
 
 /** Current projection reference is separate from immutable original creation evidence. */
-data class CapturedCreateHandoffFrame(
-    val receipt: CapturedCreateHandoffReceipt,
-    val base: RemoteChange.Upsert,
-    val lastProjection: ProjectionReceipt? = null,
+class CapturedCreateHandoffFrame(
+    receipt: CapturedCreateHandoffReceipt,
+    base: RemoteChange.Upsert,
+    lastProjection: ProjectionReceipt? = null,
 ) {
+    val receipt: CapturedCreateHandoffReceipt = receipt.let {
+        val acknowledgement = it.acknowledgement
+        val baseline = acknowledgement.baseline
+        require(supportsCapturedHandoff(baseline.change))
+        it.copy(acknowledgement = acknowledgement.copy(baseline = baseline.copy(
+            change = baseline.change.copy(content = freezeHandoffContent(baseline.change.content)))))
+    }
+    val base: RemoteChange.Upsert = base.copy(content = freezeHandoffContent(base.content))
+    val lastProjection: ProjectionReceipt? = lastProjection?.snapshot()
     init {
-        require(base.eventId == receipt.eventId && supportsCapturedHandoff(base))
-        if (lastProjection == null) require(base == receipt.acknowledgement.baseline.change)
+        require(this.base.eventId == this.receipt.eventId && supportsPersonalHandoff(this.base))
+        val last = this.lastProjection
+        if (last == null) require(this.base == this.receipt.acknowledgement.baseline.change)
         else {
-            require(lastProjection.representation == null && lastProjection.previousRepresentation == null)
-            require(lastProjection.scope == receipt.scope && lastProjection.format == receipt.format && lastProjection.change == base)
-            require(lastProjection.previousBase?.let(::supportsCapturedHandoff) == true)
-            require(lastProjection.nonce !in listOf(receipt.nonce, receipt.acknowledgement.nonce,
-                receipt.acknowledgement.baseline.receipt.nonce))
+            require(last.representation == null && last.previousRepresentation == null)
+            require(last.scope == this.receipt.scope && last.format == this.receipt.format && last.change == this.base)
+            require(last.previousBase?.let(::supportsPersonalHandoff) == true)
+            require(last.nonce !in listOf(this.receipt.nonce, this.receipt.acknowledgement.nonce,
+                this.receipt.acknowledgement.baseline.receipt.nonce))
         }
     }
     val scope: CalendarScope get() = receipt.scope
     val format: AdapterFormat get() = receipt.format
     val eventId: EventId get() = receipt.eventId
+    fun copy(receipt: CapturedCreateHandoffReceipt = this.receipt, base: RemoteChange.Upsert = this.base,
+        lastProjection: ProjectionReceipt? = this.lastProjection) = CapturedCreateHandoffFrame(receipt, base, lastProjection)
+    operator fun component1() = receipt
+    operator fun component2() = base
+    operator fun component3() = lastProjection
+    override fun equals(other: Any?) = other is CapturedCreateHandoffFrame &&
+        receipt == other.receipt && base == other.base && lastProjection == other.lastProjection
+    override fun hashCode() = 31 * (31 * receipt.hashCode() + base.hashCode()) + (lastProjection?.hashCode() ?: 0)
     override fun toString() = "CapturedCreateHandoffFrame(REDACTED)"
 }
 
@@ -54,14 +72,21 @@ data class CapturedCreateHandoffRecord(val frame: CapturedCreateHandoffFrame,
 }
 
 /** Conditional incoming projection; never admission to ordinary projection or insertion. */
-data class CapturedHandoffProjection(val frame: CapturedCreateHandoffFrame, val receipt: ProjectionReceipt) {
+class CapturedHandoffProjection(val frame: CapturedCreateHandoffFrame, receipt: ProjectionReceipt) {
+    val receipt: ProjectionReceipt = receipt.snapshot()
     init {
-        require(receipt.representation == null && receipt.previousRepresentation == null)
-        require(receipt.scope == frame.scope && receipt.format == frame.format && receipt.previousBase == frame.base)
-        require(receipt.change.eventId == frame.eventId && supportsCapturedHandoff(receipt.change))
-        require(receipt.nonce !in listOf(frame.receipt.nonce, frame.receipt.acknowledgement.nonce,
+        require(this.receipt.representation == null && this.receipt.previousRepresentation == null)
+        require(this.receipt.scope == frame.scope && this.receipt.format == frame.format && this.receipt.previousBase == frame.base)
+        require(this.receipt.change.eventId == frame.eventId && supportsPersonalHandoff(this.receipt.change))
+        require(this.receipt.nonce !in listOf(frame.receipt.nonce, frame.receipt.acknowledgement.nonce,
             frame.receipt.acknowledgement.baseline.receipt.nonce, frame.lastProjection?.nonce))
     }
+    fun copy(frame: CapturedCreateHandoffFrame = this.frame, receipt: ProjectionReceipt = this.receipt) =
+        CapturedHandoffProjection(frame, receipt)
+    operator fun component1() = frame
+    operator fun component2() = receipt
+    override fun equals(other: Any?) = other is CapturedHandoffProjection && frame == other.frame && receipt == other.receipt
+    override fun hashCode() = 31 * frame.hashCode() + receipt.hashCode()
     override fun toString() = "CapturedHandoffProjection(REDACTED)"
 }
 
@@ -75,9 +100,18 @@ data class CapturedHandoffCleanWitness(val frame: CapturedCreateHandoffFrame) {
     override fun toString() = "CapturedHandoffCleanWitness(REDACTED)"
 }
 
-data class CapturedHandoffCurrent(val frame: CapturedCreateHandoffFrame, val content: EventContent, val deleted: Boolean) {
-    init { CapturedCreateCurrent(frame.receipt.acknowledgement.baseline, content, deleted) }
+class CapturedHandoffCurrent(val frame: CapturedCreateHandoffFrame, content: EventContent, val deleted: Boolean) {
+    val content: EventContent = freezeHandoffContent(content)
+    init { require(supportsPersonalHandoff(frame.base.copy(content = this.content))) }
     val unchanged: Boolean get() = !deleted && content == frame.base.content
+    fun copy(frame: CapturedCreateHandoffFrame = this.frame, content: EventContent = this.content,
+        deleted: Boolean = this.deleted) = CapturedHandoffCurrent(frame, content, deleted)
+    operator fun component1() = frame
+    operator fun component2() = content
+    operator fun component3() = deleted
+    override fun equals(other: Any?) = other is CapturedHandoffCurrent &&
+        frame == other.frame && content == other.content && deleted == other.deleted
+    override fun hashCode() = 31 * (31 * frame.hashCode() + content.hashCode()) + deleted.hashCode()
     override fun toString() = "CapturedHandoffCurrent(REDACTED)"
 }
 
@@ -87,6 +121,27 @@ sealed interface CapturedHandoffCurrentObservation {
     }
     data object Unsupported : CapturedHandoffCurrentObservation
     data object Unresolved : CapturedHandoffCurrentObservation
+}
+
+private fun freezeHandoffContent(content: EventContent): EventContent {
+    val details = requireNotNull(content.details)
+    return content.copy(details = details.copy(
+        reminders = java.util.Collections.unmodifiableList(details.reminders.toList()),
+        attendees = java.util.Collections.unmodifiableList(details.attendees.toList())))
+}
+
+/** Current content after transfer; original creation admission remains the strict profile below. */
+fun supportsPersonalHandoff(change: RemoteChange): Boolean {
+    val value = (change as? RemoteChange.Upsert)?.content ?: return false
+    val details = value.details ?: return false
+    if (details.organizer != null || details.attendees.isNotEmpty() || value.recurrence != null ||
+        value.colorRgb?.let { it !in 0..0xffffff } == true || !ProjectionReceipt.supports(change)) return false
+    return try {
+        for (text in listOf(value.title, value.description, value.location))
+            Charsets.UTF_8.newEncoder().onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
+                .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT).encode(java.nio.CharBuffer.wrap(text))
+        true
+    } catch (_: java.nio.charset.CharacterCodingException) { false }
 }
 
 /** Deliberately bounded to known-empty simple content; unknown details are never discarded. */

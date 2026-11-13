@@ -59,7 +59,7 @@ internal class ImportStoreLocalMutationSql(
             if (row.moveToFirst()) decodeChange(row.getString(0)) else null
         } ?: return
         check(change.eventId == event) { "Invalid retained update observation" }
-        if (handoff != null && !supportsCapturedHandoff(change)) return
+        if (handoff != null && !supportsPersonalHandoff(change)) return
         val recurrence = (change as? RemoteChange.Upsert)?.content?.recurrence
         if (recurrence != null && !recurrence.isMaster && masterStates(db, scope)[recurrence.uid] == MasterState.INACTIVE) return
         check(db.update("records", ContentValues().apply { put("pending", 1) }, condition, args) == 1) {

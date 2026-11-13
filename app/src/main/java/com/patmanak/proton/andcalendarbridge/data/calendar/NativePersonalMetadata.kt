@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 package com.patmanak.proton.andcalendarbridge.data.calendar
 
 import android.accounts.Account
@@ -17,7 +18,7 @@ internal class NativePersonalMetadata(
     private val syncUri: (Uri, Account) -> Uri,
     private val fail: (CalendarProjectionFailure) -> Nothing,
 ) {
-    /** Personal owner profile v2: known unchanged reminders, no remote participants or recurrence.
+    /** Personal owner profile v2: known reminders, no remote participants or recurrence.
      * The opaque local owner label never represents a remote organizer. */
     fun knownPersonalEvent(content: EventContent): Boolean = content.recurrence == null &&
         content.details?.let { it.organizer == null && it.attendees.isEmpty() } == true &&
@@ -29,6 +30,13 @@ internal class NativePersonalMetadata(
             values.getAsInteger(Events.HAS_ALARM) in 0..1 &&
             listOf(Events.HAS_ATTENDEE_DATA, Events.GUESTS_CAN_MODIFY, Events.GUESTS_CAN_INVITE_OTHERS,
                 Events.GUESTS_CAN_SEE_GUESTS, Events.SELF_ATTENDEE_STATUS,
+                Events.ACCESS_LEVEL).all { values.getAsInteger(it) == 0 }
+
+    fun knownLocalPlaceholder(values: ContentValues, account: Account): Boolean =
+        values.getAsString(Events.ORGANIZER) == account.name && values.getAsInteger(Events.HAS_ALARM) in 0..1 &&
+            listOf(Events.HAS_ATTENDEE_DATA, Events.IS_ORGANIZER, Events.GUESTS_CAN_INVITE_OTHERS,
+                Events.GUESTS_CAN_SEE_GUESTS).all { values.getAsInteger(it) == 1 } &&
+            listOf(Events.GUESTS_CAN_MODIFY, Events.SELF_ATTENDEE_STATUS,
                 Events.ACCESS_LEVEL).all { values.getAsInteger(it) == 0 }
 
     /** Child IDs, values and total count are asserted in the event CAS batch. Never replace rows. */

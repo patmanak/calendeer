@@ -31,6 +31,64 @@ import org.junit.runner.RunWith
 /** Isolated native conditional update and historical recovery qualification; no server writes. */
 @RunWith(AndroidJUnit4::class)
 class CapturedHandoffProviderDeviceTest {
+    @Test fun transferredPersonalMetadataAcknowledgesWithoutReplacingChildrenAndSupportsAnotherEdit() = fixture(allDay = true) {
+        val origin = values().filterKeys { it in listOf(Events.SYNC_DATA5, Events.SYNC_DATA6, Events.SYNC_DATA7) }
+        val after = content.copy(details = EventDetails(listOf(EventReminder(10))), colorRgb = 0x123456)
+        reminder(); mutate(ContentValues().apply { put(Events.DIRTY, 1); put(Events.EVENT_COLOR, 0xff123456.toInt()) })
+        val observed = projection.captureCapturedHandoffCurrent(frame) as CapturedHandoffCurrentObservation.Supported
+        assertEquals(after, observed.snapshot.content)
+        assertEquals(CapturedCreateCurrentObservation.Unsupported, projection.captureAcknowledgedCreateCurrent(ack))
+        val receipt = personalReceipt(frame, after, "personal-first")
+        val children = reminderRows()
+        assertEquals(AppliedPersonalUpdateAcknowledgement(receipt), projection.acknowledgePersonalUpdate(receipt))
+        assertEquals(children, reminderRows()); assertEquals("0", field(Events.DIRTY))
+        val advanced = CapturedCreateHandoffFrame(frame.receipt, receipt.projection.change, receipt.projection)
+        assertEquals(CapturedHandoffCleanWitness(advanced), projection.inspectCapturedHandoffBase(advanced))
+        removeReminders(); mutate(ContentValues().apply { put(Events.DIRTY, 1); putNull(Events.EVENT_COLOR) })
+        val nextContent = after.copy(details = EventDetails(), colorRgb = null)
+        assertEquals(nextContent, (projection.captureCapturedHandoffCurrent(advanced) as CapturedHandoffCurrentObservation.Supported).snapshot.content)
+        val next = personalReceipt(advanced, nextContent, "personal-second")
+        assertEquals(AppliedPersonalUpdateAcknowledgement(next), projection.acknowledgePersonalUpdate(next))
+        assertEquals(origin, values().filterKeys { it in origin.keys }); assertEquals(1, rows())
+    }
+    @Test fun transferredPersonalAckResponseLossInspectsWithoutConsumingLaterReminderChanges() = fixture(allDay = true) {
+        val after = content.copy(details = EventDetails(listOf(EventReminder(10))))
+        reminder(); mutate(ContentValues().apply { put(Events.DIRTY, 1) })
+        val receipt = personalReceipt(frame, after, "lost-personal")
+        assertUnavailable { lost().acknowledgePersonalUpdate(receipt) }
+        addReminder(20); mutate(ContentValues().apply { put(Events.DIRTY, 1) })
+        val before = values(); val children = reminderRows()
+        assertEquals(AppliedPersonalUpdateAcknowledgement(receipt), projection.resumePersonalUpdateAcknowledgement(receipt))
+        assertEquals(before, values()); assertEquals(children, reminderRows())
+    }
+    @Test fun transferredIncomingMetadataAddsThenRemovesRemindersAndRecoversLostResponse() = fixture(allDay = true) {
+        val after = content.copy(details = EventDetails(listOf(EventReminder(0), EventReminder(20))), colorRgb = 0x654321)
+        val change = baseline.change.copy(revision = Revision("rich-incoming"), content = after)
+        val richPlan = CapturedHandoffProjection(frame, ProjectionReceipt(target, baseline.format, change, UUID.randomUUID().toString(), frame.base))
+        assertUnavailable { lost().applyCapturedHandoffProjection(richPlan) }
+        assertEquals(AppliedCapturedHandoffProjection(richPlan), projection.inspectCapturedHandoffProjection(richPlan))
+        assertEquals(listOf(0, 20), reminderRows().map { it[1]!!.toInt() }.sorted())
+        assertEquals(0xff654321.toInt().toString(), field(Events.EVENT_COLOR))
+        val current = advanced(richPlan)
+        assertEquals(CapturedHandoffCleanWitness(current), projection.inspectCapturedHandoffBase(current))
+        val cleared = applied(plan(current, "remove-personal"))
+        assertTrue(reminderRows().isEmpty()); assertNull(field(Events.EVENT_COLOR))
+        assertEquals(CapturedHandoffCleanWitness(cleared), projection.inspectCapturedHandoffBase(cleared))
+    }
+    @Test fun transferredIncomingAndAckCannotConsumeConcurrentReminderReplacement() = fixture(allDay = true) {
+        val after = content.copy(details = EventDetails(listOf(EventReminder(10))))
+        val change = baseline.change.copy(revision = Revision("rich-before-race"), content = after)
+        val richPlan = CapturedHandoffProjection(frame, ProjectionReceipt(target, baseline.format, change, UUID.randomUUID().toString(), frame.base))
+        val current = applied(richPlan)
+        val replacement = intercepted(mode = -1, beforeBatch = { addReminder(10); removeOldestReminder() })
+        assertBatchRejected { replacement.applyCapturedHandoffProjection(plan(current, "racing-projection")) }
+        assertEquals(after.title, field(Events.TITLE)); assertEquals(1, reminderRows().size)
+        mutate(ContentValues().apply { put(Events.DIRTY, 1); put(Events.EVENT_COLOR, 0xff123456.toInt()) })
+        val receipt = personalReceipt(current, after.copy(colorRgb = 0x123456), "racing-ack")
+        val racingAck = intercepted(mode = -1, beforeBatch = { addReminder(10); removeOldestReminder() })
+        assertBatchRejected { racingAck.acknowledgePersonalUpdate(receipt) }
+        assertEquals("1", field(Events.DIRTY)); assertEquals(1, reminderRows().size)
+    }
     @Test fun handoffIncomingPersonalTitleKeepsNativeEditingAndCapturesNextEdit() = fixture {
         val current = applied()
         assertEquals("0", field(Events.GUESTS_CAN_MODIFY))
@@ -393,9 +451,10 @@ class CapturedHandoffProviderDeviceTest {
         assertTrue(observed.snapshot.deleted); assertEquals(current.base.content, observed.snapshot.content); assertEquals(before, values()); assertEquals(1, rows())
     }
 
-    @Test fun laterDirtySnapshotWithChildrenIsUnsupportedAndPreserved() = fixture {
+    @Test fun laterDirtySnapshotWithDisplayRemindersIsObservedAndPreserved() = fixture {
         val current = applied(); mutate(ContentValues().apply { put(Events.DIRTY, 1) }); reminder(); val before = values()
-        assertEquals(CapturedHandoffCurrentObservation.Unsupported, projection.captureCapturedHandoffCurrent(current))
+        val observed = projection.captureCapturedHandoffCurrent(current) as CapturedHandoffCurrentObservation.Supported
+        assertEquals(listOf(EventReminder(10)), observed.snapshot.content.details!!.reminders)
         assertEquals(before, values()); assertEquals(1, children(Reminders.CONTENT_URI, Reminders.EVENT_ID))
     }
 
@@ -552,9 +611,26 @@ class CapturedHandoffProviderDeviceTest {
             assertEquals(1, context.contentResolver.update(uri, values, "${Events._ID}=?", arrayOf(row.toString())))
         }
         fun reminder() {
+            addReminder(10)
+        }
+        fun addReminder(minutes: Int) {
             context.contentResolver.insert(syncUri(Reminders.CONTENT_URI), ContentValues().apply {
-                put(Reminders.EVENT_ID, row); put(Reminders.MINUTES, 10); put(Reminders.METHOD, Reminders.METHOD_ALERT)
+                put(Reminders.EVENT_ID, row); put(Reminders.MINUTES, minutes); put(Reminders.METHOD, Reminders.METHOD_ALERT)
             })!!
+        }
+        fun removeReminders() { context.contentResolver.delete(syncUri(Reminders.CONTENT_URI), "${Reminders.EVENT_ID}=?", arrayOf(row.toString())) }
+        fun reminderRows() = context.contentResolver.query(syncUri(Reminders.CONTENT_URI), arrayOf(Reminders._ID, Reminders.MINUTES),
+            "${Reminders.EVENT_ID}=?", arrayOf(row.toString()), Reminders._ID)!!.use { cursor ->
+                buildList { while (cursor.moveToNext()) add(listOf(cursor.getString(0), cursor.getString(1))) }
+            }
+        fun removeOldestReminder() { context.contentResolver.delete(syncUri(Reminders.CONTENT_URI), "${Reminders._ID}=?",
+            arrayOf(reminderRows().first()[0]!!)) }
+        fun personalReceipt(from: CapturedCreateHandoffFrame, after: EventContent, revision: String): PersonalUpdateAcknowledgementReceipt {
+            val edit = LocalEditIntent(MutationId(revision), target, baseline.format, from.base, after)
+            val prepared = PersonalEditPreparation(edit, Instant.parse("2030-10-01T12:00:00Z"), AdapterFormat("synthetic-personal", 2), "opaque-personal")
+            val record = PersonalUpdateAttemptRecord(MutationId("request-$revision"), prepared, AdapterFormat("synthetic-personal-wire", 2), "opaque-wire", PersonalUpdateAttemptState.OUTCOME_UNKNOWN)
+            val result = PersonalUpdateVerifiedResult.of(record, PersonalUpdateSubmissionObservation.Verified(record, from.base.copy(revision = Revision(revision), content = after)))
+            return PersonalUpdateAcknowledgementReceipt.of(result, UUID.randomUUID().toString(), from)
         }
         fun children(child: Uri, column: String) = context.contentResolver.query(syncUri(child), arrayOf("_id"),
             "$column=?", arrayOf(row.toString()), null)!!.use { it.count }
