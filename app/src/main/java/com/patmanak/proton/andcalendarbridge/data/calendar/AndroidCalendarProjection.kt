@@ -1,4 +1,5 @@
 package com.patmanak.proton.andcalendarbridge.data.calendar
+import com.patmanak.proton.andcalendarbridge.sync.supportsCapturedHandoff
 
 import com.patmanak.proton.andcalendarbridge.data.calendar.NativeCalendarSelection as Selection
 
@@ -111,7 +112,7 @@ data class EnsuredCalendar(val id: Long, val created: Boolean)
  */
 class AndroidCalendarProjection(context: Context) : CalendarProjection {
     private val localCreateReader by lazy { NativeLocalCreateReader(resolver, ::accountFor, ::calendarRow,
-        ::syncUri, ::calendarSyncId, ::calendarSelection, ::assertion, ::simpleLocalOwnerPlaceholder,
+        ::syncUri, ::calendarSyncId, ::calendarSelection, ::assertion,
         { values, placeholder -> readSimpleTime(values, placeholder) }, ::requirePermissions, ::capturedBatch, ::fail,
         { digest(*it) }) }
     override val deleteAcknowledgementProtocol: Int? = 1
@@ -1089,6 +1090,8 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
             require(!clean && writeAck == null && handoffProjection == null && handoff != null &&
                 editAcknowledgement.handoff == handoff && expectedAck == handoff.receipt.acknowledgement)
         }
+        val personal = handoff != null || !supportsCapturedHandoff(baseline.change)
+        val personalBase = handoff?.base ?: baseline.change
         val ackMarker = (expectedAck ?: writeAck)?.let(::capturedAcknowledgementMarker)
         val receipt = baseline.receipt
         val expected = capturedAttachmentValues(receipt) // Strict canonical identity before Provider IO.
@@ -1134,28 +1137,28 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
             it.count == 1 && it.moveToFirst() && it.getLong(0) == row
         } ?: fail(CalendarProjectionFailure.PROVIDER_UNAVAILABLE)
         if (!remoteMatches) return CapturedNativeObservation.Unresolved
-        val localOwnerPlaceholder = if (handoff != null) personalMetadata.knownLocalPlaceholder(values, account)
+        val localOwnerPlaceholder = if (personal) personalMetadata.knownLocalPlaceholder(values, account)
             else simpleLocalOwnerPlaceholder(values, account)
-        val personalOwner = handoff != null && knownPersonalOwner(values, account, handoff.base.content)
+        val personalOwner = personal && knownPersonalOwner(values, account, personalBase.content)
         val rawColor = values.getAsInteger(Events.EVENT_COLOR)
-        if (handoff != null && rawColor != null && rawColor != 0 && rawColor.ushr(24) != 0xff)
+        if (personal && rawColor != null && rawColor != 0 && rawColor.ushr(24) != 0xff)
             return CapturedNativeObservation.Unsupported
-        if (unsupported.any { values[it] != null && !(it == Events.EVENT_COLOR && handoff != null) &&
+        if (unsupported.any { values[it] != null && !(it == Events.EVENT_COLOR && (personal || rawColor == 0)) &&
                 !(it == Events.ORGANIZER && (localOwnerPlaceholder || personalOwner)) } ||
-            (!localOwnerPlaceholder && emptyFlags.any { if (handoff != null && it == Events.HAS_ALARM)
+            (!localOwnerPlaceholder && emptyFlags.any { if (personal && it == Events.HAS_ALARM)
                 values.getAsInteger(it) !in 0..1 else !simplePersonalFlag(values, it, personalOwner) }) ||
             values.getAsInteger(Events.STATUS) != Events.STATUS_CONFIRMED ||
             values.getAsInteger(Events.AVAILABILITY) != Events.AVAILABILITY_BUSY)
             return CapturedNativeObservation.Unsupported
         val time = readSimpleTime(values, localOwnerPlaceholder) ?: return CapturedNativeObservation.Unsupported
-        val reminders = if (handoff != null) personalMetadata.captureReminders(account, row, handoff.base.content)
+        val reminders = if (personal) personalMetadata.captureReminders(account, row, personalBase.content)
             ?: return CapturedNativeObservation.Unsupported else null
         if (reminders != null && values.getAsInteger(Events.HAS_ALARM) != (if (reminders.reminders.isEmpty()) 0 else 1))
             return CapturedNativeObservation.Unsupported
         val snapshot = try {
             val content = EventContent(values.getAsString(Events.TITLE) ?: "", time,
                 values.getAsString(Events.DESCRIPTION) ?: "", values.getAsString(Events.EVENT_LOCATION) ?: "",
-                colorRgb = if (handoff == null) null else rawColor?.takeUnless { it == 0 }?.and(0xffffff),
+                colorRgb = if (!personal) null else rawColor?.takeUnless { it == 0 }?.and(0xffffff),
                 details = EventDetails(reminders?.reminders.orEmpty()))
             if (handoff == null) CapturedCreateCurrent(baseline, content, deleted == 1, acknowledgement = expectedAck)
             else CapturedHandoffCurrent(handoff, content, deleted == 1)
@@ -1172,7 +1175,7 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
                 .withValue(Events._ID, row).withExpectedCount(1).build())
         val expectedCounts = mutableListOf(1, 1, 1)
         if (reminders != null) personalMetadata.assertReminders(reminders, checks, expectedCounts)
-        val absentChildren = if (handoff == null) listOf(Reminders.CONTENT_URI to Reminders.EVENT_ID,
+        val absentChildren = if (!personal) listOf(Reminders.CONTENT_URI to Reminders.EVENT_ID,
             Attendees.CONTENT_URI to Attendees.EVENT_ID, ExtendedProperties.CONTENT_URI to ExtendedProperties.EVENT_ID)
             else listOf(Attendees.CONTENT_URI to Attendees.EVENT_ID, ExtendedProperties.CONTENT_URI to ExtendedProperties.EVENT_ID)
         for ((child, column) in absentChildren) {

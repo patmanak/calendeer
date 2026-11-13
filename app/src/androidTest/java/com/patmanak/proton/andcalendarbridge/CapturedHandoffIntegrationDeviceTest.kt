@@ -34,6 +34,25 @@ import org.junit.runner.RunWith
 /** Native Provider and three real journals; controlled incoming data, no network upload. */
 @RunWith(AndroidJUnit4::class)
 class CapturedHandoffIntegrationDeviceTest {
+    @Test fun personalCreationKeepsItsMetadataThroughUploadAcknowledgementReopenAndNextEdit() = fixture(safePersonal = true, richOrigin = true) {
+        transferred(); incoming(verifiedEvent); titleMode = true; personalMode = true
+        val original = record()
+        assertEquals(1, sends); assertEquals("0", field(Events.DIRTY))
+        assertEquals(content, role()!!.frame.base.content)
+        reopen(); titleMode = true; personalMode = true
+        assertEquals(content, role()!!.frame.base.content)
+        mutate(ContentValues().apply { put(Events.DIRTY, 1); put(Events.TITLE, "Personal creation next edit") })
+        assertEquals(CapturedCreateReconciliationResult.RETAINED, reconcileTransferred())
+        assertEquals(content.details, edit()!!.content.details)
+        assertEquals(content.colorRgb, edit()!!.content.colorRgb)
+        assertEquals(original, record()); assertEquals(1, sends)
+    }
+    @Test fun nativeCalendarColorFallbackCanBeAcknowledgedWithoutRewritingColor() = fixture {
+        mutate(ContentValues().apply { put(Events.EVENT_COLOR, 0) })
+        transferred()
+        assertEquals("0", field(Events.EVENT_COLOR)); assertEquals("0", field(Events.DIRTY))
+        assertNull(role()!!.frame.base.content.colorRgb)
+    }
     @Test fun transferredMetadataUsesThePersonalOwnerAndAcknowledgesThroughRealSqlAndProvider() = fixture(safePersonal = true) {
         transferred(); incoming(verifiedEvent); titleMode = true; personalMode = true
         val database = "personal-handoff-ack-${UUID.randomUUID()}.db"
@@ -374,7 +393,7 @@ class CapturedHandoffIntegrationDeviceTest {
         assertEquals("Held during backlog", field(Events.TITLE)); assertTrue(role()!!.waiting); assertEquals(0, handoffWrites)
         assertEquals(ImportRunResult.COMPLETE, drain()); assertEquals(runs - 1, continuations.get())
     }
-    private class Fixture(val context: Context, safePersonal: Boolean = false) {
+    private class Fixture(val context: Context, safePersonal: Boolean = false, val richOrigin: Boolean = false) {
         private val token = UUID.randomUUID().toString()
         private val importName = "dispatch-integration-import-$token.db"
         private val dispatchName = "captured-provider-dispatch-$token.db"
@@ -382,7 +401,7 @@ class CapturedHandoffIntegrationDeviceTest {
         val target = CalendarScope(AccountId("dispatch-integration-$token"), CalendarId("fixture"), 0)
         val format = AdapterFormat("dispatch-integration-import", 1)
         var currentFormat = format
-        val preparationFormat = AdapterFormat("controlled-known-empty-submission", 2)
+        val preparationFormat = AdapterFormat("controlled-known-empty-submission", if (richOrigin) 3 else 2)
         val localId = LocalEventId(UUID.randomUUID().toString())
         val id = MutationId(UUID.randomUUID().toString())
         val attempt = MutationId(UUID.randomUUID().toString())
@@ -390,7 +409,8 @@ class CapturedHandoffIntegrationDeviceTest {
         val content = EventContent("Preparation integration fixture",
             if (safePersonal) EventTime.Timed(Instant.parse("2030-05-01T09:00:00Z"), Instant.parse("2030-05-01T10:00:00Z"), ZoneId.of("Europe/Paris")) else
                 EventTime.Timed(Instant.parse("2030-10-27T00:30:00Z"), Instant.parse("2030-10-27T02:30:00Z"), ZoneId.of("Europe/Paris")),
-            details = EventDetails())
+            details = EventDetails(if (richOrigin) listOf(EventReminder(10)) else emptyList()),
+            colorRgb = if (richOrigin) 0x123456 else null)
         val intent = LocalCreateIntent(LocalCreateReservation(id, localId, target, format, timestamp), content)
         val projection = AndroidCalendarProjection(context)
         var handoffWrites = 0
@@ -486,6 +506,7 @@ class CapturedHandoffIntegrationDeviceTest {
         var onPrepare: suspend (CalendarCreateDraft) -> PreparedCalendarCreate = { receipt() }
         val port = object : CalendarCreateSubmissionPort {
             override val knownEmptySubmissionFormat: AdapterFormat get() = preparationFormat
+            override val personalSubmissionFormat: AdapterFormat? get() = preparationFormat.takeIf { richOrigin }
             override suspend fun prepareSubmission(draft: CalendarCreateDraft): PreparedCalendarCreate {
                 assertEquals(CalendarCreateDraft(target, attempt, timestamp, content), draft)
                 calls++; return onPrepare(draft)
@@ -535,6 +556,7 @@ class CapturedHandoffIntegrationDeviceTest {
             store.transaction(target) { checkpoint = PageCheckpoint(target, format, traversalComplete = true) }
             calendar = projection.ensureCalendar(target, summary)
             row = ContentUris.parseId(context.contentResolver.insert(uri, candidateValues())!!)
+            if (richOrigin) addReminder(10)
             start()
             assertEquals(LocalEditCaptureResult.RETAINED, coordinator.captureLocalCreate(target, row, localId, id, timestamp))
         }
@@ -550,7 +572,8 @@ class CapturedHandoffIntegrationDeviceTest {
             putNull(Events.ORGANIZER); put(Events.IS_ORGANIZER, 0); put(Events.GUESTS_CAN_MODIFY, 0)
             put(Events.GUESTS_CAN_INVITE_OTHERS, 0); put(Events.GUESTS_CAN_SEE_GUESTS, 0)
             put(Events.ACCESS_LEVEL, Events.ACCESS_DEFAULT); put(Events.AVAILABILITY, Events.AVAILABILITY_BUSY)
-            putNull(Events.EVENT_COLOR); putNull(Events.EVENT_COLOR_KEY)
+            if (richOrigin) put(Events.EVENT_COLOR, 0xff123456.toInt()) else putNull(Events.EVENT_COLOR)
+            putNull(Events.EVENT_COLOR_KEY)
             put(Events.DTSTART, time.start.toEpochMilli()); put(Events.DTEND, time.end.toEpochMilli())
             put(Events.ALL_DAY, 0); put(Events.EVENT_TIMEZONE, time.zone.id); put(Events.EVENT_END_TIMEZONE, time.zone.id)
         }
@@ -601,12 +624,12 @@ class CapturedHandoffIntegrationDeviceTest {
         suspend fun deletion(): LocalDeleteIntent? { allowStore(); return store.localDelete(target, verifiedEvent.eventId) }
         fun rawPending(): Int? = store.readableDatabase.rawQuery("SELECT pending FROM records WHERE event=?",
             arrayOf(verifiedEvent.eventId.value)).use { if (it.moveToFirst()) it.getInt(0) else null }
-        fun addReminder() {
+        fun addReminder(minutes: Int = 30) {
             val child = CalendarContract.Reminders.CONTENT_URI.buildUpon().appendQueryParameter(CalendarContract.CALLER_IS_SYNCADAPTER, "true")
                 .appendQueryParameter(CalendarContract.Calendars.ACCOUNT_NAME, projection.accountFor(target.account).name)
                 .appendQueryParameter(CalendarContract.Calendars.ACCOUNT_TYPE, projection.accountFor(target.account).type).build()
             assertNotNull(context.contentResolver.insert(child, ContentValues().apply {
-                put(CalendarContract.Reminders.EVENT_ID, row); put(CalendarContract.Reminders.MINUTES, 30)
+                put(CalendarContract.Reminders.EVENT_ID, row); put(CalendarContract.Reminders.MINUTES, minutes)
                 put(CalendarContract.Reminders.METHOD, CalendarContract.Reminders.METHOD_ALERT)
             }))
         }
@@ -678,9 +701,9 @@ class CapturedHandoffIntegrationDeviceTest {
             AccountManager.get(context).removeAccountExplicitly(projection.accountFor(target.account))
         }
     }
-    private fun fixture(safePersonal: Boolean = false, block: suspend Fixture.() -> Unit) = runBlocking {
+    private fun fixture(safePersonal: Boolean = false, richOrigin: Boolean = false, block: suspend Fixture.() -> Unit) = runBlocking {
         assumeTrue(InstrumentationRegistry.getArguments().getString("providerFixture") == "true")
-        val fixture = Fixture(ApplicationProvider.getApplicationContext(), safePersonal)
+        val fixture = Fixture(ApplicationProvider.getApplicationContext(), safePersonal, richOrigin)
         assumeTrue(fixture.projection.hasPermissions())
         try { fixture.seed(); fixture.block() } finally { fixture.close() }
     }

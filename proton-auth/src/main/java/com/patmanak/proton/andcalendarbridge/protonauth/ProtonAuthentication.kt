@@ -77,6 +77,8 @@ internal class SerializedAuthenticationPort(
     override val contentMapping = EVENT_CONTENT_MAPPING
     override val localCreateFormat = LOCAL_CREATE_PREPARATION_FORMAT
     override val knownEmptySubmissionFormat = KNOWN_EMPTY_SUBMISSION_FORMAT
+    override val personalSubmissionFormat = PERSONAL_CREATE_SUBMISSION_FORMAT
+    override val personalLocalCreateFormat = PERSONAL_LOCAL_CREATE_PREPARATION_FORMAT
     override val localTitleFormat = LOCAL_TITLE_PREPARATION_FORMAT
     override val localTextFormat = LOCAL_TEXT_PREPARATION_FORMAT
     override val personalFormat = PERSONAL_PREPARATION_FORMAT
@@ -467,11 +469,12 @@ internal class SerializedAuthenticationPort(
     override suspend fun prepareLocalText(intent: LocalEditIntent, timestamp: java.time.Instant,
         admit: (CalendarScope) -> Boolean): LocalTextEditPreparation? = localPreparations.prepareLocalText(intent, timestamp, admit)
 
-    override suspend fun prepareCreate(draft: CalendarCreateDraft): PreparedCalendarCreate = withContext(dispatcher) {
-        lock.withLock {
+    override suspend fun prepareCreate(draft: CalendarCreateDraft): PreparedCalendarCreate {
+        val frozen = draft.frozen()
+        return withContext(dispatcher) { lock.withLock {
             if (!authenticated) createUnavailable(CreatePreparationFailure.AUTHENTICATION)
-            checkNotNull(graph).preparations.prepareCreate(draft)
-        }
+            checkNotNull(graph).preparations.prepareCreate(frozen)
+        } }
     }
     override suspend fun prepareLocalTitle(intent: LocalEditIntent, timestamp: java.time.Instant): LocalEditPreparation {
         // Freeze before dispatcher switching or waiting for the logout mutex.
@@ -531,7 +534,10 @@ internal class SerializedAuthenticationPort(
           catch (failure: Exception) { currentCoroutineContext().ensureActive(); throw failure }
           finally { closed = true }
     }
-    override suspend fun prepareSubmission(draft: CalendarCreateDraft): PreparedCalendarCreate = submissionOperation { it.prepareSubmission(draft) }
+    override suspend fun prepareSubmission(draft: CalendarCreateDraft): PreparedCalendarCreate {
+        val frozen = draft.frozen()
+        return submissionOperation { it.prepareSubmission(frozen) }
+    }
     override suspend fun prepareSubmission(id: MutationId, preparation: LocalEditPreparation): TitleUpdateAttemptRecord {
         val frozen = preparation.copy(intent = LocalEditPreparation.freezeIntent(preparation.intent))
         return titleUpdateOperation { it.prepareSubmission(id, frozen) }
@@ -688,9 +694,14 @@ internal class SerializedAuthenticationPort(
         submissionOperation { it.submit(record, journal) }
     override suspend fun inspect(record: CreateAttemptRecord): CreateSubmissionObservation = submissionOperation { it.inspect(record) }
     override suspend fun submitCaptured(record: CreateAttemptRecord, expected: CalendarCreateDraft,
-        journal: CreateAttemptJournal): CreateSubmissionObservation = submissionOperation { it.submitCaptured(record, expected, journal) }
-    override suspend fun inspectCaptured(record: CreateAttemptRecord, expected: CalendarCreateDraft): CreateSubmissionObservation =
-        submissionOperation { it.inspectCaptured(record, expected) }
+        journal: CreateAttemptJournal): CreateSubmissionObservation {
+        val frozen = expected.frozen()
+        return submissionOperation { it.submitCaptured(record, frozen, journal) }
+    }
+    override suspend fun inspectCaptured(record: CreateAttemptRecord, expected: CalendarCreateDraft): CreateSubmissionObservation {
+        val frozen = expected.frozen()
+        return submissionOperation { it.inspectCaptured(record, frozen) }
+    }
     private suspend fun <T> submissionOperation(block: suspend (CalendarCreateSubmissionPort) -> T): T = withContext(dispatcher) {
         lock.withLock {
             if (!authenticated) createUnavailable(CreatePreparationFailure.AUTHENTICATION)

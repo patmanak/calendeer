@@ -12,8 +12,11 @@ Imported and transferred events support changes to display reminders and event c
 including removal and calendar-color fallback. Before/at/after-start reminders use
 explicit minute offsets. Proton email reminders remain unchanged. Recurrence,
 organizers, attendees, invitations, unknown metadata and ambiguous DST endpoints
-remain held. Initial CREATE still uses the known-empty profile; reminders/color
-can be edited after its upload and transfer.
+remain held. Initial CREATE captures supported reminders/color using distinct
+personal-v3 preparation and submission formats. The historical known-empty
+formats remain strict and inspectable; uncertain requests are never regenerated
+or resent. Shared signatures/encryption use the existing Proton primitives;
+personal API siblings and the complete readback are checked separately.
 The calendar client provides the editor. Calendeer never delivers
 reminder notifications; the system calendar continues to own that behavior.
 

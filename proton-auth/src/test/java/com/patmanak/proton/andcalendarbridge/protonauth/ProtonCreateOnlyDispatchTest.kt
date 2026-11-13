@@ -3,6 +3,7 @@ package com.patmanak.proton.andcalendarbridge.protonauth
 
 import java.util.concurrent.atomic.AtomicReference
 import okhttp3.OkHttpClient
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.Request
 import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
@@ -13,6 +14,24 @@ import org.junit.Test
 
 /** Loopback transport qualification only; no claim about Proton's server concurrency semantics. */
 class ProtonCreateOnlyDispatchTest {
+    @Test fun personalCreateAllowsOnlyTheClosedNewMetadataShapeAndKeepsOneShotBody() {
+        val endpoint = "https://calendeer.invalid/calendar/v1/synthetic/events/sync".toHttpUrl()
+        val personal = singleCreateFixture.replace("\"SharedEventContent\":[]",
+            "\"SharedEventContent\":[],\"Notifications\":[{\"Type\":1,\"Trigger\":\"-PT10M\"}],\"Color\":\"#123456\"")
+        val attempt = ProtonSingleDispatchAttempt(endpoint, personal)
+        val buffer = okio.Buffer()
+        attempt.requestBody.writeTo(buffer)
+        assertEquals(personal, buffer.readUtf8())
+        try { attempt.requestBody.writeTo(buffer); fail("Body must remain one-shot") }
+        catch (_: ProtonSingleDispatchDenied) { }
+        for (bad in listOf(personal.replace("\"Type\":1", "\"Type\":0"),
+            personal.replace("\"#123456\"", "\"red\""),
+            personal.replace("\"Overwrite\":0", "\"Overwrite\":1"),
+            personal.replace("\"Overwrite\":0", "\"ID\":\"existing\",\"Overwrite\":0"))) {
+            try { ProtonSingleDispatchAttempt(endpoint, bad); fail("Must refuse non-CREATE or foreign metadata") }
+            catch (_: ProtonSingleDispatchDenied) { }
+        }
+    }
     @Test fun staleReadCannotUseCreatePermitToOverwriteANewerRemoteEvent() {
         val server = MockWebServer()
         val remoteTitle = AtomicReference("Original remote title")

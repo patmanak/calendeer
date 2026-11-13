@@ -15,6 +15,7 @@ import retrofit2.http.Streaming
 internal val CREATE_PREPARATION_FORMAT = AdapterFormat("proton-calendar-create-preparation", 1)
 /** v2 carries an explicit empty personal override; historical v1 remains incompatible and paused. */
 internal val LOCAL_CREATE_PREPARATION_FORMAT = AdapterFormat("proton-calendar-local-create-preparation", 2)
+internal val PERSONAL_LOCAL_CREATE_PREPARATION_FORMAT = AdapterFormat("proton-calendar-local-create-preparation", 3)
 internal fun interface CreateContextPreparation {
     fun prepare(scope: CalendarScope, metadata: JsonObject, bootstrap: JsonObject, addresses: List<me.proton.core.user.domain.entity.UserAddress>,
         uid: String, draft: CalendarCreateDraft): ProtonPreparedCreateEvent
@@ -26,10 +27,27 @@ internal class ProtonCreatePreparationAdapter(private val sessions: CatalogSessi
     private val addresses: LocalEventAddresses, private val prepare: CreateContextPreparation,
     private val protector: EventPayloadProtector, private val submission: Boolean = false) : CalendarCreatePreparationPort {
     override val localCreateFormat: AdapterFormat? get() = if (submission) null else LOCAL_CREATE_PREPARATION_FORMAT
+    override val personalLocalCreateFormat: AdapterFormat? get() = if (submission) null else PERSONAL_LOCAL_CREATE_PREPARATION_FORMAT
     override suspend fun prepareCreate(draft: CalendarCreateDraft): PreparedCalendarCreate = try {
-        // Only the dedicated submission v2 may carry the supported explicit-empty personal profile.
-        if (draft.content.details != null && draft.content.details != EventDetails())
-            createUnavailable(CreatePreparationFailure.UNSUPPORTED)
+        val frozen = try { draft.frozen() } catch (_: Exception) { createUnavailable(CreatePreparationFailure.UNSUPPORTED) }
+        prepareFrozen(frozen)
+    } catch (cancelled: CancellationException) { throw cancelled }
+      catch (failure: CreatePreparationException) { throw failure }
+      catch (_: Exception) { createUnavailable(CreatePreparationFailure.CONTEXT) }
+
+    private suspend fun prepareFrozen(draft: CalendarCreateDraft): PreparedCalendarCreate = try {
+        val personal = ProtonCreateSubmissionCodec.personal(draft.content)
+        val sharedDraft = if (personal) {
+            try {
+                val full = ProtonCreateSubmissionCodec.freezePersonal(draft.content)
+                val shared = draft.copy(content = ProtonCreateSubmissionCodec.sharedContent(full))
+                ProtonSimpleEventSerializer.serialize(correlationUid(draft), draft.timestamp, shared.content)
+                shared
+            } catch (_: Exception) { createUnavailable(CreatePreparationFailure.UNSUPPORTED) }
+        } else {
+            if (draft.content.colorRgb != null) createUnavailable(CreatePreparationFailure.UNSUPPORTED)
+            draft
+        }
         val initial = localStorage { sessions.current() }?.takeIf { it.userId.id == draft.scope.account.value }
             ?: createUnavailable(CreatePreparationFailure.AUTHENTICATION)
         readContext { context.refresh(initial) }
@@ -41,21 +59,21 @@ internal class ProtonCreatePreparationAdapter(private val sessions: CatalogSessi
         val local = localStorage { addresses.get(initial.userId) }
         checkSession(initial)
         val uid = correlationUid(draft)
-        val prepared = prepare.prepare(draft.scope, calendar, bootstrap, local, uid, draft)
+        val prepared = prepare.prepare(draft.scope, calendar, bootstrap, local, uid, sharedDraft)
         checkSession(initial)
         val selection = if (submission) ProtonCreateContextPolicy.select(draft.scope, calendar, bootstrap, local) else null
-        val knownEmpty = draft.content.details == EventDetails()
+        val knownEmpty = !personal && draft.content.details == EventDetails()
         // Notifications are a personal JSON sibling, never part of shared signed/encrypted text.
         // Refuse an unexpected profile from the preparer rather than silently dropping its data.
-        val event = if (knownEmpty) {
+        val event = if (personal) ProtonCreateSubmissionCodec.personalEvent(prepared.event, draft.content) else if (knownEmpty) {
             val existing = prepared.event["Notifications"]
             if (existing != null && (existing !is JsonArray || existing.isNotEmpty()))
                 createUnavailable(CreatePreparationFailure.CONTEXT)
             JsonObject(prepared.event + ("Notifications" to JsonArray(emptyList())))
         } else prepared.event
         val format = if (submission) {
-            if (knownEmpty) KNOWN_EMPTY_SUBMISSION_FORMAT else CREATE_SUBMISSION_FORMAT
-        } else if (knownEmpty) LOCAL_CREATE_PREPARATION_FORMAT else CREATE_PREPARATION_FORMAT
+            if (personal) PERSONAL_CREATE_SUBMISSION_FORMAT else if (knownEmpty) KNOWN_EMPTY_SUBMISSION_FORMAT else CREATE_SUBMISSION_FORMAT
+        } else if (personal) PERSONAL_LOCAL_CREATE_PREPARATION_FORMAT else if (knownEmpty) LOCAL_CREATE_PREPARATION_FORMAT else CREATE_PREPARATION_FORMAT
         val envelope = buildJsonObject {
             put("version", format.version); put("account", draft.scope.account.value)
             put("calendar", draft.scope.calendar.value); put("generation", draft.scope.generation)
@@ -64,6 +82,7 @@ internal class ProtonCreatePreparationAdapter(private val sessions: CatalogSessi
                 if (!submission) put("knownEmptyDetails", true)
                 put("notificationPolicy", "EXPLICIT_EMPTY")
             }
+            if (personal) put("notificationPolicy", "EXPLICIT_PERSONAL")
             if (selection == null) put("event", event) else {
                 put("context", ProtonCreateSubmissionCodec.context(selection))
                 put("request", ProtonCreateSubmissionCodec.request(selection.member.string("ID"), event))

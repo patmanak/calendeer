@@ -9,6 +9,23 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class ProtonCreateSubmissionCodecTest {
+    @Test fun historicalExpectedAndCapsuleBytesRemainExactForVersionOneAndTwo() {
+        val original = CreateSubmissionFixture().draft.content
+        val shared = """{"title":"Synthetic create","description":"Synthetic description","location":"Synthetic location","type":"date","start":"2026-10-01","end":"2026-10-02"}"""
+        val empty = """{"title":"Synthetic create","description":"Synthetic description","location":"Synthetic location","knownEmptyDetails":true,"type":"date","start":"2026-10-01","end":"2026-10-02"}"""
+        for ((content, expected) in listOf(original to shared, original.copy(details = EventDetails()) to empty)) {
+            val f = CreateSubmissionFixture(content)
+            val version = if (content.details == null) 1 else 2
+            val personalPolicy = if (version == 2) "\"notificationPolicy\":\"EXPLICIT_EMPTY\"," else ""
+            val notifications = if (version == 2) ",\"Notifications\":[]" else ""
+            val capsule = """{"version":$version,"account":"synthetic-user","calendar":"synthetic-calendar","generation":1,"correlation":"synthetic-correlation","timestamp":"2026-09-29T10:00:00Z","uid":"synthetic-create@calendeer.test",${personalPolicy}"context":{"member":"synthetic-member","permissions":16,"key":"synthetic-key","signingKey":"synthetic-signing-fingerprint","passphrase":"synthetic-passphrase"},"request":{"MemberID":"synthetic-member","IsImport":0,"Events":[{"Overwrite":0,"Event":{"Permissions":1,"IsOrganizer":1,"SharedKeyPacket":"synthetic-packet","SharedEventContent":[]$notifications}}]},"expected":$expected}"""
+            assertEquals(expected, ProtonCreateSubmissionCodec.expected(content).toString())
+            assertEquals("test-sealed:$capsule", f.record.protectedPayload)
+            val historical = f.record.copy(protectedPayload = "test-sealed:$capsule")
+            assertEquals(f.draft, ProtonCreateSubmissionCodec.open(historical, f.protector).draft)
+            assertEquals("test-sealed:$capsule", historical.protectedPayload)
+        }
+    }
     @Test fun requestUsesMemberAtRootAndCreateOverwriteWithoutInventedActionOrIdentity() {
         val f = CreateSubmissionFixture()
         val request = ProtonCreateSubmissionCodec.request("synthetic-member", f.fragment)
@@ -36,7 +53,7 @@ class ProtonCreateSubmissionCodecTest {
     @Test fun oldFragmentFormatCannotBeInterpretedAsDispatchableSubmission() {
         val f = CreateSubmissionFixture()
         refused(CreatePreparationFailure.UNSUPPORTED) { ProtonCreateSubmissionCodec.open(f.record.copy(format = CREATE_PREPARATION_FORMAT), f.protector) }
-        refused(CreatePreparationFailure.UNSUPPORTED) { ProtonCreateSubmissionCodec.open(f.record.copy(format = CREATE_SUBMISSION_FORMAT.copy(version = 3)), f.protector) }
+        refused(CreatePreparationFailure.UNSUPPORTED) { ProtonCreateSubmissionCodec.open(f.record.copy(format = CREATE_SUBMISSION_FORMAT.copy(version = 99)), f.protector) }
         for (format in listOf(LOCAL_CREATE_PREPARATION_FORMAT.copy(version = 1), LOCAL_CREATE_PREPARATION_FORMAT)) {
             refused(CreatePreparationFailure.UNSUPPORTED) { ProtonCreateSubmissionCodec.open(f.record.copy(format = format),
                 object : EventPayloadProtector {

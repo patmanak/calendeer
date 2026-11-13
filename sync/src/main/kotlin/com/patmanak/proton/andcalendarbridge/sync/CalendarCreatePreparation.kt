@@ -5,6 +5,11 @@ import java.time.Instant
 /** Stable correlation and frozen timestamp must come from a future durable outgoing intent. */
 data class CalendarCreateDraft(val scope: CalendarScope, val correlation: MutationId,
     val timestamp: Instant, val content: EventContent) {
+    /** Own lists before the first suspension, including unsupported fields kept for validation. */
+    fun frozen(): CalendarCreateDraft = copy(content = content.copy(details = content.details?.let {
+        it.copy(reminders = java.util.Collections.unmodifiableList(it.reminders.toList()),
+            attendees = java.util.Collections.unmodifiableList(it.attendees.toList()))
+    }))
     override fun toString() = "CalendarCreateDraft(redacted)"
 }
 
@@ -29,5 +34,8 @@ fun interface CalendarCreatePreparationPort {
      * This capability never grants submission, personal notification support, or writable mode.
      */
     val localCreateFormat: AdapterFormat? get() = null
+    val personalLocalCreateFormat: AdapterFormat? get() = null
+    fun capturedPreparationFormat(content: EventContent): AdapterFormat? =
+        if (content.details == EventDetails() && content.colorRgb == null) localCreateFormat else personalLocalCreateFormat
     suspend fun prepareCreate(draft: CalendarCreateDraft): PreparedCalendarCreate
 }

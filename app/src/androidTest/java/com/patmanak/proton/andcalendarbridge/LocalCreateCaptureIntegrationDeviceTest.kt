@@ -28,6 +28,27 @@ import org.junit.runner.RunWith
 /** Real Native Provider + independent SQLite journals + owner; no live CREATE, import, or dispatch. */
 @RunWith(AndroidJUnit4::class)
 class LocalCreateCaptureIntegrationDeviceTest {
+    @Test fun providerCreationWithTenMinuteReminderIsRetainedCompletely() = fixture(allDay = true) {
+        val reminders = CalendarContract.Reminders.CONTENT_URI.buildUpon()
+            .appendQueryParameter(CalendarContract.CALLER_IS_SYNCADAPTER, "true")
+            .appendQueryParameter(CalendarContract.Calendars.ACCOUNT_NAME, projection.accountFor(target.account).name)
+            .appendQueryParameter(CalendarContract.Calendars.ACCOUNT_TYPE, projection.accountFor(target.account).type).build()
+        assertNotNull(context.contentResolver.insert(reminders, ContentValues().apply {
+            put(CalendarContract.Reminders.EVENT_ID, row); put(CalendarContract.Reminders.MINUTES, 10)
+            put(CalendarContract.Reminders.METHOD, CalendarContract.Reminders.METHOD_ALERT)
+        }))
+        assertEquals(LocalEditCaptureResult.RETAINED, capture())
+        assertEquals(content.copy(details = EventDetails(listOf(EventReminder(10)))), retained()!!.content)
+        assertEquals("1", field(Events.DIRTY))
+        reopen(); assertEquals(listOf(EventReminder(10)), retained()!!.content.details!!.reminders)
+    }
+    @Test fun providerCreationWithEventColorIsRetainedCompletely() = fixture(allDay = true) {
+        mutate(ContentValues().apply { put(Events.EVENT_COLOR, 0xff123456.toInt()) })
+        assertEquals(LocalEditCaptureResult.RETAINED, capture())
+        assertEquals(content.copy(colorRgb = 0x123456), retained()!!.content)
+        assertEquals("1", field(Events.DIRTY))
+        reopen(); assertEquals(0x123456, retained()!!.content.colorRgb)
+    }
     @Test fun simpleCreatedRowIsRetainedOfflineWithItsDirtyFlagAfterReopening() = fixture {
         assertEquals(LocalEditCaptureResult.RETAINED, capture())
         assertEquals(LocalCreateIntent(reservation, content), retained())

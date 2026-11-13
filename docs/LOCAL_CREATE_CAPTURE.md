@@ -22,16 +22,23 @@ Initial capture requires one bridge-owned calendar and the selected present row,
 Imported rows and rows carrying foreign synchronization metadata cannot become
 new creations. Title, description, location and supported time are retained.
 Timed events require an explicit consistent timezone and second precision;
-all-day dates use UTC with an exclusive end. Color overrides, recurrence,
-organizer/participant fields, reminders, extended properties, custom app data and
-unsupported flags are refused. This newly created content has an explicitly
-known-empty details profile; no unknown remote fields are inferred to be empty.
-Proton preparation uses a dedicated known-empty format. This is distinct from
-acceptance by the experimental submission adapter.
+all-day dates use UTC with an exclusive end. Explicit display reminders and RGB
+event colors are supported. Recurrence, organizer/participant fields, extended
+properties, custom app data and unsupported flags are refused. No unknown remote
+fields are inferred to be empty. Capture asserts reminder IDs, values and total
+count with the parent in the same native batch; acknowledgement preserves them.
+
+Personal CREATE uses preparation/submission version 3, with explicit personal
+siblings and full readback. Existing shared-only v1 and known-empty v2 capsules
+remain strict, unchanged and inspectable; UNKNOWN never regenerates or resends.
+Local content JSON v1 and its fingerprint bytes stay unchanged for known-empty
+captures. Rich content uses JSON v2 and a distinct complete fingerprint domain,
+without changing the native identity marker or database schema. The historical
+known-empty guards described below still apply to their original formats.
 
 An additional measured native-editor profile accepts the bridge's own opaque
 local organizer label, with the exact self-organizer/default guest flags and no
-participants, reminders or extended properties. This local label is not an
+participants or extended properties. This local label is not an
 external organizer or invitation. A missing end timezone uses the explicit start
 timezone only in this profile; an explicitly different end timezone is refused.
 Capture and acknowledgement assert and preserve the original native fields.
@@ -74,10 +81,10 @@ but can traverse all projected IDs for a native page; a persistent reverse index
 is still needed for large catalogs. The native query is not a guaranteed database
 row limit, even though cursor consumption and job processing are paginated.
 
-UPDATE and DELETE captures remain held locally without upload. Automatic CREATE
-supports only the qualified simple profiles above. Per-event colors, recurrence,
-participants, reminders and interactive conflict/uncertainty resolution remain
-outside this experimental capability. General bidirectional release is not yet
+UPDATE and DELETE use their separately qualified pipelines. Automatic CREATE
+supports the simple personal profiles above. Recurrence, participants and
+interactive conflict/uncertainty resolution remain outside this capability.
+General bidirectional release is not yet
 qualified, and additional system clients/OEMs require their own editor journeys.
 
 ## One-shot claim and first committed intention

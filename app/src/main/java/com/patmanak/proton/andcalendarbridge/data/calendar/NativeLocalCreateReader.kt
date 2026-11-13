@@ -19,13 +19,13 @@ internal class NativeLocalCreateReader(
     private val calendarSyncId: (CalendarScope) -> String,
     private val calendarSelection: (CalendarScope, Account) -> NativeCalendarSelection,
     private val assertion: (Uri, NativeCalendarSelection, Long) -> ContentProviderOperation,
-    private val simpleLocalOwnerPlaceholder: (ContentValues, Account) -> Boolean,
     private val readSimpleTime: (ContentValues, Boolean) -> EventTime?,
     private val requirePermissions: () -> Unit,
     private val capturedBatch: (ArrayList<ContentProviderOperation>, IntArray) -> Unit,
     private val fail: (CalendarProjectionFailure) -> Nothing,
     private val hash: (Array<out String>) -> String,
 ) {
+    private val personal = NativePersonalMetadata(resolver, syncUri, fail)
     private fun digest(vararg parts: String) = hash(parts)
     fun readLocalCreate(scope: CalendarScope, localId: LocalEventId, firstRow: Long?): OwnedLocalEditSnapshot? {
         if (firstRow != null && firstRow <= 0) return null
@@ -41,13 +41,13 @@ internal class NativeLocalCreateReader(
             Events.SYNC_DATA9, Events.SYNC_DATA10)
         val unsupported = arrayOf(Events.RRULE, Events.RDATE, Events.EXRULE, Events.EXDATE, Events.DURATION,
             Events.ORIGINAL_ID, Events.ORIGINAL_SYNC_ID, Events.ORIGINAL_INSTANCE_TIME, Events.ORIGINAL_ALL_DAY,
-            Events.ORGANIZER, Events.EVENT_COLOR, Events.EVENT_COLOR_KEY, Events.CUSTOM_APP_PACKAGE, Events.CUSTOM_APP_URI)
+            Events.ORGANIZER, Events.EVENT_COLOR_KEY, Events.CUSTOM_APP_PACKAGE, Events.CUSTOM_APP_URI)
         val emptyFlags = arrayOf(Events.HAS_ATTENDEE_DATA, Events.IS_ORGANIZER, Events.GUESTS_CAN_MODIFY,
-            Events.GUESTS_CAN_INVITE_OTHERS, Events.GUESTS_CAN_SEE_GUESTS, Events.HAS_ALARM,
+            Events.GUESTS_CAN_INVITE_OTHERS, Events.GUESTS_CAN_SEE_GUESTS,
             Events.SELF_ATTENDEE_STATUS, Events.ACCESS_LEVEL)
         val columns = arrayOf(Events._ID, Events.CALENDAR_ID, Events.DIRTY, Events.DELETED, Events.TITLE,
             Events.DESCRIPTION, Events.EVENT_LOCATION, Events.DTSTART, Events.DTEND, Events.ALL_DAY,
-            Events.EVENT_TIMEZONE, Events.EVENT_END_TIMEZONE, Events.STATUS, Events.AVAILABILITY) +
+            Events.EVENT_TIMEZONE, Events.EVENT_END_TIMEZONE, Events.STATUS, Events.AVAILABILITY, Events.EVENT_COLOR, Events.HAS_ALARM) +
             syncColumns + unsupported + emptyFlags
         val values = resolver.query(uri, columns, selection.sql, selection.args, null)?.use {
             if (it.count != 1 || !it.moveToFirst()) return null
@@ -56,7 +56,9 @@ internal class NativeLocalCreateReader(
         val row = values.getAsLong(Events._ID) ?: return null
         if (row <= 0 || values.getAsLong(Events.CALENDAR_ID) != calendar ||
             values.getAsInteger(Events.DIRTY) != 1 || values.getAsInteger(Events.DELETED) != 0) return null
-        val localOwnerPlaceholder = simpleLocalOwnerPlaceholder(values, account)
+        val localOwnerPlaceholder = personal.knownLocalPlaceholder(values, account)
+        val rawColor = values.getAsInteger(Events.EVENT_COLOR)
+        if (rawColor != null && rawColor != 0 && rawColor.ushr(24) != 0xff) return null
         if (syncColumns.any { column ->
                 if (firstRow == null && column == Events.SYNC_DATA5) values.getAsString(column) != marker
                 else values[column] != null
@@ -65,27 +67,34 @@ internal class NativeLocalCreateReader(
             values.getAsInteger(Events.STATUS) != Events.STATUS_CONFIRMED ||
             values.getAsInteger(Events.AVAILABILITY) != Events.AVAILABILITY_BUSY) return null
         val time = readSimpleTime(values, localOwnerPlaceholder) ?: return null
-        val content = EventContent(values.getAsString(Events.TITLE) ?: "", time,
+        val shared = EventContent(values.getAsString(Events.TITLE) ?: "", time,
             values.getAsString(Events.DESCRIPTION) ?: "", values.getAsString(Events.EVENT_LOCATION) ?: "",
             details = EventDetails())
+        val reminders = personal.captureReminders(account, row, shared) ?: return null
+        if (values.getAsInteger(Events.HAS_ALARM) != (if (reminders.reminders.isEmpty()) 0 else 1)) return null
+        val content = shared.copy(details = EventDetails(reminders.reminders),
+            colorRgb = rawColor?.takeUnless { it == 0 }?.and(0xffffff))
         val checks = arrayListOf(assertion(syncUri(Calendars.CONTENT_URI, account), calendarSelection(scope, account), calendar),
             ContentProviderOperation.newAssertQuery(uri).withSelection(selection.sql, selection.args)
                 .withValues(values).withExpectedCount(1).build(),
             ContentProviderOperation.newAssertQuery(uri).withSelection(markerSelection.sql, markerSelection.args)
                 .withExpectedCount(if (firstRow == null) 1 else 0).build())
-        for ((child, column) in listOf(Reminders.CONTENT_URI to Reminders.EVENT_ID,
-            Attendees.CONTENT_URI to Attendees.EVENT_ID, ExtendedProperties.CONTENT_URI to ExtendedProperties.EVENT_ID)) {
+        val expected = mutableListOf(1, 1, if (firstRow == null) 1 else 0)
+        personal.assertReminders(reminders, checks, expected)
+        for ((child, column) in listOf(Attendees.CONTENT_URI to Attendees.EVENT_ID,
+            ExtendedProperties.CONTENT_URI to ExtendedProperties.EVENT_ID)) {
             val absent = resolver.query(syncUri(child, account), arrayOf("_id"), "$column=?", arrayOf(row.toString()), null)
                 ?.use { it.count == 0 } ?: fail(CalendarProjectionFailure.PROVIDER_UNAVAILABLE)
             if (!absent) return null
             checks += ContentProviderOperation.newAssertQuery(syncUri(child, account))
                 .withSelection("$column=?", arrayOf(row.toString())).withExpectedCount(0).build()
+            expected += 0
         }
         if (firstRow != null) checks += ContentProviderOperation.newUpdate(uri)
             .withSelection(selection.sql, selection.args).withValue(Events.SYNC_DATA5, marker).withExpectedCount(1).build()
         requirePermissions()
-        capturedBatch(checks, if (firstRow == null) intArrayOf(1, 1, 1, 0, 0, 0)
-            else intArrayOf(1, 1, 0, 0, 0, 0, 1))
+        if (firstRow != null) expected += 1
+        capturedBatch(checks, expected.toIntArray())
         requirePermissions()
         return OwnedLocalEditSnapshot(calendar, row, content)
     }

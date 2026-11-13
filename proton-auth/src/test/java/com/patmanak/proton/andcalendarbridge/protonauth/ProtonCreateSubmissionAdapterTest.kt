@@ -199,15 +199,22 @@ internal class CreateSubmissionFixture(content: EventContent? = null) {
     val draft = CalendarCreateDraft(scope, MutationId("synthetic-correlation"), Instant.parse("2026-09-29T10:00:00Z"),
         content ?: EventContent("Synthetic create", EventTime.AllDay(LocalDate.parse("2026-10-01"), LocalDate.parse("2026-10-02")), "Synthetic description", "Synthetic location"))
     val uid = "synthetic-create@calendeer.test"
-    val knownEmpty = draft.content.details == EventDetails()
-    val format = CREATE_SUBMISSION_FORMAT.copy(version = if (knownEmpty) 2 else 1)
+    val personal = draft.content.details != null && (draft.content.details != EventDetails() || draft.content.colorRgb != null)
+    val knownEmpty = draft.content.details == EventDetails() && draft.content.colorRgb == null
+    val format = CREATE_SUBMISSION_FORMAT.copy(version = if (personal) 3 else if (knownEmpty) 2 else 1)
     var freshFormat = format
     var freshDraft = draft
     val context = buildJsonObject { put("member", "synthetic-member"); put("permissions", 16); put("key", "synthetic-key")
         put("signingKey", "synthetic-signing-fingerprint"); put("passphrase", "synthetic-passphrase") }
     var freshContext = context
     val fragment = buildJsonObject { put("Permissions", 1); put("IsOrganizer", 1); put("SharedKeyPacket", "synthetic-packet")
-        put("SharedEventContent", JsonArray(emptyList())); if (knownEmpty) put("Notifications", JsonArray(emptyList())) }
+        put("SharedEventContent", JsonArray(emptyList())); if (knownEmpty) put("Notifications", JsonArray(emptyList()))
+        if (personal) {
+            put("Notifications", JsonArray(draft.content.details!!.reminders.map { reminder -> buildJsonObject {
+                put("Type", 1); put("Trigger", (if (reminder.minutesBefore > 0) "-" else "") + java.time.Duration.ofMinutes(kotlin.math.abs(reminder.minutesBefore.toLong())).toString())
+            } }))
+            put("Color", draft.content.colorRgb?.let { JsonPrimitive(String.format(java.util.Locale.ROOT, "#%06x", it)) } ?: JsonNull)
+        } }
     val protector = object : EventPayloadProtector {
         override fun seal(plain: String) = "test-sealed:$plain"
         override fun open(protected: String): String { require(protected.startsWith("test-sealed:")); return protected.removePrefix("test-sealed:") }
@@ -217,6 +224,7 @@ internal class CreateSubmissionFixture(content: EventContent? = null) {
         put("version", envelopeFormat.version); put("account", scope.account.value); put("calendar", scope.calendar.value); put("generation", scope.generation)
         put("correlation", expectedDraft.correlation.value); put("timestamp", expectedDraft.timestamp.toString()); put("uid", uid)
         if (envelopeFormat.version == 2) put("notificationPolicy", "EXPLICIT_EMPTY")
+        if (envelopeFormat.version == 3) put("notificationPolicy", "EXPLICIT_PERSONAL")
         put("context", qualified); put("request", request); put("expected", ProtonCreateSubmissionCodec.expected(expectedDraft.content))
     }
     val record = CreateAttemptRecord(draft.correlation, scope, format, protector.seal(envelope().toString()))
@@ -231,7 +239,8 @@ internal class CreateSubmissionFixture(content: EventContent? = null) {
     var sendFailure: Exception? = null
     var response = """{"Code":1001,"Responses":[{"Index":0,"Response":{"Code":1000,"Event":{"ID":"synthetic-event","CalendarID":"synthetic-calendar","UID":"$uid","ModifyTime":10}}}]}"""
     val row = buildJsonObject { put("ID", "synthetic-event"); put("CalendarID", scope.calendar.value); put("UID", uid); put("ModifyTime", 10)
-        if (knownEmpty) put("Notifications", JsonArray(emptyList())) }
+        if (knownEmpty) put("Notifications", JsonArray(emptyList()))
+        if (personal) { put("Notifications", fragment.getValue("Notifications")); put("Color", fragment.getValue("Color")) } }
     var rows: List<JsonObject> = listOf(row)
     var individualRow = row
     var verified: RemoteChange.Upsert? = RemoteChange.Upsert(EventId("synthetic-event"), Revision("synthetic-revision"), draft.content)
@@ -257,7 +266,7 @@ internal class CreateSubmissionFixture(content: EventContent? = null) {
         override suspend fun bootstrap(session: CatalogSession, calendar: String): JsonObject { step("bootstrap"); return buildJsonObject {} }
     }, CreateEventVerifier { _, _, _, _, expectedUid, policy ->
         assertEquals(uid, expectedUid)
-        assertEquals(if (knownEmpty) CreatedEventReadbackPolicy.KNOWN_EMPTY_V2 else CreatedEventReadbackPolicy.SHARED_ONLY_V1, policy)
+        assertEquals(if (personal) 4 else if (knownEmpty) 2 else 1, policy.version)
         step("verify"); verified })
 }
 

@@ -22,11 +22,18 @@ interface CalendarCreateSubmissionPort {
      * Existing local preparation formats must never be converted or reinterpreted.
      */
     val knownEmptySubmissionFormat: AdapterFormat? get() = null
+    /** Separate versioned capability; historical known-empty capsules keep their original format. */
+    val personalSubmissionFormat: AdapterFormat? get() = null
+    fun capturedSubmissionFormat(content: EventContent): AdapterFormat? =
+        if (content.details == EventDetails() && content.colorRgb == null) knownEmptySubmissionFormat else personalSubmissionFormat
+    /** Inspection accepts retained formats, independently of the fresh content selector. */
+    fun supportsCapturedSubmission(format: AdapterFormat): Boolean =
+        format == knownEmptySubmissionFormat || format == personalSubmissionFormat
     suspend fun prepareSubmission(draft: CalendarCreateDraft): PreparedCalendarCreate
     suspend fun submit(record: CreateAttemptRecord, journal: CreateAttemptJournal): CreateSubmissionObservation
     suspend fun inspect(record: CreateAttemptRecord): CreateSubmissionObservation
 
-    /** Fail-closed captured path. The sealed submission MUST be known-empty and match the entire
+    /** Fail-closed captured path. The sealed submission MUST match its declared profile and entire
      * immutable captured draft before fresh preparation or inspection. Final local qualification
      * belongs to journal.claim, after the adapter's last fresh rights/key/session reads.
      * UNKNOWN is read-only even when the original Provider row has changed or disappeared.

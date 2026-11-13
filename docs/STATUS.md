@@ -60,7 +60,8 @@ Samsung/One UI is outside 0.1. Signature management remains deferred by the owne
   [Personal edits](PERSONAL_UPDATE.md), [deletion](DELETE_SUBMISSION.md).
 - Imported and transferred events also support personal reminder/color edits, including
   removal and calendar-color fallback, while retaining Proton email reminders.
-  Initial CREATE retains the known-empty profile; client journeys remain an E4 gate.
+  Initial CREATE also captures reminders/color using a separate personal-v3 preparation
+  and submission profile. Historical formats stay unchanged; client journeys remain an E4 gate.
 - UNKNOWN is inspect-only, never reset/resend. Unsupported local changes and
   conflicts retain their variants. Native permission/account/generation and consent
   are rechecked; a system sync request cannot lift a paused CREATE.

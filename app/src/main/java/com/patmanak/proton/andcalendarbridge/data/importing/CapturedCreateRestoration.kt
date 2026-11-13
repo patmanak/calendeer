@@ -48,12 +48,12 @@ internal class CapturedCreateRestoration(
             val cached = journal.capturedBinding(identity)
             if (cached == null) {
                 val inspections = port ?: return CapturedCreateBindingResult.UNRESOLVED
-                if (inspections.knownEmptySubmissionFormat != reserved.format) return CapturedCreateBindingResult.UNRESOLVED
+                if (!inspections.supportsCapturedSubmission(reserved.format)) return CapturedCreateBindingResult.UNRESOLVED
                 val observed = inspections.inspectCaptured(unknown, reserved.draft) as? CreateSubmissionObservation.Verified
                     ?: return CapturedCreateBindingResult.UNRESOLVED
                 if (!available()) return CapturedCreateBindingResult.INACTIVE
                 if (observed.attempt != identity.attempt || observed.event.content != reserved.draft.content ||
-                    inspections.knownEmptySubmissionFormat != reserved.format || currentFormat() != captured.format ||
+                    !inspections.supportsCapturedSubmission(reserved.format) || currentFormat() != captured.format ||
                     store.transaction(target) { checkpoint?.format } != captured.format ||
                     captures.readSubmission(target, localId) != submission || journal.capturedIdentity(target, attempt) != identity)
                     return CapturedCreateBindingResult.UNRESOLVED

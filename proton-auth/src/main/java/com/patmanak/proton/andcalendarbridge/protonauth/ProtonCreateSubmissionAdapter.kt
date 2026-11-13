@@ -19,6 +19,7 @@ internal class ProtonCreateSubmissionAdapter(private val preparations: CalendarC
     private val remote: CreateSubmissionRemote, private val events: EventImportRemote,
     verifier: CreateEventVerifier) : CalendarCreateSubmissionPort {
     override val knownEmptySubmissionFormat = KNOWN_EMPTY_SUBMISSION_FORMAT
+    override val personalSubmissionFormat = PERSONAL_CREATE_SUBMISSION_FORMAT
     private val readback = ProtonCreatedEventReadback(sessions, remote, events, verifier)
     override suspend fun prepareSubmission(draft: CalendarCreateDraft) = preparations.prepareCreate(draft)
 
@@ -28,7 +29,8 @@ internal class ProtonCreateSubmissionAdapter(private val preparations: CalendarC
         journal: CreateAttemptJournal): CreateSubmissionObservation = submitWithExpectation(record, journal, expected)
 
     private suspend fun submitWithExpectation(record: CreateAttemptRecord, journal: CreateAttemptJournal,
-        expected: CalendarCreateDraft?): CreateSubmissionObservation = guarded {
+        suppliedExpected: CalendarCreateDraft?): CreateSubmissionObservation = guarded {
+        val expected = suppliedExpected?.frozen()
         val stored = journal.read(record.scope, record.id) ?: createUnavailable(CreatePreparationFailure.CONTEXT)
         if (stored.format != record.format || stored.protectedPayload != record.protectedPayload)
             createUnavailable(CreatePreparationFailure.CONTEXT)
@@ -67,7 +69,8 @@ internal class ProtonCreateSubmissionAdapter(private val preparations: CalendarC
     override suspend fun inspectCaptured(record: CreateAttemptRecord, expected: CalendarCreateDraft): CreateSubmissionObservation =
         inspectWithExpectation(record, expected)
 
-    private suspend fun inspectWithExpectation(record: CreateAttemptRecord, expected: CalendarCreateDraft?): CreateSubmissionObservation = guarded {
+    private suspend fun inspectWithExpectation(record: CreateAttemptRecord, suppliedExpected: CalendarCreateDraft?): CreateSubmissionObservation = guarded {
+        val expected = suppliedExpected?.frozen()
         if (record.state != CreateAttemptState.OUTCOME_UNKNOWN) return@guarded CreateSubmissionObservation.Unknown
         val submission = ProtonCreateSubmissionCodec.open(record, protector)
         qualifyCaptured(record, submission, expected)
@@ -89,9 +92,15 @@ internal class ProtonCreateSubmissionAdapter(private val preparations: CalendarC
         CreateSubmissionObservation.Verified(CreateAttemptIdentity.of(record), canonical)
     }
     private fun qualifyCaptured(record: CreateAttemptRecord, submission: ProtonCreateSubmission, expected: CalendarCreateDraft?) {
-        if (expected != null && (record.format != KNOWN_EMPTY_SUBMISSION_FORMAT ||
-                submission.policy != CreatedEventReadbackPolicy.KNOWN_EMPTY_V2 || expected.content.details != EventDetails() ||
-                submission.draft != expected)) createUnavailable(CreatePreparationFailure.CONTEXT)
+        if (expected == null) return
+        val profile = when (record.format) {
+            KNOWN_EMPTY_SUBMISSION_FORMAT -> submission.policy == CreatedEventReadbackPolicy.KNOWN_EMPTY_V2 &&
+                expected.content.details == EventDetails() && expected.content.colorRgb == null
+            PERSONAL_CREATE_SUBMISSION_FORMAT -> submission.policy == CreatedEventReadbackPolicy.PERSONAL_CREATE_V3 &&
+                ProtonCreateSubmissionCodec.personal(expected.content) && submission.policy.acceptsExpected(expected.content)
+            else -> false
+        }
+        if (!profile || submission.draft != expected) createUnavailable(CreatePreparationFailure.CONTEXT)
     }
     private suspend fun session(scope: CalendarScope) = sessions.current()?.takeIf { it.userId.id == scope.account.value }
         ?: createUnavailable(CreatePreparationFailure.AUTHENTICATION)

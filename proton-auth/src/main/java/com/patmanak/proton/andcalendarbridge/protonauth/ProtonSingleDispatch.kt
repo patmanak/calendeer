@@ -59,7 +59,7 @@ internal class ProtonPersonalEditV2DispatchAttempt(private val url: HttpUrl, pay
 internal class ProtonSingleDispatchDenied : IOException("CREATE_SINGLE_DISPATCH_DENIED")
 
 /** Operation discrimination only; original signing, scope, rights and journal admission belong
- * to the existing preparation/submission path. The two current CREATE profiles stay compatible.
+ * to the existing preparation/submission path. Historical CREATE profiles stay compatible.
  * Keep the original bytes after qualification: no payload rewrite or preparation migration.
  */
 private fun createOnlyBytes(payload: String): ByteArray {
@@ -80,10 +80,12 @@ private fun createOnlyBytes(payload: String): ByteArray {
         val packet = event?.get("SharedKeyPacket") as? JsonPrimitive
         root?.keys == setOf("MemberID", "IsImport", "Events") && member?.isString == true && member.content.isNotBlank() &&
             number(root["IsImport"], 0) && operation?.keys == setOf("Overwrite", "Event") && number(operation["Overwrite"], 0) &&
-            event != null && (event.keys == fields || event.keys == fields + "Notifications") &&
+            event != null &&
+            ((event.keys == fields || event.keys == fields + "Notifications") &&
+                ("Notifications" !in event || (event["Notifications"] as? JsonArray)?.isEmpty() == true) ||
+                event.keys == fields + setOf("Notifications", "Color") && CreatedEventReadbackPolicy.PERSONAL_CREATE_V3.accepts(event)) &&
             number(event["Permissions"], 1) && number(event["IsOrganizer"], 1) && packet?.isString == true && packet.content.isNotBlank() &&
-            event["SharedEventContent"] is JsonArray &&
-            ("Notifications" !in event || (event["Notifications"] as? JsonArray)?.isEmpty() == true)
+            event["SharedEventContent"] is JsonArray
     } catch (_: Exception) { false }
     if (!accepted) throw ProtonSingleDispatchDenied()
     val bytes = payload.toByteArray(Charsets.UTF_8)

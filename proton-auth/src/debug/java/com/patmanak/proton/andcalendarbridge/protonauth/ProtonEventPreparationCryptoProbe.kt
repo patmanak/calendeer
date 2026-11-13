@@ -160,7 +160,9 @@ object ProtonEventPreparationCryptoProbe {
     suspend fun runKnownEmptySubmission(): String = runKnownEmpty(submission = true)
     suspend fun runKnownEmptySubmissionWithFoldedWhitespace(): String = runKnownEmpty(submission = true, foldedWhitespace = true)
     suspend fun runCapturedSubmissionReadback(): String = runKnownEmpty(submission = true, captured = true)
-    private suspend fun runKnownEmpty(submission: Boolean, foldedWhitespace: Boolean = false, captured: Boolean = false): String = withContext(Dispatchers.IO) {
+    suspend fun runPersonalSubmissionReadback(): String = runKnownEmpty(submission = true, captured = true, personal = true)
+    private suspend fun runKnownEmpty(submission: Boolean, foldedWhitespace: Boolean = false, captured: Boolean = false,
+        personal: Boolean = false): String = withContext(Dispatchers.IO) {
         var stage = "GENERATE"
         try {
             val crypto = AndroidCryptoContext()
@@ -239,8 +241,8 @@ object ProtonEventPreparationCryptoProbe {
                         resolver.prepare(actualScope, actualMetadata, actualBootstrap, local, uid, draft)
                     },
                     protector = protector, submission = submission)
-                val expectedFormat = if (submission) KNOWN_EMPTY_SUBMISSION_FORMAT else LOCAL_CREATE_PREPARATION_FORMAT
-                check(adapter.localCreateFormat == if (submission) null else expectedFormat)
+                val expectedFormat = if (personal) PERSONAL_CREATE_SUBMISSION_FORMAT else if (submission) KNOWN_EMPTY_SUBMISSION_FORMAT else LOCAL_CREATE_PREPARATION_FORMAT
+                check(adapter.localCreateFormat == if (submission) null else LOCAL_CREATE_PREPARATION_FORMAT)
                 val decoder = ProtonEventDecryptor(crypto) { listOf(address) }
                 val stamp = Instant.parse("2026-09-29T10:00:00Z")
                 val times = listOf<EventTime>(EventTime.Timed(Instant.parse("2027-03-28T00:30:00Z"),
@@ -249,7 +251,8 @@ object ProtonEventPreparationCryptoProbe {
                 for ((index, time) in times.withIndex()) {
                     val content = EventContent("Known-empty creation; café, \\" + "é".repeat(100), time,
                         if (foldedWhitespace) "x".repeat(62) + " " + "y".repeat(30) else "Description\nLigne suivante",
-                        "Lieu de test", details = EventDetails())
+                        "Lieu de test", details = EventDetails(if (personal) listOf(EventReminder(10), EventReminder(0), EventReminder(-10)) else emptyList()),
+                        colorRgb = if (personal) 0x123456 else null)
                     if (foldedWhitespace) {
                         stage = "FOLDED_WHITESPACE_FIXTURE"
                         check(ProtonSimpleEventSerializer.serialize("synthetic@calendeer.invalid", stamp, content)
@@ -263,8 +266,8 @@ object ProtonEventPreparationCryptoProbe {
                     stage = "KEYSTORE_REOPEN"
                     val reopened = ProtonEventPayloadProtector(AndroidCryptoContext().keyStoreCrypto)
                     val envelope = Json.parseToJsonElement(reopened.open(prepared.protectedPayload)) as JsonObject
-                    check(envelope.number("version") == 2L)
-                    check(envelope.string("notificationPolicy") == "EXPLICIT_EMPTY")
+                    check(envelope.number("version") == if (personal) 3L else 2L)
+                    check(envelope.string("notificationPolicy") == if (personal) "EXPLICIT_PERSONAL" else "EXPLICIT_EMPTY")
                     if (!submission) {
                         check(envelope.getValue("knownEmptyDetails").jsonPrimitive.boolean)
                         check(listOf("request", "context", "expected").none { it in envelope })
@@ -276,7 +279,7 @@ object ProtonEventPreparationCryptoProbe {
                     val event = if (submission) {
                         val decoded = ProtonCreateSubmissionCodec.open(CreateAttemptRecord(draft.correlation, scope,
                             prepared.format, prepared.protectedPayload), reopened)
-                        check(decoded.draft == draft && decoded.policy == CreatedEventReadbackPolicy.KNOWN_EMPTY_V2)
+                        check(decoded.draft == draft && decoded.policy == if (personal) CreatedEventReadbackPolicy.PERSONAL_CREATE_V3 else CreatedEventReadbackPolicy.KNOWN_EMPTY_V2)
                         check(decoded.uid == uid && decoded.context == ProtonCreateSubmissionCodec.context(
                             ProtonCreateContextPolicy.select(scope, metadata, bootstrap, listOf(address))))
                         stage = "CREATE_ONLY_PERMIT"
@@ -285,7 +288,8 @@ object ProtonEventPreparationCryptoProbe {
                     } else envelope.obj("event")
                     stage = "EXPLICIT_NOTIFICATION_OVERRIDE"
                     val notifications = event.getValue("Notifications")
-                    check(notifications is JsonArray && notifications.isEmpty())
+                    check(notifications is JsonArray && notifications.size == if (personal) 3 else 0)
+                    if (personal) check(notifications == Json.parseToJsonElement("""[{"Type":1,"Trigger":"-PT10M"},{"Type":1,"Trigger":"PT0S"},{"Type":1,"Trigger":"PT10M"}]"""))
                     val shared = event.array("SharedEventContent").map { it as JsonObject }
                     check(shared.map { it.number("Type") } == listOf(2L, 3L))
                     check(shared.all { it.string("Author").isEmpty() })
@@ -305,8 +309,9 @@ object ProtonEventPreparationCryptoProbe {
                         put("SharedEvents", JsonArray(shared.map { JsonObject(it + ("Author" to JsonPrimitive(email))) }))
                         put("CalendarEvents", JsonArray(emptyList())); put("AttendeesEvents", JsonArray(emptyList()))
                         put("Notifications", notifications)
+                        if (personal) put("Color", event.getValue("Color"))
                     }
-                    check(row["Notifications"] is JsonArray && (row.getValue("Notifications") as JsonArray).isEmpty())
+                    check(row["Notifications"] is JsonArray)
                     stage = "KNOWN_EMPTY_ROUND_TRIP"
                     val actual = decoder.decrypt(user, calendar, bootstrap, listOf(row)).single().content
                     check(actual.copy(description = actual.description.replace("\r\n", "\n")) == content)
@@ -348,7 +353,7 @@ object ProtonEventPreparationCryptoProbe {
                             error("Readback must not scan event windows")
                     }
                     val readback = ProtonCreatedEventReadback(CatalogSessionSource { session }, readRemote, readEvents, decoder::decodeCreated)
-                    val strict = CreatedEventReadbackPolicy.KNOWN_EMPTY_V2
+                    val strict = if (personal) CreatedEventReadbackPolicy.PERSONAL_CREATE_V3 else CreatedEventReadbackPolicy.KNOWN_EMPTY_V2
                     val observed = readback.inspect(session, scope, uid, content, strict)?.content
                         ?: error("Known-empty readback was not verified")
                     check(observed.copy(description = observed.description.replace("\r\n", "\n")) == content)
@@ -395,9 +400,16 @@ object ProtonEventPreparationCryptoProbe {
                     check((emailRow.getValue("Notifications") as JsonArray).isNotEmpty())
                     check(decoder.decrypt(user, calendar, bootstrap, listOf(emailRow)).single().content.details == EventDetails())
                     stage = "STRICT_PERSONAL_REFUSAL"
+                    val changedReminder = JsonObject(row + ("Notifications" to JsonArray(listOf(buildJsonObject { put("Type", 1); put("Trigger", "-PT15M") }))))
+                    if (personal) {
+                        readRow = changedReminder
+                        check(readback.inspect(session, scope, uid, content, strict) == null)
+                        readRow = JsonObject(row + ("Color" to JsonPrimitive("#654321")))
+                        check(readback.inspect(session, scope, uid, content, strict) == null)
+                    }
                     val invalidOverrides = listOf(JsonObject(row - "Notifications"), JsonObject(row + ("Notifications" to JsonNull)),
-                        emailRow, JsonObject(row + ("Notifications" to JsonPrimitive("[]"))),
-                        JsonObject(row + ("Notifications" to JsonArray(listOf(buildJsonObject { put("Type", 1); put("Trigger", "-PT15M") })))))
+                        emailRow, JsonObject(row + ("Notifications" to JsonPrimitive("[]")))) +
+                        if (personal) emptyList() else listOf(changedReminder)
                     val noKeyDecoder = ProtonEventDecryptor(crypto) { error("Invalid override must be refused before local keys") }
                     val beforeBootstrap = readBootstrapCalls
                     for (variant in invalidOverrides) {

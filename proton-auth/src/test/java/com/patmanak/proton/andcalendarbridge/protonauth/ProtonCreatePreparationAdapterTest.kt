@@ -23,6 +23,7 @@ class ProtonCreatePreparationAdapterTest {
     private var sessionReads = 0
     private var sessionFailureAt = -1
     private var preparedEvent = buildJsonObject { put("fixture", "synthetic") }
+    private var preparedDraft: CalendarCreateDraft? = null
     private fun adapter(submission: Boolean = false) = ProtonCreatePreparationAdapter({
         sessionReads++
         if (sessionReads == sessionFailureAt) throw java.io.IOException("private session storage detail")
@@ -35,7 +36,7 @@ class ProtonCreatePreparationAdapterTest {
                 steps += "bootstrap"; after("bootstrap"); return buildJsonObject {}
             }
         }, LocalEventAddresses { steps += "addresses"; after("addresses"); emptyList() },
-        CreateContextPreparation { _, _, _, _, _, _ -> steps += "prepare"; after("prepare"); ProtonPreparedCreateEvent(preparedEvent) },
+        CreateContextPreparation { _, _, _, _, _, value -> preparedDraft = value; steps += "prepare"; after("prepare"); ProtonPreparedCreateEvent(preparedEvent) },
         object : EventPayloadProtector {
             override fun seal(plain: String): String { steps += "seal"; sealed = Json.parseToJsonElement(plain) as JsonObject; after("seal"); return "synthetic-sealed" }
             override fun open(protected: String): String = error("Preparation must not reopen")
@@ -145,17 +146,43 @@ class ProtonCreatePreparationAdapterTest {
         adapter().prepareCreate(draft.copy(content = draft.content.copy(details = EventDetails())))
         assertEquals(preparedEvent, sealed!!.obj("event"))
     }
-    @Test fun submissionCannotAcceptNonemptyDetailsBeforeAnyReads() = runTest {
-        for (details in listOf(EventDetails(reminders = listOf(EventReminder(10))))) {
+    @Test fun submissionCannotAcceptParticipantsBeforeAnyReads() = runTest {
+        for (details in listOf(EventDetails(organizer = EventPerson("synthetic@calendeer.invalid")))) {
             refused(CreatePreparationFailure.UNSUPPORTED) { adapter(submission = true).prepareCreate(draft.copy(content = draft.content.copy(details = details))) }
             assertEquals(0, sessionReads); assertTrue(steps.isEmpty()); assertNull(sealed)
         }
     }
-    @Test fun nonemptyLocalDetailsCannotBeReducedToThePreparationSubset() = runTest {
+    @Test fun participantsCannotBeReducedToThePreparationSubset() = runTest {
         refused(CreatePreparationFailure.UNSUPPORTED) {
-            adapter().prepareCreate(draft.copy(content = draft.content.copy(details = EventDetails(reminders = listOf(EventReminder(10))))))
+            adapter().prepareCreate(draft.copy(content = draft.content.copy(details = EventDetails(organizer = EventPerson("synthetic@calendeer.invalid")))))
         }
         assertEquals(0, sessionReads); assertTrue(steps.isEmpty()); assertNull(sealed)
+    }
+    @Test fun richPersonalCreateUsesNewFormatAndKeepsMetadataOutsideSharedCrypto() = runTest {
+        val content = draft.content.copy(details = EventDetails(listOf(EventReminder(10), EventReminder(0), EventReminder(-5))), colorRgb = 0x123456)
+        val receipt = adapter().prepareCreate(draft.copy(content = content))
+        assertEquals(AdapterFormat("proton-calendar-local-create-preparation", 3), receipt.format)
+        assertEquals(EventDetails(), preparedDraft!!.content.details)
+        assertNull(preparedDraft!!.content.colorRgb)
+        assertEquals(content.title, preparedDraft!!.content.title)
+        assertEquals("EXPLICIT_PERSONAL", sealed!!.string("notificationPolicy"))
+        assertEquals(Json.parseToJsonElement("""[{"Type":1,"Trigger":"-PT10M"},{"Type":1,"Trigger":"PT0S"},{"Type":1,"Trigger":"PT5M"}]"""), sealed!!.obj("event")["Notifications"])
+        assertEquals(JsonPrimitive("#123456"), sealed!!.obj("event")["Color"])
+        assertFalse(sealed!!.containsKey("knownEmptyDetails"))
+    }
+    @Test fun colorOnlyCreateStillUsesPersonalVersionThreeAndExplicitEmptyReminders() = runTest {
+        val receipt = adapter().prepareCreate(draft.copy(content = draft.content.copy(details = EventDetails(), colorRgb = 0)))
+        assertEquals(3, receipt.format.version)
+        assertEquals(JsonArray(emptyList()), sealed!!.obj("event")["Notifications"])
+        assertEquals(JsonPrimitive("#000000"), sealed!!.obj("event")["Color"])
+    }
+    @Test fun callerReminderMutationDuringContextReadsCannotChangeTheFrozenPreparation() = runTest {
+        val reminders = mutableListOf(EventReminder(10))
+        val content = draft.content.copy(details = EventDetails(reminders))
+        after = { if (it == "refresh") { reminders.clear(); reminders += EventReminder(30) } }
+        adapter().prepareCreate(draft.copy(content = content))
+        assertEquals(Json.parseToJsonElement("""[{"Type":1,"Trigger":"-PT10M"}]"""), sealed!!.obj("event")["Notifications"])
+        assertEquals(listOf(EventReminder(30)), reminders)
     }
     private suspend fun refused(reason: CreatePreparationFailure, action: suspend () -> Any) {
         try { action(); fail("Preparation must not escape failed admission") }

@@ -103,7 +103,7 @@ internal class ImportCoordinatorCapturedCreates(
             val captured = submission.reservation.intent.reservation
             if (captured.scope != target || captured.localId != localId || captured.id != id ||
                 submission.reservation.attempt != attempt || captured.format != remote.format ||
-                port.knownEmptySubmissionFormat != submission.reservation.format)
+                !port.supportsCapturedSubmission(submission.reservation.format))
                 return@withLock LocalCreateSubmissionResult.UNQUALIFIED
             val wanted = CapturedCreateDispatchIdentity.of(submission)
             val record = journal.read(target, attempt)
@@ -114,7 +114,7 @@ internal class ImportCoordinatorCapturedCreates(
                 if (selected?.enabled != true || !selected.available ||
                     store.transaction(target) { checkpoint?.format } != captured.format ||
                     captures.readSubmission(target, localId) != submission ||
-                    port.knownEmptySubmissionFormat != submission.reservation.format) return false
+                    !port.supportsCapturedSubmission(submission.reservation.format)) return false
                 val row = projection.inspectStampedSimpleCreate(target, localId)
                 return row?.content == submission.reservation.intent.content && active() &&
                     captures.readSubmission(target, localId) == submission &&
@@ -164,7 +164,7 @@ internal class ImportCoordinatorCapturedCreates(
             val reserved = submission.reservation
             val captured = reserved.intent.reservation
             if (captured.scope != target || captured.localId != localId || captured.id != id || reserved.attempt != attempt ||
-                port.knownEmptySubmissionFormat != reserved.format) return@withLock CreateSubmissionObservation.Unknown
+                !port.supportsCapturedSubmission(reserved.format)) return@withLock CreateSubmissionObservation.Unknown
             val wanted = CapturedCreateDispatchIdentity.of(submission)
             val draft = reserved.draft
             val prepared = CreateAttemptRecord(attempt, target, reserved.format, submission.protectedPayload)
@@ -190,7 +190,7 @@ internal class ImportCoordinatorCapturedCreates(
             // Called from inside Proton's authentication mutex at final claim. Never call
             // currentAccount/isCurrent/qualifyCreate here; the adapter owns fresh session checks.
             suspend fun qualifyLocal(): Boolean {
-                if (!hasLease() || port.knownEmptySubmissionFormat != reserved.format || remote.format != captured.format) return false
+                if (!hasLease() || !port.supportsCapturedSubmission(reserved.format) || remote.format != captured.format) return false
                 suspend fun localStateMatches(): Boolean {
                     val selected = store.selections(target.account).singleOrNull { it.scope == target }
                     return selected?.enabled == true && selected.available &&
@@ -200,7 +200,7 @@ internal class ImportCoordinatorCapturedCreates(
                 if (!localStateMatches()) return false
                 val row = projection.inspectStampedSimpleCreate(target, localId)
                 return row?.content == draft.content && localStateMatches() && hasLease() &&
-                    port.knownEmptySubmissionFormat == reserved.format && remote.format == captured.format
+                    port.supportsCapturedSubmission(reserved.format) && remote.format == captured.format
             }
             if (!qualifyLocal() || journal.pauseReason(target, attempt) != null) return@withLock CreateSubmissionObservation.Unknown
             journal.admitDispatch = { it == target && hasLease() }
