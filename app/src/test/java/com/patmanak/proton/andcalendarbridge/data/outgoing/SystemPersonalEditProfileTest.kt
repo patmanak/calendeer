@@ -6,6 +6,21 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class SystemPersonalEditProfileTest {
+    @Test fun canonicalLineEndingOnlyIntentCannotUseThePersonalRoute() {
+        val f = TextOperationsFixture()
+        val base = f.base.copy(title = "Before\nTitle")
+        val intent = f.intent.copy(base = f.intent.base.copy(content = base), content = base.copy(title = "Before\r\nTitle"))
+        PersonalEditCandidate(intent)
+        assertFalse("Canonical no-ops need a visible held outcome, not a route which will never accept them",
+            SystemPersonalEditProfile.accepts(intent))
+    }
+    @Test fun retiringCanonicalNoopsDoesNotChangeTheHistoricalNativeReader() {
+        val f = TextOperationsFixture()
+        val base = f.base.copy(description = "Before\nNotes")
+        val intent = f.intent.copy(base = f.intent.base.copy(content = base), content = base.copy(description = "Before\r\nNotes"))
+        assertFalse(SystemPersonalEditProfile.accepts(intent))
+        assertTrue(SystemPersonalEditProfile.requiresExtendedSnapshot(intent))
+    }
     @Test fun simpleTitleTextAndTimeChangesCanUsePersonalV2() {
         val text = TextOperationsFixture()
         val time = TimeOperationsFixture()

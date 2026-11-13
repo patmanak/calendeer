@@ -12,84 +12,23 @@ import kotlinx.coroutines.ensureActive
 class CoordinatorSystemTimeOperations(
     private val owners: SystemTimeLocalOwner,
     private val journal: TimeUpdateRecoveryJournal,
-    private val capsules: CalendarLocalTimePreparationPort,
     private val submissions: CalendarTimeUpdateSubmissionPort,
-    private val discoverLocal: suspend (RetainedLocalChangeQuery) -> RetainedLocalChangeListing,
     private val evidenceAdmission: (CalendarScope) -> ((CalendarScope) -> Boolean) = { target -> { it == target } },
-    private val existingOnly: Boolean = false,
 ) : SystemTitleUpdateOperations {
     constructor(imports: ImportCoordinator, journal: TimeUpdateRecoveryJournal,
-        capsules: CalendarLocalTimePreparationPort, submissions: CalendarTimeUpdateSubmissionPort, existingOnly: Boolean = false) :
-        this(imports.localTimeOwners, journal, capsules, submissions, imports::retainedLocalChanges,
-            imports::systemTimeEvidenceAdmission, existingOnly)
+        submissions: CalendarTimeUpdateSubmissionPort) :
+        this(imports.localTimeOwners, journal, submissions, imports::systemTimeEvidenceAdmission)
 
-    override suspend fun discover(query: RetainedLocalChangeQuery) = checked { discoverLocal(query) }
+    override suspend fun discover(query: RetainedLocalChangeQuery): RetainedLocalChangeListing {
+        currentCoroutineContext().ensureActive()
+        return RetainedLocalChangeListing.Available(RetainedLocalChangePage.fromOrderedMetadata(query, emptyList()))
+    }
 
     override suspend fun process(scope: CalendarScope, reference: RetainedLocalChangeRef, attempt: MutationId,
         timestamp: Instant, admission: (CalendarScope) -> Boolean, proofRetained: () -> Unit): Boolean {
         currentCoroutineContext().ensureActive()
-        if (reference.kind != MutationKind.UPDATE || !admission(scope)) return false
-        // The generic traversal's random candidate is deliberately not a durable time request ID.
-        // A time ID derives from the first locally retained complete capsule and target format.
-        var open = true
-        var closed = false
-        val lease: (CalendarScope) -> Boolean = { requested ->
-            if (!open || closed || requested != scope) false else admission(requested).also { if (!it) closed = true }
-        }
-        val retainedEvidence = evidenceAdmission(scope)
-        val evidence: (CalendarScope) -> Boolean = { requested -> open && requested == scope && retainedEvidence(requested) }
-        suspend fun active(): Boolean {
-            currentCoroutineContext().ensureActive()
-            val allowed = lease(scope)
-            currentCoroutineContext().ensureActive()
-            return allowed
-        }
-        try {
-            if (!active()) return false
-            val source = checked { owners.observe(scope, reference.eventId, reference.mutationId, lease) } ?: return false
-            if (!active() || source.intent.scope != scope || source.intent.id != reference.mutationId ||
-                source.intent.base.eventId != reference.eventId || !SystemTimeEditProfile.accepts(source.intent)) return false
-            val prepared = source.preparation ?: run {
-                if (existingOnly) return false
-                val fresh = checked { capsules.prepareLocalTime(source.intent, timestamp, lease) } ?: return false
-                if (!active() || fresh.intent != source.intent || fresh.timestamp != timestamp) return false
-                checked { owners.retain(fresh, lease) } ?: return false
-            }
-            if (!active() || prepared.intent != source.intent || !checked { owners.qualify(prepared, lease) }) return false
-            val format = submissions.timeUpdateFormat ?: return false
-            val id = TimeUpdateAttemptIdentity.requestId(prepared, format)
-            val existing = checked { journal.read(scope, id, lease) }
-            if (!active()) return false
-            val record = if (existing != null) {
-                if (!samePreparation(existing.preparation, prepared) || existing.format != format) return false
-                existing
-            } else {
-                val candidate = checked { submissions.prepareSubmission(id, prepared, lease) } ?: return false
-                if (!active() || candidate.id != id || candidate.scope != scope || candidate.format != format ||
-                    candidate.state != TimeUpdateAttemptState.PREPARED || candidate.protectedEvidence != null ||
-                    !samePreparation(candidate.preparation, prepared) || !checked { owners.qualify(prepared, lease) }) return false
-                checked { journal.remember(candidate, lease) }
-                if (!active()) return false
-                // A concurrent call can retain the first wire. Never replace it with our new ciphertext.
-                checked { journal.read(scope, id, lease) }?.takeIf { it.id == id && it.format == format &&
-                    samePreparation(it.preparation, prepared) } ?: return false
-            }
-            if (!active()) return false
-            if (record.state == TimeUpdateAttemptState.OUTCOME_UNKNOWN) return false // inspection has its own traversal
-            val observed = checked { owners.submit(record, journal, submissions, lease, evidence) }
-            currentCoroutineContext().ensureActive()
-            if (observed is TimeUpdateSubmissionObservation.Verified && evidence(scope)) {
-                val result = TimeUpdateVerifiedResult.of(record.copy(state = TimeUpdateAttemptState.OUTCOME_UNKNOWN), observed)
-                if (checked { journal.retainVerified(result, evidence) }) {
-                    proofRetained()
-                    if (active() && checked { owners.acknowledge(result, journal, lease) })
-                        checked { owners.complete(result, journal, lease) }
-                }
-            }
-            return false
-        } catch (cancelled: CancellationException) { throw cancelled }
-          catch (_: Exception) { currentCoroutineContext().ensureActive(); return true }
-          finally { open = false; closed = true }
+        // Retired writers never prepare, claim or resend. Historical inspection/ACK stays below.
+        return false
     }
 
     override suspend fun inspect(query: TitleUpdateWorkQuery, admission: (CalendarScope) -> Boolean,

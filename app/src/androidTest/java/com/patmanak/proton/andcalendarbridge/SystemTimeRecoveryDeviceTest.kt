@@ -156,7 +156,7 @@ class SystemTimeRecoveryDeviceTest {
 
         fun rebuild(reopenJournal: Boolean = false) {
             if (reopenJournal) { attempts.close(); attempts = TitleUpdateAttemptStore(context, names[1]) }
-            val operations = CoordinatorSystemTimeOperations(imports, journal, ports, ports)
+            val operations = CoordinatorSystemTimeOperations(imports, journal, ports)
             val recovery = SystemTitleRecoveryController(cursors, { error("Guarded recovery is required") }, pageSize = 1,
                 guardedRecover = { query, active ->
                     queries += query

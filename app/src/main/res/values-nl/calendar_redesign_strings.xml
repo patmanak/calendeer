@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="calendar_legacy_unsupported">Sommige bewaarde wijzigingen kunnen niet worden verzonden. Ze blijven bewaard. Onzekere verzoeken worden alleen gecontroleerd en nooit opnieuw verzonden.</string>
     <string name="calendar_dashboard_intro">Kies welke agenda’s in Android verschijnen.</string>
     <string name="calendar_dashboard_sync">Nu synchroniseren</string>
     <string name="calendar_dashboard_refresh">Agendalijst vernieuwen</string>

@@ -182,6 +182,7 @@ internal class ImportCoordinatorTitleWrites(
                 val intent = store.localEdit(target, event) ?: return@withLock LocalTitleAttemptPreparation.Unqualified
                 if (intent.id != owner || !systemTitleSource(intent, active)) return@withLock LocalTitleAttemptPreparation.Unsupported
                 val retained = store.localEditPreparation(target, event)
+                if (!active()) return@withLock LocalTitleAttemptPreparation.Inactive
                 if (existingOnly && retained == null) return@withLock LocalTitleAttemptPreparation.Unsupported
                 val actualTime = retained?.timestamp ?: timestamp
                 val result = prepareLocalTitleLocked(target, event, owner, actualTime, localPort, expected, policy,

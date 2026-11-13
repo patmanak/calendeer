@@ -22,7 +22,7 @@ import org.junit.Test
 
 /** Actual reopened SQLite/coordinator; controlled native ports, no HTTP or system UI. */
 class PersonalAcknowledgementRecoveryCoordinatorDeviceTest {
-    private class Fixture(val simpleTitle: Boolean = false) {
+    private class Fixture(val simpleTitle: Boolean = false, val bare: Boolean = false) {
         val context = ApplicationProvider.getApplicationContext<Context>()
         private val token = UUID.randomUUID().toString()
         private val name = "personal-ack-recovery-$token.db"
@@ -46,6 +46,7 @@ class PersonalAcknowledgementRecoveryCoordinatorDeviceTest {
         var general = true
         var nativeContent = intent.content
         var personalSourceAllowed = true
+        var personalReadFails = false
         var legacySourceAllowed = false
         var legacyReads = 0
         var applied = false
@@ -65,6 +66,7 @@ class PersonalAcknowledgementRecoveryCoordinatorDeviceTest {
             override val personalUpdateAcknowledgementRecoveryProtocol get() = recoveryProtocol
             override suspend fun captureOwnedPersonalEdit(scope: CalendarScope, base: RemoteChange.Upsert): OwnedLocalEditSnapshot? {
                 check(admitOperation()); assertEquals(this@Fixture.scope, scope); assertEquals(this@Fixture.base, base)
+                if (personalReadFails) throw java.io.IOException("Controlled native read failure")
                 return if (personalSourceAllowed) OwnedLocalEditSnapshot(7, 51, nativeContent) else null
             }
             override suspend fun captureOwnedSimpleEdit(scope: CalendarScope, base: RemoteChange.Upsert): OwnedLocalEditSnapshot? {
@@ -104,11 +106,13 @@ class PersonalAcknowledgementRecoveryCoordinatorDeviceTest {
             store.transaction(scope) { checkpoint = PageCheckpoint(scope, format); putRemote(base); putProjection(ProjectionIntent(scope, base)) }
             assertEquals(1, store.acknowledge(ProjectionIntent(scope, base)))
             assertEquals(intent, store.captureLocalEdit(intent))
-            assertEquals(PersonalPreparationAdmission.STORED, store.retainCurrentPersonalPreparation(preparation))
-            assertTrue(journal.remember(prepared) { true }); assertTrue(journal.claim(prepared) { true })
-            assertTrue(journal.retainVerified(result) { true })
-            reservation = checkNotNull(store.preparePersonalUpdateAcknowledgement(result))
-            assertTrue(reservation.fresh)
+            if (!bare) {
+                assertEquals(PersonalPreparationAdmission.STORED, store.retainCurrentPersonalPreparation(preparation))
+                assertTrue(journal.remember(prepared) { true }); assertTrue(journal.claim(prepared) { true })
+                assertTrue(journal.retainVerified(result) { true })
+                reservation = checkNotNull(store.preparePersonalUpdateAcknowledgement(result))
+                assertTrue(reservation.fresh)
+            }
             store.close(); store = ImportStore(context, name)
             coordinator = ImportCoordinator(context, store, remote, projection, jobs, scheduler,
                 systemCreatesEnabled = { general }, systemTitlesEnabled = { simpleTitle },
@@ -117,16 +121,52 @@ class PersonalAcknowledgementRecoveryCoordinatorDeviceTest {
             withTimeout(10_000) { while (networkSchedules.get() == 0) delay(10) }
         }
         suspend fun recover() = coordinator.personalOwners.acknowledge(result, journal, coordinator.systemPersonalProofAdmission(scope))
+        suspend fun reportBareFailure() = coordinator.retainUnsupportedBarePersonalUpdate(scope,
+            RetainedLocalChangeRef(base.eventId, intent.id, MutationKind.UPDATE, LocalEditState.PAUSED),
+            coordinator.systemPersonalRunAdmission(scope), coordinator.systemPersonalConsentAdmission(scope))
+        suspend fun inspectOwner() = ImportStore(context, name).use { it.localEdit(scope, base.eventId) }
         suspend fun close() {
             if (::coordinator.isInitialized) coordinator.authenticationChanged(false)
             jobs.coroutineContext[Job]!!.cancelAndJoin()
             store.close(); shared.close(); context.deleteDatabase(name); context.deleteDatabase(journalName)
         }
     }
-    private fun fixture(simpleTitle: Boolean = false, block: suspend Fixture.() -> Unit) = runBlocking {
+    private fun fixture(simpleTitle: Boolean = false, bare: Boolean = false, block: suspend Fixture.() -> Unit) = runBlocking {
         assumeTrue(InstrumentationRegistry.getArguments().getString("providerFixture") == "true")
-        val fixture = Fixture(simpleTitle)
+        val fixture = Fixture(simpleTitle, bare)
         try { fixture.seed(); fixture.block() } finally { fixture.close() }
+    }
+
+    @Test fun bareSourceRefusalIsPersistentButNeverUsesLegacyOrChangesTheCapturedVariant() = fixture(simpleTitle = true, bare = true) {
+        personalSourceAllowed = false; legacySourceAllowed = true
+        assertTrue(reportBareFailure())
+        assertEquals(intent.copy(state = LocalEditState.CONFLICT), inspectOwner())
+        assertTrue(store.hasUnsupportedLegacyUpdates(scope))
+        assertEquals(0, legacyReads); assertEquals(0, nativeWrites)
+        assertNull(journal.read(scope, prepared.id) { true })
+    }
+
+    @Test fun recoveredNativeQualificationIsRetriedWithoutAnnotatingTheBareIntent() = fixture(simpleTitle = true, bare = true) {
+        assertFalse(reportBareFailure())
+        assertEquals(intent, inspectOwner())
+        assertFalse(store.hasUnsupportedLegacyUpdates(scope))
+        assertEquals(0, nativeWrites)
+    }
+
+    @Test fun nativeIoFailureCannotBecomeAPermanentUnsupportedConflict() = fixture(simpleTitle = true, bare = true) {
+        personalReadFails = true
+        assertFalse(reportBareFailure())
+        assertEquals(intent, inspectOwner())
+        assertFalse(store.hasUnsupportedLegacyUpdates(scope))
+        assertEquals(0, nativeWrites)
+    }
+
+    @Test fun frozenUnknownOwnerCannotBeAnnotatedOrResetByBareTriage() = fixture(simpleTitle = true) {
+        personalSourceAllowed = false
+        assertFalse(reportBareFailure())
+        assertEquals(intent, inspectOwner())
+        assertEquals(unknown, journal.read(scope, prepared.id) { true })
+        assertEquals(0, nativeWrites)
     }
     @Test fun simplePersonalOwnerUsesPersonalNativeReaderForQualificationAndAck() = fixture(simpleTitle = true) {
         assertNotNull(coordinator.personalOwners.observe(scope, base.eventId, intent.id,

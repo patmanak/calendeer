@@ -43,6 +43,15 @@ enum class PersonalPreparationAdmission { ELIGIBLE, STORED, HISTORICAL, INACTIVE
 class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
     SQLiteOpenHelper(context, name, null, 23), SyncStore {
     private val lock = Mutex()
+    /** Derived read-only status; never changes an intent, capsule or acknowledgement. */
+    suspend fun hasUnsupportedLegacyUpdates(scope: CalendarScope): Boolean {
+        val operation = currentCoroutineContext()
+        return access { db ->
+            val legacy = com.patmanak.proton.andcalendarbridge.data.outgoing.LegacyUpdateCompatibility
+            legacy.hasRetainedCapsules(db, scope, operation::ensureActive) || legacy.hasUnsupportedIntent(db, key(scope),
+                { event -> ImportStoreLocalPreparations.readLocalPreparationOwner(db, scope, event) }, operation::ensureActive)
+        }
+    }
     private val localMutations = ImportStoreLocalMutationSql(::conflicts)
     private val calendar = ImportStoreCalendarSql(localMutations)
     private val projection = ImportStoreProjectionSql(localMutations) { target -> admitTransaction(target) }
@@ -361,6 +370,9 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
     }
     suspend fun localEdit(scope: CalendarScope, eventId: EventId): LocalEditIntent? = access { db ->
         projection.localEdit(db, scope, eventId)
+    }
+    suspend fun retainUnsupportedBareUpdate(intent: LocalEditIntent): Boolean = guardedEditMutation(intent.scope) { db ->
+        localMutations.retainUnsupportedBareUpdate(db, intent)
     }
     /** Bounded metadata index only. No captured contents, preparation payloads or write authority. */
     suspend fun retainedLocalChanges(query: RetainedLocalChangeQuery): RetainedLocalChangePage =

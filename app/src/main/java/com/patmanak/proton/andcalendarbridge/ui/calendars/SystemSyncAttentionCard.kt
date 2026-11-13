@@ -39,9 +39,9 @@ internal fun SystemSyncAttentionCard(imports: ImportUiState, state: SystemCreate
                 .testTag(SystemSyncAttentionTags.WHY)) { Text(toggleLabel) }
             if (expanded) Column(Modifier.testTag(SystemSyncAttentionTags.DETAILS), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(stringResource(R.string.sync_attention_explanation), style = MaterialTheme.typography.bodyMedium)
-                Text(stringResource(if (state.textSupportAvailable) R.string.system_text_overview else R.string.import_read_only),
+                Text(stringResource(R.string.calendar_mode_description),
                     style = MaterialTheme.typography.bodySmall)
-                Text(stringResource(if (state.textSupportAvailable) R.string.system_text_limits else R.string.system_title_limits),
+                Text(stringResource(R.string.import_field_limits),
                     style = MaterialTheme.typography.bodySmall)
             }
         }

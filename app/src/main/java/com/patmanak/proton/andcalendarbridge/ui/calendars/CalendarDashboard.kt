@@ -180,6 +180,9 @@ private fun CalendarCard(
             Text(stringResource(if (createEnabled) R.string.calendar_mode_editable else R.string.calendar_dashboard_read_only),
                 style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
             // Unresolved work stays visible even when options are closed or the calendar is paused.
+            if (selection.scope in creates.legacyUnsupported) Text(stringResource(R.string.calendar_legacy_unsupported),
+                color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.testTag("legacy-update-unsupported").semantics { liveRegion = LiveRegionMode.Polite })
             if (selection.deferredCount > 0) PendingText(
                 stringResource(R.string.calendar_dashboard_held, selection.deferredCount), CalendarImportTags.DEFERRED)
             if (selection.historyGap) PendingText(stringResource(R.string.calendar_dashboard_history), CalendarImportTags.HISTORY_GAP)
@@ -283,4 +286,15 @@ internal object CalendarDashboardTags {
     const val OPTIONS = "calendar_options"
     const val HELP = "calendar_sync_help"
     const val OUTGOING_ERROR = "calendar_outgoing_error"
+}
+
+@Composable
+internal fun ModeToggle(label: String, checked: Boolean, enabled: Boolean, tag: String,
+    onCheckedChange: (Boolean) -> Unit) {
+    Row(Modifier.fillMaxWidth().heightIn(min = 48.dp)
+        .toggleable(checked, enabled = enabled, role = Role.Switch, onValueChange = onCheckedChange).testTag(tag),
+        horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(label, Modifier.weight(1f))
+        Switch(checked, onCheckedChange = null, enabled = enabled)
+    }
 }

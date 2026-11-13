@@ -20,7 +20,7 @@ Scheduling follows the DAVx5 model: the thin calendar SyncAdapter accepts Androi
 change/manual triggers, enqueues expedited WorkManager work and waits at most ten
 minutes without cancelling it. Android always receives success; WorkManager owns
 retry and the app owns actual status. The Android 14+ pending latch is cleared.
-One network-constrained WorkManager periodic pull runs at 15 / 30 / 60 default /
+One network-constrained WorkManager periodic synchronization runs at 15 / 30 / 60 default /
 120 / 360 minutes; native Android periodic syncs are removed. Android automatic
 switches control push only. App actions are manual and bypass those switches;
 periodic sending precedes receiving when push is allowed; receiving continues
@@ -52,8 +52,9 @@ Samsung/One UI is outside 0.1. Signature management remains deferred by the owne
 - Simple CREATE, personal-v2 combined title/text/date edits and DELETE use retained
   intent identity, guarded preparation/submission/readback and exact native/SQL
   acknowledgement. Timed/all-day events and qualified zone changes are supported.
-  Fresh eligible title/text/date edits use personal-v2. Legacy paths only finish
-  retained capsules and historical recovery; their removal remains pending.
+  Fresh eligible title/text/date edits use personal-v2. Legacy writers are retired;
+  retained unsupported work is visible, while historical UNKNOWN inspection and
+  proven acknowledgements keep their original identities and formats.
   [Personal edits](PERSONAL_UPDATE.md), [deletion](DELETE_SUBMISSION.md).
 - UNKNOWN is inspect-only, never reset/resend. Unsupported local changes and
   conflicts retain their variants. Native permission/account/generation and consent
@@ -76,8 +77,8 @@ isolated fresh password login were tested. Remote CI, canonical release/update
 installation, other ABIs/OEMs and signing remain release gates.
 [Distribution](LICENSING.md), [build security](BUILD_SECURITY.md).
 
-Still required: legacy-family migration, milestone qualification, explicit handling
-of unresolved historical associations/conflicts, remote CI and signed packaging.
+Still required: V05 editing, logout confirmation, milestone qualification,
+unresolved historical associations/conflicts, remote CI and signed packaging.
 Trustworthy comparable modification timestamps remain unavailable for general
 last-writer-wins. GET then PUT is not atomic; concurrent changes can be overwritten.
 [Conditional writes](research/CONDITIONAL_WRITES.md).

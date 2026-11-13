@@ -58,6 +58,12 @@ class TitleUpdateAttemptStore(context: Context, name: String = "calendar-title-u
     override val completionProtocol = 1
     @Volatile var admitDispatch: (CalendarScope) -> Boolean = { false }
 
+    /** Metadata only, including older generations whose immutable ownership still blocks this calendar. */
+    suspend fun hasUnsupportedLegacyUpdates(scope: CalendarScope): Boolean = access { db ->
+        val operation = currentCoroutineContext()
+        LegacyUpdateCompatibility.hasPendingRequests(db, scope, operation::ensureActive)
+    }
+
     /** Metadata discovery only. A non-null completion is excluded without qualifying its proof;
      * admission still validates the full event history independently, across generations.
      */

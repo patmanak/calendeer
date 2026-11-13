@@ -72,6 +72,20 @@ class CalendarDashboardUiDeviceTest {
         }
     }
 
+    @Test fun unsupportedLegacyWorkStaysVisibleWithoutOptionsPermissionOrEnabledSync() {
+        creates.value = creates.value.copy(legacyUnsupported = setOf(selection.scope))
+        start()
+        compose.onNodeWithTag("legacy-update-unsupported").assertExists()
+        compose.onNodeWithText(compose.activity.getString(R.string.calendar_legacy_unsupported)).assertExists()
+        compose.onNodeWithTag("system-create-toggle").assertDoesNotExist()
+        compose.runOnIdle { imports.value = imports.value.copy(hasPermission = false,
+            selections = listOf(selection.copy(enabled = false, available = false))) }
+        compose.onNodeWithTag("legacy-update-unsupported").assertExists()
+        compose.runOnIdle { assertEquals(emptyList<Boolean>(), modeChanges); assertEquals(0, syncs) }
+        compose.runOnIdle { imports.value = imports.value.copy(authenticated = false) }
+        compose.onNodeWithTag("legacy-update-unsupported").assertDoesNotExist()
+    }
+
     @Test fun pendingAndConflictingChangesStayVisibleWithOptionsClosedAndAfterPause() {
         imports.value = imports.value.copy(selections = listOf(selection.copy(deferredCount = 2, unverifiedCount = 1,
             historyGap = true, pendingProjectionCount = 3, retainedLocalChangeCount = 2, localConflictCount = 1)))
@@ -171,7 +185,7 @@ class CalendarDashboardUiDeviceTest {
         compose.onNodeWithTag(SystemSyncAttentionTags.DETAILS).assertExists()
         compose.onNode(hasText(compose.activity.getString(R.string.sync_attention_explanation)) and
             hasAnyAncestor(hasTestTag(SystemSyncAttentionTags.DETAILS))).assertExists()
-        compose.onNode(hasText(compose.activity.getString(R.string.system_text_limits)) and
+        compose.onNode(hasText(compose.activity.getString(R.string.import_field_limits)) and
             hasAnyAncestor(hasTestTag(SystemSyncAttentionTags.DETAILS))).assertExists()
         compose.runOnIdle {
             assertEquals(0, syncs); assertEquals(0, refreshes); assertEquals(0, permissions); assertEquals(0, settings)
@@ -219,22 +233,6 @@ class CalendarDashboardUiDeviceTest {
         compose.runOnIdle { creates.value = creates.value.copy(failed = true); imports.value = imports.value.copy(authenticated = false) }
         compose.onNodeWithTag(CalendarDashboardTags.OUTGOING_ERROR).assertDoesNotExist()
         compose.runOnIdle { assertEquals(0, syncs) }
-    }
-
-    @Test fun legacyPanelWithoutRetryCallbackOffersExplanationWithoutAnOrphanAction() {
-        creates.value = creates.value.copy(failed = true)
-        compose.setContent {
-            MaterialTheme {
-                SystemCreatePanel(imports.value, creates.value, onMode = { _, enabled -> modeChanges += enabled },
-                    modifier = Modifier.verticalScroll(rememberScrollState()))
-            }
-        }
-        compose.onNodeWithTag(SystemSyncAttentionTags.RETRY).assertDoesNotExist()
-        compose.onNodeWithTag(SystemSyncAttentionTags.WHY).performScrollTo().performClick()
-        compose.onNodeWithTag(SystemSyncAttentionTags.DETAILS).assertExists()
-        compose.onNode(hasText(compose.activity.getString(R.string.system_title_limits)) and
-            hasAnyAncestor(hasTestTag(SystemSyncAttentionTags.DETAILS))).assertExists()
-        compose.runOnIdle { assertEquals(emptyList<Boolean>(), modeChanges); assertEquals(0, syncs) }
     }
 
     @Test fun discoveryWithoutAPersistedScopeDoesNotInventAnActionableSelection() {

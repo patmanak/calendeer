@@ -69,12 +69,12 @@ class BridgeApplication : Application() {
             AndroidTitleRecoveryCursorStore(this, "calendar-title-owner-cursors"),
             AndroidTitleRecoveryCursorStore(this, "calendar-title-inspection-cursors"),
             CoordinatorSystemTitleOperations(imports, titleAttempts,
-                ProtonAuthentication.localEditPreparations(this), ProtonAuthentication.titleUpdates(this), existingOnly = true),
+                ProtonAuthentication.titleUpdates(this)),
             { target -> titleRecovery.reset(target) })
     }
     private val textOperations: CoordinatorSystemTextOperations by lazy {
         CoordinatorSystemTextOperations(imports, titleAttempts.textJournal,
-            ProtonAuthentication.localTextPreparations(this), ProtonAuthentication.textUpdates(this), existingOnly = true)
+            ProtonAuthentication.textUpdates(this))
     }
     private val textRecovery by lazy {
         SystemTitleRecoveryController(AndroidTitleRecoveryCursorStore(this, "calendar-text-recovery-cursors"),
@@ -91,7 +91,7 @@ class BridgeApplication : Application() {
     }
     private val timeOperations: CoordinatorSystemTimeOperations by lazy {
         CoordinatorSystemTimeOperations(imports, titleAttempts.timeJournal,
-            ProtonAuthentication.localTimePreparations(this), ProtonAuthentication.timeUpdates(this), existingOnly = true)
+            ProtonAuthentication.timeUpdates(this))
     }
     private val timeRecovery by lazy {
         SystemTitleRecoveryController(AndroidTitleRecoveryCursorStore(this, "calendar-time-recovery-cursors"),
@@ -149,7 +149,9 @@ class BridgeApplication : Application() {
         timeUpdates = if (timeSynchronizationQualified) timeUpdates else null,
         personalRecovery = personalRecovery, personalUpdates = personalUpdates,
         deleteRecovery = if (deleteSynchronizationQualified) deleteRecovery else null,
-        deleteUpdates = if (deleteSynchronizationQualified) deleteUpdates else null) }
+        deleteUpdates = if (deleteSynchronizationQualified) deleteUpdates else null,
+        legacyUnsupported = { target -> imports.store.hasUnsupportedLegacyUpdates(target) ||
+            titleAttempts.hasUnsupportedLegacyUpdates(target) }) }
 
     val imports: ImportCoordinator by lazy {
         ImportCoordinator(this, ImportStore(this), ProtonAuthentication.events(this),

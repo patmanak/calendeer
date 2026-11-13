@@ -17,11 +17,13 @@ class CoordinatorSystemPersonalOperations(
     private val discoverLocal: suspend (RetainedLocalChangeQuery) -> RetainedLocalChangeListing,
     private val evidenceAdmission: (CalendarScope) -> ((CalendarScope) -> Boolean) = { target -> { it == target } },
     private val consentAdmission: (CalendarScope) -> ((LocalEditIntent) -> Boolean) = { target -> { it.scope == target } },
+    private val retainUnsupported: suspend (CalendarScope, RetainedLocalChangeRef, (CalendarScope) -> Boolean,
+        (LocalEditIntent) -> Boolean) -> Boolean = { _, _, _, _ -> false },
 ) : SystemTitleUpdateOperations {
     constructor(imports: ImportCoordinator, journal: PersonalUpdateRecoveryJournal,
         capsules: CalendarPersonalPreparationPort, submissions: CalendarPersonalUpdatePort) :
         this(imports.personalOwners, journal, capsules, submissions, imports::retainedLocalChanges,
-            imports::systemPersonalEvidenceAdmission, imports::systemPersonalConsentAdmission)
+            imports::systemPersonalEvidenceAdmission, imports::systemPersonalConsentAdmission, imports::retainUnsupportedBarePersonalUpdate)
 
     override suspend fun discover(query: RetainedLocalChangeQuery) = checked { discoverLocal(query) }
 
@@ -49,7 +51,13 @@ class CoordinatorSystemPersonalOperations(
         }
         try {
             if (!active()) return false
-            val source = checked { owners.observe(scope, reference.eventId, reference.mutationId, lease) } ?: return false
+            val source = checked { owners.observe(scope, reference.eventId, reference.mutationId, lease) }
+            if (source == null) {
+                if (!active()) return false
+                // Persist a provenance conflict only for a bare exact owner; otherwise retry visibly.
+                val reported = checked { retainUnsupported(scope, reference, lease, consent) }
+                return !reported && active()
+            }
             if (!active() || source.intent.scope != scope || source.intent.id != reference.mutationId ||
                 source.intent.base.eventId != reference.eventId || !SystemPersonalEditProfile.accepts(source.intent)) return false
             requiredIntent = source.intent

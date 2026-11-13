@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="calendar_legacy_unsupported">Niektóre zachowane zmiany nie są obsługiwane do wysyłania. Pozostają zapisane. Niepewne żądania są tylko sprawdzane, nigdy wysyłane ponownie.</string>
     <string name="calendar_dashboard_intro">Wybierz kalendarze widoczne w Androidzie.</string>
     <string name="calendar_dashboard_sync">Synchronizuj teraz</string>
     <string name="calendar_dashboard_refresh">Odśwież listę kalendarzy</string>

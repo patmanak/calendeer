@@ -6,13 +6,15 @@ import com.patmanak.proton.andcalendarbridge.sync.*
 /** All supported fresh edits use personal-v2. Existing legacy capsules keep their frozen route. */
 object SystemPersonalEditProfile {
     fun accepts(intent: LocalEditIntent): Boolean = try {
-        PersonalEditCandidate(intent)
-        true
+        val candidate = PersonalEditCandidate(intent)
+        !PersonalUpdateContentPolicy.sameSubmittedContent(candidate.intent.base.content, candidate.intent.content)
     } catch (_: Exception) { false }
 
     /** Preserve the historical native-source reader independently of new request routing. */
-    fun requiresExtendedSnapshot(intent: LocalEditIntent): Boolean = accepts(intent) &&
+    fun requiresExtendedSnapshot(intent: LocalEditIntent): Boolean = historicalCandidate(intent) &&
         !SystemTimeEditProfile.accepts(intent) && !SystemTextEditProfile.accepts(intent) && !legacyTitle(intent)
+    private fun historicalCandidate(intent: LocalEditIntent): Boolean = try { PersonalEditCandidate(intent); true }
+        catch (_: Exception) { false }
     private fun legacyTitle(intent: LocalEditIntent): Boolean {
         val before = intent.base.content
         return before.details == EventDetails() && before.colorRgb == null && before.recurrence == null &&

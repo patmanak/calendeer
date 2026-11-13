@@ -9,18 +9,78 @@ import android.provider.CalendarContract.*
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.platform.app.InstrumentationRegistry
 import com.patmanak.proton.andcalendarbridge.data.calendar.*
+import com.patmanak.proton.andcalendarbridge.data.importing.*
 import com.patmanak.proton.andcalendarbridge.sync.*
 import com.patmanak.proton.andcalendarbridge.sync.catalog.CalendarSummary
 import java.time.Instant
 import java.time.ZoneId
 import java.util.UUID
-import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.*
 import org.junit.Assert.*
 import org.junit.Assume.assumeTrue
 import org.junit.Test
 
 /** Isolated Provider fixtures; never accesses a Proton session or existing calendars. */
 class PersonalNativeProfileDeviceTest {
+    @Test fun bareLegacyTitleWithUnqualifiedPersonalMarkerBecomesVisibleAndKeepsItsVariant() =
+        fixture(richMetadata = false, simpleTitle = true) {
+            val token = UUID.randomUUID().toString()
+            val name = "bare-provenance-$token.db"
+            val preferences = java.util.Collections.synchronizedSet(mutableSetOf<String>())
+            val wrapped = object : ContextWrapper(context) {
+                override fun getApplicationContext(): Context = this
+                override fun getSharedPreferences(key: String, mode: Int): SharedPreferences {
+                    val scoped = "bare-provenance-$token-$key"; preferences.add(scoped)
+                    return context.getSharedPreferences(scoped, mode)
+                }
+            }
+            val store = ImportStore(wrapped, name)
+            val jobs = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+            val remote = object : ReadOnlyCalendarRemote {
+                override val format = this@fixture.format
+                override suspend fun currentAccount() = scope.account
+                override suspend fun fetch(request: PageRequest): RemotePage = error("No service IO in provenance fixture")
+                override suspend fun dispatch(mutation: Mutation): DispatchResult = error("No dispatch in provenance fixture")
+            }
+            val scheduler = object : ImportScheduler {
+                override fun cancel() = Unit
+                override fun requestLocal() = Unit
+                override fun requestNetwork() = Unit
+                override fun continueWork(network: Boolean) = Unit
+            }
+            val owner = ImportCoordinator(wrapped, store, remote, projection, jobs, scheduler,
+                systemCreatesEnabled = { true }, systemTitlesEnabled = { true }, systemTextsEnabled = { true }, systemTimesEnabled = { true })
+            try {
+                store.remember(scope.account, listOf(CalendarSummary(scope.calendar, "Synthetic provenance fixture")))
+                store.setEnabled(scope, true)
+                store.transaction(scope) { checkpoint = PageCheckpoint(scope, format); putRemote(base); putProjection(ProjectionIntent(scope, base)) }
+                assertEquals(1, store.acknowledge(ProjectionIntent(scope, base)))
+                assertEquals(intent, store.captureLocalEdit(intent))
+                mutate(ContentValues().apply { put(Events.SYNC_DATA8, "synthetic-unqualified-marker") })
+                val inspection = AndroidCalendarProjection(context)
+                assertNotNull(inspection.captureOwnedSimpleEdit(scope, base))
+                assertNull(inspection.captureOwnedPersonalEdit(scope, base))
+                owner.authenticationChanged(true)
+                withTimeout(10_000) { while (!owner.state.value.selectionsLoaded) delay(10) }
+                assertFalse(store.hasUnsupportedLegacyUpdates(scope))
+                val run = owner.systemPersonalRunAdmission(scope)
+                assertNull(owner.personalOwners.observe(scope, base.eventId, intent.id, run))
+                val reference = RetainedLocalChangeRef(base.eventId, intent.id, MutationKind.UPDATE, LocalEditState.PAUSED)
+                assertTrue(owner.retainUnsupportedBarePersonalUpdate(scope, reference, run, owner.systemPersonalConsentAdmission(scope)))
+                assertTrue(store.hasUnsupportedLegacyUpdates(scope))
+                ImportStore(wrapped, name).use { reopened ->
+                    assertEquals(intent.copy(state = LocalEditState.CONFLICT), reopened.localEdit(scope, base.eventId))
+                    assertTrue(reopened.hasUnsupportedLegacyUpdates(scope))
+                    assertNull(reopened.personalEditPreparation(scope, base.eventId))
+                }
+                assertEquals(intent.content.title, field(Events.TITLE)); assertEquals("1", field(Events.DIRTY))
+                assertEquals("synthetic-unqualified-marker", field(Events.SYNC_DATA8))
+            } finally {
+                owner.authenticationChanged(false); jobs.coroutineContext[Job]!!.cancelAndJoin()
+                store.close(); context.deleteDatabase(name)
+                preferences.toList().forEach { context.deleteSharedPreferences(it) }
+            }
+        }
     @Test fun personalAllDayAcceptsFixedUtcEndAliasesWithoutChangingRawZonesOrLegacyCapture() {
         for (zone in listOf("Z", "Etc/UTC", "GMT")) fixture {
             mutate(ContentValues().apply { put(Events.EVENT_END_TIMEZONE, zone) })
@@ -157,7 +217,7 @@ class PersonalNativeProfileDeviceTest {
         assertEquals("Personal\r\nedit", field(Events.TITLE)); assertEquals(1, reminders().size)
     }
 
-    private class Fixture(val context: Context, richMetadata: Boolean = true) {
+    private class Fixture(val context: Context, richMetadata: Boolean = true, val simpleTitle: Boolean = false) {
         val scope = CalendarScope(AccountId("personal-native-${UUID.randomUUID()}"), CalendarId("fixture"), 0)
         val projection = AndroidCalendarProjection(context)
         val format = AdapterFormat("synthetic-personal-native", 1)
@@ -165,8 +225,9 @@ class PersonalNativeProfileDeviceTest {
             Instant.parse("2030-05-01T10:00:00Z"), ZoneId.of("Europe/Paris")), colorRgb = if (richMetadata) 0x123456 else null,
             details = EventDetails(reminders = if (richMetadata) listOf(EventReminder(10)) else emptyList()))
         val base = RemoteChange.Upsert(EventId("synthetic-event"), Revision("old"), original)
-        val intent = LocalEditIntent(MutationId("local"), scope, format, base, original.copy(title = "Personal\r\nedit",
-            description = "New detail", location = "New place", time = EventTime.AllDay(java.time.LocalDate.of(2030, 5, 2), java.time.LocalDate.of(2030, 5, 4))))
+        val intent = LocalEditIntent(MutationId("local"), scope, format, base, if (simpleTitle) original.copy(title = "Personal\r\nedit") else
+            original.copy(title = "Personal\r\nedit", description = "New detail", location = "New place",
+                time = EventTime.AllDay(java.time.LocalDate.of(2030, 5, 2), java.time.LocalDate.of(2030, 5, 4))))
         val observed = base.copy(revision = Revision("new"), content = intent.content.copy(title = "Personal\nedit"))
         val receipt = PersonalUpdateAcknowledgementReceipt(PersonalUpdateAttemptIdentity(scope, MutationId("attempt"), intent.id,
             base.eventId, base.revision, format, format, "a".repeat(64), "b".repeat(64)), intent,
@@ -186,20 +247,22 @@ class PersonalNativeProfileDeviceTest {
             mutate(ContentValues().apply {
                 put(Events.TITLE, intent.content.title); put(Events.DESCRIPTION, intent.content.description)
                 put(Events.EVENT_LOCATION, intent.content.location); put(Events.DIRTY, 1)
-                put(Events.ALL_DAY, 1); put(Events.EVENT_TIMEZONE, "UTC"); put(Events.EVENT_END_TIMEZONE, "UTC")
-                val time = intent.content.time as EventTime.AllDay
-                put(Events.DTSTART, time.start.atStartOfDay(java.time.ZoneOffset.UTC).toInstant().toEpochMilli())
-                put(Events.DTEND, time.endExclusive.atStartOfDay(java.time.ZoneOffset.UTC).toInstant().toEpochMilli())
+                if (!simpleTitle) {
+                    put(Events.ALL_DAY, 1); put(Events.EVENT_TIMEZONE, "UTC"); put(Events.EVENT_END_TIMEZONE, "UTC")
+                    val time = intent.content.time as EventTime.AllDay
+                    put(Events.DTSTART, time.start.atStartOfDay(java.time.ZoneOffset.UTC).toInstant().toEpochMilli())
+                    put(Events.DTEND, time.endExclusive.atStartOfDay(java.time.ZoneOffset.UTC).toInstant().toEpochMilli())
+                }
             })
         }
         suspend fun close() {
-            projection.removeOwnedCalendar(scope)
+            AndroidCalendarProjection(context).removeOwnedCalendar(scope)
             AccountManager.get(context).removeAccountExplicitly(projection.accountFor(scope.account))
         }
     }
-    private fun fixture(richMetadata: Boolean = true, block: suspend Fixture.() -> Unit) = runBlocking {
+    private fun fixture(richMetadata: Boolean = true, simpleTitle: Boolean = false, block: suspend Fixture.() -> Unit) = runBlocking {
         assumeTrue(InstrumentationRegistry.getArguments().getString("providerFixture") == "true")
-        val fixture = Fixture(ApplicationProvider.getApplicationContext(), richMetadata)
+        val fixture = Fixture(ApplicationProvider.getApplicationContext(), richMetadata, simpleTitle)
         assumeTrue(fixture.projection.hasPermissions())
         try { fixture.seed(); fixture.block() } finally { fixture.close() }
     }

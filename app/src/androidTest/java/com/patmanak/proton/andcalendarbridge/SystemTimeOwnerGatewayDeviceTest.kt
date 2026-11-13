@@ -200,7 +200,7 @@ class SystemTimeOwnerGatewayDeviceTest {
             assertTrue(journal.retainVerified(result, coordinator.systemTimeEvidenceAdmission(target)))
             return result
         }
-        fun operations(port: Port) = CoordinatorSystemTimeOperations(coordinator, journal, port, port)
+        fun operations(port: Port) = CoordinatorSystemTimeOperations(coordinator, journal, port)
         suspend fun close() {
             accountHook = {}; coordinator.authenticationChanged(false); jobs.coroutineContext.job.cancelAndJoin()
             attempts.close(); store.close(); captures.close(); creates.close(); names.forEach(context::deleteDatabase)
@@ -394,7 +394,7 @@ class SystemTimeOwnerGatewayDeviceTest {
         val port = Port(this)
         port.makeCapsule = { value, stamp -> capsule(value.copy(base = value.base.copy(revision = Revision("substituted-original"))), stamp) }
         var proofs = 0
-        assertFalse(operations(port).process(target, RetainedLocalChangeRef(base.eventId, intent.id, MutationKind.UPDATE, LocalEditState.PAUSED),
+        assertFalse(com.patmanak.proton.andcalendarbridge.data.outgoing.LegacyTimeFixtureOperations(coordinator, journal, port, port).process(target, RetainedLocalChangeRef(base.eventId, intent.id, MutationKind.UPDATE, LocalEditState.PAUSED),
             MutationId("unused-traversal-id"), timestamp, coordinator.systemTimeRunAdmission(target)) { proofs++ })
         assertEquals(1, port.preparations); assertEquals(0, port.wires); assertEquals(0, port.sends); assertEquals(0, proofs)
         assertFalse(port.savedPreparation!!(target))
@@ -410,7 +410,7 @@ class SystemTimeOwnerGatewayDeviceTest {
 
     @Test fun operationsComposePreparedWireVerifiedResultNativeReceiptRestorationAndCompletion() = fixture(seedCapsule = false, seedAttempt = false) {
         val port = Port(this); var proofs = 0
-        assertFalse(operations(port).process(target, RetainedLocalChangeRef(base.eventId, intent.id, MutationKind.UPDATE, LocalEditState.PAUSED),
+        assertFalse(com.patmanak.proton.andcalendarbridge.data.outgoing.LegacyTimeFixtureOperations(coordinator, journal, port, port).process(target, RetainedLocalChangeRef(base.eventId, intent.id, MutationKind.UPDATE, LocalEditState.PAUSED),
             MutationId("unused-traversal-id"), timestamp, coordinator.systemTimeRunAdmission(target)) { proofs++ })
         assertEquals(1, proofs); assertEquals(1, port.preparations); assertEquals(1, port.wires); assertEquals(1, port.sends)
         assertFalse(port.savedPreparation!!(target)); assertFalse(port.savedWire!!(target)); assertFalse(port.savedSending!!(target))

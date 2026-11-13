@@ -2,9 +2,10 @@
 
 Basic bidirectional event management includes title, description and location.
 The internal `ProtonSharedTextPatcher` prepares changes to these three text
-properties without rebuilding the original iCalendar document. Production
-submission remains title-only: this primitive does not enable description or
-location uploads. See the [current title path](TITLE_UPDATE_SUBMISSION.md).
+properties without rebuilding the original iCalendar document. The primitive is used by
+[personal-v2](PERSONAL_UPDATE.md), which qualifies and submits the complete supported
+change. Title-only legacy submission is retired; its strict stored formats remain
+readable for [compatibility recovery](TITLE_UPDATE_SUBMISSION.md).
 
 ## Selected properties and original data
 

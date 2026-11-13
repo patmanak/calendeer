@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="calendar_legacy_unsupported">Einige gespeicherte Änderungen werden beim Senden nicht unterstützt. Sie bleiben erhalten. Ungewisse Anfragen werden nur geprüft und nie erneut gesendet.</string>
     <string name="calendar_dashboard_intro">Wähle die Kalender aus, die in Android erscheinen sollen.</string>
     <string name="calendar_dashboard_sync">Jetzt synchronisieren</string>
     <string name="calendar_dashboard_refresh">Kalenderliste aktualisieren</string>

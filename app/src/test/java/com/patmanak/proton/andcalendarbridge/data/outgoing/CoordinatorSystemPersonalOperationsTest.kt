@@ -12,6 +12,26 @@ import org.junit.Test
 
 /** Host orchestration contracts only; no SQLite, Provider, crypto or service qualification. */
 class CoordinatorSystemPersonalOperationsTest {
+    @Test fun bareSourceRefusalIsReportedUnderTheOriginalLeasesWithoutPreparation() = runBlocking {
+        val f = PersonalOperationsFixture()
+        f.observedIntent = f.intent.copy(state = LocalEditState.CONFLICT)
+        var reports = 0
+        f.unsupportedHook = { reference, admit, consent ->
+            reports++; assertEquals(f.reference, reference)
+            assertTrue(admit(f.scope)); assertTrue(consent(f.intent)); true
+        }
+        assertFalse(f.process()); assertEquals(1, reports)
+        assertEquals(listOf("observe"), f.calls); assertNull(f.saved)
+    }
+
+    @Test fun unreportedTransientSourceFailureRequestsRetryThenPersonalCanComplete() = runBlocking {
+        val f = PersonalOperationsFixture()
+        f.observedIntent = f.intent.copy(state = LocalEditState.CONFLICT)
+        assertTrue(f.process()); assertNull(f.saved)
+        f.observedIntent = f.intent
+        assertFalse(f.process()); assertNotNull(f.completion)
+        assertEquals(1, f.calls.count { it == "submit" })
+    }
     @Test fun permanentPreparationRefusalHoldsWithoutSchedulingNetworkBackoff() = runBlocking {
         for (reason in listOf(LocalEditPreparationFailure.UNSUPPORTED, LocalEditPreparationFailure.CONFLICT,
             LocalEditPreparationFailure.PERMISSION, LocalEditPreparationFailure.AUTHENTICATION, LocalEditPreparationFailure.NOT_FOUND)) {
@@ -274,6 +294,7 @@ internal class PersonalOperationsFixture(allDay: Boolean = false) {
     var sessionOpen = true
     var fieldsAllowed = true
     var observedIntent = intent
+    var unsupportedHook: (suspend (RetainedLocalChangeRef, (CalendarScope) -> Boolean, (LocalEditIntent) -> Boolean) -> Boolean)? = null
     var retained: PersonalEditPreparation? = null
     var saved: PersonalUpdateAttemptRecord? = null
     var submitted: PersonalUpdateAttemptRecord? = null
@@ -430,7 +451,8 @@ internal class PersonalOperationsFixture(allDay: Boolean = false) {
                 open && requested == target
             }
             lease
-        }, consentAdmission = { target -> { intent -> fieldsAllowed && intent.scope == target } })
+        }, consentAdmission = { target -> { intent -> fieldsAllowed && intent.scope == target } },
+        retainUnsupported = { _, reference, admit, consent -> unsupportedHook?.invoke(reference, admit, consent) ?: false })
     suspend fun process(timestamp: Instant = stamp, candidate: MutationId = MutationId("random-traversal-candidate")): Boolean =
         operations.process(scope, reference, candidate, timestamp, { it == scope && allowed }) { calls += "wake" }
 }

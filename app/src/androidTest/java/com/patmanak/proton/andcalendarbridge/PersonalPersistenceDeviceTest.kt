@@ -25,6 +25,150 @@ import org.junit.runner.RunWith
 /** Opt-in isolated SQLite fixtures. Applied witnesses here qualify SQL only, never native ACK. */
 @RunWith(AndroidJUnit4::class)
 class PersonalPersistenceDeviceTest {
+    @Test fun bareEligibleIntentsStayEligibleAndUnsupportedDatesAreFoundBeyondTheFirstPage() = importFixture { store, _ ->
+        for (index in 0..29) {
+            val local = ordinary("eligible-%02d".format(index))
+            seed(store, local.base); assertEquals(local, store.captureLocalEdit(local))
+        }
+        assertFalse(store.hasUnsupportedLegacyUpdates(scope))
+        val old = ordinary("zz-unsupported")
+        val ambiguous = old.base.content.copy(time = EventTime.Timed(Instant.parse("2030-10-27T00:30:00Z"),
+            Instant.parse("2030-10-27T02:30:00Z"), ZoneId.of("Europe/Paris")))
+        val held = old.copy(base = old.base.copy(content = ambiguous), content = ambiguous.copy(title = "Changed"))
+        seed(store, held.base); assertEquals(held, store.captureLocalEdit(held))
+        val before = snapshot(store.readableDatabase, tables(store.readableDatabase))
+        assertTrue(store.hasUnsupportedLegacyUpdates(scope))
+        assertEquals(before, snapshot(store.readableDatabase, tables(store.readableDatabase)))
+    }
+
+    @Test fun bareCanonicalLineEndingOnlyChangesHaveAnExplicitUnsupportedOutcome() = importFixture { store, _ ->
+        val old = ordinary("line-ending-only")
+        val original = old.base.copy(content = old.base.content.copy(title = "Before\nTitle"))
+        val local = old.copy(base = original, content = original.content.copy(title = "Before\r\nTitle"))
+        PersonalEditCandidate(local)
+        seed(store, original); assertEquals(local, store.captureLocalEdit(local))
+        assertEquals(PersonalPreparationAdmission.UNQUALIFIED, store.assessPersonalPreparation(local))
+        assertTrue(store.hasUnsupportedLegacyUpdates(scope))
+        assertEquals(local, store.localEdit(scope, local.base.eventId))
+    }
+    @Test fun bareLegacyReservationIsVisibleAcrossGenerationsAndReadOnlyAfterReopen() = journalFixture { store, name ->
+        assertFalse(store.hasUnsupportedLegacyUpdates(scope))
+        val work = title(ordinary("bare-reservation"))
+        val reserved = TitleUpdatePreparationReservation.of(work)
+        assertEquals(reserved, store.reservePreparation(reserved, allow))
+        val before = snapshot(store.readableDatabase, tables(store.readableDatabase))
+        assertTrue(store.hasUnsupportedLegacyUpdates(scope))
+        assertTrue(store.hasUnsupportedLegacyUpdates(scope.copy(generation = 1)))
+        assertFalse(store.hasUnsupportedLegacyUpdates(scope.copy(account = AccountId("other-account"))))
+        assertFalse(store.hasUnsupportedLegacyUpdates(scope.copy(calendar = CalendarId("other-calendar"))))
+        assertEquals(before, snapshot(store.readableDatabase, tables(store.readableDatabase)))
+        store.close()
+        TitleUpdateAttemptStore(context, name).use { reopened ->
+            assertTrue(reopened.hasUnsupportedLegacyUpdates(scope))
+            assertEquals(reserved, reopened.readPreparationReservation(scope, work.preparation.intent.base.eventId))
+            assertEquals(before, snapshot(reopened.readableDatabase, tables(reopened.readableDatabase)))
+        }
+    }
+
+    @Test fun preparedAndUnknownLegacyFamiliesStayVisibleWithoutChangingTheirWire() {
+        for (family in listOf("title", "text", "time")) for (unknown in listOf(false, true)) journalFixture { store, name ->
+            val local = ordinary("held-$family")
+            store.admitDispatch = { it == scope }
+            when (family) {
+                "title" -> { val work = title(local); store.remember(work); if (unknown) assertTrue(store.claim(work)) }
+                "text" -> { val work = text(local); assertTrue(store.textJournal.remember(work, allow));
+                    if (unknown) assertTrue(store.textJournal.claim(work, allow)) }
+                "time" -> { val work = temporal(local); assertTrue(store.timeJournal.remember(work, allow));
+                    if (unknown) assertTrue(store.timeJournal.claim(work, allow)) }
+            }
+            val before = snapshot(store.readableDatabase, tables(store.readableDatabase))
+            assertTrue(store.hasUnsupportedLegacyUpdates(scope))
+            assertEquals(before, snapshot(store.readableDatabase, tables(store.readableDatabase)))
+            store.close()
+            TitleUpdateAttemptStore(context, name).use { reopened ->
+                assertTrue(reopened.hasUnsupportedLegacyUpdates(scope))
+                assertEquals(before, snapshot(reopened.readableDatabase, tables(reopened.readableDatabase)))
+            }
+        }
+    }
+
+    @Test fun oldCapsulesAreReportedEvenWithoutAWireAndNeverChangedByDiscovery() {
+        for (family in listOf("title", "text", "time")) importFixture { store, _ ->
+            val local = ordinary("held-capsule-$family")
+            val frozen = when (family) {
+                "text" -> text(local).preparation.intent
+                "time" -> temporal(local).preparation.intent
+                else -> local
+            }
+            seed(store, frozen.base); assertEquals(frozen, store.captureLocalEdit(frozen))
+            when (family) {
+                "title" -> assertTrue(store.retainLocalEditPreparation(title(local).preparation))
+                "text" -> assertEquals(LocalTextPreparationAdmission.STORED,
+                    store.retainCurrentLocalTextPreparation(text(local).preparation))
+                "time" -> assertEquals(LocalTimePreparationAdmission.STORED,
+                    store.retainCurrentLocalTimePreparation(temporal(local).preparation))
+            }
+            val before = snapshot(store.readableDatabase, tables(store.readableDatabase))
+            assertTrue(com.patmanak.proton.andcalendarbridge.data.outgoing.LegacyUpdateCompatibility
+                .hasRetainedCapsules(store.readableDatabase, scope) {})
+            assertEquals(before, snapshot(store.readableDatabase, tables(store.readableDatabase)))
+        }
+    }
+
+    @Test fun completedLegacyProofAndAckReleasePersonalWithoutRewritingHistoricalFormats() {
+        for (family in listOf("title", "text", "time")) journalFixture { store, name ->
+            val local = ordinary("completed-$family")
+            store.admitDispatch = { it == scope }
+            val delivered = when (family) {
+                "title" -> {
+                    val work = title(local); assertTrue(store.remember(work, allow)); assertTrue(store.claim(work, allow))
+                    val unknown = work.copy(state = TitleUpdateAttemptState.OUTCOME_UNKNOWN)
+                    val actual = local.base.copy(revision = Revision("legacy-complete"), content = local.content)
+                    val proof = TitleUpdateVerifiedResult.of(unknown,
+                        TitleUpdateSubmissionObservation.Verified(TitleUpdateAttemptIdentity.of(unknown), actual))
+                    assertTrue(store.retainVerified(proof, allow))
+                    val receipt = TitleUpdateAcknowledgementReceipt.of(proof, UUID.randomUUID().toString())
+                    assertTrue(store.retainCompletion(TitleUpdateCompletion.of(proof,
+                        TitleUpdateAcknowledgementRecord(receipt, TitleUpdateAcknowledgementState.RESTORED)), allow))
+                    actual
+                }
+                "text" -> {
+                    val work = text(local); assertTrue(store.textJournal.remember(work, allow)); assertTrue(store.textJournal.claim(work, allow))
+                    val unknown = work.copy(state = TextUpdateAttemptState.OUTCOME_UNKNOWN)
+                    val actual = local.base.copy(revision = Revision("legacy-complete"),
+                        content = work.preparation.intent.content.copy(description = "New\nnotes"))
+                    val proof = TextUpdateVerifiedResult.of(unknown, TextUpdateSubmissionObservation.Verified(unknown, actual))
+                    assertTrue(store.textJournal.retainVerified(proof, allow))
+                    val receipt = TextUpdateAcknowledgementReceipt.of(proof, UUID.randomUUID().toString())
+                    assertTrue(store.textJournal.retainCompletion(TextUpdateCompletion.of(proof,
+                        TextUpdateAcknowledgementRecord(receipt, TextUpdateAcknowledgementState.RESTORED)), allow))
+                    actual
+                }
+                else -> {
+                    val work = temporal(local); assertTrue(store.timeJournal.remember(work, allow)); assertTrue(store.timeJournal.claim(work, allow))
+                    val unknown = work.copy(state = TimeUpdateAttemptState.OUTCOME_UNKNOWN)
+                    val actual = local.base.copy(revision = Revision("legacy-complete"), content = work.preparation.intent.content)
+                    val proof = TimeUpdateVerifiedResult.of(unknown, TimeUpdateSubmissionObservation.Verified(unknown, actual))
+                    assertTrue(store.timeJournal.retainVerified(proof, allow))
+                    val receipt = TimeUpdateAcknowledgementReceipt.of(proof, UUID.randomUUID().toString())
+                    assertTrue(store.timeJournal.retainCompletion(TimeUpdateCompletion.of(proof,
+                        TimeUpdateAcknowledgementRecord(receipt, TimeUpdateAcknowledgementState.RESTORED)), allow))
+                    actual
+                }
+            }
+            assertFalse(store.hasUnsupportedLegacyUpdates(scope))
+            val oldTables = tables(store.readableDatabase).filter { it != "personal_update_attempts" }
+            val before = snapshot(store.readableDatabase, oldTables)
+            store.close()
+            TitleUpdateAttemptStore(context, name).use { reopened ->
+                assertFalse(reopened.hasUnsupportedLegacyUpdates(scope))
+                val next = local.copy(id = MutationId("modern-owner"), base = delivered,
+                    content = delivered.content.copy(title = "New personal change"))
+                assertTrue(reopened.personalJournal.remember(personal(next, "modern-request"), allow))
+                assertEquals(before, snapshot(reopened.readableDatabase, oldTables))
+            }
+        }
+    }
     private val scope = CalendarScope(AccountId("personal-sql-fixture"), CalendarId("calendar"), 0)
     private val format = AdapterFormat("synthetic-import", 3)
     private val timestamp = Instant.parse("2030-04-01T12:00:00Z")

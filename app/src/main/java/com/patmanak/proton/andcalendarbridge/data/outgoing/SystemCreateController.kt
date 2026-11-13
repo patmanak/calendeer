@@ -44,6 +44,7 @@ data class SystemCreateUiState(
     val deletesEnabled: Set<CalendarScope> = emptySet(),
     val deleteSupportAvailable: Boolean = false,
     val modeReview: Set<CalendarScope> = emptySet(),
+    val legacyUnsupported: Set<CalendarScope> = emptySet(),
 ) {
     override fun toString() = "SystemCreateUiState(REDACTED, busy=$busy, failed=$failed)"
 }
@@ -73,6 +74,7 @@ class SystemCreateController(
     private val personalUpdates: SystemUpdateController? = null,
     private val deleteRecovery: SystemTitleRecoveryController? = null,
     private val deleteUpdates: SystemUpdateController? = null,
+    private val legacyUnsupported: suspend (CalendarScope) -> Boolean = { false },
 ) {
     private val context = context.applicationContext
     private val textSupportAvailable = textRecovery != null && textUpdates != null
@@ -561,8 +563,10 @@ class SystemCreateController(
         val texts = selections.map { it.scope }.filter { work.textsEnabled(it) }.toSet()
         val times = selections.map { it.scope }.filter { work.timesEnabled(it) }.toSet()
         val deletes = selections.map { it.scope }.filter { work.deletesEnabled(it) }.toSet()
+        val unsupported = selections.map { it.scope }.filter { legacyUnsupported(it) }.toSet()
         mutableState.update { it.copy(enabled = enabled, titlesEnabled = titles, textsEnabled = texts,
             modeReview = selections.map { it.scope }.filter { work.modeReviewRequired(it) }.toSet(),
+            legacyUnsupported = unsupported,
             textSupportAvailable = textSupportAvailable, timesEnabled = times,
             timeSupportAvailable = timeSupportAvailable, deletesEnabled = deletes, deleteSupportAvailable = deleteSupportAvailable, pending = pending) }
     }

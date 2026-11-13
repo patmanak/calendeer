@@ -33,6 +33,17 @@ import kotlinx.coroutines.CancellationException
 internal class ImportStoreLocalMutationSql(
     private val conflicts: (SQLiteDatabase) -> ConflictArchiveSql,
 ) {
+    /** Triage a bare captured variant only; frozen capsules and all request formats remain untouched. */
+    fun retainUnsupportedBareUpdate(db: SQLiteDatabase, intent: LocalEditIntent): Boolean {
+        val scope = intent.scope; val event = intent.base.eventId
+        if (intent.state != LocalEditState.PAUSED || !activeProjectionScope(db, scope) ||
+            ImportStoreLocalPreparations.readLocalPreparationOwner(db, scope, event) != intent ||
+            hasForeignLocalPreparation(db, scope, event, null)) return false
+        check(db.update("local_edits", ContentValues().apply { put("state", LocalEditState.CONFLICT.name) },
+            "scope=? AND event=? AND mutation=? AND kind='UPDATE'", arrayOf(key(scope), event.value, intent.id.value)) == 1)
+        conflicts(db).ensure(scope, event)
+        return true
+    }
     data class ProjectionBase(val change: RemoteChange.Upsert, val representation: ProjectedEventReference?) {
         override fun toString() = "ProjectionBase(redacted)"
     }

@@ -209,6 +209,29 @@ class ImportCoordinator(
         ::systemPersonalEvidenceAdmission, ::handoffSource,
     ).owner
 
+    suspend fun retainUnsupportedBarePersonalUpdate(target: CalendarScope, reference: RetainedLocalChangeRef,
+        admit: (CalendarScope) -> Boolean, consent: (LocalEditIntent) -> Boolean): Boolean {
+        if (reference.kind != MutationKind.UPDATE || reference.state != LocalEditState.PAUSED) return false
+        var intent: LocalEditIntent? = null
+        val lease = { requested: CalendarScope -> admit(requested) && (intent?.let(consent) != false) }
+        return editAccess.withScopedEditOwner(target, lease, true, false, sendingEnabled = ::personalSendingEnabled) { access ->
+            val frozen = access.read { store.localEdit(target, reference.eventId) } ?: return@withScopedEditOwner true
+            intent = frozen
+            if (frozen.id != reference.mutationId) return@withScopedEditOwner true
+            if (!consent(frozen)) return@withScopedEditOwner false
+            if (access.read { store.hasUnsupportedLegacyUpdates(target) }) return@withScopedEditOwner true
+            val role = access.read { store.capturedHandoff(target, reference.eventId) }
+            if (role != null && !access.read { currentSystemTitleHandoff(role, frozen, access::active) }) return@withScopedEditOwner false
+            val native = access.read { if (role == null) projection.captureOwnedPersonalEdit(target, frozen.base)?.content else
+                (projection.captureCapturedHandoffCurrent(role.frame) as? CapturedHandoffCurrentObservation.Supported)
+                    ?.snapshot?.takeIf { it.frame == role.frame && !it.deleted }?.content }
+            if (native == frozen.content) return@withScopedEditOwner false
+            val retained = access.read { store.retainUnsupportedBareUpdate(frozen) }
+            if (retained) refreshState()
+            retained
+        }
+    }
+
     fun systemDeleteRunAdmission(target: CalendarScope): (CalendarScope) -> Boolean = deleteAdmission(target, true)
     fun systemDeleteProofAdmission(target: CalendarScope): (CalendarScope) -> Boolean = deleteAdmission(target, false)
     fun systemDeleteEvidenceAdmission(target: CalendarScope): (CalendarScope) -> Boolean = systemTimeEvidenceAdmission(target)

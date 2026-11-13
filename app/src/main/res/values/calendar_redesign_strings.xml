@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="calendar_legacy_unsupported">Some retained changes are not supported for sending. They are kept. Uncertain requests are only checked, never sent again.</string>
     <string name="calendar_dashboard_intro">Choose which calendars appear in Android.</string>
     <string name="calendar_dashboard_sync">Sync now</string>
     <string name="calendar_dashboard_refresh">Refresh calendar list</string>

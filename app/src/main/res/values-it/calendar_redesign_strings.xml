@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="calendar_legacy_unsupported">Alcune modifiche conservate non sono supportate per l’invio. Rimangono salvate. Le richieste incerte vengono solo verificate, mai inviate di nuovo.</string>
     <string name="calendar_dashboard_intro">Scegli quali calendari visualizzare in Android.</string>
     <string name="calendar_dashboard_sync">Sincronizza ora</string>
     <string name="calendar_dashboard_refresh">Aggiorna elenco calendari</string>

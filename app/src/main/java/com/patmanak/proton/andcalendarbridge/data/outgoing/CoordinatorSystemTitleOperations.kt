@@ -11,38 +11,17 @@ import kotlinx.coroutines.ensureActive
 class CoordinatorSystemTitleOperations(
     private val imports: ImportCoordinator,
     private val journal: TitleUpdateAttemptStore,
-    private val capsulePort: CalendarLocalEditPreparationPort,
     private val titlePort: CalendarTitleUpdateSubmissionPort,
-    private val existingOnly: Boolean = false,
 ) : SystemTitleUpdateOperations {
-    override suspend fun discover(query: RetainedLocalChangeQuery) = imports.retainedLocalChanges(query)
+    override suspend fun discover(query: RetainedLocalChangeQuery): RetainedLocalChangeListing {
+        currentCoroutineContext().ensureActive()
+        return RetainedLocalChangeListing.Available(RetainedLocalChangePage.fromOrderedMetadata(query, emptyList()))
+    }
 
     override suspend fun process(scope: CalendarScope, reference: RetainedLocalChangeRef, attempt: MutationId,
         timestamp: Instant, admission: (CalendarScope) -> Boolean, proofRetained: () -> Unit): Boolean {
-        if (!admission(scope)) return false
-        val prepared = imports.prepareSystemTitle(scope, reference.eventId, reference.mutationId, attempt, timestamp,
-            journal, capsulePort, titlePort, admission, existingOnly)
         currentCoroutineContext().ensureActive()
-        if (prepared !is LocalTitleAttemptPreparation.Prepared) return prepared == LocalTitleAttemptPreparation.Unavailable
-        if (!admission(scope)) return false
-        val record = prepared.record
-        val before = journal.readVerified(scope, record.id)
-        currentCoroutineContext().ensureActive()
-        if (!admission(scope) || before != null) return false
-        val result = imports.submitSystemTitle(record, journal, titlePort, admission)
-        currentCoroutineContext().ensureActive()
-        // A committed historical proof survives revocation without authorizing another send.
-        val retained = journal.readVerified(scope, record.id)
-        currentCoroutineContext().ensureActive()
-        if (retained != null && retained.record.copy(state = TitleUpdateAttemptState.PREPARED) == record)
-            proofRetained()
-        if (result != null) {
-            val acknowledged = imports.acknowledgeLocalTitle(scope, reference.eventId, record.id, journal)
-            currentCoroutineContext().ensureActive()
-            if (acknowledged == TitleUpdateAcknowledgementResult.ACKNOWLEDGED)
-                imports.completeLocalTitle(scope, reference.eventId, record.id, journal)
-        }
-        currentCoroutineContext().ensureActive()
+        // Retired writers never prepare, claim or resend. Historical inspection/ACK stays below.
         return false
     }
 

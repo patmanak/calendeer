@@ -284,7 +284,7 @@ class TitleUpdateAcknowledgementIntegrationDeviceTest {
             try {
                 val controller = SystemUpdateController(AndroidTitleRecoveryCursorStore(context, changePrefs),
                     AndroidTitleRecoveryCursorStore(context, attemptPrefs),
-                    CoordinatorSystemTitleOperations(coordinator, journal, capsule, port), {
+                    com.patmanak.proton.andcalendarbridge.data.outgoing.LegacyTitleFixtureOperations(coordinator, journal, capsule, port), {
                         assertEquals(target, it); wakes++
                     }, pageSize = 1)
                 assertEquals(SystemTitleRecoveryProgress(more = true), controller.run(target, network = true) { titlesAllowed })
