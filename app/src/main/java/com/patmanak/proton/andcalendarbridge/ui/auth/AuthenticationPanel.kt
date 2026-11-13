@@ -19,7 +19,6 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -67,6 +66,8 @@ fun AuthenticationPanel(
     onOpenAppSettings: (() -> Unit)? = null,
     connectedAccountLabel: String? = null,
     nativeRemovalPending: Boolean = false,
+    showSignOut: Boolean = true,
+    readPendingWork: suspend () -> Int? = { null },
 ) {
     val state by controller.state.collectAsState()
     val context = LocalContext.current
@@ -86,6 +87,7 @@ fun AuthenticationPanel(
         },
         modifier = modifier,
         connectedAccountLabel = connectedAccountLabel,
+        showSignOut = showSignOut, readPendingWork = readPendingWork,
     )
 }
 
@@ -99,18 +101,19 @@ internal fun AuthenticationContent(
     onOpenAppSettings: () -> Unit,
     modifier: Modifier = Modifier,
     connectedAccountLabel: String? = null,
+    showSignOut: Boolean = true,
+    readPendingWork: suspend () -> Int? = { null },
 ) {
     // Deliberately excluded from saved state. Dropping Strings cannot guarantee heap zeroization;
     // only the transferred mutable arrays have the controller's explicit clearing guarantee.
     var username by remember(state.destination, state.passwordPurpose) { mutableStateOf("") }
     var secret by remember(state.destination, state.passwordPurpose) { mutableStateOf("") }
-    var confirmSignOut by remember(state.destination, state.isCleanupRequired) { mutableStateOf(false) }
     val keyboard = LocalSoftwareKeyboardController.current
     val view = LocalView.current
     fun clearInputs() { username = ""; secret = ""; keyboard?.hide() }
     fun cancel() {
         clearInputs()
-        if (state.destination == AuthenticationDestination.AUTHENTICATED) confirmSignOut = true else onCancel()
+        if (state.destination != AuthenticationDestination.AUTHENTICATED) onCancel()
     }
     val canSubmit = !state.isSubmitting && !state.isCleanupRequired && !state.isRetryBlocked
     fun submit() {
@@ -147,15 +150,6 @@ internal fun AuthenticationContent(
     )) { cancel() }
     AuthenticationWindowProtection(state.destination)
     val connected = state.destination == AuthenticationDestination.AUTHENTICATED
-    if (connected && confirmSignOut) AlertDialog(
-        onDismissRequest = { confirmSignOut = false },
-        title = { Text(stringResource(R.string.auth_sign_out_title)) },
-        text = { Text(stringResource(R.string.auth_sign_out_warning)) },
-        confirmButton = { TextButton(onClick = { confirmSignOut = false; onCancel() },
-            modifier = Modifier.testTag("auth_sign_out_confirm")) { Text(stringResource(android.R.string.ok)) } },
-        dismissButton = { TextButton(onClick = { confirmSignOut = false },
-            modifier = Modifier.testTag("auth_sign_out_cancel")) { Text(stringResource(android.R.string.cancel)) } },
-    )
     Column(modifier.fillMaxWidth().imePadding(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text(stringResource(if (connected) R.string.auth_redesign_account else titleResource(state)),
@@ -253,7 +247,9 @@ internal fun AuthenticationContent(
                     R.string.auth_sign_in else R.string.auth_continue))
             }
         }
-        if (state.destination != AuthenticationDestination.SIGN_IN || state.isSubmitting || state.isCleanupRequired) {
+        if (connected) {
+            if (showSignOut) AccountSignOutAction(state, onCancel, readPendingWork)
+        } else if (state.destination != AuthenticationDestination.SIGN_IN || state.isSubmitting || state.isCleanupRequired) {
             TextButton(onClick = ::cancel, enabled = !state.isCleanupInProgress,
                 modifier = Modifier.align(if (connected) Alignment.Start else Alignment.CenterHorizontally)
                     .heightIn(min = 48.dp).testTag(AuthenticationTags.CANCEL)) {

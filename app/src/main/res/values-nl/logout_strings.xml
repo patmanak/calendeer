@@ -1,4 +1,4 @@
 <resources>
     <string name="auth_sign_out_title">Uitloggen?</string>
-    <string name="auth_sign_out_warning">Calendeer-agenda’s worden van deze telefoon verwijderd. Openstaande wijzigingen worden niet meer verzonden; niet-gesynchroniseerde wijzigingen kunnen verloren gaan. Je Proton-agenda’s worden niet verwijderd.</string>
+    <string name="auth_sign_out_warning">De agenda’s worden van deze telefoon verwijderd. Niet-gesynchroniseerde wijzigingen kunnen verloren gaan. Je Proton-agenda’s blijven behouden.</string>
 </resources>

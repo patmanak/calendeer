@@ -128,12 +128,23 @@ class MainActivity : ComponentActivity() {
                             HumanVerificationPanel(ProtonAuthentication.verification, darkTheme)
                         } else {
                             AuthenticationPanel(authentication, connectedAccountLabel = connectedAccountLabel,
-                                nativeRemovalPending = importState.nativeRemovalPending)
+                                nativeRemovalPending = importState.nativeRemovalPending, showSignOut = !accountLabelAllowed,
+                                readPendingWork = preferences.signOutWorkCounter::readCount)
                         }
                     },
                     synchronizationContent = {
                         if (accountLabelAllowed && syncSettings.accountPresent) {
-                            CalendarSyncSettingsPanel(preferences.calendarSyncSettings, syncSettings, onManualSync)
+                            CalendarSyncSettingsPanel(preferences.calendarSyncSettings, syncSettings)
+                        }
+                    },
+                    accountActions = {
+                        if (accountLabelAllowed) androidx.compose.runtime.key(archiveEpoch) {
+                            com.patmanak.proton.andcalendarbridge.ui.auth.AccountSignOutAction(authenticationState,
+                                { if (preferences.imports.conflictArchiveEpoch.value == archiveEpoch &&
+                                    !ProtonAuthentication.verification.state.value.isRequired && authentication.state.value.let {
+                                        it.destination == com.patmanak.proton.andcalendarbridge.auth.AuthenticationDestination.AUTHENTICATED &&
+                                            !it.isSubmitting && !it.isCleanupRequired && !it.isCleanupInProgress }) authentication.cancelAuthentication() },
+                                preferences.signOutWorkCounter::readCount)
                         }
                     },
                     calendarContent = {

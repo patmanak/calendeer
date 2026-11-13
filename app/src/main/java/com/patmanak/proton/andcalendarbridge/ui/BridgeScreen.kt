@@ -43,6 +43,7 @@ fun BridgeScreen(
     verificationRequired: Boolean = false,
     synchronizationContent: @Composable () -> Unit = {},
     snackbarContent: @Composable () -> Unit = {},
+    accountActions: @Composable () -> Unit = {},
 ) {
     var openPicker by rememberSaveable { mutableStateOf<String?>(null) }
     var settingsOpen by rememberSaveable(signedIn) { mutableStateOf(false) }
@@ -112,6 +113,7 @@ fun BridgeScreen(
                             Text(stringResource(R.string.brand_independent), style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
+                        if (signedIn) accountActions()
                     }
                     signedIn -> calendarContent()
                     else -> {

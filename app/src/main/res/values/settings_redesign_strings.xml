@@ -1,0 +1,7 @@
+<resources>
+    <string name="auth_sign_out_loading">Checking retained work…</string>
+    <string name="auth_sign_out_count">Retained operations: %1$d. Synchronization will be interrupted.</string>
+    <string name="auth_sign_out_count_unavailable">Pending work could not be checked. You can still sign out.</string>
+    <string name="sync_settings_battery_label">Battery optimization exemption</string>
+    <string name="ui_adjust">Adjust</string>
+</resources>

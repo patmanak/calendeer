@@ -1,0 +1,7 @@
+<resources>
+    <string name="auth_sign_out_loading">Verifica delle operazioni conservate…</string>
+    <string name="auth_sign_out_count">Operazioni conservate: %1$d. La sincronizzazione sarà interrotta.</string>
+    <string name="auth_sign_out_count_unavailable">Impossibile verificare le operazioni in attesa. Puoi comunque disconnetterti.</string>
+    <string name="sync_settings_battery_label">Esclusione dall’ottimizzazione della batteria</string>
+    <string name="ui_adjust">Regola</string>
+</resources>

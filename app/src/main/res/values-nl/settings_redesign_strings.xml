@@ -1,0 +1,7 @@
+<resources>
+    <string name="auth_sign_out_loading">Opgeslagen bewerkingen controleren…</string>
+    <string name="auth_sign_out_count">Opgeslagen bewerkingen: %1$d. De synchronisatie wordt onderbroken.</string>
+    <string name="auth_sign_out_count_unavailable">Openstaande bewerkingen konden niet worden gecontroleerd. Uitloggen blijft mogelijk.</string>
+    <string name="sync_settings_battery_label">Uitzondering op batterijoptimalisatie</string>
+    <string name="ui_adjust">Aanpassen</string>
+</resources>

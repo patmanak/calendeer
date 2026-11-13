@@ -1,11 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="calendar_legacy_unsupported">Sommige bewaarde wijzigingen kunnen niet worden verzonden. Ze blijven bewaard. Onzekere verzoeken worden alleen gecontroleerd en nooit opnieuw verzonden.</string>
-    <string name="calendar_dashboard_intro">Kies welke agenda’s in Android verschijnen.</string>
     <string name="calendar_dashboard_sync">Nu synchroniseren</string>
-    <string name="calendar_dashboard_refresh">Agendalijst vernieuwen</string>
-    <string name="calendar_dashboard_options">Opties en details</string>
-    <string name="calendar_dashboard_close_options">Opties sluiten</string>
     <string name="calendar_dashboard_ready">Ondersteunde afspraken geïmporteerd</string>
     <string name="calendar_dashboard_waiting">Wijzigingen in afwachting</string>
     <string name="calendar_dashboard_working">Bezig met synchroniseren…</string>
@@ -13,7 +9,6 @@
     <string name="calendar_dashboard_unavailable">Agenda niet beschikbaar</string>
     <string name="calendar_dashboard_configuring">Agenda voorbereiden…</string>
     <string name="calendar_dashboard_details">Synchronisatiedetails</string>
-    <string name="calendar_dashboard_usage">Hoe synchronisatie werkt</string>
     <string name="calendar_dashboard_editing">Wijzigingen vanuit Android</string>
     <string name="calendar_dashboard_history">Sommige oudere wijzigingen konden niet worden gecontroleerd.</string>
     <string name="calendar_dashboard_held">Wachten op ondersteuning of controle: %1$d</string>

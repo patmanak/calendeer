@@ -8,20 +8,14 @@ import android.provider.Settings
 import android.text.format.DateFormat
 import androidx.core.net.toUri
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.selection.selectable
-import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
@@ -31,9 +25,17 @@ import com.patmanak.proton.andcalendarbridge.data.importing.CalendarSyncSettings
 import java.util.Date
 
 @Composable
-fun CalendarSyncSettingsPanel(settings: AndroidCalendarSyncSettings, state: CalendarSyncSettingsState, onSync: () -> Unit) {
+fun CalendarSyncSettingsPanel(settings: AndroidCalendarSyncSettings, state: CalendarSyncSettingsState) {
     val context = LocalContext.current
-    var intervalOpen by rememberSaveable { mutableStateOf(false) }
+    CalendarSyncSettingsContent(state, settings::setIntervalMinutes,
+        { openSettings(context, Intent(Settings.ACTION_SYNC_SETTINGS)) },
+        { openBatterySettings(context, state.batteryExempt) })
+}
+
+@Composable
+internal fun CalendarSyncSettingsContent(state: CalendarSyncSettingsState, onInterval: (Int) -> Unit,
+    onAndroidSettings: () -> Unit, onBatterySettings: () -> Unit) {
+    val context = LocalContext.current
     Text(stringResource(R.string.sync_settings_title), style = MaterialTheme.typography.titleSmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.semantics { heading() })
     Card(shape = RoundedCornerShape(24.dp), colors = CardDefaults.cardColors(
@@ -44,44 +46,30 @@ fun CalendarSyncSettingsPanel(settings: AndroidCalendarSyncSettings, state: Cale
                 DateFormat.getDateFormat(context).format(date) + " " + DateFormat.getTimeFormat(context).format(date)
             } ?: stringResource(R.string.sync_settings_never)
             SyncValue(stringResource(R.string.sync_settings_last_success), lastSuccess)
+            Text(stringResource(R.string.sync_settings_interval), style = MaterialTheme.typography.bodyMedium)
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                listOf(15, 30, 60, 120, 360).forEach { minutes ->
+                    FilterChip(selected = state.intervalMinutes == minutes,
+                        onClick = { if (state.intervalMinutes != minutes) onInterval(minutes) },
+                        modifier = Modifier.testTag("sync_interval_$minutes"), label = { Text(intervalLabel(minutes)) })
+                }
+            }
             SyncValue(stringResource(R.string.sync_settings_account_auto), enabledLabel(state.automatic))
             SyncValue(stringResource(R.string.sync_settings_master_auto), enabledLabel(state.masterAutomatic))
             Text(stringResource(R.string.sync_settings_schedule_note), style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
             AutomaticSyncNotice(state)
-            OutlinedButton(onClick = { intervalOpen = true }, modifier = Modifier.fillMaxWidth()
-                .testTag("sync_interval")) {
-                Text(stringResource(R.string.sync_settings_interval_value, intervalLabel(state.intervalMinutes)))
-            }
-            OutlinedButton(onClick = { openSettings(context, Intent(Settings.ACTION_SYNC_SETTINGS)) },
+            OutlinedButton(onClick = onAndroidSettings,
                 modifier = Modifier.fillMaxWidth().testTag("sync_android_settings")) {
                 Text(stringResource(R.string.sync_settings_android))
             }
-            Button(onClick = onSync, modifier = Modifier.fillMaxWidth().testTag("sync_now")) {
-                Text(stringResource(R.string.sync_settings_now))
+            HorizontalDivider()
+            SyncValue(stringResource(R.string.sync_settings_battery_label), enabledLabel(state.batteryExempt))
+            TextButton(onClick = onBatterySettings, modifier = Modifier.fillMaxWidth().testTag("sync_battery_adjust")) {
+                Text(stringResource(R.string.ui_adjust))
             }
         }
     }
-    if (intervalOpen) AlertDialog(
-        onDismissRequest = { intervalOpen = false },
-        title = { Text(stringResource(R.string.sync_settings_interval)) },
-        text = {
-            Column(Modifier.verticalScroll(rememberScrollState()).selectableGroup()) {
-                listOf(15, 30, 60, 120, 360).forEach { minutes ->
-                    Row(Modifier.fillMaxWidth().selectable(selected = state.intervalMinutes == minutes,
-                        role = Role.RadioButton, onClick = {
-                            intervalOpen = false
-                            settings.setIntervalMinutes(minutes)
-                        }).heightIn(min = 52.dp), verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        RadioButton(selected = state.intervalMinutes == minutes, onClick = null)
-                        Text(intervalLabel(minutes))
-                    }
-                }
-            }
-        },
-        confirmButton = { TextButton(onClick = { intervalOpen = false }) { Text(stringResource(R.string.close)) } },
-    )
 }
 
 @Composable
@@ -132,14 +120,19 @@ fun CalendarSyncBatteryOffer(settings: AndroidCalendarSyncSettings, state: Calen
         confirmButton = {
             TextButton(onClick = {
                 offerOpen = false
-                openSettings(context, Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
-                    "package:${context.packageName}".toUri()), Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+                openBatterySettings(context, false)
             }) { Text(stringResource(R.string.sync_settings_battery_continue)) }
         },
         dismissButton = {
             TextButton(onClick = { offerOpen = false }) { Text(stringResource(R.string.sync_settings_battery_decline)) }
         },
     )
+}
+
+private fun openBatterySettings(context: Context, exempt: Boolean) {
+    openSettings(context, if (exempt) Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+        else Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, "package:${context.packageName}".toUri()),
+        Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
 }
 
 private fun openSettings(context: Context, intent: Intent, fallback: Intent? = null) {

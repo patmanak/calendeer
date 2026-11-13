@@ -1,11 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="calendar_legacy_unsupported">Some retained changes are not supported for sending. They are kept. Uncertain requests are only checked, never sent again.</string>
-    <string name="calendar_dashboard_intro">Choose which calendars appear in Android.</string>
     <string name="calendar_dashboard_sync">Sync now</string>
-    <string name="calendar_dashboard_refresh">Refresh calendar list</string>
-    <string name="calendar_dashboard_options">Options and details</string>
-    <string name="calendar_dashboard_close_options">Close options</string>
     <string name="calendar_dashboard_ready">Supported events imported</string>
     <string name="calendar_dashboard_waiting">Changes waiting</string>
     <string name="calendar_dashboard_working">Syncing…</string>
@@ -13,7 +9,6 @@
     <string name="calendar_dashboard_unavailable">Calendar unavailable</string>
     <string name="calendar_dashboard_configuring">Preparing calendar…</string>
     <string name="calendar_dashboard_details">Sync details</string>
-    <string name="calendar_dashboard_usage">How synchronization works</string>
     <string name="calendar_dashboard_editing">Changes from Android</string>
     <string name="calendar_dashboard_history">Some older changes could not be checked.</string>
     <string name="calendar_dashboard_held">Awaiting support or verification: %1$d</string>

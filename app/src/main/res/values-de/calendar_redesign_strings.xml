@@ -1,11 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="calendar_legacy_unsupported">Einige gespeicherte Änderungen werden beim Senden nicht unterstützt. Sie bleiben erhalten. Ungewisse Anfragen werden nur geprüft und nie erneut gesendet.</string>
-    <string name="calendar_dashboard_intro">Wähle die Kalender aus, die in Android erscheinen sollen.</string>
     <string name="calendar_dashboard_sync">Jetzt synchronisieren</string>
-    <string name="calendar_dashboard_refresh">Kalenderliste aktualisieren</string>
-    <string name="calendar_dashboard_options">Optionen und Details</string>
-    <string name="calendar_dashboard_close_options">Optionen schließen</string>
     <string name="calendar_dashboard_ready">Unterstützte Termine importiert</string>
     <string name="calendar_dashboard_waiting">Änderungen ausstehend</string>
     <string name="calendar_dashboard_working">Synchronisierung läuft…</string>
@@ -13,7 +9,6 @@
     <string name="calendar_dashboard_unavailable">Kalender nicht verfügbar</string>
     <string name="calendar_dashboard_configuring">Kalender wird vorbereitet…</string>
     <string name="calendar_dashboard_details">Synchronisierungsdetails</string>
-    <string name="calendar_dashboard_usage">So funktioniert die Synchronisierung</string>
     <string name="calendar_dashboard_editing">Änderungen aus Android</string>
     <string name="calendar_dashboard_history">Einige ältere Änderungen konnten nicht geprüft werden.</string>
     <string name="calendar_dashboard_held">Warten auf Unterstützung oder Prüfung: %1$d</string>

@@ -32,7 +32,6 @@
     <string name="sync_settings_interval_value">Intervalle : %1$s</string>
     <string name="sync_settings_interval">Intervalle de synchronisation</string>
     <string name="sync_settings_android">Ouvrir les réglages de synchronisation Android</string>
-    <string name="sync_settings_now">Synchroniser maintenant</string>
     <string name="sync_settings_15_minutes">15 minutes</string>
     <string name="sync_settings_30_minutes">30 minutes</string>
     <string name="sync_settings_1_hour">1 heure (par défaut)</string>

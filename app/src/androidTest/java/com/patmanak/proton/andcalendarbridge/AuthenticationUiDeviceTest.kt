@@ -8,6 +8,7 @@ import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -42,6 +43,13 @@ import org.junit.runner.RunWith
 /** Sanitized fake boundary only. Never loads a WebView, reads a credential or calls Proton. */
 @RunWith(AndroidJUnit4::class)
 class AuthenticationUiDeviceTest {
+    @Test fun signOutConfirmationNamesTheActionExplicitly() {
+        port.result = AuthenticationStep.Authenticated
+        start()
+        compose.runOnIdle { controller.submitSignIn("fixture".toCharArray(), "fixture".toCharArray()) }
+        compose.onNodeWithTag(AuthenticationTags.CANCEL).performClick()
+        compose.onNodeWithTag("auth_sign_out_confirm").assertTextEquals(compose.activity.getString(R.string.auth_sign_out))
+    }
     @Test fun deferredRemovalMessageDisappearsAfterTheDurableObligationCompletes() {
         val pending = mutableStateOf(true)
         port.result = AuthenticationStep.Authenticated

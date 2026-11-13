@@ -1,4 +1,4 @@
 <resources>
     <string name="auth_sign_out_title">Disconnettersi?</string>
-    <string name="auth_sign_out_warning">I calendari Calendeer verranno rimossi da questo telefono. Le modifiche in attesa non verranno più inviate; quelle non sincronizzate potrebbero andare perse. I calendari Proton non verranno eliminati.</string>
+    <string name="auth_sign_out_warning">I calendari verranno rimossi da questo telefono. Le modifiche non sincronizzate potrebbero andare perse. I calendari Proton saranno conservati.</string>
 </resources>

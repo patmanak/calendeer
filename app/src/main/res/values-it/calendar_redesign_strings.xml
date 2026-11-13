@@ -1,11 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="calendar_legacy_unsupported">Alcune modifiche conservate non sono supportate per l’invio. Rimangono salvate. Le richieste incerte vengono solo verificate, mai inviate di nuovo.</string>
-    <string name="calendar_dashboard_intro">Scegli quali calendari visualizzare in Android.</string>
     <string name="calendar_dashboard_sync">Sincronizza ora</string>
-    <string name="calendar_dashboard_refresh">Aggiorna elenco calendari</string>
-    <string name="calendar_dashboard_options">Opzioni e dettagli</string>
-    <string name="calendar_dashboard_close_options">Chiudi opzioni</string>
     <string name="calendar_dashboard_ready">Eventi compatibili importati</string>
     <string name="calendar_dashboard_waiting">Modifiche in attesa</string>
     <string name="calendar_dashboard_working">Sincronizzazione in corso…</string>
@@ -13,7 +9,6 @@
     <string name="calendar_dashboard_unavailable">Calendario non disponibile</string>
     <string name="calendar_dashboard_configuring">Preparazione del calendario…</string>
     <string name="calendar_dashboard_details">Dettagli di sincronizzazione</string>
-    <string name="calendar_dashboard_usage">Come funziona la sincronizzazione</string>
     <string name="calendar_dashboard_editing">Modifiche da Android</string>
     <string name="calendar_dashboard_history">Alcune vecchie modifiche non sono state verificate.</string>
     <string name="calendar_dashboard_held">In attesa di supporto o verifica: %1$d</string>

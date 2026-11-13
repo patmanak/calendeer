@@ -56,8 +56,18 @@ Import completion is never presented as full bidirectional convergence.
 Permission requests and failures remain actionable. Longer explanations live in
 details rather than repeating throughout the main view.
 
-Settings groups Account, Appearance and language, and About. Version and
-independent-project information belong in About. Login uses a short introduction,
+Settings groups Account, Synchronization, Appearance and language, and About.
+Synchronization offers interval chips, Android automatic-switch status and its
+settings link, plus a battery-exemption status and explicit Adjust action. Manual
+synchronization stays in the Calendars banner. Version and
+independent-project information belong in About. A red Sign out action follows
+About. Its confirmation reads retained operation counts afresh from the existing
+account-scoped stores, including paused and older generations. The count is a
+sample of recorded operations, not unique events or uncaptured Android changes.
+Zero hides the pending-work panel; unavailable or timed-out counts are explicit
+and still allow sign-out. Cancelling or changing the authentication epoch removes
+the sample. The existing controller still owns session clearing and deferred
+native removal. Login uses a short introduction,
 one form and a dedicated error surface; it does not restore entered credentials.
 Controls use at least 48dp targets, scrollable content and text labels in addition
 to icons or color. Light and dark appearances retain violet accents on neutral

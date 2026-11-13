@@ -1,0 +1,7 @@
+<resources>
+    <string name="auth_sign_out_loading">Gespeicherte Vorgänge werden geprüft…</string>
+    <string name="auth_sign_out_count">Gespeicherte Vorgänge: %1$d. Die Synchronisierung wird unterbrochen.</string>
+    <string name="auth_sign_out_count_unavailable">Ausstehende Vorgänge konnten nicht geprüft werden. Abmelden ist weiterhin möglich.</string>
+    <string name="sync_settings_battery_label">Ausnahme von der Akkuoptimierung</string>
+    <string name="ui_adjust">Anpassen</string>
+</resources>

@@ -1,4 +1,4 @@
 <resources>
     <string name="auth_sign_out_title">Terminar sessão?</string>
-    <string name="auth_sign_out_warning">Os calendários Calendeer serão removidos deste telefone. As alterações pendentes deixarão de ser enviadas; as alterações não sincronizadas podem perder-se. Os seus calendários Proton não serão eliminados.</string>
+    <string name="auth_sign_out_warning">Os calendários serão removidos deste telefone. As alterações não sincronizadas podem perder-se. Os calendários Proton serão conservados.</string>
 </resources>
