@@ -3,6 +3,7 @@ package com.patmanak.proton.andcalendarbridge
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
@@ -23,6 +24,7 @@ import com.patmanak.proton.andcalendarbridge.auth.AuthenticationMonotonicClock
 import com.patmanak.proton.andcalendarbridge.auth.AuthenticationSecret
 import com.patmanak.proton.andcalendarbridge.auth.AuthenticationStep
 import com.patmanak.proton.andcalendarbridge.auth.PasswordPurpose
+import com.patmanak.proton.andcalendarbridge.auth.SignOutCalendarCleanup
 import com.patmanak.proton.andcalendarbridge.ui.auth.AuthenticationPanel
 import com.patmanak.proton.andcalendarbridge.ui.auth.AuthenticationTags
 import kotlinx.coroutines.CoroutineScope
@@ -40,6 +42,30 @@ import org.junit.runner.RunWith
 /** Sanitized fake boundary only. Never loads a WebView, reads a credential or calls Proton. */
 @RunWith(AndroidJUnit4::class)
 class AuthenticationUiDeviceTest {
+    @Test fun deferredRemovalMessageDisappearsAfterTheDurableObligationCompletes() {
+        val pending = mutableStateOf(true)
+        port.result = AuthenticationStep.Authenticated
+        compose.runOnUiThread {
+            controller = AuthenticationController(port,
+                AuthenticationMonotonicClock { android.os.SystemClock.elapsedRealtime() }, scope,
+                beforeSignOut = { SignOutCalendarCleanup.DEFERRED })
+        }
+        compose.setContent { MaterialTheme { AuthenticationPanel(controller, nativeRemovalPending = pending.value) } }
+        val message = compose.activity.getString(R.string.auth_native_cleanup_pending)
+        // A fresh signed-out screen must also explain a persisted obligation, before a logout callback.
+        compose.onNodeWithText(message).assertExists()
+        compose.onNodeWithTag(AuthenticationTags.APP_SETTINGS).assertExists()
+        compose.runOnIdle {
+            controller.submitSignIn("fixture".toCharArray(), "fixture".toCharArray())
+            controller.cancelAuthentication()
+        }
+        compose.onNodeWithText(message).assertExists()
+        compose.runOnIdle { pending.value = false }
+        compose.onNodeWithText(message).assertDoesNotExist()
+        compose.onNodeWithTag(AuthenticationTags.APP_SETTINGS).assertDoesNotExist()
+        compose.onNodeWithTag(AuthenticationTags.SUBMIT).assertExists()
+        compose.runOnIdle { assertEquals(1, port.cancelCalls); assertTrue(!controller.state.value.isCleanupRequired) }
+    }
     @Test fun signOutWaitsForConfirmationAndCancelPreservesTheSession() {
         port.result = AuthenticationStep.Authenticated
         start()

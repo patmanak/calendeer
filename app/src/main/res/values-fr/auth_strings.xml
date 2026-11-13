@@ -34,4 +34,5 @@
     <string name="auth_cleaning">Nettoyage de la tentative de connexion…</string>
     <string name="auth_working">Connexion…</string>
     <string name="auth_human_cancel">Annuler la vérification</string>
+    <string name="auth_native_cleanup_pending">Déconnexion effectuée. Les calendriers Android seront retirés dès que l\'accès à l\'agenda sera rétabli.</string>
 </resources>

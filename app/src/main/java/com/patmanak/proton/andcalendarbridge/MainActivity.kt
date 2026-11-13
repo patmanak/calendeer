@@ -127,7 +127,8 @@ class MainActivity : ComponentActivity() {
                         if (verification.isRequired) {
                             HumanVerificationPanel(ProtonAuthentication.verification, darkTheme)
                         } else {
-                            AuthenticationPanel(authentication, connectedAccountLabel = connectedAccountLabel)
+                            AuthenticationPanel(authentication, connectedAccountLabel = connectedAccountLabel,
+                                nativeRemovalPending = importState.nativeRemovalPending)
                         }
                     },
                     synchronizationContent = {

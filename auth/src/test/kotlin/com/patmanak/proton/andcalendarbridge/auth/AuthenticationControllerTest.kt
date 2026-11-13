@@ -4,8 +4,12 @@
 package com.patmanak.proton.andcalendarbridge.auth
 
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.yield
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.advanceTimeBy
@@ -14,6 +18,7 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withContext
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -21,22 +26,22 @@ import org.junit.Test
 class AuthenticationControllerTest {
     private val dispatcher = StandardTestDispatcher()
 
-    @Test fun `sign out waits for native cleanup and retries it before clearing the session`() = runTest(dispatcher) {
+    @Test fun `sign out clears session even when native cleanup fails and retries failed cleanup`() = runTest(dispatcher) {
         val order = mutableListOf<String>()
         var fail = true
         val port = FakeAuthenticationFlowPort(restoreResult = AuthenticationStep.Authenticated,
             cancelResult = { order += "session" })
         val controller = AuthenticationController(port, AuthenticationMonotonicClock { 0 }, this,
-            beforeSignOut = { order += "calendars"; check(!fail) })
+            beforeSignOut = { order += "calendars"; check(!fail); SignOutCalendarCleanup.COMPLETE })
         advanceUntilIdle()
         controller.signOut(); advanceUntilIdle()
-        assertEquals(listOf("calendars"), order)
+        assertEquals(listOf("calendars", "session"), order)
         assertTrue(controller.state.value.isCleanupRequired)
         controller.submitSignIn("fixture".toCharArray(), "secret".toCharArray()); advanceUntilIdle()
         assertEquals(0, port.signInCalls)
         fail = false
         controller.cancelAuthentication(); advanceUntilIdle()
-        assertEquals(listOf("calendars", "calendars", "session"), order)
+        assertEquals(listOf("calendars", "session", "calendars", "session"), order)
         assertFalse(controller.state.value.isCleanupRequired)
     }
 
@@ -44,7 +49,7 @@ class AuthenticationControllerTest {
         var removals = 0
         val port = FakeAuthenticationFlowPort(restoreResult = AuthenticationStep.CodeRequired)
         val controller = AuthenticationController(port, AuthenticationMonotonicClock { 0 }, this,
-            beforeSignOut = { removals++ })
+            beforeSignOut = { removals++; SignOutCalendarCleanup.COMPLETE })
         advanceUntilIdle(); controller.cancelAuthentication(); advanceUntilIdle()
         assertEquals(0, removals); assertEquals(1, port.cancelCalls)
     }
@@ -55,11 +60,111 @@ class AuthenticationControllerTest {
         val port = FakeAuthenticationFlowPort(restoreResult = AuthenticationStep.Authenticated,
             cancelResult = { check(!fail) })
         val controller = AuthenticationController(port, AuthenticationMonotonicClock { 0 }, this,
-            beforeSignOut = { removals++ })
+            beforeSignOut = { removals++; SignOutCalendarCleanup.COMPLETE })
         advanceUntilIdle(); controller.signOut(); advanceUntilIdle()
         assertTrue(controller.state.value.isCleanupRequired)
         fail = false; controller.cancelAuthentication(); advanceUntilIdle()
         assertEquals(2, removals); assertFalse(controller.state.value.isCleanupRequired)
+    }
+
+    @Test fun `durably deferred native removal clears session and admits new credentials`() = runTest(dispatcher) {
+        var removals = 0
+        val port = FakeAuthenticationFlowPort(restoreResult = AuthenticationStep.Authenticated,
+            signInResult = { AuthenticationStep.CodeRequired })
+        val controller = AuthenticationController(port, { 0 }, this, beforeSignOut = {
+            removals++
+            SignOutCalendarCleanup.DEFERRED
+        })
+        advanceUntilIdle()
+        controller.signOut(); advanceUntilIdle()
+        assertEquals(1, port.cancelCalls)
+        assertFalse(controller.state.value.isCleanupRequired)
+        assertEquals(AuthenticationMessage.NATIVE_CLEANUP_PENDING, controller.state.value.message)
+        controller.submitSignIn("fixture".toCharArray(), "secret".toCharArray()); advanceUntilIdle()
+        assertEquals(1, port.signInCalls)
+        assertEquals(AuthenticationDestination.CODE, controller.state.value.destination)
+        // Cancelling a new unfinished login must not restart the old native cleanup.
+        controller.cancelAuthentication(); advanceUntilIdle()
+        assertEquals(1, removals)
+    }
+
+    @Test fun `deferred native removal does not hide session cleanup failure`() = runTest(dispatcher) {
+        var fail = true
+        val port = FakeAuthenticationFlowPort(restoreResult = AuthenticationStep.Authenticated,
+            cancelResult = { check(!fail) })
+        val controller = AuthenticationController(port, { 0 }, this,
+            beforeSignOut = { SignOutCalendarCleanup.DEFERRED })
+        advanceUntilIdle()
+        controller.signOut(); advanceUntilIdle()
+        assertEquals(AuthenticationMessage.CLEANUP_FAILED, controller.state.value.message)
+        assertTrue(controller.state.value.isCleanupRequired)
+        controller.submitSignIn("fixture".toCharArray(), "secret".toCharArray()); advanceUntilIdle()
+        assertEquals(0, port.signInCalls)
+        fail = false
+        controller.cancelAuthentication(); advanceUntilIdle()
+        assertFalse(controller.state.value.isCleanupRequired)
+        assertEquals(AuthenticationMessage.NATIVE_CLEANUP_PENDING, controller.state.value.message)
+    }
+
+    @Test fun `native callback cancellation is preserved after session cleanup failure`() = runTest(dispatcher) {
+        val original = CancellationException("synthetic callback cancellation")
+        var completion: Throwable? = null
+        val port = FakeAuthenticationFlowPort(restoreResult = AuthenticationStep.Authenticated,
+            cancelResult = { error("synthetic session failure") })
+        val controller = AuthenticationController(port, { 0 }, this, beforeSignOut = { throw original })
+        advanceUntilIdle()
+        controller.signOut()
+        coroutineContext[Job]!!.children.single().invokeOnCompletion { completion = it }
+        advanceUntilIdle()
+        assertEquals(1, port.cancelCalls)
+        assertSame(original, completion)
+        assertTrue(controller.state.value.isCleanupRequired)
+        assertEquals(AuthenticationMessage.CLEANUP_FAILED, controller.state.value.message)
+    }
+
+    @Test fun `cancelling the owner during native cleanup still completes suspending session cleanup`() = runTest(dispatcher) {
+        val ownerJob = Job(coroutineContext[Job])
+        val owner = CoroutineScope(coroutineContext + ownerJob)
+        val waiting = CompletableDeferred<Unit>()
+        var sessionCleared = false
+        var completion: Throwable? = null
+        val port = FakeAuthenticationFlowPort(restoreResult = AuthenticationStep.Authenticated,
+            cancelResult = { yield(); sessionCleared = true })
+        val controller = AuthenticationController(port, { 0 }, owner, beforeSignOut = {
+            waiting.await()
+            SignOutCalendarCleanup.COMPLETE
+        })
+        advanceUntilIdle()
+        controller.signOut(); runCurrent()
+        ownerJob.children.single().invokeOnCompletion { completion = it }
+        ownerJob.cancel()
+        advanceUntilIdle()
+        assertEquals(1, port.cancelCalls)
+        assertTrue(sessionCleared)
+        assertTrue(completion is CancellationException)
+        assertTrue(controller.state.value.isCleanupRequired)
+        assertFalse(controller.state.value.isCleanupInProgress)
+    }
+
+    @Test fun `late native callback after disposal cannot publish pending cleanup or reopen admission`() = runTest(dispatcher) {
+        val release = CompletableDeferred<Unit>()
+        val port = FakeAuthenticationFlowPort(restoreResult = AuthenticationStep.Authenticated)
+        val controller = AuthenticationController(port, { 0 }, this, beforeSignOut = {
+            withContext(NonCancellable) { release.await() }
+            SignOutCalendarCleanup.DEFERRED
+        })
+        advanceUntilIdle()
+        controller.signOut(); runCurrent()
+        controller.dispose()
+        val disposedState = controller.state.value
+        release.complete(Unit); advanceUntilIdle()
+        assertEquals(2, port.cancelCalls)
+        assertEquals(disposedState, controller.state.value)
+        val username = "fixture".toCharArray()
+        val password = "secret".toCharArray()
+        controller.submitSignIn(username, password); advanceUntilIdle()
+        assertEquals(0, port.signInCalls)
+        assertTrue(username.isCleared()); assertTrue(password.isCleared())
     }
 
     @Test

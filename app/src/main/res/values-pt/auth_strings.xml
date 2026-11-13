@@ -34,4 +34,5 @@
     <string name="auth_cleaning">A limpar a tentativa de ligação…</string>
     <string name="auth_working">A ligar…</string>
     <string name="auth_human_cancel">Cancelar verificação</string>
+    <string name="auth_native_cleanup_pending">Sessão terminada. Os calendários Android serão removidos quando o acesso ao calendário for restaurado.</string>
 </resources>

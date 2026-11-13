@@ -34,4 +34,5 @@
     <string name="auth_cleaning">Anmeldeversuch wird bereinigt…</string>
     <string name="auth_working">Verbindung wird hergestellt…</string>
     <string name="auth_human_cancel">Verifizierung abbrechen</string>
+    <string name="auth_native_cleanup_pending">Abgemeldet. Die Android-Kalender werden entfernt, sobald der Kalenderzugriff wieder erteilt wird.</string>
 </resources>

@@ -4,7 +4,7 @@ import com.patmanak.proton.andcalendarbridge.sync.*
 
 data class ImportUiState(val selections: List<ImportStore.Selection> = emptyList(),
     val hasPermission: Boolean = false, val authenticated: Boolean = false, val busy: Boolean = false,
-    val selectionsLoaded: Boolean = false)
+    val selectionsLoaded: Boolean = false, val nativeRemovalPending: Boolean = false)
 enum class CreateAssociationResult { INACTIVE, UNRESOLVED, WAITING_IMPORT, WAITING_PROVIDER, ASSOCIATED }
 enum class LocalEditCaptureResult { INACTIVE, UNQUALIFIED, RETAINED, CONFLICT, UNAVAILABLE }
 sealed interface RetainedLocalChangeListing {

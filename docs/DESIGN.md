@@ -22,6 +22,12 @@ Signed-out users see the mascot, a short introduction and the existing connectio
 form. Signed-in users arrive at their calendars and synchronization controls.
 Settings contains appearance, language and the existing connected-account actions.
 Returning from settings restores the main destination; sign-out returns to login.
+
+Confirmed sign-out clears the Proton session even when device calendar access is
+unavailable. Owned calendar removal is retained durably and retried when access
+returns or the app restarts. Mirror recreation waits until that removal finishes.
+The connection screen explains the delay and clears its message after cleanup.
+Retained outgoing work and uncertain outcomes remain available for reconciliation.
 No event editor or calendar browsing interface is added.
 
 Authenticated navigation uses two labeled destinations, Calendars and Settings.

@@ -34,4 +34,5 @@
     <string name="auth_cleaning">Czyszczenie próby połączenia…</string>
     <string name="auth_working">Łączenie…</string>
     <string name="auth_human_cancel">Anuluj weryfikację</string>
+    <string name="auth_native_cleanup_pending">Wylogowano. Kalendarze Androida zostaną usunięte po przywróceniu dostępu do kalendarza.</string>
 </resources>

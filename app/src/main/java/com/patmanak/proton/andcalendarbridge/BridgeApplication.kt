@@ -169,7 +169,10 @@ class BridgeApplication : Application() {
             ProtonAuthentication.create(this),
             AuthenticationMonotonicClock(SystemClock::elapsedRealtime),
             authenticationScope,
-            beforeSignOut = imports::disconnectCalendars,
+            beforeSignOut = {
+                if (imports.disconnectCalendars()) com.patmanak.proton.andcalendarbridge.auth.SignOutCalendarCleanup.COMPLETE
+                else com.patmanak.proton.andcalendarbridge.auth.SignOutCalendarCleanup.DEFERRED
+            },
         ).also { controller ->
             authenticationScope.launch {
                 controller.state.map { it.destination == AuthenticationDestination.AUTHENTICATED }

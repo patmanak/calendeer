@@ -66,11 +66,19 @@ fun AuthenticationPanel(
     modifier: Modifier = Modifier,
     onOpenAppSettings: (() -> Unit)? = null,
     connectedAccountLabel: String? = null,
+    nativeRemovalPending: Boolean = false,
 ) {
     val state by controller.state.collectAsState()
     val context = LocalContext.current
+    val displayState = when {
+        state.message == AuthenticationMessage.NATIVE_CLEANUP_PENDING && !nativeRemovalPending -> state.copy(message = null)
+        nativeRemovalPending && state.destination == AuthenticationDestination.SIGN_IN && state.message == null ->
+            state.copy(message = AuthenticationMessage.NATIVE_CLEANUP_PENDING)
+        else -> state
+    }
     AuthenticationContent(
-        state, controller::submitSignIn, controller::submitCode, controller::submitPassword,
+        displayState,
+        controller::submitSignIn, controller::submitCode, controller::submitPassword,
         controller::cancelAuthentication,
         onOpenAppSettings = onOpenAppSettings ?: {
             context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
@@ -187,7 +195,7 @@ internal fun AuthenticationContent(
                     if (state.isRetryBlocked) Text(stringResource(R.string.auth_retry_wait),
                         style = MaterialTheme.typography.bodyMedium,
                         modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
-                    if (state.message == AuthenticationMessage.OFFLINE) {
+                    if (state.message == AuthenticationMessage.OFFLINE || state.message == AuthenticationMessage.NATIVE_CLEANUP_PENDING) {
                         TextButton(onClick = { clearInputs(); onOpenAppSettings() },
                             modifier = Modifier.heightIn(min = 48.dp).testTag(AuthenticationTags.APP_SETTINGS)) {
                             Text(stringResource(R.string.auth_open_app_settings))
@@ -280,6 +288,7 @@ private fun messageResource(message: AuthenticationMessage): Int = when (message
     AuthenticationMessage.CRYPTOGRAPHIC_FAILURE -> R.string.auth_crypto_failure
     AuthenticationMessage.CLIENT_UNSUPPORTED -> R.string.auth_client_unsupported
     AuthenticationMessage.CLEANUP_FAILED -> R.string.auth_cleanup_failed
+    AuthenticationMessage.NATIVE_CLEANUP_PENDING -> R.string.auth_native_cleanup_pending
     AuthenticationMessage.TRY_AGAIN -> R.string.auth_try_again
 }
 

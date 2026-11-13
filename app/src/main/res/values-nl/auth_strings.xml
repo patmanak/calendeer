@@ -34,4 +34,5 @@
     <string name="auth_cleaning">Inlogpoging opschonen…</string>
     <string name="auth_working">Verbinden…</string>
     <string name="auth_human_cancel">Verificatie annuleren</string>
+    <string name="auth_native_cleanup_pending">Afgemeld. Android-agenda’s worden verwijderd zodra toegang tot de agenda is hersteld.</string>
 </resources>

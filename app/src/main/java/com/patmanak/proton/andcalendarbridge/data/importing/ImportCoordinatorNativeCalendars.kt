@@ -18,9 +18,18 @@ internal class ImportCoordinatorNativeCalendars(
     private val systemCreatesEnabled: (CalendarScope) -> Boolean,
     private val isCurrent: suspend (Long, AccountId) -> Boolean,
     private val invalidateAuthentication: () -> Unit,
+    private val pendingChanged: (Boolean) -> Unit,
 ) {
+    private fun removals(admitted: () -> Boolean) =
+        ImportCalendarDisconnect(store, projection, mutex, admitted, pendingChanged)
+    suspend fun drainLocked(): Boolean {
+        val expected = generation()
+        return removals { generation() == expected }.drainLocked { generation() == expected }
+    }
+    private suspend fun drain(): Boolean = mutex.withLock { drainLocked() }
     suspend fun configure(target: CalendarScope): Boolean = mutex.withLock {
         val expected = generation()
+        if (!drainLocked() || generation() != expected) return@withLock false
         if (!hasCalendarPermissions()) return@withLock false
         val selected = store.selections(target.account).singleOrNull { it.scope == target }
         val mode = systemCreatesEnabled(target) && selected?.enabled == true && selected.available &&
@@ -36,11 +45,12 @@ internal class ImportCoordinatorNativeCalendars(
         finally { projection.admitOperation = { false } }
     }
     suspend fun reconcile() {
+        if (!drain()) return
         for (target in store.calendarScopes()) configure(target)
     }
-    suspend fun disconnect() {
+    suspend fun disconnect(): Boolean {
         invalidateAuthentication()
         val expected = generation()
-        ImportCalendarDisconnect(store, projection, mutex) { !authenticated() && generation() == expected }.remove()
+        return removals { !authenticated() && generation() == expected }.remove()
     }
 }

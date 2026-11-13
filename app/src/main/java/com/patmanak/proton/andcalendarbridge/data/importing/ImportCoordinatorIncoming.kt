@@ -38,6 +38,7 @@ internal class ImportCoordinatorIncoming(
     private val rememberAccessibleCatalog: suspend (AccountId, List<CalendarSummary>) -> Unit,
     private val refreshState: suspend () -> Unit,
     private val retainCreatePermissionLoss: () -> Unit,
+    private val beforeNativeCreation: suspend () -> Boolean,
 ) {
     fun requestSync() {
         if (!authenticated()) return
@@ -149,6 +150,8 @@ internal class ImportCoordinatorIncoming(
         var continuation = false
         try {
             store.status(calendarScope, "RUNNING")
+            if (!isCurrent(expected, account)) return null
+            if (!beforeNativeCreation()) return if (isCurrent(expected, account)) ImportRunResult.RETRY else null
             if (!isCurrent(expected, account)) return null
             val createsMode = systemCreatesEnabled(calendarScope)
             val accessPolicy = policyRevision()

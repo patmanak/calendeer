@@ -34,4 +34,5 @@
     <string name="auth_cleaning">Clearing the connection attempt…</string>
     <string name="auth_working">Connecting…</string>
     <string name="auth_human_cancel">Cancel verification</string>
+    <string name="auth_native_cleanup_pending">Signed out. Android calendars will be removed when calendar access is restored.</string>
 </resources>

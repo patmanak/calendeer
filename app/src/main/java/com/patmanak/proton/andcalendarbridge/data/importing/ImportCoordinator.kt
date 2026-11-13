@@ -122,7 +122,8 @@ class ImportCoordinator(
 
     private val nativeCalendars by lazy { ImportCoordinatorNativeCalendars(store, projection, mutex,
         { generation }, { createPolicyRevision.get() }, { authenticated }, ::hasCalendarPermissions,
-        systemCreatesEnabled, ::isCurrent, { authenticationChanged(false) }) }
+        systemCreatesEnabled, ::isCurrent, { authenticationChanged(false) },
+        { pending -> mutableState.update { it.copy(nativeRemovalPending = pending) } }) }
 
     private val incoming = ImportCoordinatorIncoming(
         store, remote, projection, scope, mutex, scheduler, serial, engine, stagedEngine, deltaEngine,
@@ -132,6 +133,7 @@ class ImportCoordinator(
         hasCalendarPermissions = ::hasCalendarPermissions, currentObservedAccount = ::currentObservedAccount,
         isCurrent = ::isCurrent, rememberAccessibleCatalog = ::rememberAccessibleCatalog,
         refreshState = ::refreshState, retainCreatePermissionLoss = ::retainCreatePermissionLoss,
+        beforeNativeCreation = { nativeCalendars.drainLocked() },
     )
 
     init {
@@ -478,7 +480,8 @@ class ImportCoordinator(
             catch (cancelled: CancellationException) { throw cancelled }
             catch (_: Exception) { /* Writes remain closed; the next explicit command retries initialization. */ }
         }
-        mutableState.value = ImportUiState(hasPermission = hasCalendarPermissions(), authenticated = value, selectionsLoaded = !value)
+        mutableState.value = ImportUiState(hasPermission = hasCalendarPermissions(), authenticated = value, selectionsLoaded = !value,
+            nativeRemovalPending = state.value.nativeRemovalPending)
         if (!value) {
             scheduler.cancel()
         } else {
@@ -719,6 +722,11 @@ class ImportCoordinator(
     fun permissionsChanged() {
         val previouslyGranted = state.value.hasPermission
         mutableState.value = state.value.copy(hasPermission = hasCalendarPermissions())
+        scope.launch {
+            try { nativeCalendars.reconcile() }
+            catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { /* Durable removal stays pending; creation has its own barrier. */ }
+        }
         if (!state.value.hasPermission) {
             scope.launch {
                 try { initializeCreates() }

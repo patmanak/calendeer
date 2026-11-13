@@ -6,8 +6,12 @@ package com.patmanak.proton.andcalendarbridge.auth
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -32,8 +36,12 @@ enum class AuthenticationMessage {
     CRYPTOGRAPHIC_FAILURE,
     CLIENT_UNSUPPORTED,
     CLEANUP_FAILED,
+    NATIVE_CLEANUP_PENDING,
     TRY_AGAIN,
 }
+
+/** DEFERRED means native removal is durably recorded and can resume without a session. */
+enum class SignOutCalendarCleanup { COMPLETE, DEFERRED }
 
 data class AuthenticationState(
     val destination: AuthenticationDestination = AuthenticationDestination.RESTORING,
@@ -65,7 +73,7 @@ class AuthenticationController(
     private val port: AuthenticationFlowPort,
     private val monotonicClock: AuthenticationMonotonicClock,
     private val scope: kotlinx.coroutines.CoroutineScope,
-    private val beforeSignOut: suspend () -> Unit = {},
+    private val beforeSignOut: suspend () -> SignOutCalendarCleanup = { SignOutCalendarCleanup.COMPLETE },
 ) {
     private val mutableState = MutableStateFlow(AuthenticationState())
     val state: StateFlow<AuthenticationState> = mutableState.asStateFlow()
@@ -189,18 +197,32 @@ class AuthenticationController(
             message = null,
         )
         activeOperation = scope.launch {
-            var cleanupSucceeded = false
+            var calendarCleanup = if (signOutCleanupRequired) null else SignOutCalendarCleanup.COMPLETE
+            var sessionCleared = false
+            var cancellation: CancellationException? = null
             try {
-                if (signOutCleanupRequired) beforeSignOut()
-                port.cancel()
-                signOutCleanupRequired = false
-                cleanupSucceeded = true
-            } catch (cancellation: CancellationException) {
-                throw cancellation
-            } catch (_: Exception) {
-                // Keep credential admission blocked until an explicit cleanup retry succeeds.
+                try {
+                    if (signOutCleanupRequired) calendarCleanup = beforeSignOut()
+                } catch (cancelled: CancellationException) {
+                    cancellation = cancelled
+                } catch (_: Exception) {
+                    // An unrecorded native cleanup must be retried, even after session removal.
+                } finally {
+                    // Calendar permission, storage failure and caller cancellation must never
+                    // prevent an attempt to clear the Proton session.
+                    try {
+                        withContext(NonCancellable) { port.cancel() }
+                        sessionCleared = true
+                    } catch (cancelled: CancellationException) {
+                        if (cancellation == null) cancellation = cancelled
+                    } catch (_: Exception) {
+                        // Keep credential admission blocked until session cleanup succeeds.
+                    }
+                }
             } finally {
                 if (revision == operationRevision) {
+                    val cleanupSucceeded = sessionCleared && calendarCleanup != null
+                    if (cleanupSucceeded) signOutCleanupRequired = false
                     operationAdmitted.set(false)
                     mutableState.value = mutableState.value.copy(
                         destination = AuthenticationDestination.SIGN_IN,
@@ -208,10 +230,17 @@ class AuthenticationController(
                         isSubmitting = false,
                         isCleanupInProgress = false,
                         isCleanupRequired = !cleanupSucceeded,
-                        message = if (cleanupSucceeded) null else AuthenticationMessage.CLEANUP_FAILED,
+                        message = when {
+                            !cleanupSucceeded -> AuthenticationMessage.CLEANUP_FAILED
+                            calendarCleanup == SignOutCalendarCleanup.DEFERRED ->
+                                AuthenticationMessage.NATIVE_CLEANUP_PENDING
+                            else -> null
+                        },
                     )
                 }
             }
+            cancellation?.let { throw it }
+            currentCoroutineContext().ensureActive()
         }
     }
 

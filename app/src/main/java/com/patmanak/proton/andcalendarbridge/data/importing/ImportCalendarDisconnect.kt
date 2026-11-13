@@ -3,6 +3,7 @@ package com.patmanak.proton.andcalendarbridge.data.importing
 
 import com.patmanak.proton.andcalendarbridge.data.calendar.CalendarProjection
 import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -13,19 +14,45 @@ internal class ImportCalendarDisconnect(
     private val projection: CalendarProjection,
     private val mutex: Mutex,
     private val disconnected: () -> Boolean,
+    private val pendingChanged: (Boolean) -> Unit = {},
 ) {
-    suspend fun remove() = mutex.withLock {
+    suspend fun remove(): Boolean = mutex.withLock {
         val operation = currentCoroutineContext()
         val active = { operation.ensureActive(); disconnected() }
         check(active())
-        check(projection.hasPermissions()) { "Calendar permission is required to remove local calendars" }
-        projection.admitOperation = active
+        // Commit the obligation before any permission-dependent native operation.
+        store.queueNativeRemovals()
+        pendingChanged(true)
+        drainLocked(active)
+    }
+
+    /** Caller already holds the coordinator mutex. Retrying a removed mirror is idempotent. */
+    suspend fun drainLocked(admitted: () -> Boolean): Boolean {
+        val operation = currentCoroutineContext()
+        val active = { operation.ensureActive(); admitted() }
+        check(active())
+        val pending = store.pendingNativeRemovals()
+        check(active())
+        pendingChanged(pending.isNotEmpty())
+        if (pending.isEmpty()) return true
+        if (!projection.hasPermissions()) return false
+        projection.admitOperation = { active() && projection.hasPermissions() }
         try {
-            for (target in store.calendarScopes()) {
+            for (target in pending) {
                 check(active())
+                if (!projection.hasPermissions()) return false
                 projection.removeOwnedCalendar(target)
                 check(active())
+                // Never acknowledge a native failure or a superseded epoch.
+                store.completeNativeRemoval(target)
+                check(active())
             }
-        } finally { projection.admitOperation = { false } }
+            val remains = store.pendingNativeRemovals().isNotEmpty()
+            check(active())
+            pendingChanged(remains)
+            return !remains
+        } catch (cancelled: CancellationException) { throw cancelled }
+          catch (_: Exception) { pendingChanged(true); return false }
+          finally { projection.admitOperation = { false } }
     }
 }
