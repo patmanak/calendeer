@@ -87,24 +87,33 @@ internal object ProtonPersonalCryptoProbe {
             val cases=listOf(timed to timed.copy(end=timed.end.plusSeconds(3600)),timed to day,day to timed,
                 timed to timed.copy(zone=ZoneId.of("Europe/Paris")),timed to timed.copy(zone=ZoneId.of("Etc/UTC")),
                 timed to timed.copy(start=timed.start.plusSeconds(3600),end=timed.end.plusSeconds(7200),zone=ZoneId.of("Europe/Paris")),
-                timed to timed, timed to timed)
-            for((index,pair) in cases.withIndex()) {
-                stage="PERSONAL_CASE_$index"
+                timed to timed, timed to timed, day to day)
+            for(inherited in listOf(false, true)) for((index,pair) in cases.withIndex()) {
+                stage="PERSONAL_CASE_${index}_INHERITED_$inherited"
                 val (before,after)=pair
+                val bootstrap = if (!inherited) bootstrap else JsonObject(bootstrap + ("CalendarSettings" to buildJsonObject {
+                    put("CalendarID", scope.calendar.value)
+                    for (name in listOf("DefaultPartDayNotifications", "DefaultFullDayNotifications")) put(name, buildJsonArray {
+                        add(buildJsonObject { put("Type", 1); put("Trigger", "-PT10M") })
+                        add(buildJsonObject { put("Type", 0); put("Trigger", if (name == "DefaultFullDayNotifications") "-PT2H" else "-PT1H") })
+                    })
+                }))
+                val requestContext=ProtonSimpleEventUpdate.context(selected,metadata,bootstrap)
                 val clear=if(before is EventTime.AllDay) originalClear.replace(oldDates,dayDates) else originalClear
-                val row=source(clear,before)
+                val sourceRow=source(clear,before)
+                val row=if(inherited) JsonObject(sourceRow + ("Notifications" to JsonNull)) else sourceRow
                 ProtonPersonalEventWire.qualify(row)
                 val baseline=decoder.decodePage(session.userId,scope.calendar.value,bootstrap,listOf(row),uid).also { check(it.deferred.isEmpty()) }.changes.single()
                 check(baseline.content.time == before && baseline.content.details == EventDetails(listOf(EventReminder(10))) && baseline.content.colorRgb == 0xabcd12)
                 val replacement = when(index) {
-                    6 -> baseline.content.copy(details = EventDetails(listOf(EventReminder(0), EventReminder(20))))
+                    6,8 -> baseline.content.copy(details = EventDetails(listOf(EventReminder(0), EventReminder(20))))
                     7 -> baseline.content.copy(colorRgb = 0x123456)
                     else -> baseline.content.copy(title="Combined title",description="Combined notes",location="Combined place",time=after)
                 }
                 val intent=LocalEditIntent(MutationId("synthetic-personal-$index"),scope,EVENT_FORMAT,baseline,replacement)
                 val prepared=decoder.prepareAndSealPersonalEdit(session,intent,uid,timestamp,metadata,bootstrap,row,protector())
                 check(if(index < 6) prepared.requiredConsent.containsAll(setOf(PersonalEditField.TITLE,PersonalEditField.TEXT,PersonalEditField.TIME))
-                    else prepared.requiredConsent == setOf(if(index == 6) PersonalEditField.REMINDERS else PersonalEditField.COLOR))
+                    else prepared.requiredConsent == setOf(if(index == 7) PersonalEditField.COLOR else PersonalEditField.REMINDERS))
                 val fragments=ProtonPersonalPreparationCodec(protector()).openLocal(prepared)
                 check(fragments.originalRow == row && fragments.originalRow.string("SharedKeyPacket") == originalRow.string("SharedKeyPacket"))
                 val nextClear=fragments.clearSharedPart.string("Data");val nextSecret=decrypt(fragments.encryptedSharedPart)
@@ -119,7 +128,8 @@ internal object ProtonPersonalCryptoProbe {
                 val request=codec.seal(MutationId("synthetic-personal-request-$index"),prepared,requestContext)
                 val opened=ProtonPersonalUpdateRequestCodec(protector()).open(request)
                 val event=(opened.request.array("Events").single() as JsonObject).obj("Event")
-                val expectedNotifications = if(index == 6) Json.parseToJsonElement("""[{"Type":0,"Trigger":"-PT1H"},{"Type":1,"Trigger":"PT0S"},{"Type":1,"Trigger":"-PT20M"}]""") else notifications
+                val expectedNotifications = if(index in listOf(6,8)) Json.parseToJsonElement(
+                    """[{"Type":0,"Trigger":"${if(inherited && before is EventTime.AllDay) "-PT2H" else "-PT1H"}"},{"Type":1,"Trigger":"PT0S"},{"Type":1,"Trigger":"-PT20M"}]""") else if(inherited) JsonNull else notifications
                 val expectedColor = JsonPrimitive(if(index == 7) "#123456" else "#aBcD12")
                 check(event["Notifications"] == expectedNotifications && event["Color"] == expectedColor)
                 personalEventUpdateOnlyBytes(opened.request.toString()).fill(0)

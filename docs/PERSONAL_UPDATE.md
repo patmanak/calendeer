@@ -38,7 +38,16 @@ device notifications, retaining every email entry. Exact readback checks the ful
 new metadata. A fixture captured before this extension checks the original capsule,
 request bytes and fingerprints; UNKNOWN remains inspect-only.
 
-Transferred events retain their original known-empty creation receipt. Only the
+`Notifications: null` preserves calendar-default inheritance when reminders are
+unchanged. A reminder change freezes the initial timed/all-day calendar defaults
+in an optional protected `notificationDefaults` snapshot, separate from the
+unchanged original row. Offline reconstruction keeps those default email entries
+and writes explicit phone alerts. This snapshot is required only for the new
+null-plus-changed-reminders profile; historical capsule bytes remain unchanged.
+Readback checks both forms. A timed/all-day transition retaining null is held
+before sending when destination defaults would change the intended phone alerts.
+
+Transferred events retain their original captured creation receipt. Only the
 current handoff reference accepts known personal metadata. Frames, observations
 and projection plans own immutable snapshots. Personal ACK preserves reminder
 rows; incoming projection changes them only with exact parent/child assertions

@@ -38,7 +38,7 @@ internal class ProtonPersonalUpdateReadbackVerifier(
                 rowSnapshot.string("ID") != intent.base.eventId.value ||
                 rowSnapshot.string("CalendarID") != intent.scope.calendar.value ||
                 !ProtonPersonalEventUpdate.matchesReadback(fragments.originalRow, fragments.clearSharedPart,
-                    fragments.encryptedSharedPart, rowSnapshot, intent.base.content, intent.content) ||
+                    fragments.encryptedSharedPart, rowSnapshot, intent.base.content, intent.content, fragments.defaults) ||
                 !CreatedEventReadbackPolicy.PERSONAL_EDIT_V2.acceptsExpected(intent.content)) null else {
                 val expectedRevision = rowSnapshot.revision(bootstrapSnapshot)
                 if (expectedRevision == intent.base.revision) null else {

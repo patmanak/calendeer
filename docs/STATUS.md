@@ -59,7 +59,8 @@ Samsung/One UI is outside 0.1. Signature management remains deferred by the owne
   proven acknowledgements keep their original identities and formats.
   [Personal edits](PERSONAL_UPDATE.md), [deletion](DELETE_SUBMISSION.md).
 - Imported and transferred events also support personal reminder/color edits, including
-  removal and calendar-color fallback, while retaining Proton email reminders.
+  removal and calendar-color fallback, while retaining Proton email reminders and
+  default inheritance when alerts are unchanged. Changed inherited alerts freeze default emails.
   Initial CREATE also captures reminders/color using a separate personal-v3 preparation
   and submission profile. Historical formats stay unchanged; client journeys remain an E4 gate.
 - UNKNOWN is inspect-only, never reset/resend. Unsupported local changes and

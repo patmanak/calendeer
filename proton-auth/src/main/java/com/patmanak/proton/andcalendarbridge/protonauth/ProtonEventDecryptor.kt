@@ -237,11 +237,14 @@ internal class ProtonEventDecryptor(private val crypto: CryptoContext, private v
             catch (_: IllegalArgumentException) { context.ensureActive(); unsupportedEvents() }
             catch (_: java.nio.charset.CharacterCodingException) { context.ensureActive(); unsupportedEvents() }
         if (frozen.format != EVENT_FORMAT) unsupportedEvents()
-        ProtonPersonalEventWire.qualify(row)
+        val frozenRow = snapshot(row)
+        val frozenBootstrap = snapshot(bootstrap)
+        ProtonPersonalEventWire.qualify(frozenRow)
+        val defaults = ProtonPersonalMetadataEdit.captureDefaults(frozenRow, frozenBootstrap, frozen.base.content, frozen.content)
         // Reuse original signature verification, full-base decode, writer selection and the
         // original shared session key. Only the plaintext policy and protected format differ.
         val prepared = prepareSharedTextFragments(session, frozen.scope, frozen.base.eventId, frozen.base.revision,
-            uid, frozen.base.content.title, metadata, bootstrap, row, requireEmptyPersonal = true,
+            uid, frozen.base.content.title, metadata, frozenBootstrap, frozenRow, requireEmptyPersonal = true,
             expectedBase = frozen.base) { basis ->
             ProtonSharedTextPatcher.patchPersonalAt(basis.originalPlaintext, uid, frozen.base.content,
                 frozen.content, timestamp)
@@ -250,7 +253,7 @@ internal class ProtonEventDecryptor(private val crypto: CryptoContext, private v
         val record = try {
             ProtonPersonalPreparationCodec(protector).sealLocal(frozen, uid, timestamp,
                 ProtonTimestampedSharedPersonal(prepared.originalRow, prepared.clearSharedPart,
-                    prepared.encryptedSharedPart, prepared.changed))
+                    prepared.encryptedSharedPart, prepared.changed, defaults))
         } catch (cancelled: CancellationException) { throw cancelled }
           catch (failure: Exception) { context.ensureActive(); throw failure }
         context.ensureActive()

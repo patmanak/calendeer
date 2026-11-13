@@ -26,11 +26,13 @@ internal class ProtonPersonalPreparationCodec(private val protector: EventPayloa
             val clear = fragments.clearSharedPart
             val encrypted = fragments.encryptedSharedPart
             validateFragments(frozen, uid, original, clear, encrypted, fragments.changed)
+            validateDefaults(frozen, original, fragments.defaults)
             buildJsonObject {
                 put("kind", KIND); put("version", 2); put("format", PERSONAL_PREPARATION_FORMAT.json())
                 put("localIntent", frozen.json()); put("binding", binding(uid, timestamp))
                 put("originalRow", original); put("clearSharedPart", clear); put("encryptedSharedPart", encrypted)
                 put("changed", fragments.changed)
+                fragments.defaults?.let { put("notificationDefaults", it) }
             }.encoded()
         }
         val protected = storage { protector.seal(plain) }
@@ -51,7 +53,7 @@ internal class ProtonPersonalPreparationCodec(private val protector: EventPayloa
             bounded(plain); require(UniqueJsonKeys(plain).validate())
             val root = Json.parseToJsonElement(plain) as? JsonObject ?: refuse()
             validateJson(root)
-            require(root.keys == ROOT_KEYS && root.strictString("kind") == KIND && root.strictNumber("version") == 2L)
+            require(root.keys in setOf(ROOT_KEYS, ROOT_KEYS + "notificationDefaults") && root.strictString("kind") == KIND && root.strictNumber("version") == 2L)
             require(root.strictObject("format") == record.format.json())
             require(root.strictObject("localIntent") == frozen.json())
             val bound = root.strictObject("binding")
@@ -63,8 +65,16 @@ internal class ProtonPersonalPreparationCodec(private val protector: EventPayloa
             val clear = root.strictObject("clearSharedPart")
             val encrypted = root.strictObject("encryptedSharedPart")
             validateFragments(frozen, uid, original, clear, encrypted, changed)
-            ProtonTimestampedSharedPersonal(original, clear, encrypted, changed)
+            val defaults = if ("notificationDefaults" in root) root.strictObject("notificationDefaults") else null
+            validateDefaults(frozen, original, defaults)
+            ProtonTimestampedSharedPersonal(original, clear, encrypted, changed, defaults)
         }
+    }
+
+    private fun validateDefaults(intent: LocalEditIntent, original: JsonObject, defaults: JsonObject?) {
+        val needsDefaults = original["Notifications"] == JsonNull && intent.base.content.details?.reminders != intent.content.details?.reminders
+        require((defaults != null) == needsDefaults)
+        if (defaults != null) ProtonPersonalMetadataEdit.validateDefaults(original, intent.base.content, defaults)
     }
 
     private fun validateBinding(uid: String, timestamp: Instant) {

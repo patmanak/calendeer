@@ -4,7 +4,7 @@ import kotlinx.serialization.json.*
 /** Explicit v2 personal siblings. Their raw JSON is preserved exactly, including email delivery. */
 internal object ProtonPersonalMetadata {
     fun valid(notifications: JsonElement?, color: JsonElement?): Boolean = try {
-        val values = notifications as? JsonArray ?: error("Unsupported")
+        val values = if (notifications == JsonNull) JsonArray(emptyList()) else notifications as? JsonArray ?: error("Unsupported")
         require(values.size <= 100)
         values.forEach { item ->
             val value = item as? JsonObject ?: error("Unsupported")

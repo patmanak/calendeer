@@ -9,10 +9,14 @@ import org.junit.Assert.*
 
 /** Real protected codecs, synthetic signatures and controlled transport: no service/crypto claim. */
 internal class PersonalSubmissionFixture(zone: ZoneId = ZoneId.of("UTC"),
-    replace: (EventContent) -> EventContent = { it }) {
+    replace: (EventContent) -> EventContent = { it }, inherited: Boolean = false) {
     private val seed = TitleSubmissionFixture()
     val initial = seed.initial
-    val bootstrap = seed.bootstrap
+    val bootstrap = if (!inherited) seed.bootstrap else JsonObject(seed.bootstrap + ("CalendarSettings" to buildJsonObject {
+        put("CalendarID", seed.scope.calendar.value)
+        put("DefaultPartDayNotifications", Json.parseToJsonElement("""[{"Type":0,"Trigger":"-PT1H"},{"Type":1,"Trigger":"-PT5M"}]"""))
+        put("DefaultFullDayNotifications", Json.parseToJsonElement("""[{"Type":0,"Trigger":"-P1D"},{"Type":1,"Trigger":"-PT5M"}]"""))
+    }))
     val timestamp = seed.timestamp
     val scope = seed.scope
     private val time = EventTime.Timed(Instant.parse("2026-10-24T12:00:00Z"),
@@ -20,7 +24,7 @@ internal class PersonalSubmissionFixture(zone: ZoneId = ZoneId.of("UTC"),
     private val replacement = time.copy(start = time.start.plusSeconds(7200), end = time.end.plusSeconds(10800))
     val originalRow = JsonObject(seed.row + buildJsonObject {
         put("Color", "#aBcD12")
-        put("Notifications", JsonArray(listOf(buildJsonObject { put("Type", 1); put("Trigger", "-PT5M") }, buildJsonObject { put("Type", 0); put("Trigger", "-PT1H") })))
+        put("Notifications", if (inherited) JsonNull else JsonArray(listOf(buildJsonObject { put("Type", 1); put("Trigger", "-PT5M") }, buildJsonObject { put("Type", 0); put("Trigger", "-PT1H") })))
         put("StartTime", time.start.epochSecond); put("EndTime", time.end.epochSecond); put("FullDay", 0)
         val apiZone = if (zone == java.time.ZoneOffset.UTC) "UTC" else zone.id
         put("StartTimezone", apiZone); put("EndTimezone", apiZone)
@@ -28,7 +32,8 @@ internal class PersonalSubmissionFixture(zone: ZoneId = ZoneId.of("UTC"),
     val intent = seed.intent.copy(base = seed.intent.base.copy(revision = originalRow.revision(bootstrap),
         content = seed.content.copy(time = time, description = "Old notes", location = "Old place", colorRgb = 0xabcd12, details = EventDetails(listOf(EventReminder(5))))),
         content = replace(seed.content.copy(title = "Combined title", time = replacement, description = "New notes", location = "New place", colorRgb = 0xabcd12, details = EventDetails(listOf(EventReminder(5))))))
-    val fragments = ProtonTimestampedSharedPersonal(originalRow, seed.fragments.clearSharedPart, seed.fragments.encryptedSharedPart, true)
+    val fragments = ProtonTimestampedSharedPersonal(originalRow, seed.fragments.clearSharedPart, seed.fragments.encryptedSharedPart, true,
+        ProtonPersonalMetadataEdit.captureDefaults(originalRow, bootstrap, intent.base.content, intent.content))
     val context = JsonObject(seed.context + buildJsonObject {
         put("permissions", 16); put("flags", 1)
         for (name in listOf("calendarKey", "signingKey", "calendar")) put(name, ProtonSimpleEventUpdate.hash("synthetic-$name"))
