@@ -120,6 +120,10 @@ class ImportCoordinator(
         capturedRawHold = ::capturedRawHold, currentSystemTitleHandoff = ::currentSystemTitleHandoff,
     )
 
+    private val nativeCalendars by lazy { ImportCoordinatorNativeCalendars(store, projection, mutex,
+        { generation }, { createPolicyRevision.get() }, { authenticated }, ::hasCalendarPermissions,
+        systemCreatesEnabled, ::isCurrent, { authenticationChanged(false) }) }
+
     private val incoming = ImportCoordinatorIncoming(
         store, remote, projection, scope, mutex, scheduler, serial, engine, stagedEngine, deltaEngine,
         providerIds, state, mutableState, projectionWork,
@@ -262,32 +266,11 @@ class ImportCoordinator(
     private fun personalConsent(intent: LocalEditIntent): Boolean = PersonalEditConsent.allowed(intent,
         systemTitlesEnabled, systemTextsEnabled, systemTimesEnabled, systemCreatesEnabled)
 
-    suspend fun configureSystemCalendar(target: CalendarScope): Boolean = mutex.withLock {
-        val expected = generation
-        if (!hasCalendarPermissions()) return@withLock false
-        val selected = store.selections(target.account).singleOrNull { it.scope == target }
-        val mode = systemCreatesEnabled(target) && selected?.enabled == true && selected.available &&
-            isCurrent(expected, target.account)
-        val policy = createPolicyRevision.get()
-        projection.admitOperation = { generation == expected && hasCalendarPermissions() &&
-            createPolicyRevision.get() == policy && (!mode || (authenticated && systemCreatesEnabled(target))) }
-        try {
-            if (mode) projection.ensureCalendarState(target, selected!!.summary, true)
-            else projection.makeCalendarReadOnly(target)
-            true
-        }
-        finally { projection.admitOperation = { false } }
-    }
+    suspend fun configureSystemCalendar(target: CalendarScope): Boolean = nativeCalendars.configure(target)
 
     /** Also closes retained mirrors after sign-out/account changes and a cold process restart. */
-    suspend fun reconcileSystemCalendarAccess() {
-        for (target in store.calendarScopes()) configureSystemCalendar(target)
-    }
-    suspend fun disconnectCalendars() {
-        authenticationChanged(false)
-        val expected = generation
-        ImportCalendarDisconnect(store, projection, mutex) { !authenticated && generation == expected }.remove()
-    }
+    suspend fun reconcileSystemCalendarAccess() = nativeCalendars.reconcile()
+    suspend fun disconnectCalendars() = nativeCalendars.disconnect()
 
     suspend fun discoverSystemChanges(target: CalendarScope, afterRow: Long = 0, limit: Int = 25):
         com.patmanak.proton.andcalendarbridge.data.calendar.SystemCalendarChangePage? = mutex.withLock {
