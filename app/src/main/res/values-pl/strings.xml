@@ -12,15 +12,7 @@
     <string name="brand_back">Wstecz</string>
     <string name="brand_welcome">Twoje dni, połączone.</string>
     <string name="brand_independent">Niezależna aplikacja, niepowiązana z Proton.</string>
-    <string name="system_create_title">Eksperymentalne zmiany systemowe</string>
-    <string name="system_create_limits">Twórz proste wydarzenia w kalendarzu, bez przypomnień, gości, powtarzania i własnych kolorów. Edycja i usuwanie mają osobne opcje.</string>
-    <string name="system_create_mode">Zezwól na tworzenie z kalendarza systemowego</string>
-    <string name="system_title_mode">Synchronizuj zmiany tytułów (eksperymentalne)</string>
-    <string name="system_title_limits">Dla osobistych wydarzeń bez gości i powtarzania. Istniejące przypomnienia i kolory są zachowywane. Włącz odpowiednie opcje, aby zmieniać inne pola.</string>
-    <string name="system_create_pending">Operacje tworzenia oczekujące lub wymagające sprawdzenia: %1$d. Niepewne wysłanie nigdy nie jest automatycznie powtarzane.</string>
     <string name="system_create_error">Wystąpił problem podczas synchronizacji z Androidem. Twoje dane są zachowane.</string>
-    <string name="system_text_limits">Zmieniaj opis i miejsce, także wraz z tytułem. Jeśli zmieniasz również daty, włącz odpowiednie opcje. Przypomnienia i kolory są zachowywane; ich zmiany pozostają lokalne.</string>
-    <string name="system_text_overview">Domyślnie tylko odczyt. Tworzenie, tytuł, tekst, daty i usuwanie mają osobne opcje. Dla zmian łączonych włącz odpowiednie opcje. Nieobsługiwane zmiany i oczekujące operacje są zachowywane.</string>
     <string name="sync_settings_title">Synchronizacja</string>
     <string name="sync_settings_last_success">Ostatnia udana synchronizacja</string>
     <string name="sync_settings_never">Brak udanej synchronizacji</string>

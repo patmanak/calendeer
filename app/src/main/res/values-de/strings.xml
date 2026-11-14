@@ -12,15 +12,7 @@
     <string name="brand_back">Zurück</string>
     <string name="brand_welcome">Ihre Tage, gut verbunden.</string>
     <string name="brand_independent">Unabhängige Anwendung, nicht mit Proton verbunden.</string>
-    <string name="system_create_title">Experimentelle Systemänderungen</string>
-    <string name="system_create_limits">Erstelle einfache Termine in deiner Kalender-App, ohne Erinnerungen, Gäste, Wiederholungen oder eigene Farben. Bearbeiten und Löschen haben eigene Optionen.</string>
-    <string name="system_create_mode">Erstellung im Systemkalender erlauben</string>
-    <string name="system_title_mode">Titeländerungen synchronisieren (experimentell)</string>
-    <string name="system_title_limits">Für persönliche Termine ohne Gäste oder Wiederholungen. Vorhandene Erinnerungen und Terminfarben bleiben erhalten. Aktiviere die passenden Optionen für andere Felder.</string>
-    <string name="system_create_pending">Wartende oder zu prüfende Erstellungen: %1$d. Ein ungewisser Versand wird nie automatisch wiederholt.</string>
     <string name="system_create_error">Bei der Synchronisierung mit Android ist ein Problem aufgetreten. Ihre Daten bleiben erhalten.</string>
-    <string name="system_text_limits">Ändere Beschreibung und Ort, auch zusammen mit dem Titel. Aktiviere bei gleichzeitigen Datumsänderungen die betreffenden Optionen. Vorhandene Erinnerungen und Farben bleiben erhalten; Änderungen daran bleiben lokal.</string>
-    <string name="system_text_overview">Standardmäßig nur lesen. Erstellen, Titel, Text, Datum und Löschen haben eigene Optionen. Aktiviere bei kombinierten Änderungen die betreffenden Optionen. Nicht unterstützte Änderungen und ausstehende Vorgänge bleiben erhalten.</string>
     <string name="sync_settings_title">Synchronisierung</string>
     <string name="sync_settings_last_success">Letzte erfolgreiche Synchronisierung</string>
     <string name="sync_settings_never">Noch keine erfolgreiche Synchronisierung</string>

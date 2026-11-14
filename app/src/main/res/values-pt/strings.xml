@@ -12,15 +12,7 @@
     <string name="brand_back">Voltar</string>
     <string name="brand_welcome">Os seus dias, ligados.</string>
     <string name="brand_independent">Aplicação independente, não afiliada ao Proton.</string>
-    <string name="system_create_title">Alterações de sistema experimentais</string>
-    <string name="system_create_limits">Crie eventos simples no calendário, sem lembretes, convidados, repetições ou cores personalizadas. A edição e a eliminação têm opções separadas.</string>
-    <string name="system_create_mode">Permitir criação no calendário do sistema</string>
-    <string name="system_title_mode">Sincronizar alterações de títulos (experimental)</string>
-    <string name="system_title_limits">Para eventos pessoais sem convidados nem repetições. Os lembretes e as cores existentes são preservados. Ative as opções correspondentes para alterar outros campos.</string>
-    <string name="system_create_pending">Criações pendentes ou por verificar: %1$d. Um envio incerto nunca é repetido automaticamente.</string>
     <string name="system_create_error">Ocorreu um problema na sincronização com o Android. Os seus dados são preservados.</string>
-    <string name="system_text_limits">Edite a descrição e o local, incluindo uma alteração de título associada. Se também alterar as datas, ative as opções correspondentes. Os lembretes e as cores são preservados; as suas alterações ficam locais.</string>
-    <string name="system_text_overview">Apenas leitura por predefinição. A criação, o título, o texto, as datas e a eliminação têm opções separadas. Ative as opções afetadas para alterações combinadas. As alterações não suportadas e as operações pendentes são preservadas.</string>
     <string name="sync_settings_title">Sincronização</string>
     <string name="sync_settings_last_success">Última sincronização bem-sucedida</string>
     <string name="sync_settings_never">Ainda não há sincronizações bem-sucedidas</string>

@@ -12,15 +12,7 @@
     <string name="brand_back">Volver</string>
     <string name="brand_welcome">Tus días, conectados.</string>
     <string name="brand_independent">Aplicación independiente, no afiliada a Proton.</string>
-    <string name="system_create_title">Cambios del sistema experimentales</string>
-    <string name="system_create_limits">Crea eventos sencillos en tu calendario, sin recordatorios, invitados, repeticiones ni colores personalizados. La edición y la eliminación tienen opciones separadas.</string>
-    <string name="system_create_mode">Permitir crear desde el calendario del sistema</string>
-    <string name="system_title_mode">Sincronizar cambios de título (experimental)</string>
-    <string name="system_title_limits">Para eventos personales sin invitados ni repeticiones. Se conservan los recordatorios y colores existentes. Activa las opciones correspondientes para cambiar otros campos.</string>
-    <string name="system_create_pending">Creaciones pendientes o por revisar: %1$d. Un envío incierto nunca se repite automáticamente.</string>
     <string name="system_create_error">Se ha producido un problema al sincronizar con Android. Tus datos se conservan.</string>
-    <string name="system_text_limits">Edita la descripción y la ubicación, incluido un cambio de título asociado. Si también cambias las fechas, activa las opciones correspondientes. Se conservan los recordatorios y colores; sus cambios permanecen locales.</string>
-    <string name="system_text_overview">Solo lectura por defecto. La creación, el título, el texto, las fechas y la eliminación tienen opciones separadas. Activa las opciones afectadas para cambios combinados. Se conservan los cambios no compatibles y las operaciones pendientes.</string>
     <string name="sync_settings_title">Sincronización</string>
     <string name="sync_settings_last_success">Última sincronización correcta</string>
     <string name="sync_settings_never">Aún no hay ninguna sincronización correcta</string>
