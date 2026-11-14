@@ -531,6 +531,12 @@ class AndroidCalendarProjection(context: Context,
     override suspend fun inspectStampedSimpleCreate(scope: CalendarScope, localId: LocalEventId): OwnedLocalEditSnapshot? = operation {
         readLocalCreate(scope, localId, null)
     }
+    override suspend fun captureAndStampSeriesCreate(scope: CalendarScope, eventRow: Long, localId: LocalEventId) = operation {
+        readLocalCreate(scope, localId, eventRow, true)
+    }
+    override suspend fun inspectStampedSeriesCreate(scope: CalendarScope, localId: LocalEventId) = operation {
+        readLocalCreate(scope, localId, null, true)
+    }
 
     override fun eventIdentityKey(scope: CalendarScope, event: EventId): String =
         digest("event-v1", calendarSyncId(scope), event.value)
@@ -596,8 +602,8 @@ class AndroidCalendarProjection(context: Context,
     }
 
     /** A row locator can select a candidate only for the durable claim's first invocation. */
-    private fun readLocalCreate(scope: CalendarScope, localId: LocalEventId, firstRow: Long?): OwnedLocalEditSnapshot? =
-        localCreateReader.readLocalCreate(scope, localId, firstRow)
+    private fun readLocalCreate(scope: CalendarScope, localId: LocalEventId, firstRow: Long?, seriesOnly: Boolean = false): OwnedLocalEditSnapshot? =
+        localCreateReader.readLocalCreate(scope, localId, firstRow, seriesOnly)
 
     override val capturedAttachmentProtocol: Int get() = 1
 

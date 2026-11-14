@@ -27,7 +27,7 @@ internal class NativeLocalCreateReader(
 ) {
     private val personal = NativePersonalMetadata(resolver, syncUri, fail)
     private fun digest(vararg parts: String) = hash(parts)
-    fun readLocalCreate(scope: CalendarScope, localId: LocalEventId, firstRow: Long?): OwnedLocalEditSnapshot? {
+    fun readLocalCreate(scope: CalendarScope, localId: LocalEventId, firstRow: Long?, seriesOnly: Boolean = false): OwnedLocalEditSnapshot? {
         if (firstRow != null && firstRow <= 0) return null
         val account = accountFor(scope.account)
         val calendar = calendarRow(scope, account) ?: return null
@@ -57,16 +57,18 @@ internal class NativeLocalCreateReader(
         if (row <= 0 || values.getAsLong(Events.CALENDAR_ID) != calendar ||
             values.getAsInteger(Events.DIRTY) != 1 || values.getAsInteger(Events.DELETED) != 0) return null
         val localOwnerPlaceholder = personal.knownLocalPlaceholder(values, account)
+        val seriesSnapshot = if (seriesOnly) nativeCreateSeriesSnapshot(values, localOwnerPlaceholder, readSimpleTime) ?: return null else null
         val rawColor = values.getAsInteger(Events.EVENT_COLOR)
         if (rawColor != null && rawColor != 0 && rawColor.ushr(24) != 0xff) return null
         if (syncColumns.any { column ->
                 if (firstRow == null && column == Events.SYNC_DATA5) values.getAsString(column) != marker
                 else values[column] != null
-            } || unsupported.any { values[it] != null && !(it == Events.ORGANIZER && localOwnerPlaceholder) } ||
+            } || unsupported.any { values[it] != null && !(it == Events.ORGANIZER && localOwnerPlaceholder) &&
+                !(seriesSnapshot != null && it in setOf(Events.RRULE, Events.DURATION)) } ||
             (!localOwnerPlaceholder && emptyFlags.any { values.getAsInteger(it) != 0 }) ||
             values.getAsInteger(Events.STATUS) != Events.STATUS_CONFIRMED ||
             values.getAsInteger(Events.AVAILABILITY) != Events.AVAILABILITY_BUSY) return null
-        val time = readSimpleTime(values, localOwnerPlaceholder) ?: return null
+        val time = seriesSnapshot?.first ?: readSimpleTime(values, localOwnerPlaceholder) ?: return null
         val shared = EventContent(values.getAsString(Events.TITLE) ?: "", time,
             values.getAsString(Events.DESCRIPTION) ?: "", values.getAsString(Events.EVENT_LOCATION) ?: "",
             details = EventDetails())
@@ -81,6 +83,15 @@ internal class NativeLocalCreateReader(
                 .withExpectedCount(if (firstRow == null) 1 else 0).build())
         val expected = mutableListOf(1, 1, if (firstRow == null) 1 else 0)
         personal.assertReminders(reminders, checks, expected)
+        if (seriesSnapshot != null) {
+            val children = "${Events.ORIGINAL_ID}=?"
+            val args = arrayOf(row.toString())
+            val absent = resolver.query(uri, arrayOf(Events._ID), children, args, null)?.use { it.count == 0 }
+                ?: fail(CalendarProjectionFailure.PROVIDER_UNAVAILABLE)
+            if (!absent) return null
+            checks += ContentProviderOperation.newAssertQuery(uri).withSelection(children, args).withExpectedCount(0).build()
+            expected += 0
+        }
         for ((child, column) in listOf(Attendees.CONTENT_URI to Attendees.EVENT_ID,
             ExtendedProperties.CONTENT_URI to ExtendedProperties.EVENT_ID)) {
             val absent = resolver.query(syncUri(child, account), arrayOf("_id"), "$column=?", arrayOf(row.toString()), null)
@@ -96,7 +107,7 @@ internal class NativeLocalCreateReader(
         if (firstRow != null) expected += 1
         capturedBatch(checks, expected.toIntArray())
         requirePermissions()
-        return OwnedLocalEditSnapshot(calendar, row, content)
+        return OwnedLocalEditSnapshot(calendar, row, content, seriesSnapshot?.second)
     }
 
 }

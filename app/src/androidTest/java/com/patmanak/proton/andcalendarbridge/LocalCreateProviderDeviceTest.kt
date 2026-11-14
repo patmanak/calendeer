@@ -28,6 +28,72 @@ import org.junit.runner.RunWith
 /** Isolated Provider candidates; no editable UI, Proton transport, or outgoing CREATE is exercised. */
 @RunWith(AndroidJUnit4::class)
 class LocalCreateProviderDeviceTest {
+    @Test fun concurrentExceptionInsertionAbortsSeriesStampWithoutDiscardingEitherRow() = fixture(allDay = true) {
+        mutate(ContentValues().apply { putNull(Events.DTEND); put(Events.DURATION, "P2D"); put(Events.RRULE, "FREQ=DAILY;COUNT=3") })
+        var inserted: Uri? = null
+        val adapter = beforeBatch {
+            inserted = context.contentResolver.insert(uri, candidateValues().apply {
+                put(Events.ORIGINAL_ID, row); put(Events.ORIGINAL_ALL_DAY, 1)
+                put(Events.ORIGINAL_INSTANCE_TIME, field(Events.DTSTART)!!.toLong())
+            })!!
+        }
+        try { adapter.captureAndStampSeriesCreate(target, row, localId); fail("Concurrent exception must abort") }
+        catch (failure: CalendarProjectionException) { assertEquals(CalendarProjectionFailure.PROVIDER_REJECTED, failure.category) }
+        assertNotNull(inserted); assertNull(field(Events.SYNC_DATA5)); assertEquals("1", field(Events.DIRTY))
+        assertEquals("FREQ=DAILY;COUNT=3", field(Events.RRULE))
+    }
+    @Test fun allDaySeriesObservationKeepsPersonalMetadataWithoutCreatingARemoteIdentity() = fixture(allDay = true, ordinary = true) {
+        mutate(ContentValues().apply { put(Events.RRULE, "COUNT=3;FREQ=DAILY"); putNull(Events.DTEND)
+            put(Events.DURATION, "P2D"); put(Events.EVENT_COLOR, 0xff123456.toInt()); put(Events.HAS_ALARM, 1) })
+        context.contentResolver.insert(syncUri(Reminders.CONTENT_URI), ContentValues().apply {
+            put(Reminders.EVENT_ID, row); put(Reminders.METHOD, Reminders.METHOD_ALERT); put(Reminders.MINUTES, 10)
+        })!!
+        val snapshot = projection.captureAndStampSeriesCreate(target, row, localId)!!
+        assertEquals(content.copy(colorRgb = 0x123456, details = EventDetails(listOf(EventReminder(10)))), snapshot.content)
+        assertEquals(CreateSeriesRule(3), snapshot.series)
+        assertEquals("COUNT=3;FREQ=DAILY", field(Events.RRULE)); assertEquals("P2D", field(Events.DURATION))
+        assertEquals(snapshot, projection.inspectStampedSeriesCreate(target, localId))
+        assertEquals("1", field(Events.DIRTY)); assertNull(field(Events._SYNC_ID)); assertNull(field(Events.SYNC_DATA6))
+    }
+    @Test fun seriesObservationRefusesUnqualifiedRulesAndExcludedOrAmbiguousSlotsWithoutStamping() {
+        fixture(allDay = true) {
+            mutate(ContentValues().apply { putNull(Events.DTEND); put(Events.DURATION, "P2D") })
+            for (rule in listOf("FREQ=WEEKLY;COUNT=3", "FREQ=DAILY", "FREQ=DAILY;COUNT=367", "FREQ=DAILY;COUNT=3;BYHOUR=2")) {
+                mutate(ContentValues().apply { put(Events.RRULE, rule) })
+                assertNull(projection.captureAndStampSeriesCreate(target, row, localId)); assertNull(field(Events.SYNC_DATA5))
+            }
+            mutate(ContentValues().apply { put(Events.RRULE, "FREQ=DAILY;COUNT=3"); put(Events.EXDATE, "20300331") })
+            assertNull(projection.captureAndStampSeriesCreate(target, row, localId)); assertNull(field(Events.SYNC_DATA5))
+        }
+        fixture {
+            mutate(ContentValues().apply { putNull(Events.DTEND); put(Events.DURATION, "PT7200S"); put(Events.RRULE, "FREQ=DAILY;COUNT=3") })
+            assertNull(projection.captureAndStampSeriesCreate(target, row, localId)); assertNull(field(Events.SYNC_DATA5))
+        }
+    }
+    @Test fun aSeriesWithAnExistingLocalExceptionCannotBeCapturedAsAMasterOnlyCreate() = fixture(allDay = true) {
+        mutate(ContentValues().apply { putNull(Events.DTEND); put(Events.DURATION, "P2D"); put(Events.RRULE, "FREQ=DAILY;COUNT=3") })
+        context.contentResolver.insert(uri, candidateValues().apply {
+            put(Events.ORIGINAL_ID, row); put(Events.ORIGINAL_ALL_DAY, 1)
+            put(Events.ORIGINAL_INSTANCE_TIME, field(Events.DTSTART)!!.toLong())
+        })!!
+        assertNull(projection.captureAndStampSeriesCreate(target, row, localId)); assertNull(field(Events.SYNC_DATA5))
+    }
+    @Test fun explicitDailySeriesCapturePreservesNativeRuleDurationAndDirtyState() = fixture {
+        val time = EventTime.Timed(Instant.parse("2030-05-01T09:00:00Z"), Instant.parse("2030-05-01T10:00:00Z"), ZoneId.of("Europe/Paris"))
+        mutate(ContentValues().apply { put(Events.DTSTART, time.start.toEpochMilli())
+            put(Events.RRULE, "FREQ=DAILY;COUNT=3"); putNull(Events.DTEND); put(Events.DURATION, "PT3600S") })
+        val before = values()
+        assertNull(projection.captureAndStampSimpleCreate(target, row, localId))
+        assertNull(field(Events.SYNC_DATA5))
+        val snapshot = projection.captureAndStampSeriesCreate(target, row, localId)!!
+        assertEquals(time, snapshot.content.time); assertNull(snapshot.content.recurrence)
+        assertEquals(CreateSeriesRule(3), snapshot.series)
+        assertEquals(snapshot, projection.inspectStampedSeriesCreate(target, localId))
+        assertNull(projection.inspectStampedSimpleCreate(target, localId))
+        assertEquals("FREQ=DAILY;COUNT=3", field(Events.RRULE)); assertEquals("PT3600S", field(Events.DURATION))
+        assertNull(field(Events.DTEND)); assertEquals("1", field(Events.DIRTY)); assertNull(field(Events._SYNC_ID))
+        assertEquals(before, values() - Events.SYNC_DATA5 + (Events.SYNC_DATA5 to null))
+    }
     @Test fun explicitSystemCreationModeKeepsTheSameCalendarAndDefaultsBackToReadOnly() = fixture {
         val summary = CalendarSummary(target.calendar, "Create mode fixture")
         assertEquals(calendar, projection.ensureCalendarState(target, summary, true).id)
@@ -113,7 +179,7 @@ class LocalCreateProviderDeviceTest {
                     put(Attendees.ATTENDEE_TYPE, Attendees.TYPE_REQUIRED); put(Attendees.ATTENDEE_STATUS, Attendees.ATTENDEE_STATUS_NONE)
                 })!!
                 "reminder" -> child = context.contentResolver.insert(syncUri(Reminders.CONTENT_URI), ContentValues().apply {
-                    put(Reminders.EVENT_ID, row); put(Reminders.MINUTES, 15); put(Reminders.METHOD, Reminders.METHOD_ALERT)
+                    put(Reminders.EVENT_ID, row); put(Reminders.MINUTES, 15); put(Reminders.METHOD, Reminders.METHOD_EMAIL)
                 })!!
             }
             val before = values()
@@ -163,7 +229,7 @@ class LocalCreateProviderDeviceTest {
     }
 
     @Test fun unsupportedColorFlagsAndPrecisionDoNotAcquireAMarker() = fixture {
-        for ((column, value) in listOf(Events.EVENT_COLOR to 0xFFAA1122.toInt().toString(),
+        for ((column, value) in listOf(Events.EVENT_COLOR to 0x7FAA1122.toString(),
             Events.ORGANIZER to "create-fixture@example.invalid", Events.ACCESS_LEVEL to Events.ACCESS_PRIVATE.toString(),
             Events.AVAILABILITY to Events.AVAILABILITY_FREE.toString(), Events.CUSTOM_APP_PACKAGE to "example.create.fixture",
             Events.DTSTART to ((content.time as EventTime.Timed).start.toEpochMilli() + 1).toString())) {
@@ -177,7 +243,7 @@ class LocalCreateProviderDeviceTest {
 
     @Test fun unsupportedReminderAndRecurrenceCannotBeSilentlyDropped() = fixture {
         val reminder = context.contentResolver.insert(syncUri(Reminders.CONTENT_URI), ContentValues().apply {
-            put(Reminders.EVENT_ID, row); put(Reminders.MINUTES, 10); put(Reminders.METHOD, Reminders.METHOD_ALERT)
+            put(Reminders.EVENT_ID, row); put(Reminders.MINUTES, 10); put(Reminders.METHOD, Reminders.METHOD_EMAIL)
         })!!
         assertNull(projection.captureAndStampSimpleCreate(target, row, localId)); assertNull(field(Events.SYNC_DATA5))
         context.contentResolver.delete(syncUri(reminder), null, null)
@@ -303,6 +369,26 @@ class LocalCreateProviderDeviceTest {
         }
         fun mutate(values: ContentValues) {
             assertEquals(1, context.contentResolver.update(uri, values, "${Events._ID}=?", arrayOf(row.toString())))
+        }
+        fun beforeBatch(change: () -> Unit): AndroidCalendarProjection {
+            val real = context.contentResolver
+            val provider = object : ContentProvider() {
+                override fun onCreate() = true
+                override fun getType(uri: Uri): String? = null
+                override fun insert(uri: Uri, values: ContentValues?): Uri? = error("Use batch")
+                override fun delete(uri: Uri, selection: String?, args: Array<out String>?): Int = error("Use batch")
+                override fun update(uri: Uri, values: ContentValues?, selection: String?, args: Array<out String>?): Int = error("Use batch")
+                override fun query(uri: Uri, columns: Array<out String>?, selection: String?, args: Array<out String>?, order: String?): Cursor? =
+                    real.query(uri, columns, selection, args, order)
+                override fun applyBatch(operations: ArrayList<ContentProviderOperation>): Array<ContentProviderResult> {
+                    change(); return real.applyBatch(CalendarContract.AUTHORITY, operations)
+                }
+            }
+            val wrapped = object : ContextWrapper(context) {
+                override fun getApplicationContext(): Context = this
+                override fun getContentResolver() = ContentResolver.wrap(provider)
+            }
+            return AndroidCalendarProjection(wrapped)
         }
         fun systemSelfOrganizerProfile() = ContentValues().apply {
             put(Events.ORGANIZER, projection.accountFor(target.account).name)

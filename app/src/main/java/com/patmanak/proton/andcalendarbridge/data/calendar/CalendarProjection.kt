@@ -141,6 +141,9 @@ interface CalendarProjection {
     suspend fun captureAndStampSimpleCreate(scope: CalendarScope, eventRow: Long, localId: LocalEventId): OwnedLocalEditSnapshot? = null
     /** Reopening is marker-only inspection. Missing markers never fall back to a row locator. */
     suspend fun inspectStampedSimpleCreate(scope: CalendarScope, localId: LocalEventId): OwnedLocalEditSnapshot? = null
+    /** Explicit series observation only; neither port enables preparation, sending or acknowledgement. */
+    suspend fun captureAndStampSeriesCreate(scope: CalendarScope, eventRow: Long, localId: LocalEventId): OwnedLocalEditSnapshot? = null
+    suspend fun inspectStampedSeriesCreate(scope: CalendarScope, localId: LocalEventId): OwnedLocalEditSnapshot? = null
     val capturedAttachmentProtocol: Int? get() = null
     /** Metadata-only attachment to the unique scoped local marker. Preserve content, children and
      * dirty/deleted flags. No row-ID fallback, insertion, acknowledgement or import release.
@@ -176,8 +179,9 @@ interface CalendarProjection {
 }
 
 /** Android locator is diagnostic context only and never enters the durable domain intent. */
-data class OwnedLocalEditSnapshot(val calendarRow: Long, val eventRow: Long, val content: EventContent) {
-    init { require(calendarRow > 0 && eventRow > 0) }
+data class OwnedLocalEditSnapshot(val calendarRow: Long, val eventRow: Long, val content: EventContent,
+    val series: com.patmanak.proton.andcalendarbridge.sync.CreateSeriesRule? = null) {
+    init { require(calendarRow > 0 && eventRow > 0 && series?.supports(content.time) != false) }
     override fun toString() = "OwnedLocalEditSnapshot(redacted)"
 }
 
