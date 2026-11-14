@@ -1,0 +1,7 @@
+<resources>
+    <string name="event_colors">Kolory wydarzeń</string>
+    <string name="event_colors_individual">Kolor każdego wydarzenia</string>
+    <string name="event_colors_calendar">Kolor kalendarza</string>
+    <string name="event_colors_help">Zmienia tylko wygląd na tym telefonie. Niewysłane zmiany zachowują wygląd do czasu przetworzenia. W trybie koloru kalendarza kolory wybrane na telefonie pozostają na nim i nie są wysyłane do Proton; inne zmiany zachowują kolor Proton.</string>
+    <string name="event_colors_retry">Nie udało się zmienić wyglądu. Otwórz ponownie ustawienia.</string>
+</resources>

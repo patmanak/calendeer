@@ -93,6 +93,20 @@ with an explanation inviting a new choice. This never discards pending work or
 reissues an uncertain request. Fresh calendars default to Read-only. Eight
 supported languages remain available.
 
+Appearance includes a global Event colors choice: each event color (default) or
+the calendar color. Changing it updates existing clean owned rows locally, with
+no import, capture or outgoing request. A durable local job traverses pages of
+100 rows and can safely restart. Paused calendars are included; the choice never
+grants editing permission. Calendar access must be available.
+
+Calendar-color display masks the native event color while retaining its original
+value and projection proof in versioned display metadata. Historical receipts
+keep their identity. Unknown metadata and dirty/deleted rows remain untouched;
+received or acknowledged changes adopt the current choice. On a masked row,
+phone color changes are unsupported and retained locally; ordinary edits preserve
+the Proton color. Returning to event colors restores clean rows without a server
+round trip. Client-specific rendering remains a milestone qualification gate.
+
 ## Artwork provenance
 
 `app/src/main/res/drawable-nodpi/calendeer_mascot.png` was generated with the built-in

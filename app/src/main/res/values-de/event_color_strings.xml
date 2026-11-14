@@ -1,0 +1,7 @@
+<resources>
+    <string name="event_colors">Terminfarben</string>
+    <string name="event_colors_individual">Farbe jedes Termins</string>
+    <string name="event_colors_calendar">Kalenderfarbe</string>
+    <string name="event_colors_help">Ändert nur die Anzeige auf diesem Telefon. Nicht gesendete Änderungen behalten bis zur Verarbeitung ihre Anzeige. Bei Kalenderfarben bleiben auf dem Telefon gewählte Farben dort und werden nicht an Proton gesendet; andere Änderungen behalten die Proton-Farbe.</string>
+    <string name="event_colors_retry">Die Anzeige konnte nicht aktualisiert werden. Öffne die Einstellungen erneut.</string>
+</resources>

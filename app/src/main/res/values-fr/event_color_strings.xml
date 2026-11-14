@@ -1,0 +1,7 @@
+<resources>
+    <string name="event_colors">Couleur des événements</string>
+    <string name="event_colors_individual">Couleur de chaque événement</string>
+    <string name="event_colors_calendar">Couleur du calendrier</string>
+    <string name="event_colors_help">Change uniquement l’affichage sur ce téléphone. Les modifications non envoyées gardent leur affichage actuel jusqu’à leur traitement. En mode couleur du calendrier, une couleur choisie sur le téléphone y reste sans être envoyée à Proton ; les autres modifications conservent la couleur Proton.</string>
+    <string name="event_colors_retry">La mise à jour de l’affichage n’a pas pu démarrer. Rouvrez les réglages pour réessayer.</string>
+</resources>

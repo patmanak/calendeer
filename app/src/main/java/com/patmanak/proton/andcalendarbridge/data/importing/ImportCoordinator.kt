@@ -272,6 +272,7 @@ class ImportCoordinator(
 
     /** Also closes retained mirrors after sign-out/account changes and a cold process restart. */
     suspend fun reconcileSystemCalendarAccess() = nativeCalendars.reconcile()
+    suspend fun reprojectEventColors(): Boolean = nativeCalendars.reprojectColors()
     suspend fun disconnectCalendars() = nativeCalendars.disconnect()
 
     suspend fun discoverSystemChanges(target: CalendarScope, afterRow: Long = 0, limit: Int = 25):

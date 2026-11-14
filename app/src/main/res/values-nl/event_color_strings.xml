@@ -1,0 +1,7 @@
+<resources>
+    <string name="event_colors">Afspraakkleuren</string>
+    <string name="event_colors_individual">Kleur van elke afspraak</string>
+    <string name="event_colors_calendar">Agendakleur</string>
+    <string name="event_colors_help">Wijzigt alleen de weergave op deze telefoon. Niet-verzonden wijzigingen behouden hun weergave totdat ze zijn verwerkt. Bij agendakleuren blijven op de telefoon gekozen kleuren daar en worden ze niet naar Proton gestuurd; andere wijzigingen behouden de Proton-kleur.</string>
+    <string name="event_colors_retry">De weergave kon niet worden bijgewerkt. Open Instellingen opnieuw.</string>
+</resources>

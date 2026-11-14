@@ -63,6 +63,7 @@ class MainActivity : ComponentActivity() {
         val catalog = preferences.calendarCatalog
         setContent {
             val mode by preferences.themePreferences.mode.collectAsState()
+            val eventColorMode by preferences.eventColorPreferences.mode.collectAsState()
             val language by preferences.languagePreferences.language.collectAsState()
             val darkTheme = resolveDarkTheme(mode, isSystemInDarkTheme())
             val verification by ProtonAuthentication.verification.state.collectAsState()
@@ -93,6 +94,7 @@ class MainActivity : ComponentActivity() {
             LaunchedEffect(accountLabelAllowed, archiveEpoch) {
                 if (accountLabelAllowed) {
                     connectedAccountLabel = ProtonAuthentication.connectedAccountLabel(preferences)
+                    runCatching { com.patmanak.proton.andcalendarbridge.data.importing.EventColorWorker.enqueue(preferences) }
                 }
             }
             // Event history stays in ephemeral memory and never crosses an authentication epoch.
@@ -112,6 +114,12 @@ class MainActivity : ComponentActivity() {
                     mode, preferences.themePreferences::setMode, language,
                     signedIn = authenticationState.destination == com.patmanak.proton.andcalendarbridge.auth.AuthenticationDestination.AUTHENTICATED,
                     verificationRequired = verification.isRequired,
+                    colorMode = eventColorMode,
+                    onColorModeChange = { selected ->
+                        if (!preferences.eventColorPreferences.setMode(selected)) feedbackScope.launch {
+                            syncFeedback.showSnackbar(getString(R.string.event_colors_retry))
+                        }
+                    },
                     snackbarContent = { androidx.compose.material3.SnackbarHost(syncFeedback) },
                     settingsEnabled = !verification.isRequired && !authenticationState.isSubmitting &&
                         !authenticationState.isCleanupRequired && authenticationState.destination in setOf(
@@ -181,6 +189,7 @@ class MainActivity : ComponentActivity() {
         (application as BridgeApplication).languagePreferences.refresh()
         (application as BridgeApplication).calendarSyncSettings.refresh()
         (application as BridgeApplication).imports.permissionsChanged()
+        runCatching { com.patmanak.proton.andcalendarbridge.data.importing.EventColorWorker.enqueue(this) }
         com.patmanak.proton.andcalendarbridge.data.importing.WorkManagerImportScheduler(this, manual = true).apply {
             requestLocal()
             requestNetwork()

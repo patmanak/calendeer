@@ -42,6 +42,11 @@ class BridgeApplication : Application() {
     val calendarSyncSettings by lazy {
         com.patmanak.proton.andcalendarbridge.data.importing.AndroidCalendarSyncSettings(this, authenticationScope)
     }
+    val eventColorPreferences by lazy {
+        com.patmanak.proton.andcalendarbridge.data.calendar.EventColorPreferences(this) {
+            com.patmanak.proton.andcalendarbridge.data.importing.EventColorWorker.enqueue(this, changed = true)
+        }
+    }
     internal val providerWake: com.patmanak.proton.andcalendarbridge.data.importing.AndroidProviderWake by lazy {
         com.patmanak.proton.andcalendarbridge.data.importing.AndroidProviderWake(this)
     }

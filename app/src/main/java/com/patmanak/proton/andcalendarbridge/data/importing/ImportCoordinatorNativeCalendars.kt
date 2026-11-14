@@ -5,6 +5,7 @@ import com.patmanak.proton.andcalendarbridge.data.calendar.CalendarProjection
 import com.patmanak.proton.andcalendarbridge.sync.*
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.ensureActive
 
 /** Native mirror lifecycle under the coordinator's original mutex and dynamic epoch guards. */
 internal class ImportCoordinatorNativeCalendars(
@@ -47,6 +48,30 @@ internal class ImportCoordinatorNativeCalendars(
     suspend fun reconcile() {
         if (!drain()) return
         for (target in store.calendarScopes()) configure(target)
+    }
+    /** Includes paused mirrors; appearance never grants editing/synchronization consent. */
+    suspend fun reprojectColors(): Boolean = mutex.withLock {
+        if (!authenticated() || !hasCalendarPermissions()) return@withLock false
+        val expected = generation()
+        val policy = policyRevision()
+        for (target in store.calendarScopes()) {
+            if (!isCurrent(expected, target.account)) continue
+            val active = { authenticated() && generation() == expected &&
+                policyRevision() == policy && hasCalendarPermissions() }
+            projection.admitOperation = active
+            try {
+                var after = 0L
+                do {
+                    kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                    if (!active() || !isCurrent(expected, target.account)) return@withLock false
+                    val page = projection.reprojectEventColors(target, after, 100)
+                    check(!page.hasMore || page.afterRow > after) { "Non-advancing color projection" }
+                    after = page.afterRow
+                    kotlinx.coroutines.yield()
+                } while (page.hasMore)
+            } finally { projection.admitOperation = { false } }
+        }
+        authenticated() && generation() == expected && hasCalendarPermissions()
     }
     suspend fun disconnect(): Boolean {
         invalidateAuthentication()

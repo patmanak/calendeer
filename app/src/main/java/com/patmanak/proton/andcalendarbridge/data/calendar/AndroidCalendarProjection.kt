@@ -111,7 +111,7 @@ data class EnsuredCalendar(val id: Long, val created: Boolean)
  * order opaque revisions and never infers deletion from an absent event in a server page.
  */
 class AndroidCalendarProjection(context: Context,
-    internal val colorMode: () -> EventColorMode = { EventColorMode.EVENT }) : CalendarProjection {
+    internal val colorMode: () -> EventColorMode = { EventColorPreferences.read(context) }) : CalendarProjection {
     override suspend fun reprojectEventColors(scope: CalendarScope, afterRow: Long, limit: Int) =
         reprojectColorPage(scope, afterRow, limit)
     private val localCreateReader by lazy { NativeLocalCreateReader(resolver, ::accountFor, ::calendarRow,

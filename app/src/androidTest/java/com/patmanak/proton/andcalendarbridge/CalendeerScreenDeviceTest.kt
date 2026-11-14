@@ -18,6 +18,7 @@ import com.patmanak.proton.andcalendarbridge.ui.BridgeScreen
 import com.patmanak.proton.andcalendarbridge.ui.locale.AppLanguage
 import com.patmanak.proton.andcalendarbridge.ui.theme.BridgeTheme
 import com.patmanak.proton.andcalendarbridge.ui.theme.ThemeMode
+import com.patmanak.proton.andcalendarbridge.data.calendar.EventColorMode
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
@@ -31,6 +32,7 @@ class CalendeerScreenDeviceTest {
     private val mode = mutableStateOf(ThemeMode.LIGHT)
     private val settingsEnabled = mutableStateOf(true)
     private val verificationRequired = mutableStateOf(false)
+    private val eventColorMode = mutableStateOf(EventColorMode.EVENT)
     private fun start(fontScale: Float? = null) {
         compose.setContent {
             val density = LocalDensity.current
@@ -39,7 +41,8 @@ class CalendeerScreenDeviceTest {
                 BridgeScreen(mode.value, { mode.value = it }, AppLanguage.SYSTEM, {},
                     authenticationContent = { Text("Synthetic connection") },
                     calendarContent = { Text("Synthetic calendars") }, signedIn = signedIn.value,
-                    settingsEnabled = settingsEnabled.value, verificationRequired = verificationRequired.value)
+                    settingsEnabled = settingsEnabled.value, verificationRequired = verificationRequired.value,
+                    colorMode = eventColorMode.value, onColorModeChange = { eventColorMode.value = it })
             }
             }
         }
@@ -82,6 +85,26 @@ class CalendeerScreenDeviceTest {
         compose.runOnIdle { assertEquals(ThemeMode.DARK, mode.value) }
         compose.onNodeWithTag("brand_settings").performClick()
         compose.onNodeWithText("Synthetic connection").performScrollTo().assertIsDisplayed()
+    }
+    @Test fun eventColorChoiceIsReachableWithoutOpeningOrEditingAnEvent() {
+        start()
+        compose.onNodeWithTag("brand_settings").performClick()
+        compose.onNodeWithTag("preference_event_colors").performScrollTo().assertIsDisplayed().performClick()
+        compose.onNodeWithText(compose.activity.getString(R.string.event_colors_help)).assertIsDisplayed()
+        compose.onNodeWithText(compose.activity.getString(R.string.event_colors_calendar)).performScrollTo().performClick()
+        compose.runOnIdle { assertEquals(EventColorMode.CALENDAR, eventColorMode.value) }
+        compose.onNodeWithTag("preference_event_colors").performScrollTo().performClick()
+        compose.onNodeWithText(compose.activity.getString(R.string.event_colors_individual)).performScrollTo().performClick()
+        compose.runOnIdle { assertEquals(EventColorMode.EVENT, eventColorMode.value) }
+    }
+    @Test fun colorChoiceDismissesOnVerificationAndIsUsableWithLargeText() {
+        signedIn.value = true; start(fontScale = 1.8f)
+        compose.onNodeWithTag("brand_settings").performClick()
+        compose.onNodeWithTag("preference_event_colors").performScrollTo().performClick()
+        compose.onNodeWithText(compose.activity.getString(R.string.event_colors_calendar)).performScrollTo().assertIsDisplayed()
+        compose.runOnIdle { verificationRequired.value = true }
+        compose.onNodeWithText(compose.activity.getString(R.string.event_colors_calendar)).assertDoesNotExist()
+        compose.runOnIdle { assertEquals(EventColorMode.EVENT, eventColorMode.value) }
     }
     @Test fun activeAuthenticationCannotBeHiddenBySettingsNavigation() {
         settingsEnabled.value = false; start()

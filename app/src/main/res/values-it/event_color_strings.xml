@@ -1,0 +1,7 @@
+<resources>
+    <string name="event_colors">Colori degli eventi</string>
+    <string name="event_colors_individual">Colore di ogni evento</string>
+    <string name="event_colors_calendar">Colore del calendario</string>
+    <string name="event_colors_help">Cambia solo la visualizzazione su questo telefono. Le modifiche non inviate mantengono il loro aspetto fino alla gestione. Con il colore del calendario, i colori scelti sul telefono restano sul telefono e non vengono inviati a Proton; le altre modifiche conservano il colore Proton.</string>
+    <string name="event_colors_retry">Impossibile aggiornare la visualizzazione. Riapri le impostazioni per riprovare.</string>
+</resources>

@@ -1,0 +1,7 @@
+<resources>
+    <string name="event_colors">Cores dos eventos</string>
+    <string name="event_colors_individual">Cor de cada evento</string>
+    <string name="event_colors_calendar">Cor do calendário</string>
+    <string name="event_colors_help">Altera apenas a apresentação neste telefone. As alterações não enviadas mantêm o aspeto até serem processadas. Com a cor do calendário, as cores escolhidas no telefone permanecem nele e não são enviadas ao Proton; as outras alterações preservam a cor Proton.</string>
+    <string name="event_colors_retry">Não foi possível atualizar a apresentação. Volte a abrir as definições para tentar novamente.</string>
+</resources>

@@ -28,6 +28,7 @@ import androidx.compose.ui.unit.dp
 import com.patmanak.proton.andcalendarbridge.R
 import com.patmanak.proton.andcalendarbridge.ui.locale.AppLanguage
 import com.patmanak.proton.andcalendarbridge.ui.theme.ThemeMode
+import com.patmanak.proton.andcalendarbridge.data.calendar.EventColorMode
 
 /** Navigation only. Opening a destination never changes calendar consent or schedules work. */
 @Composable
@@ -41,6 +42,8 @@ fun BridgeScreen(
     signedIn: Boolean = false,
     settingsEnabled: Boolean = true,
     verificationRequired: Boolean = false,
+    colorMode: EventColorMode = EventColorMode.EVENT,
+    onColorModeChange: (EventColorMode) -> Unit = {},
     synchronizationContent: @Composable () -> Unit = {},
     snackbarContent: @Composable () -> Unit = {},
     accountActions: @Composable () -> Unit = {},
@@ -99,6 +102,9 @@ fun BridgeScreen(
                             HorizontalDivider(Modifier.padding(horizontal = 20.dp), color = MaterialTheme.colorScheme.outlineVariant)
                             PreferenceRow(stringResource(R.string.language), languageLabel(language), canConfigure,
                                 "preference_language") { openPicker = "language" }
+                            HorizontalDivider(Modifier.padding(horizontal = 20.dp), color = MaterialTheme.colorScheme.outlineVariant)
+                            PreferenceRow(stringResource(R.string.event_colors), colorLabel(colorMode), canConfigure,
+                                "preference_event_colors") { openPicker = "colors" }
                         }
                         SectionTitle(stringResource(R.string.ui_about))
                         ContentCard {
@@ -139,6 +145,9 @@ fun BridgeScreen(
             onDismiss = { openPicker = null }) { openPicker = null; onThemeChange(it) }
         "language" -> ChoiceDialog(stringResource(R.string.language), AppLanguage.entries, language, { languageLabel(it) },
             onDismiss = { openPicker = null }) { openPicker = null; onLanguageChange(it) }
+        "colors" -> ChoiceDialog(stringResource(R.string.event_colors), EventColorMode.entries, colorMode, { colorLabel(it) },
+            description = stringResource(R.string.event_colors_help),
+            onDismiss = { openPicker = null }) { openPicker = null; onColorModeChange(it) }
     }
 }
 
@@ -184,6 +193,7 @@ private fun <T> ChoiceDialog(
     options: List<T>,
     selected: T,
     label: @Composable (T) -> String,
+    description: String? = null,
     onDismiss: () -> Unit,
     onSelect: (T) -> Unit,
 ) {
@@ -192,6 +202,8 @@ private fun <T> ChoiceDialog(
         title = { Text(title) },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()).selectableGroup()) {
+                if (description != null) Text(description, style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.padding(bottom = 12.dp))
                 options.forEach { option ->
                     Row(
                         Modifier.fillMaxWidth().selectable(
@@ -210,6 +222,12 @@ private fun <T> ChoiceDialog(
         confirmButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.close)) } },
     )
 }
+
+@Composable
+private fun colorLabel(mode: EventColorMode): String = stringResource(when (mode) {
+    EventColorMode.EVENT -> R.string.event_colors_individual
+    EventColorMode.CALENDAR -> R.string.event_colors_calendar
+})
 
 @Composable
 private fun themeLabel(mode: ThemeMode): String = stringResource(when (mode) {

@@ -1,0 +1,7 @@
+<resources>
+    <string name="event_colors">Event colors</string>
+    <string name="event_colors_individual">Each event color</string>
+    <string name="event_colors_calendar">Calendar color</string>
+    <string name="event_colors_help">Only changes the display on this phone. Unsent edits keep their current display until handled. With calendar colors, color changes made on the phone stay on the phone and are not sent to Proton; other edits preserve the Proton color.</string>
+    <string name="event_colors_retry">Display update could not start. Reopen Settings to retry.</string>
+</resources>

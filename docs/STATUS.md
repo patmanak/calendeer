@@ -50,8 +50,9 @@ Samsung/One UI is outside 0.1. Signature management remains deferred by the owne
   feedback. [Design](DESIGN.md), [permissions](PERMISSIONS.md).
 - Incoming data uses bounded sealed staging, offline decoding, retained keys,
   opaque cursors/change feeds and rolling coverage. Dirty unsupported events hold
-  their own projection, not unrelated pages. Colors preserve supported event
-  colors with calendar fallback. [Import](READ_ONLY_IMPORT.md).
+  their own projection, not unrelated pages. Colors follow each event by default,
+  or the calendar through a global offline display preference that preserves
+  Proton colors and retained work. [Import](READ_ONLY_IMPORT.md).
 - Simple CREATE, personal-v2 combined title/text/date edits and DELETE use retained
   intent identity, guarded preparation/submission/readback and exact native/SQL
   acknowledgement. Timed/all-day events and qualified zone changes are supported.
