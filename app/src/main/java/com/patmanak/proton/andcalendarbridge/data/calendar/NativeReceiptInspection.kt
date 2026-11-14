@@ -42,9 +42,7 @@ internal fun AndroidCalendarProjection.inspectCapturedHistory(receipt: CapturedC
     val uri = syncUri(Events.CONTENT_URI, account)
     val local = capturedLocalSelection(baseline.receipt, calendar)
     val values = attachmentMetadata(uri, local) ?: return false
-    if (expected.keySet().any { values.getAsString(it) != expected.getAsString(it) } ||
-        values.getAsString(Events.SYNC_DATA5) != local.args[1] ||
-        ATTACHMENT_SYNC_COLUMNS.any { it !in expected.keySet() && it != Events.SYNC_DATA5 && values[it] != null })
+    if (!colorMetadataMatches(values, expected) || values.getAsString(Events.SYNC_DATA5) != local.args[1])
         return false
     val remote = capturedRemoteSelection(baseline.receipt, calendar)
     val remoteMatches = resolver.query(uri, arrayOf(Events._ID), remote.sql, remote.args, null)?.use {
@@ -117,7 +115,7 @@ internal fun AndroidCalendarProjection.inspectOrdinaryAcknowledgement(scope: Cal
         metadata.getAsString(Events._SYNC_ID) != remoteId || metadata.getAsString(Events.SYNC_DATA4) != remoteId ||
         metadata.getAsString(Events.SYNC_DATA1) != OWNER_MARKER ||
         metadata.getAsString(Events.SYNC_DATA2) != digest("revision-v1", revision.value) ||
-        metadata.getAsString(Events.SYNC_DATA3) != marker ||
+        NativeColorStyle.read(metadata.getAsString(Events.SYNC_DATA3))?.proof != marker ||
         ORDINARY_RESERVED_COLUMNS.any { metadata[it] != null }) return false
     val syncIdentity = Selection("${Events.CALENDAR_ID}=? AND ${Events._SYNC_ID}=?", arrayOf(calendar.toString(), remoteId))
     if (ownedRow(uri, syncIdentity, Events.SYNC_DATA1) != row) return false

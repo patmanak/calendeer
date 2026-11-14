@@ -109,7 +109,7 @@ internal fun AndroidCalendarProjection.applyInternal(intent: ProjectionIntent, s
                 put(Events.SYNC_DATA1, OWNER_MARKER)
                 put(Events.SYNC_DATA2, digest("revision-v1", change.revision.value))
                 put(Events.SYNC_DATA4, remoteId)
-                if (receipt != null) put(Events.SYNC_DATA3, receiptMarker(receipt))
+                displayColor(this, change.content.colorRgb, receipt?.let(::receiptMarker))
                 if (parent != null) {
                     put(Events.ORIGINAL_ID, parent)
                     put(Events.ORIGINAL_SYNC_ID, seriesId)
@@ -156,7 +156,7 @@ internal suspend fun AndroidCalendarProjection.inspectReceipt(frozen: Projection
         if (metadata.getAsLong(Events._ID) != row || metadata.getAsString(Events._SYNC_ID) != ownSyncId ||
             metadata.getAsString(Events.SYNC_DATA1) != OWNER_MARKER || metadata.getAsString(Events.SYNC_DATA4) != remoteId ||
             metadata.getAsString(Events.SYNC_DATA2) != digest("revision-v1", frozen.change.revision.value) ||
-            metadata.getAsString(Events.SYNC_DATA3) != receiptMarker(frozen)) return@operation null
+            NativeColorStyle.read(metadata.getAsString(Events.SYNC_DATA3))?.proof != receiptMarker(frozen)) return@operation null
         // A master has distinct remote-event and series identities. Bind both uniquely,
         // without treating today's recurrence fields or child rows as historical proof.
         val syncIdentity = Selection("${Events.CALENDAR_ID}=? AND ${Events._SYNC_ID}=?",

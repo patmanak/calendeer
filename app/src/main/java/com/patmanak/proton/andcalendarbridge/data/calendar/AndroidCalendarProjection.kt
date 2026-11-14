@@ -110,7 +110,8 @@ data class EnsuredCalendar(val id: Long, val created: Boolean)
  * Callers must enforce active scope/generation and ordered durable queue draining. This class cannot
  * order opaque revisions and never infers deletion from an absent event in a server page.
  */
-class AndroidCalendarProjection(context: Context) : CalendarProjection {
+class AndroidCalendarProjection(context: Context,
+    internal val colorMode: () -> EventColorMode = { EventColorMode.EVENT }) : CalendarProjection {
     private val localCreateReader by lazy { NativeLocalCreateReader(resolver, ::accountFor, ::calendarRow,
         ::syncUri, ::calendarSyncId, ::calendarSelection, ::assertion,
         { values, placeholder -> readSimpleTime(values, placeholder) }, ::requirePermissions, ::capturedBatch, ::fail,
@@ -749,8 +750,11 @@ class AndroidCalendarProjection(context: Context) : CalendarProjection {
             Events.SYNC_DATA8, Events.SYNC_DATA9, Events.SYNC_DATA10)
         internal val CAPTURED_ORIGIN_COLUMNS = arrayOf(Events.SYNC_DATA5, Events.SYNC_DATA6, Events.SYNC_DATA7)
         internal val ORDINARY_RESERVED_COLUMNS = CAPTURED_ORIGIN_COLUMNS + arrayOf(Events.SYNC_DATA8, Events.SYNC_DATA9, Events.SYNC_DATA10)
-        internal fun ordinaryReceiptMarker(value: String?) = value == null ||
-            value.matches(Regex("calendeer-projection-receipt-v1:[a-f0-9]{8}(-[a-f0-9]{4}){3}-[a-f0-9]{12}"))
+        internal fun ordinaryReceiptMarker(value: String?): Boolean {
+            val style = NativeColorStyle.read(value) ?: return false
+            return style.proof == null || style.proof.matches(
+                Regex("calendeer-projection-receipt-v1:[a-f0-9]{8}(-[a-f0-9]{4}){3}-[a-f0-9]{12}"))
+        }
         internal fun strictAttachmentDigest(vararg parts: String): String {
             val hash = MessageDigest.getInstance("SHA-256")
             for (part in parts) {

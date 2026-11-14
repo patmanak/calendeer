@@ -61,8 +61,9 @@ internal fun AndroidCalendarProjection.captureSimpleSnapshot(scope: CalendarScop
         Events.GUESTS_CAN_MODIFY, Events.GUESTS_CAN_INVITE_OTHERS, Events.GUESTS_CAN_SEE_GUESTS,
         Events.HAS_ALARM, Events.SELF_ATTENDEE_STATUS, Events.AVAILABILITY, Events.ACCESS_LEVEL,
         Events.CUSTOM_APP_PACKAGE, Events.CUSTOM_APP_URI) + if (!acknowledging && !personal) emptyArray() else
-            arrayOf(Events.SYNC_DATA3, Events.SYNC_DATA8, Events.SYNC_DATA9, Events.SYNC_DATA10)
-    val values = resolver.query(uri, columns, identity.sql, identity.args, null)?.use {
+            arrayOf(Events.SYNC_DATA8, Events.SYNC_DATA9, Events.SYNC_DATA10)
+    val observedColumns = columns + Events.SYNC_DATA3
+    val values = resolver.query(uri, observedColumns, identity.sql, identity.args, null)?.use {
         if (it.count != 1 || !it.moveToFirst()) return null
         ContentValues().apply { DatabaseUtils.cursorRowToContentValues(it, this) }
     } ?: fail(CalendarProjectionFailure.PROVIDER_UNAVAILABLE)
@@ -91,14 +92,16 @@ internal fun AndroidCalendarProjection.captureSimpleSnapshot(scope: CalendarScop
         values.getAsInteger(Events.AVAILABILITY) != Events.AVAILABILITY_BUSY) return null
     val expectedColor = base.content.colorRgb?.or(0xFF000000.toInt())
     val rawColor = values.getAsInteger(Events.EVENT_COLOR)
-    if (!personal && rawColor != expectedColor) return null
+    val style = NativeColorStyle.read(values.getAsString(Events.SYNC_DATA3)) ?: return null
+    if (!style.accepts(base.content.colorRgb, rawColor)) return null
+    if (!personal && !style.masked && rawColor != expectedColor) return null
     if (personal && rawColor != null && rawColor != 0 && rawColor.ushr(24) != 0xff) return null
     val time = readSimpleTime(values, personalAllDayUtcAlias = personal) ?: return null
     val reminders = if (personal) personalMetadata.captureReminders(account, row, base.content) ?: return null else null
     if (reminders != null && values.getAsInteger(Events.HAS_ALARM) != (if (reminders.reminders.isEmpty()) 0 else 1)) return null
     val content = EventContent(values.getAsString(Events.TITLE) ?: "", time,
         values.getAsString(Events.DESCRIPTION) ?: "", values.getAsString(Events.EVENT_LOCATION) ?: "",
-        if (personal) rawColor?.takeUnless { it == 0 }?.and(0xffffff) else base.content.colorRgb,
+        if (personal) style.logicalColor(rawColor) else base.content.colorRgb,
         details = if (reminders == null) base.content.details else base.content.details!!.copy(reminders = reminders.reminders))
     if (personal) {
         try {
@@ -138,7 +141,9 @@ internal fun AndroidCalendarProjection.captureSimpleSnapshot(scope: CalendarScop
     }
     if (acknowledgement != null) {
         checks += ContentProviderOperation.newUpdate(uri).withSelection(identity.sql, identity.args)
-            .withValues(acknowledgement.values(receiptMarker(acknowledgement.projection)))
+            .withValues(displayColor(acknowledgement.values(receiptMarker(acknowledgement.projection)),
+                acknowledgement.projection.change.content.colorRgb, receiptMarker(acknowledgement.projection),
+                values.getAsString(Events.SYNC_DATA3)))
             .withExpectedCount(1).build()
         expected += 1
     }

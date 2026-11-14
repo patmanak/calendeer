@@ -78,8 +78,7 @@ internal fun AndroidCalendarProjection.captureCapturedCurrent(baseline: Captured
         values.getAsInteger(Events.DIRTY) != (if (clean) 0 else 1) ||
         (if (clean) deleted != 0 else deleted != 0 && deleted != 1) ||
         values.getAsString(Events.SYNC_DATA5) != local.args[1] ||
-        expected.keySet().any { values.getAsString(it) != expected.getAsString(it) } ||
-        ATTACHMENT_SYNC_COLUMNS.any { it !in expected.keySet() && it != Events.SYNC_DATA5 && values[it] != null })
+        !colorMetadataMatches(values, expected))
         return CapturedNativeObservation.Unresolved
     val remote = capturedRemoteSelection(receipt, calendar)
     val remoteMatches = resolver.query(uri, arrayOf(Events._ID), remote.sql, remote.args, null)?.use {
@@ -90,6 +89,9 @@ internal fun AndroidCalendarProjection.captureCapturedCurrent(baseline: Captured
         else simpleLocalOwnerPlaceholder(values, account)
     val personalOwner = personal && knownPersonalOwner(values, account, personalBase.content)
     val rawColor = values.getAsInteger(Events.EVENT_COLOR)
+    val style = NativeColorStyle.read(values.getAsString(Events.SYNC_DATA3))
+        ?: return CapturedNativeObservation.Unsupported
+    if (!style.accepts(personalBase.content.colorRgb, rawColor)) return CapturedNativeObservation.Unsupported
     if (personal && rawColor != null && rawColor != 0 && rawColor.ushr(24) != 0xff)
         return CapturedNativeObservation.Unsupported
     if (unsupported.any { values[it] != null && !(it == Events.EVENT_COLOR && (personal || rawColor == 0)) &&
@@ -107,7 +109,7 @@ internal fun AndroidCalendarProjection.captureCapturedCurrent(baseline: Captured
     val snapshot = try {
         val content = EventContent(values.getAsString(Events.TITLE) ?: "", time,
             values.getAsString(Events.DESCRIPTION) ?: "", values.getAsString(Events.EVENT_LOCATION) ?: "",
-            colorRgb = if (!personal) null else rawColor?.takeUnless { it == 0 }?.and(0xffffff),
+            colorRgb = if (!personal) null else style.logicalColor(rawColor),
             details = EventDetails(reminders?.reminders.orEmpty()))
         if (handoff == null) CapturedCreateCurrent(baseline, content, deleted == 1, acknowledgement = expectedAck)
         else CapturedHandoffCurrent(handoff, content, deleted == 1)
@@ -137,14 +139,19 @@ internal fun AndroidCalendarProjection.captureCapturedCurrent(baseline: Captured
     }
     if (writeAck != null) checks += ContentProviderOperation.newUpdate(uri)
         .withSelection(local.sql, local.args).withValue(Events.DIRTY, 0)
-        .withValue(Events.SYNC_DATA7, ackMarker).withExpectedCount(1).build()
+        .withValue(Events.SYNC_DATA7, ackMarker)
+        .withValues(displayColor(ContentValues(), baseline.change.content.colorRgb,
+            style.proof, values.getAsString(Events.SYNC_DATA3)))
+        .withExpectedCount(1).build()
     if (editAcknowledgement != null) checks += ContentProviderOperation.newUpdate(uri)
         .withSelection(local.sql, local.args)
-        .withValues(editAcknowledgement.values(receiptMarker(editAcknowledgement.projection))).withExpectedCount(1).build()
+        .withValues(displayColor(editAcknowledgement.values(receiptMarker(editAcknowledgement.projection)),
+            editAcknowledgement.projection.change.content.colorRgb, receiptMarker(editAcknowledgement.projection),
+            values.getAsString(Events.SYNC_DATA3))).withExpectedCount(1).build()
     if (handoffProjection != null) checks += ContentProviderOperation.newUpdate(uri)
         .withSelection(local.sql, local.args).withValues(eventValues(handoffProjection.receipt.change, account).apply {
             put(Events.SYNC_DATA2, digest("revision-v1", handoffProjection.receipt.change.revision.value))
-            put(Events.SYNC_DATA3, receiptMarker(handoffProjection.receipt))
+            displayColor(this, handoffProjection.receipt.change.content.colorRgb, receiptMarker(handoffProjection.receipt))
         }).withExpectedCount(1).build()
     if (writeAck != null || handoffProjection != null || editAcknowledgement != null) expectedCounts += 1
     // ACK and incoming handoff writes admit from current assertions, never a prior snapshot.

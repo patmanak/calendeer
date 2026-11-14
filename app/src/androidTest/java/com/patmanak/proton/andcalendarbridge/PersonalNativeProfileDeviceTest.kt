@@ -22,6 +22,45 @@ import org.junit.Test
 
 /** Isolated Provider fixtures; never accesses a Proton session or existing calendars. */
 class PersonalNativeProfileDeviceTest {
+    @Test fun maskedColorPreservesCanonicalColorAcrossTitleEditAcknowledgementAndLaterInspection() =
+        fixture(colorMode = { EventColorMode.CALENDAR }) {
+            assertNull(field(Events.EVENT_COLOR))
+            assertEquals(original.colorRgb, NativeColorStyle.read(field(Events.SYNC_DATA3))!!.colorRgb)
+            assertEquals(intent.content, projection.captureOwnedPersonalEdit(scope, base)?.content)
+            assertEquals(AppliedPersonalUpdateAcknowledgement(receipt), projection.acknowledgePersonalUpdate(receipt))
+            assertNull(field(Events.EVENT_COLOR)); assertEquals("0", field(Events.DIRTY))
+            mutate(ContentValues().apply { put(Events.TITLE, "Later synthetic edit"); put(Events.DIRTY, 1) })
+            assertEquals(AppliedPersonalUpdateAcknowledgement(receipt), projection.resumePersonalUpdateAcknowledgement(receipt))
+            assertEquals("Later synthetic edit", field(Events.TITLE)); assertEquals("1", field(Events.DIRTY))
+        }
+    @Test fun explicitPhoneColorOnAMaskedRowStaysUnsupportedAndDirty() =
+        fixture(colorMode = { EventColorMode.CALENDAR }) {
+            val marker = field(Events.SYNC_DATA3)
+            mutate(ContentValues().apply { put(Events.EVENT_COLOR, 0xff654321.toInt()) })
+            assertNull(projection.captureOwnedPersonalEdit(scope, base))
+            assertNull(projection.acknowledgePersonalUpdate(receipt))
+            assertEquals("1", field(Events.DIRTY)); assertEquals(marker, field(Events.SYNC_DATA3))
+            assertEquals(0xff654321.toInt().toString(), field(Events.EVENT_COLOR))
+        }
+    @Test fun desiredModeChangeCannotReinterpretAnOlderMaskedDirtyRowAsAColorClear() {
+        var mode = EventColorMode.CALENDAR
+        fixture(colorMode = { mode }) {
+            mode = EventColorMode.EVENT
+            assertEquals(intent.content, projection.captureOwnedPersonalEdit(scope, base)?.content)
+            assertEquals(AppliedPersonalUpdateAcknowledgement(receipt), projection.acknowledgePersonalUpdate(receipt))
+            assertEquals((original.colorRgb!! or 0xff000000.toInt()).toString(), field(Events.EVENT_COLOR))
+            assertFalse(NativeColorStyle.read(field(Events.SYNC_DATA3))!!.masked)
+        }
+    }
+    @Test fun maskedProjectionReceiptRecoversWithoutChangingItsIdentity() =
+        fixture(colorMode = { EventColorMode.CALENDAR }) {
+            mutate(ContentValues().apply { put(Events.DIRTY, 0) })
+            val frozen = receipt.projection
+            projection.applyTracked(frozen)
+            assertEquals(AppliedProjectionWitness(frozen), projection.inspectProjectionReceipt(frozen))
+            assertEquals(frozen.nonce, NativeColorStyle.read(field(Events.SYNC_DATA3))!!.proof!!.substringAfterLast(':'))
+            assertNull(field(Events.EVENT_COLOR)); assertEquals("0", field(Events.DIRTY))
+        }
     @Test fun reminderOnlyEditsCaptureAndAcknowledgeTheExactChildrenWithoutReplacingThem() {
         for (offsets in listOf(emptyList(), listOf(0, 20), listOf(-10, 5), listOf(-525600, 525600)))
             fixture(simpleTitle = true) {
@@ -252,9 +291,10 @@ class PersonalNativeProfileDeviceTest {
         assertEquals("Personal\r\nedit", field(Events.TITLE)); assertEquals(1, reminders().size)
     }
 
-    private class Fixture(val context: Context, richMetadata: Boolean = true, val simpleTitle: Boolean = false) {
+    private class Fixture(val context: Context, richMetadata: Boolean = true, val simpleTitle: Boolean = false,
+        colorMode: () -> EventColorMode = { EventColorMode.EVENT }) {
         val scope = CalendarScope(AccountId("personal-native-${UUID.randomUUID()}"), CalendarId("fixture"), 0)
-        val projection = AndroidCalendarProjection(context)
+        val projection = AndroidCalendarProjection(context, colorMode)
         val format = AdapterFormat("synthetic-personal-native", 1)
         val original = EventContent("Original", EventTime.Timed(Instant.parse("2030-05-01T09:00:00Z"),
             Instant.parse("2030-05-01T10:00:00Z"), ZoneId.of("Europe/Paris")), colorRgb = if (richMetadata) 0x123456 else null,
@@ -295,9 +335,10 @@ class PersonalNativeProfileDeviceTest {
             AccountManager.get(context).removeAccountExplicitly(projection.accountFor(scope.account))
         }
     }
-    private fun fixture(richMetadata: Boolean = true, simpleTitle: Boolean = false, block: suspend Fixture.() -> Unit) = runBlocking {
+    private fun fixture(richMetadata: Boolean = true, simpleTitle: Boolean = false,
+        colorMode: () -> EventColorMode = { EventColorMode.EVENT }, block: suspend Fixture.() -> Unit) = runBlocking {
         assumeTrue(InstrumentationRegistry.getArguments().getString("providerFixture") == "true")
-        val fixture = Fixture(ApplicationProvider.getApplicationContext(), richMetadata, simpleTitle)
+        val fixture = Fixture(ApplicationProvider.getApplicationContext(), richMetadata, simpleTitle, colorMode)
         assumeTrue(fixture.projection.hasPermissions())
         try { fixture.seed(); fixture.block() } finally { fixture.close() }
     }

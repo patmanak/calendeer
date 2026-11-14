@@ -31,6 +31,27 @@ import org.junit.runner.RunWith
 /** Isolated native conditional update and historical recovery qualification; no server writes. */
 @RunWith(AndroidJUnit4::class)
 class CapturedHandoffProviderDeviceTest {
+    @Test fun maskedTransferredCreationAndIncomingColorKeepOriginAndHistoricalProof() =
+        fixture(allDay = true, colorMode = { EventColorMode.CALENDAR }) {
+            assertEquals(CapturedCreateCleanWitness(ack), projection.inspectAcknowledgedCreateClean(ack))
+            val origin = values().filterKeys { it in listOf(Events.SYNC_DATA5, Events.SYNC_DATA6, Events.SYNC_DATA7) }
+            val after = content.copy(colorRgb = 0x123456)
+            val change = baseline.change.copy(revision = Revision("masked-incoming"), content = after)
+            val plan = CapturedHandoffProjection(frame,
+                ProjectionReceipt(target, baseline.format, change, UUID.randomUUID().toString(), frame.base))
+            assertEquals(AppliedCapturedHandoffProjection(plan), projection.applyCapturedHandoffProjection(plan))
+            val current = advanced(plan)
+            assertNull(field(Events.EVENT_COLOR))
+            assertEquals(CapturedHandoffCleanWitness(current), projection.inspectCapturedHandoffBase(current))
+            mutate(ContentValues().apply { put(Events.DIRTY, 1); put(Events.TITLE, "Masked transferred edit") })
+            val expected = after.copy(title = "Masked transferred edit")
+            val observed = projection.captureCapturedHandoffCurrent(current) as CapturedHandoffCurrentObservation.Supported
+            assertEquals(expected, observed.snapshot.content)
+            val receipt = personalReceipt(current, expected, "masked-ack")
+            assertEquals(AppliedPersonalUpdateAcknowledgement(receipt), projection.acknowledgePersonalUpdate(receipt))
+            assertEquals(AppliedPersonalUpdateAcknowledgement(receipt), projection.inspectPersonalUpdateAcknowledgement(receipt))
+            assertEquals(origin, values().filterKeys { it in origin.keys }); assertNull(field(Events.EVENT_COLOR))
+        }
     @Test fun transferredPersonalMetadataAcknowledgesWithoutReplacingChildrenAndSupportsAnotherEdit() = fixture(allDay = true) {
         val origin = values().filterKeys { it in listOf(Events.SYNC_DATA5, Events.SYNC_DATA6, Events.SYNC_DATA7) }
         val after = content.copy(details = EventDetails(listOf(EventReminder(10))), colorRgb = 0x123456)
@@ -493,10 +514,11 @@ class CapturedHandoffProviderDeviceTest {
         assertEquals(before[Events.SYNC_DATA5], field(Events.SYNC_DATA5)); assertEquals(before[Events.SYNC_DATA7], field(Events.SYNC_DATA7)); assertEquals("1", field(Events.DIRTY))
     }
 
-    private class Fixture(val context: Context, val allDay: Boolean) {
+    private class Fixture(val context: Context, val allDay: Boolean,
+        colorMode: () -> EventColorMode = { EventColorMode.EVENT }) {
         val target = CalendarScope(AccountId("captured-handoff-provider-${UUID.randomUUID()}"), CalendarId("fixture"), 0)
         val localId = LocalEventId(UUID.randomUUID().toString())
-        val projection = AndroidCalendarProjection(context)
+        val projection = AndroidCalendarProjection(context, colorMode)
         val content = EventContent("Captured handoff provider fixture", if (allDay)
             EventTime.AllDay(LocalDate.of(2030, 3, 30), LocalDate.of(2030, 4, 1)) else
             EventTime.Timed(Instant.parse("2030-10-27T00:30:00Z"), Instant.parse("2030-10-27T02:30:00Z"), ZoneId.of("Europe/Paris")),
@@ -690,9 +712,10 @@ class CapturedHandoffProviderDeviceTest {
             projection.removeOwnedCalendar(target); AccountManager.get(context).removeAccountExplicitly(projection.accountFor(target.account))
         }
     }
-    private fun fixture(allDay: Boolean = false, block: suspend Fixture.() -> Unit) = runBlocking {
+    private fun fixture(allDay: Boolean = false, colorMode: () -> EventColorMode = { EventColorMode.EVENT },
+        block: suspend Fixture.() -> Unit) = runBlocking {
         assumeTrue(InstrumentationRegistry.getArguments().getString("providerFixture") == "true")
-        val fixture = Fixture(ApplicationProvider.getApplicationContext(), allDay)
+        val fixture = Fixture(ApplicationProvider.getApplicationContext(), allDay, colorMode)
         assumeTrue(fixture.projection.hasPermissions())
         try { fixture.seed(); fixture.block() } finally { fixture.close() }
     }
