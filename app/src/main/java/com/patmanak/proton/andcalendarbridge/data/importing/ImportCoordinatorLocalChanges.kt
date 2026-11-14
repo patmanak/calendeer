@@ -73,6 +73,13 @@ internal class ImportCoordinatorLocalChanges(
     suspend fun captureLocalEdit(target: CalendarScope, eventId: EventId, id: MutationId): LocalEditCaptureResult = mutex.withLock {
         captureLocalEditLocked(target, eventId, id, generation(), policyRevision())
     }
+    /** Explicit offline series observation. Remote family qualification and upload remain separate. */
+    suspend fun captureLocalSeriesEdit(target: CalendarScope, eventId: EventId, id: MutationId): LocalEditCaptureResult = mutex.withLock {
+        val expected = generation(); val policy = policyRevision()
+        val active = { authenticated() && generation() == expected && policyRevision() == policy && hasCalendarPermissions() }
+        if (!isCurrent(expected, target.account) || !active()) return@withLock LocalEditCaptureResult.INACTIVE
+        localChangeCapture(target, expected, active).edit(eventId, id, {}, series = true)
+    }
 
     /** Offline observer capture. Reuse the durable owner until it is closed; a later cycle
      * receives a new identity, never the event's fixed identity from a previous upload.

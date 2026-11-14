@@ -728,7 +728,10 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
     /** Retention only; no family-membership proof, preparation or dispatch authority. */
     suspend fun captureSeriesEdit(intent: LocalEditIntent): LocalEditIntent {
         val frozen = SeriesEditCandidate(intent).intent
-        return stagingMutation(frozen.scope) { db -> localMutations.captureLocalEdit(db, frozen, series = true) }
+        return stagingMutation(frozen.scope) { db ->
+            projection.requireDirectProjection(db, frozen.scope, frozen.base.eventId)
+            localMutations.captureLocalEdit(db, frozen, series = true)
+        }
     }
 
     /** Retain a qualified Android tombstone snapshot without consuming its flags or sending DELETE. */

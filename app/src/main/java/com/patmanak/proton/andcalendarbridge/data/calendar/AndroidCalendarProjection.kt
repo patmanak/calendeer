@@ -518,6 +518,9 @@ class AndroidCalendarProjection(context: Context,
     override suspend fun captureOwnedPersonalEdit(scope: CalendarScope, base: RemoteChange.Upsert): OwnedLocalEditSnapshot? = operation {
         captureSimpleSnapshot(scope, base, deleted = false, personal = true)
     }
+    override suspend fun captureOwnedSeriesEdit(scope: CalendarScope, base: RemoteChange.Upsert): OwnedLocalEditSnapshot? = operation {
+        captureSimpleSnapshot(scope, base, deleted = false, personal = true, series = true)
+    }
 
     override suspend fun captureOwnedSimpleDelete(scope: CalendarScope, base: RemoteChange.Upsert): OwnedLocalEditSnapshot? = operation {
         captureSimpleSnapshot(scope, base, deleted = true)

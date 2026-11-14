@@ -73,6 +73,21 @@ class ProjectionRepresentationStoreDeviceTest {
         ImportStore(context, name).use { reopened -> assertEquals(reference, reopened.projectedReference(scope, finite.eventId)) }
     }
 
+    @Test fun materializedFiniteSourceCannotBeCapturedAsACanonicalSeriesEdit() = fixture { store, _ ->
+        val finite = this.finite.copy(content = this.finite.content.copy(time = EventTime.Timed(
+            Instant.parse("2030-10-01T10:00:00Z"), Instant.parse("2030-10-01T11:00:00Z"), ZoneId.of("UTC")), details = EventDetails()))
+        store.queue(finite)
+        val receipt = store.prepareProjection(ProjectionIntent(scope, finite), format, ProjectedEventReference.finiteDaily(finite))
+        assertTrue(store.restoreProjection(AppliedProjectionWitness(receipt)))
+        val content = finite.content.copy(title = "Edited finite fixture")
+        val intent = LocalEditIntent(MutationId("finite-source-edit"), scope, format, finite, content,
+            seriesProfile = SeriesEditProfile.of(finite.content, content))
+        refused { store.captureSeriesEdit(intent) }
+        assertNull(store.localEdit(scope, finite.eventId))
+        assertEquals(finite, store.projectedBaseline(scope, finite.eventId))
+        assertEquals(ProjectionRepresentation.FINITE_DAILY_V1, store.projectedReference(scope, finite.eventId)!!.representation)
+    }
+
     @Test fun completePreviousRepresentationAndExactPreparedMetadataControlRestoration() = fixture { store, _ ->
         val first = ProjectedEventReference.finiteDaily(finite)
         store.queue(finite); val initial = store.prepareProjection(ProjectionIntent(scope, finite), format, first)

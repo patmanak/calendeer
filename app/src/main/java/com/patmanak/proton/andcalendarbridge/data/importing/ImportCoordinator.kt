@@ -602,6 +602,8 @@ class ImportCoordinator(
 
     suspend fun captureLocalEdit(target: CalendarScope, eventId: EventId, id: MutationId): LocalEditCaptureResult =
         localChanges.captureLocalEdit(target, eventId, id)
+    suspend fun captureLocalSeriesEdit(target: CalendarScope, eventId: EventId, id: MutationId): LocalEditCaptureResult =
+        localChanges.captureLocalSeriesEdit(target, eventId, id)
 
     suspend fun captureSystemLocalEdit(target: CalendarScope, eventId: EventId,
         beforeNewOwner: suspend () -> Unit = {}): LocalEditCaptureResult =

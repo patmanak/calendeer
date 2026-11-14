@@ -33,7 +33,8 @@ internal class LocalChangeCapture(
         projection.admitOperation = { false }
     }
 
-    suspend fun edit(eventId: EventId, id: MutationId?, beforeNewOwner: suspend () -> Unit): LocalEditCaptureResult {
+    suspend fun edit(eventId: EventId, id: MutationId?, beforeNewOwner: suspend () -> Unit,
+        series: Boolean = false): LocalEditCaptureResult {
         installAdmission()
         return try {
             if (!selected()) return LocalEditCaptureResult.INACTIVE
@@ -45,16 +46,30 @@ internal class LocalChangeCapture(
             val mutation = id ?: retained?.id ?: MutationId(java.util.UUID.randomUUID().toString())
             if (retained != null) {
                 if (retained.id != mutation || retained.format != format) return LocalEditCaptureResult.UNQUALIFIED
+                if (series != (retained.seriesProfile != null)) return LocalEditCaptureResult.UNQUALIFIED
                 return if (retained.state == LocalEditState.CONFLICT) LocalEditCaptureResult.CONFLICT else LocalEditCaptureResult.RETAINED
             }
             val base = baseline(eventId) ?: return LocalEditCaptureResult.UNQUALIFIED
-            val snapshot = projection.captureOwnedSimpleEdit(target, base)
+            if (series) store.requireDirectProjection(target, eventId)
+            val snapshot = if (series) projection.captureOwnedSeriesEdit(target, base)
+                ?: return LocalEditCaptureResult.UNQUALIFIED
+                else projection.captureOwnedSimpleEdit(target, base)
                 ?: projection.captureOwnedPersonalEdit(target, base)
                 ?: return LocalEditCaptureResult.UNQUALIFIED
             if (!current()) return LocalEditCaptureResult.INACTIVE
             beforeNewOwner()
             if (!current()) return LocalEditCaptureResult.INACTIVE
-            val captured = store.captureLocalEdit(LocalEditIntent(mutation, target, format, base, snapshot.content))
+            if (series) {
+                if (!selected()) return LocalEditCaptureResult.INACTIVE
+                requireUnheld(eventId)
+                store.requireDirectProjection(target, eventId)
+                if (store.transaction(target) { checkpoint?.format } != format || baseline(eventId) != base)
+                    return LocalEditCaptureResult.UNQUALIFIED
+                if (!current()) return LocalEditCaptureResult.INACTIVE
+            }
+            val intent = LocalEditIntent(mutation, target, format, base, snapshot.content,
+                seriesProfile = if (series) SeriesEditProfile.of(base.content, snapshot.content) else null)
+            val captured = if (series) store.captureSeriesEdit(intent) else store.captureLocalEdit(intent)
             if (captured.state == LocalEditState.CONFLICT) LocalEditCaptureResult.CONFLICT else LocalEditCaptureResult.RETAINED
         } catch (cancelled: CancellationException) { throw cancelled }
           catch (_: Exception) { LocalEditCaptureResult.UNAVAILABLE }

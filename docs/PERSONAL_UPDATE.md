@@ -33,8 +33,16 @@ through explicit profile 2 (finite-daily-v1); profile 1 keeps historical simple
 semantics. Schema 26 adds default-simple profile columns without changing saved
 event JSON, preparation capsules or uncertain requests. Conflicts keep their
 profile and both variants after reopening. Simple capture/preparation paths
-reject the series profile. Native edit capture, family qualification, series
-preparation/submission and acknowledgement are not enabled yet.
+reject the series profile.
+
+An explicit offline capture entry reads an ordinary owned RRULE/DURATION master,
+retains its canonical UID and checks reminders, logical event color and absence
+of detached native children in one assertion batch. It leaves DIRTY and the raw
+Provider representation intact. Selection, permissions, account, generation,
+baseline and direct-source representation are rechecked before retention.
+Materialized RDATE sources and transferred CREATE rows are not admitted by this
+entry. No worker invokes it yet. Complete remote-family qualification, transferred
+CREATE edit capture, series preparation/submission and acknowledgement stay closed.
 
 ## Wire and local state
 

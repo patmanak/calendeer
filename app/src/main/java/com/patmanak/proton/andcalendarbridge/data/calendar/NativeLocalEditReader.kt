@@ -15,6 +15,8 @@ import android.provider.CalendarContract.ExtendedProperties
 import com.patmanak.proton.andcalendarbridge.sync.CalendarScope
 import com.patmanak.proton.andcalendarbridge.sync.EventTime
 import com.patmanak.proton.andcalendarbridge.sync.PersonalEditCandidate
+import com.patmanak.proton.andcalendarbridge.sync.SeriesEditCandidate
+import com.patmanak.proton.andcalendarbridge.sync.SeriesEditProfile
 import com.patmanak.proton.andcalendarbridge.sync.MutationId
 import com.patmanak.proton.andcalendarbridge.sync.AdapterFormat
 import com.patmanak.proton.andcalendarbridge.sync.LocalEditIntent
@@ -34,19 +36,25 @@ import com.patmanak.proton.andcalendarbridge.data.calendar.AndroidCalendarProjec
 
 internal fun AndroidCalendarProjection.captureSimpleSnapshot(scope: CalendarScope, base: RemoteChange.Upsert, deleted: Boolean,
     acknowledgement: NativeEditAcknowledgement? = null, deleteAcknowledgement: DeleteAcknowledgementReceipt? = null,
-    checkDeleteActive: () -> Unit = {}, personal: Boolean = false): OwnedLocalEditSnapshot? {
+    checkDeleteActive: () -> Unit = {}, personal: Boolean = false, series: Boolean = false): OwnedLocalEditSnapshot? {
     require(acknowledgement == null || deleteAcknowledgement == null)
+    require(!series || (personal && !deleted && acknowledgement == null && deleteAcknowledgement == null))
     val acknowledging = acknowledgement != null || deleteAcknowledgement != null
     fun checkPermissions() {
         checkDeleteActive(); requireEditPermissions(acknowledgement); checkDeleteActive()
     }
-    if (base.content.recurrence != null) return null
+    if (series) {
+        try { SeriesEditProfile.of(base.content, base.content) }
+        catch (_: IllegalArgumentException) { return null }
+    } else if (base.content.recurrence != null) return null
+    val personalBase = if (series) base.content.copy(recurrence = null) else base.content
     if (personal) {
-        if (!knownPersonalEvent(base.content)) return null
+        if (!knownPersonalEvent(personalBase)) return null
     } else if (base.content.details != null && base.content.details != EventDetails()) return null
     val account = accountFor(scope.account)
     val calendar = calendarRow(scope, account) ?: return null
     val remoteId = digest("event-v1", calendarSyncId(scope), base.eventId.value)
+    val syncId = if (series) digest("series-v1", calendarSyncId(scope), base.content.recurrence!!.uid) else remoteId
     val uri = syncUri(Events.CONTENT_URI, account)
     val identity = Selection("${Events.CALENDAR_ID}=? AND (${Events.SYNC_DATA4}=? OR " +
         "(${Events.SYNC_DATA4} IS NULL AND ${Events._SYNC_ID}=?))", arrayOf(calendar.toString(), remoteId, remoteId))
@@ -67,7 +75,7 @@ internal fun AndroidCalendarProjection.captureSimpleSnapshot(scope: CalendarScop
         if (it.count != 1 || !it.moveToFirst()) return null
         ContentValues().apply { DatabaseUtils.cursorRowToContentValues(it, this) }
     } ?: fail(CalendarProjectionFailure.PROVIDER_UNAVAILABLE)
-    if (values.getAsLong(Events._ID) != row || values.getAsString(Events._SYNC_ID) != remoteId ||
+    if (values.getAsLong(Events._ID) != row || values.getAsString(Events._SYNC_ID) != syncId ||
         values.getAsString(Events.SYNC_DATA1) != OWNER_MARKER ||
         values.getAsString(Events.SYNC_DATA2) != digest("revision-v1", base.revision.value) ||
         CAPTURED_ORIGIN_COLUMNS.any { values[it] != null } ||
@@ -79,9 +87,13 @@ internal fun AndroidCalendarProjection.captureSimpleSnapshot(scope: CalendarScop
     val unsupported = arrayOf(Events.RRULE, Events.RDATE, Events.EXRULE, Events.EXDATE, Events.DURATION,
         Events.ORIGINAL_ID, Events.ORIGINAL_SYNC_ID, Events.ORIGINAL_INSTANCE_TIME, Events.ORIGINAL_ALL_DAY,
         Events.ORGANIZER, Events.EVENT_COLOR_KEY, Events.CUSTOM_APP_PACKAGE, Events.CUSTOM_APP_URI)
-    val personalOwner = if (personal) knownPersonalOwner(values, account, base.content)
+    val personalOwner = if (personal) knownPersonalOwner(values, account, personalBase)
         else simplePersonalOwner(values, account, base.content)
-    if (unsupported.any { values[it] != null && !(it == Events.ORGANIZER && personalOwner) }) return null
+    val seriesSnapshot = if (series) nativeCreateSeriesSnapshot(values, false) { logical, _ ->
+        readSimpleTime(logical, personalAllDayUtcAlias = true)
+    } ?: return null else null
+    if (unsupported.any { values[it] != null && !(it == Events.ORGANIZER && personalOwner) &&
+            !(seriesSnapshot != null && it in setOf(Events.RRULE, Events.DURATION)) }) return null
     val emptyFlags = arrayOf(Events.HAS_ATTENDEE_DATA, Events.IS_ORGANIZER, Events.GUESTS_CAN_MODIFY,
         Events.GUESTS_CAN_INVITE_OTHERS, Events.GUESTS_CAN_SEE_GUESTS, Events.HAS_ALARM,
         Events.SELF_ATTENDEE_STATUS, Events.ACCESS_LEVEL)
@@ -96,17 +108,20 @@ internal fun AndroidCalendarProjection.captureSimpleSnapshot(scope: CalendarScop
     if (!style.accepts(base.content.colorRgb, rawColor)) return null
     if (!personal && !style.masked && rawColor != expectedColor) return null
     if (personal && rawColor != null && rawColor != 0 && rawColor.ushr(24) != 0xff) return null
-    val time = readSimpleTime(values, personalAllDayUtcAlias = personal) ?: return null
+    val time = seriesSnapshot?.first ?: readSimpleTime(values, personalAllDayUtcAlias = personal) ?: return null
     val reminders = if (personal) personalMetadata.captureReminders(account, row, base.content) ?: return null else null
     if (reminders != null && values.getAsInteger(Events.HAS_ALARM) != (if (reminders.reminders.isEmpty()) 0 else 1)) return null
     val content = EventContent(values.getAsString(Events.TITLE) ?: "", time,
         values.getAsString(Events.DESCRIPTION) ?: "", values.getAsString(Events.EVENT_LOCATION) ?: "",
         if (personal) style.logicalColor(rawColor) else base.content.colorRgb,
+        recurrence = seriesSnapshot?.let { base.content.recurrence!!.copy(rule = it.second.rule) },
         details = if (reminders == null) base.content.details else base.content.details!!.copy(reminders = reminders.reminders))
     if (personal) {
         try {
-            PersonalEditCandidate(LocalEditIntent(MutationId("native-personal-observation"), scope,
-                AdapterFormat("native-personal-observation", 1), base, content))
+            val intent = LocalEditIntent(MutationId("native-personal-observation"), scope,
+                AdapterFormat("native-personal-observation", 1), base, content,
+                seriesProfile = if (series) SeriesEditProfile.of(base.content, content) else null)
+            if (series) SeriesEditCandidate(intent) else PersonalEditCandidate(intent)
         } catch (_: IllegalArgumentException) { return null }
     }
     if (!deleted && content == base.content) return null
@@ -119,8 +134,17 @@ internal fun AndroidCalendarProjection.captureSimpleSnapshot(scope: CalendarScop
         ContentProviderOperation.newAssertQuery(uri).withSelection(identity.sql, identity.args)
             .withValues(values).withExpectedCount(1).build())
     val expected = mutableListOf(1, 1, 1)
+    if (series) {
+        val children = "${Events.ORIGINAL_ID}=? OR (${Events.CALENDAR_ID}=? AND ${Events.ORIGINAL_SYNC_ID}=?)"
+        val args = arrayOf(row.toString(), calendar.toString(), syncId)
+        val absent = resolver.query(uri, arrayOf(Events._ID), children, args, null)?.use { it.count == 0 }
+            ?: fail(CalendarProjectionFailure.PROVIDER_UNAVAILABLE)
+        if (!absent) return null
+        checks += ContentProviderOperation.newAssertQuery(uri).withSelection(children, args).withExpectedCount(0).build()
+        expected += 0
+    }
     if (acknowledging || personal) {
-        val syncIdentity = Selection("${Events.CALENDAR_ID}=? AND ${Events._SYNC_ID}=?", arrayOf(calendar.toString(), remoteId))
+        val syncIdentity = Selection("${Events.CALENDAR_ID}=? AND ${Events._SYNC_ID}=?", arrayOf(calendar.toString(), syncId))
         if (ownedRow(uri, syncIdentity, Events.SYNC_DATA1) != row) return null
         checks += assertion(uri, syncIdentity, row)
         expected += 1

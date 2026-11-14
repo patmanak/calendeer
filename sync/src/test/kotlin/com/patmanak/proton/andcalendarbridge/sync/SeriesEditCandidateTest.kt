@@ -6,6 +6,13 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class SeriesEditCandidateTest {
+    @Test fun profileFactoryKeepsTheUidAndRefusesUnknownOrNonCanonicalRules() {
+        val content = base.copy(recurrence = base.recurrence!!.copy(rule = "FREQ=DAILY;COUNT=8;INTERVAL=2"))
+        assertEquals(SeriesEditProfile(rule, CreateSeriesRule(8, 2)), SeriesEditProfile.of(base, content))
+        refused { SeriesEditProfile.of(base, content.copy(recurrence = content.recurrence!!.copy(uid = "foreign"))) }
+        refused { SeriesEditProfile.of(base, content.copy(recurrence = content.recurrence!!.copy(rule = "COUNT=8;FREQ=DAILY;INTERVAL=2"))) }
+        refused { SeriesEditProfile.of(base.copy(recurrence = null), content) }
+    }
     private val rule = CreateSeriesRule(5)
     private val start = Instant.parse("2030-04-01T10:00:00Z")
     private val time = EventTime.Timed(start, start.plusSeconds(3600), ZoneId.of("Europe/Paris"))

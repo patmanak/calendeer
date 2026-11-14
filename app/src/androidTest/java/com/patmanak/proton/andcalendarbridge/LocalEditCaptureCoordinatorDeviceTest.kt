@@ -21,7 +21,7 @@ import org.junit.runner.RunWith
 /** Real isolated SQLite and controlled Provider/remote ports. No service writes or editing UI. */
 @RunWith(AndroidJUnit4::class)
 class LocalEditCaptureCoordinatorDeviceTest {
-    private class Fixture {
+    private class Fixture(val series: Boolean = false) {
         private val context = ApplicationProvider.getApplicationContext<Context>()
         private val token = UUID.randomUUID().toString()
         private val name = "capture-coordinator-$token.db"
@@ -29,7 +29,10 @@ class LocalEditCaptureCoordinatorDeviceTest {
         val format = AdapterFormat("capture-fixture", 1)
         val id = MutationId("edit")
         val base = RemoteChange.Upsert(EventId("event"), Revision("base"), EventContent("Baseline fixture",
-            EventTime.AllDay(LocalDate.of(2030, 10, 1), LocalDate.of(2030, 10, 2))))
+            if (series) EventTime.Timed(Instant.parse("2030-10-01T10:00:00Z"), Instant.parse("2030-10-01T11:00:00Z"), java.time.ZoneId.of("UTC"))
+            else EventTime.AllDay(LocalDate.of(2030, 10, 1), LocalDate.of(2030, 10, 2)),
+            recurrence = if (series) EventRecurrence("fixture@calendeer.invalid", "FREQ=DAILY;COUNT=5") else null,
+            details = if (series) EventDetails() else null))
         val local = base.content.copy(title = "Local fixture")
         val latest = base.copy(revision = Revision("remote"), content = base.content.copy(title = "Remote fixture"))
         val store = ImportStore(context, name)
@@ -51,6 +54,8 @@ class LocalEditCaptureCoordinatorDeviceTest {
                 check(admitOperation()); reads++; onRead()
                 return snapshot
             }
+            override suspend fun captureOwnedSeriesEdit(scope: CalendarScope, base: RemoteChange.Upsert) =
+                captureOwnedSimpleEdit(scope, base)
         }
         private val remote = object : ReadOnlyCalendarRemote {
             override val format = this@Fixture.format
@@ -83,6 +88,7 @@ class LocalEditCaptureCoordinatorDeviceTest {
             }
         }
         suspend fun capture(editId: MutationId = id) = coordinator.captureLocalEdit(target, base.eventId, editId)
+        suspend fun captureSeries() = coordinator.captureLocalSeriesEdit(target, base.eventId, id)
         suspend fun observe() = coordinator.captureSystemLocalEdit(target, base.eventId)
         suspend fun retained(): LocalEditIntent? {
             store.admitTransaction = { true }
@@ -94,9 +100,54 @@ class LocalEditCaptureCoordinatorDeviceTest {
             store.close(); context.deleteDatabase(name)
         }
     }
-    private fun fixture(block: suspend Fixture.() -> Unit) = runBlocking {
-        val fixture = Fixture()
+    private fun fixture(series: Boolean = false, block: suspend Fixture.() -> Unit) = runBlocking {
+        val fixture = Fixture(series)
         try { fixture.seed(); fixture.block() } finally { fixture.close() }
+    }
+
+    @Test fun explicitSeriesCaptureRetainsItsProfileAndNeverEntersThePersonalPreparation() = fixture(series = true) {
+        assertEquals(LocalEditCaptureResult.RETAINED, captureSeries())
+        val retained = retained()!!
+        assertEquals(SeriesEditProfile(CreateSeriesRule(5), CreateSeriesRule(5)), retained.seriesProfile)
+        assertEquals(local, retained.content); assertEquals(base, retained.base)
+        store.admitTransaction = { true }
+        assertEquals(PersonalPreparationAdmission.UNQUALIFIED, store.assessPersonalPreparation(retained))
+        snapshot = null
+        assertEquals(LocalEditCaptureResult.RETAINED, captureSeries()); assertEquals(1, reads)
+        assertEquals(LocalEditCaptureResult.UNQUALIFIED, capture())
+    }
+    @Test fun materializedSourceBeforeOrDuringNativeReadCannotBecomeACanonicalSeriesEdit() = runBlocking {
+        for (duringRead in listOf(false, true)) fixture(series = true) {
+            suspend fun materialize() {
+                store.admitTransaction = { true }
+                cache(base)
+                val receipt = store.prepareProjection(ProjectionIntent(target, base), format, ProjectedEventReference.finiteDaily(base))
+                assertTrue(store.restoreProjection(AppliedProjectionWitness(receipt)))
+            }
+            if (duringRead) onRead = { materialize() } else materialize()
+            assertEquals(LocalEditCaptureResult.UNAVAILABLE, captureSeries())
+            assertEquals(if (duringRead) 1 else 0, reads); assertNull(retained())
+            assertEquals(ProjectionRepresentation.FINITE_DAILY_V1, store.projectedReference(target, base.eventId)!!.representation)
+        }
+    }
+    @Test fun seriesCaptureRechecksSelectionAfterTheNativeSuspension() = fixture(series = true) {
+        onRead = { store.setEnabled(target, false) }
+        assertEquals(LocalEditCaptureResult.INACTIVE, captureSeries()); assertNull(retained())
+    }
+    @Test fun seriesCaptureCannotBindToABaselineReplacedDuringNativeRead() = fixture(series = true) {
+        onRead = { cache(latest); assertEquals(1, store.acknowledge(ProjectionIntent(target, latest))) }
+        assertEquals(LocalEditCaptureResult.UNQUALIFIED, captureSeries()); assertNull(retained())
+    }
+    @Test fun seriesCapturePreservesTheNativeObservationWhenRemoteConflictArrives() = fixture(series = true) {
+        onRead = { cache(latest) }
+        assertEquals(LocalEditCaptureResult.CONFLICT, captureSeries())
+        assertEquals(local, retained()!!.content); assertEquals(LocalEditState.CONFLICT, retained()!!.state)
+    }
+    @Test fun seriesCaptureLosingTheAccountOrPermissionCannotRetainTheSnapshot() {
+        for (loseAccount in listOf(false, true)) fixture(series = true) {
+            onRead = { if (loseAccount) currentAccount = null else permission = false }
+            assertEquals(LocalEditCaptureResult.INACTIVE, captureSeries()); assertNull(retained())
+        }
     }
 
     @Test fun capturesPausedLocalUpdateWithoutDispatchAndKeepsItsBaseline() = fixture {
