@@ -4,13 +4,18 @@ import java.time.Instant
 
 /** Stable correlation and frozen timestamp must come from a future durable outgoing intent. */
 data class CalendarCreateDraft(val scope: CalendarScope, val correlation: MutationId,
-    val timestamp: Instant, val content: EventContent) {
+    val timestamp: Instant, val content: EventContent, val series: CreateSeriesRule? = null) {
+    init { require(series == null || (content.recurrence == null && content.details != null && series.supports(content.time))) }
     /** Own lists before the first suspension, including unsupported fields kept for validation. */
     fun frozen(): CalendarCreateDraft = copy(content = content.copy(details = content.details?.let {
         it.copy(reminders = java.util.Collections.unmodifiableList(it.reminders.toList()),
             attendees = java.util.Collections.unmodifiableList(it.attendees.toList()))
     }))
     override fun toString() = "CalendarCreateDraft(redacted)"
+    /** Comparison reference only; the adapter binds the canonical UID before verification. */
+    fun canonicalContent(uid: String): EventContent = series?.let {
+        content.copy(recurrence = EventRecurrence(uid, it.rule))
+    } ?: content
 }
 
 /** Opaque protected preparation, not admission to dispatch or a remote acknowledgement. */

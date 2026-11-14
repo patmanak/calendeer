@@ -8,13 +8,13 @@ import kotlinx.serialization.json.JsonObject
 
 /** Readback interpretation only. Neither profile grants dispatch or upgrades a stored preparation. */
 internal enum class CreatedEventReadbackPolicy(val version: Int) {
-    SHARED_ONLY_V1(1), KNOWN_EMPTY_V2(2), PERSONAL_EDIT_V2(3), PERSONAL_CREATE_V3(4);
+    SHARED_ONLY_V1(1), KNOWN_EMPTY_V2(2), PERSONAL_EDIT_V2(3), PERSONAL_CREATE_V3(4), SERIES_CREATE_V4(5);
 
     /** Personal data is observed through the authenticated read, not signed by the shared parts. */
     fun accepts(row: JsonObject): Boolean = when (this) {
         SHARED_ONLY_V1 -> true
         PERSONAL_EDIT_V2 -> try { ProtonPersonalEventWire.qualify(row); true } catch (_: Exception) { false }
-        PERSONAL_CREATE_V3 -> try {
+        PERSONAL_CREATE_V3, SERIES_CREATE_V4 -> try {
             val notifications = row.array("Notifications")
             ProtonPersonalMetadata.valid(notifications, row["Color"]) && notifications.size <= 5 &&
                 notifications.all { (it as JsonObject).number("Type") == 1L } &&
@@ -25,6 +25,12 @@ internal enum class CreatedEventReadbackPolicy(val version: Int) {
 
     fun acceptsExpected(content: EventContent): Boolean {
         val time = content.time
+        if (this == SERIES_CREATE_V4) return try {
+            val recurrence = requireNotNull(content.recurrence)
+            require(recurrence.isMaster && recurrence.additionalDates.isEmpty() && recurrence.excludedDates.isEmpty() && !recurrence.cancelled)
+            require(CreateSeriesRule.parse(requireNotNull(recurrence.rule)).supports(time))
+            ProtonCreateSubmissionCodec.freezePersonal(content.copy(recurrence = null)); true
+        } catch (_: Exception) { false }
         if (this == PERSONAL_CREATE_V3) return try { ProtonCreateSubmissionCodec.freezePersonal(content); true } catch (_: Exception) { false }
         if (this == PERSONAL_EDIT_V2) return content.details != null && content.details!!.organizer == null && content.details!!.attendees.isEmpty() && content.recurrence == null && (content.colorRgb == null || content.colorRgb!! in 0..0xffffff)
         return this == SHARED_ONLY_V1 || (content.details == EventDetails() && content.recurrence == null && content.colorRgb == null &&
@@ -86,6 +92,9 @@ internal class ProtonCreatedEventReadback(private val sessions: CatalogSessionSo
     private fun normalized(content: EventContent, policy: CreatedEventReadbackPolicy) = content.copy(title = content.title.replace("\r\n", "\n"),
         description = content.description.replace("\r\n", "\n"), location = content.location.replace("\r\n", "\n"),
         details = if (policy == CreatedEventReadbackPolicy.SHARED_ONLY_V1) null else content.details,
+        recurrence = if (policy == CreatedEventReadbackPolicy.SERIES_CREATE_V4) content.recurrence?.let {
+            it.copy(rule = CreateSeriesRule.parse(requireNotNull(it.rule)).rule)
+        } else content.recurrence,
         time = when (val time = content.time) {
             is EventTime.Timed -> if (time.zone.normalized() == java.time.ZoneOffset.UTC) time.copy(zone = java.time.ZoneOffset.UTC) else time
             is EventTime.AllDay -> time

@@ -8,6 +8,7 @@ import kotlinx.serialization.json.*
 internal val CREATE_SUBMISSION_FORMAT = AdapterFormat("proton-calendar-create-submission", 1)
 internal val KNOWN_EMPTY_SUBMISSION_FORMAT = AdapterFormat("proton-calendar-create-submission", 2)
 internal val PERSONAL_CREATE_SUBMISSION_FORMAT = AdapterFormat("proton-calendar-create-submission", 3)
+internal val SERIES_CREATE_SUBMISSION_FORMAT = AdapterFormat("proton-calendar-create-submission", 4)
 internal class ProtonCreateSubmission(val draft: CalendarCreateDraft, val uid: String,
     val context: JsonObject, val request: JsonObject, val policy: CreatedEventReadbackPolicy) {
     override fun toString() = "ProtonCreateSubmission(redacted)"
@@ -28,10 +29,15 @@ internal object ProtonCreateSubmissionCodec {
         put("MemberID", member); put("IsImport", 0)
         putJsonArray("Events") { add(buildJsonObject { put("Overwrite", 0); put("Event", event) }) }
     }
-    fun expected(content: EventContent) = buildJsonObject {
+    fun expected(content: EventContent) = expectedContent(content, false)
+    fun expected(draft: CalendarCreateDraft): JsonObject {
+        val series = draft.series ?: return expected(draft.content)
+        return JsonObject(expectedContent(draft.content, true) + ("seriesRule" to JsonPrimitive(series.rule)))
+    }
+    private fun expectedContent(content: EventContent, forcePersonal: Boolean) = buildJsonObject {
         put("title", content.title.replace("\r\n", "\n")); put("description", content.description.replace("\r\n", "\n"))
         put("location", content.location.replace("\r\n", "\n"))
-        if (personal(content)) {
+        if (forcePersonal || personal(content)) {
             val frozen = freezePersonal(content)
             put("personalDetails", true)
             put("reminders", JsonArray(frozen.details!!.reminders.map { JsonPrimitive(it.minutesBefore) }))
@@ -47,6 +53,7 @@ internal object ProtonCreateSubmissionCodec {
             CREATE_SUBMISSION_FORMAT -> CreatedEventReadbackPolicy.SHARED_ONLY_V1
             KNOWN_EMPTY_SUBMISSION_FORMAT -> CreatedEventReadbackPolicy.KNOWN_EMPTY_V2
             PERSONAL_CREATE_SUBMISSION_FORMAT -> CreatedEventReadbackPolicy.PERSONAL_CREATE_V3
+            SERIES_CREATE_SUBMISSION_FORMAT -> CreatedEventReadbackPolicy.SERIES_CREATE_V4
             else -> createUnavailable(CreatePreparationFailure.UNSUPPORTED)
         }
         val source = protector.open(record.protectedPayload)
@@ -57,7 +64,8 @@ internal object ProtonCreateSubmissionCodec {
             root.string("correlation") != record.id.value) createUnavailable(CreatePreparationFailure.CONTEXT)
         val content = root.obj("expected")
         val knownEmpty = policy == CreatedEventReadbackPolicy.KNOWN_EMPTY_V2
-        val personal = policy == CreatedEventReadbackPolicy.PERSONAL_CREATE_V3
+        val isSeries = policy == CreatedEventReadbackPolicy.SERIES_CREATE_V4
+        val personal = policy == CreatedEventReadbackPolicy.PERSONAL_CREATE_V3 || isSeries
         if (knownEmpty && (root.string("notificationPolicy") != "EXPLICIT_EMPTY" ||
             content["knownEmptyDetails"] != JsonPrimitive(true))) createUnavailable(CreatePreparationFailure.CONTEXT)
         if (personal && (root.string("notificationPolicy") != "EXPLICIT_PERSONAL" ||
@@ -77,17 +85,23 @@ internal object ProtonCreateSubmissionCodec {
                 colorRgb = if (personal && content["color"] != JsonNull) content.number("color").let {
                     if (it !in 0L..0xffffffL) createUnavailable(CreatePreparationFailure.CONTEXT)
                     it.toInt()
-                } else null))
+                } else null), series = if (isSeries) content.string("seriesRule").let { raw ->
+                    CreateSeriesRule.parse(raw).also { require(it.rule == raw) }
+                } else null)
         val uid = root.string("uid")
+        if (isSeries && uid != createCorrelationUid(draft)) createUnavailable(CreatePreparationFailure.CONTEXT)
         if (personal) freezePersonal(draft.content)
-        ProtonSimpleEventSerializer.serialize(uid, draft.timestamp, if (personal) sharedContent(draft.content) else draft.content)
+        val shared = if (personal) sharedContent(draft.content) else draft.content
+        val series = draft.series
+        if (series != null) ProtonSimpleEventSerializer.serializeSeries(uid, draft.timestamp, shared, series)
+        else ProtonSimpleEventSerializer.serialize(uid, draft.timestamp, shared)
         val context = root.obj("context"); val request = root.obj("request")
         val event = request.array("Events").single() as JsonObject
         val rootKeys = setOf("version", "account", "calendar", "generation", "correlation", "uid", "timestamp", "context", "request", "expected") +
             if (knownEmpty || personal) setOf("notificationPolicy") else emptySet()
         val eventKeys = setOf("Permissions", "IsOrganizer", "SharedKeyPacket", "SharedEventContent") +
             if (personal) setOf("Notifications", "Color") else if (knownEmpty) setOf("Notifications") else emptySet()
-        if (root.keys != rootKeys || content != expected(draft.content) || !policy.acceptsExpected(draft.content) ||
+        if (root.keys != rootKeys || content != expected(draft) || !policy.acceptsExpected(draft.canonicalContent(uid)) ||
             request.keys != setOf("MemberID", "IsImport", "Events") || request.string("MemberID") != context.string("member") ||
             request.number("IsImport") != 0L || event.number("Overwrite") != 0L || event.keys != setOf("Overwrite", "Event") ||
             event.obj("Event").keys != eventKeys || !policy.accepts(event.obj("Event")))

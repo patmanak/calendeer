@@ -12,6 +12,21 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class ProtonCreatePreparationAdapterTest {
+    @Test fun seriesPreparationUsesItsOwnVersionAndPreservesRuleBeforeContextPreparation() = runTest {
+        val value = draft.copy(content = draft.content.copy(details = EventDetails()), series = CreateSeriesRule(3))
+        val port = adapter()
+        val prepared = port.prepareCreate(value)
+        assertEquals(AdapterFormat("proton-calendar-local-create-preparation", 4), prepared.format)
+        assertEquals(value.series, preparedDraft!!.series)
+        assertEquals(EventDetails(), preparedDraft!!.content.details)
+        assertEquals("FREQ=DAILY;COUNT=3", sealed!!.string("seriesRule"))
+        assertEquals("EXPLICIT_PERSONAL", sealed!!.string("notificationPolicy"))
+        assertEquals(JsonArray(emptyList()), sealed!!.obj("event")["Notifications"])
+        assertEquals(JsonNull, sealed!!.obj("event")["Color"])
+        assertFalse(sealed!!.containsKey("knownEmptyDetails"))
+        assertEquals(port.correlationUid(value), sealed!!.string("uid"))
+        assertEquals(LOCAL_CREATE_PREPARATION_FORMAT, port.localCreateFormat)
+    }
     private val scope = CalendarScope(AccountId("synthetic-user"), CalendarId("synthetic-calendar"), 1)
     private val draft = CalendarCreateDraft(scope, MutationId("synthetic-correlation"), Instant.parse("2026-09-29T10:00:00Z"),
         EventContent("Synthetic", EventTime.AllDay(LocalDate.parse("2026-10-01"), LocalDate.parse("2026-10-02"))))

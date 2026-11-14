@@ -79,8 +79,10 @@ internal class ProtonCreateContextResolver(private val crypto: CryptoContext) {
                 finally { bytes.fill(0) }
             val calendarKey = PrivateKey(selected.calendarKey.string("PrivateKey"), isPrimary = true, passphrase = protected)
             if (calendarKey.unlockOrNull(crypto)?.use { true } != true) createUnavailable(CreatePreparationFailure.LOCAL_KEYS)
-            return ProtonSimpleEventEncryptor(crypto).prepare(uid, draft.timestamp, draft.content,
-                selected.signingKey, calendarKey.publicKey(crypto))
+            val encryptor = ProtonSimpleEventEncryptor(crypto)
+            val series = draft.series
+            return if (series == null) encryptor.prepare(uid, draft.timestamp, draft.content, selected.signingKey, calendarKey.publicKey(crypto))
+            else encryptor.prepareSeries(uid, draft.timestamp, draft.content, series, selected.signingKey, calendarKey.publicKey(crypto))
         } catch (cancelled: CancellationException) { throw cancelled }
           catch (failure: CreatePreparationException) { throw failure }
           catch (failure: ProtonEventPreparationException) {

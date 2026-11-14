@@ -35,6 +35,8 @@ internal class ProtonCreateSubmissionAdapter(private val preparations: CalendarC
         if (stored.format != record.format || stored.protectedPayload != record.protectedPayload)
             createUnavailable(CreatePreparationFailure.CONTEXT)
         if (stored.state == CreateAttemptState.OUTCOME_UNKNOWN) return@guarded inspectWithExpectation(stored, expected)
+        // Native series acknowledgement is not qualified yet. Historical UNKNOWN is still inspect-only.
+        if (stored.format == SERIES_CREATE_SUBMISSION_FORMAT) return@guarded CreateSubmissionObservation.Unknown
         val submission = ProtonCreateSubmissionCodec.open(stored, protector)
         qualifyCaptured(stored, submission, expected)
         val session = session(record.scope)
@@ -84,11 +86,11 @@ internal class ProtonCreateSubmissionAdapter(private val preparations: CalendarC
             val response = ProtonCreateResponseParser.parse(evidence.string("body"), record.scope.calendar.value, submission.uid)
             if (response is ProtonCreateResponse.Candidate) candidateId = response.event.string("ID")
         }
-        val actual = readback.inspect(session, record.scope, submission.uid, submission.draft.content,
+        val actual = readback.inspect(session, record.scope, submission.uid, submission.draft.canonicalContent(submission.uid),
             submission.policy, candidateId) ?: return@guarded CreateSubmissionObservation.Unknown
         // Readback already qualified the adapter's canonical text/UTC semantics and signatures.
         // Captured callers receive their exact domain expectation, with the observed ID/revision.
-        val canonical = if (expected != null) actual.copy(content = expected.content) else actual
+        val canonical = if (expected != null) actual.copy(content = expected.canonicalContent(submission.uid)) else actual
         CreateSubmissionObservation.Verified(CreateAttemptIdentity.of(record), canonical)
     }
     private fun qualifyCaptured(record: CreateAttemptRecord, submission: ProtonCreateSubmission, expected: CalendarCreateDraft?) {
@@ -98,6 +100,8 @@ internal class ProtonCreateSubmissionAdapter(private val preparations: CalendarC
                 expected.content.details == EventDetails() && expected.content.colorRgb == null
             PERSONAL_CREATE_SUBMISSION_FORMAT -> submission.policy == CreatedEventReadbackPolicy.PERSONAL_CREATE_V3 &&
                 ProtonCreateSubmissionCodec.personal(expected.content) && submission.policy.acceptsExpected(expected.content)
+            SERIES_CREATE_SUBMISSION_FORMAT -> submission.policy == CreatedEventReadbackPolicy.SERIES_CREATE_V4 &&
+                expected.series != null && submission.policy.acceptsExpected(expected.canonicalContent(submission.uid))
             else -> false
         }
         if (!profile || submission.draft != expected) createUnavailable(CreatePreparationFailure.CONTEXT)

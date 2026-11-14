@@ -194,14 +194,14 @@ class ProtonCreateSubmissionAdapterTest {
     }
 }
 
-internal class CreateSubmissionFixture(content: EventContent? = null) {
+internal class CreateSubmissionFixture(content: EventContent? = null, val series: CreateSeriesRule? = null) {
     val scope = CalendarScope(AccountId("synthetic-user"), CalendarId("synthetic-calendar"), 1)
     val draft = CalendarCreateDraft(scope, MutationId("synthetic-correlation"), Instant.parse("2026-09-29T10:00:00Z"),
-        content ?: EventContent("Synthetic create", EventTime.AllDay(LocalDate.parse("2026-10-01"), LocalDate.parse("2026-10-02")), "Synthetic description", "Synthetic location"))
-    val uid = "synthetic-create@calendeer.test"
-    val personal = draft.content.details != null && (draft.content.details != EventDetails() || draft.content.colorRgb != null)
-    val knownEmpty = draft.content.details == EventDetails() && draft.content.colorRgb == null
-    val format = CREATE_SUBMISSION_FORMAT.copy(version = if (personal) 3 else if (knownEmpty) 2 else 1)
+        content ?: EventContent("Synthetic create", EventTime.AllDay(LocalDate.parse("2026-10-01"), LocalDate.parse("2026-10-02")), "Synthetic description", "Synthetic location"), series)
+    val uid = if (series == null) "synthetic-create@calendeer.test" else createCorrelationUid(draft)
+    val personal = series != null || draft.content.details != null && (draft.content.details != EventDetails() || draft.content.colorRgb != null)
+    val knownEmpty = series == null && draft.content.details == EventDetails() && draft.content.colorRgb == null
+    val format = CREATE_SUBMISSION_FORMAT.copy(version = if (series != null) 4 else if (personal) 3 else if (knownEmpty) 2 else 1)
     var freshFormat = format
     var freshDraft = draft
     val context = buildJsonObject { put("member", "synthetic-member"); put("permissions", 16); put("key", "synthetic-key")
@@ -224,8 +224,13 @@ internal class CreateSubmissionFixture(content: EventContent? = null) {
         put("version", envelopeFormat.version); put("account", scope.account.value); put("calendar", scope.calendar.value); put("generation", scope.generation)
         put("correlation", expectedDraft.correlation.value); put("timestamp", expectedDraft.timestamp.toString()); put("uid", uid)
         if (envelopeFormat.version == 2) put("notificationPolicy", "EXPLICIT_EMPTY")
-        if (envelopeFormat.version == 3) put("notificationPolicy", "EXPLICIT_PERSONAL")
-        put("context", qualified); put("request", request); put("expected", ProtonCreateSubmissionCodec.expected(expectedDraft.content))
+        if (envelopeFormat.version in 3..4) put("notificationPolicy", "EXPLICIT_PERSONAL")
+        val expected = ProtonCreateSubmissionCodec.expected(expectedDraft.content)
+        put("context", qualified); put("request", request)
+        put("expected", if (expectedDraft.series == null) expected else JsonObject(expected - "knownEmptyDetails" + mapOf(
+            "personalDetails" to JsonPrimitive(true), "seriesRule" to JsonPrimitive(expectedDraft.series!!.rule),
+            "reminders" to JsonArray(expectedDraft.content.details!!.reminders.map { JsonPrimitive(it.minutesBefore) }),
+            "color" to (expectedDraft.content.colorRgb?.let(::JsonPrimitive) ?: JsonNull))))
     }
     val record = CreateAttemptRecord(draft.correlation, scope, format, protector.seal(envelope().toString()))
     val steps = mutableListOf<String>()
@@ -243,7 +248,8 @@ internal class CreateSubmissionFixture(content: EventContent? = null) {
         if (personal) { put("Notifications", fragment.getValue("Notifications")); put("Color", fragment.getValue("Color")) } }
     var rows: List<JsonObject> = listOf(row)
     var individualRow = row
-    var verified: RemoteChange.Upsert? = RemoteChange.Upsert(EventId("synthetic-event"), Revision("synthetic-revision"), draft.content)
+    var verified: RemoteChange.Upsert? = RemoteChange.Upsert(EventId("synthetic-event"), Revision("synthetic-revision"),
+        if (series == null) draft.content else draft.content.copy(recurrence = EventRecurrence(uid, series.rule)))
     val adapter = ProtonCreateSubmissionAdapter(CalendarCreatePreparationPort { requestedDraft ->
         assertEquals(draft, requestedDraft); prepares++; step("prepare")
         PreparedCalendarCreate(scope, freshFormat, protector.seal(envelope(freshContext, expectedDraft = freshDraft, envelopeFormat = freshFormat).toString()))
@@ -266,7 +272,7 @@ internal class CreateSubmissionFixture(content: EventContent? = null) {
         override suspend fun bootstrap(session: CatalogSession, calendar: String): JsonObject { step("bootstrap"); return buildJsonObject {} }
     }, CreateEventVerifier { _, _, _, _, expectedUid, policy ->
         assertEquals(uid, expectedUid)
-        assertEquals(if (personal) 4 else if (knownEmpty) 2 else 1, policy.version)
+        assertEquals(if (series != null) 5 else if (personal) 4 else if (knownEmpty) 2 else 1, policy.version)
         step("verify"); verified })
 }
 

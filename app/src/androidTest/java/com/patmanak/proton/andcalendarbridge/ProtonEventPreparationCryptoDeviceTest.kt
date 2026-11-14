@@ -10,6 +10,9 @@ import org.junit.runner.RunWith
 /** Native synthetic preparation, no account data, network, Provider writes or remote mutation. */
 @RunWith(AndroidJUnit4::class)
 class ProtonEventPreparationCryptoDeviceTest {
+    @Test fun seriesCapsuleVersionFourReopensAndInspectsWithoutDispatch() = runBlocking {
+        assertEquals("RESULT=SUCCESS", ProtonEventPreparationCryptoProbe.runSeriesSubmissionReadback())
+    }
     @Test fun seriesSharedPartsUseRebuiltCryptoAndBindRuleUidAndBothSignatures() = runBlocking {
         assertEquals("RESULT=SUCCESS", ProtonEventPreparationCryptoProbe.runSeries())
     }

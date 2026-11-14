@@ -16,6 +16,7 @@ internal val CREATE_PREPARATION_FORMAT = AdapterFormat("proton-calendar-create-p
 /** v2 carries an explicit empty personal override; historical v1 remains incompatible and paused. */
 internal val LOCAL_CREATE_PREPARATION_FORMAT = AdapterFormat("proton-calendar-local-create-preparation", 2)
 internal val PERSONAL_LOCAL_CREATE_PREPARATION_FORMAT = AdapterFormat("proton-calendar-local-create-preparation", 3)
+internal val SERIES_LOCAL_CREATE_PREPARATION_FORMAT = AdapterFormat("proton-calendar-local-create-preparation", 4)
 internal fun interface CreateContextPreparation {
     fun prepare(scope: CalendarScope, metadata: JsonObject, bootstrap: JsonObject, addresses: List<me.proton.core.user.domain.entity.UserAddress>,
         uid: String, draft: CalendarCreateDraft): ProtonPreparedCreateEvent
@@ -36,12 +37,14 @@ internal class ProtonCreatePreparationAdapter(private val sessions: CatalogSessi
       catch (_: Exception) { createUnavailable(CreatePreparationFailure.CONTEXT) }
 
     private suspend fun prepareFrozen(draft: CalendarCreateDraft): PreparedCalendarCreate = try {
-        val personal = ProtonCreateSubmissionCodec.personal(draft.content)
+        val series = draft.series
+        val personal = series != null || ProtonCreateSubmissionCodec.personal(draft.content)
         val sharedDraft = if (personal) {
             try {
                 val full = ProtonCreateSubmissionCodec.freezePersonal(draft.content)
                 val shared = draft.copy(content = ProtonCreateSubmissionCodec.sharedContent(full))
-                ProtonSimpleEventSerializer.serialize(correlationUid(draft), draft.timestamp, shared.content)
+                if (series != null) ProtonSimpleEventSerializer.serializeSeries(correlationUid(draft), draft.timestamp, shared.content, series)
+                else ProtonSimpleEventSerializer.serialize(correlationUid(draft), draft.timestamp, shared.content)
                 shared
             } catch (_: Exception) { createUnavailable(CreatePreparationFailure.UNSUPPORTED) }
         } else {
@@ -72,8 +75,8 @@ internal class ProtonCreatePreparationAdapter(private val sessions: CatalogSessi
             JsonObject(prepared.event + ("Notifications" to JsonArray(emptyList())))
         } else prepared.event
         val format = if (submission) {
-            if (personal) PERSONAL_CREATE_SUBMISSION_FORMAT else if (knownEmpty) KNOWN_EMPTY_SUBMISSION_FORMAT else CREATE_SUBMISSION_FORMAT
-        } else if (personal) PERSONAL_LOCAL_CREATE_PREPARATION_FORMAT else if (knownEmpty) LOCAL_CREATE_PREPARATION_FORMAT else CREATE_PREPARATION_FORMAT
+            if (series != null) SERIES_CREATE_SUBMISSION_FORMAT else if (personal) PERSONAL_CREATE_SUBMISSION_FORMAT else if (knownEmpty) KNOWN_EMPTY_SUBMISSION_FORMAT else CREATE_SUBMISSION_FORMAT
+        } else if (series != null) SERIES_LOCAL_CREATE_PREPARATION_FORMAT else if (personal) PERSONAL_LOCAL_CREATE_PREPARATION_FORMAT else if (knownEmpty) LOCAL_CREATE_PREPARATION_FORMAT else CREATE_PREPARATION_FORMAT
         val envelope = buildJsonObject {
             put("version", format.version); put("account", draft.scope.account.value)
             put("calendar", draft.scope.calendar.value); put("generation", draft.scope.generation)
@@ -83,10 +86,11 @@ internal class ProtonCreatePreparationAdapter(private val sessions: CatalogSessi
                 put("notificationPolicy", "EXPLICIT_EMPTY")
             }
             if (personal) put("notificationPolicy", "EXPLICIT_PERSONAL")
+            if (series != null && selection == null) put("seriesRule", series.rule)
             if (selection == null) put("event", event) else {
                 put("context", ProtonCreateSubmissionCodec.context(selection))
                 put("request", ProtonCreateSubmissionCodec.request(selection.member.string("ID"), event))
-                put("expected", ProtonCreateSubmissionCodec.expected(draft.content))
+                put("expected", ProtonCreateSubmissionCodec.expected(draft))
             }
         }
         val receipt = PreparedCalendarCreate(draft.scope, format, localStorage { protector.seal(envelope.toString()) })
@@ -121,12 +125,14 @@ internal class ProtonCreatePreparationAdapter(private val sessions: CatalogSessi
         catch (_: Exception) { createUnavailable(CreatePreparationFailure.STORAGE) }
 
     /** Correlation only: deterministic scoped UID is not evidence of server uniqueness/idempotence. */
-    internal fun correlationUid(draft: CalendarCreateDraft): String {
+    internal fun correlationUid(draft: CalendarCreateDraft): String = createCorrelationUid(draft)
+}
+
+internal fun createCorrelationUid(draft: CalendarCreateDraft): String {
         val encoded = listOf(draft.scope.account.value, draft.scope.calendar.value, draft.scope.generation.toString(), draft.correlation.value)
         if (encoded.any { it.length > 4096 }) createUnavailable(CreatePreparationFailure.UNSUPPORTED)
         val digest = MessageDigest.getInstance("SHA-256").digest(encoded.joinToString("") { "${it.length}:$it" }.toByteArray(Charsets.UTF_8))
         return digest.joinToString("") { "%02x".format(it) } + "@calendeer.invalid"
-    }
 }
 
 internal fun interface CreateCalendarMetadataRemote {
