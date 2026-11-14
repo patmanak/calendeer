@@ -41,6 +41,8 @@ internal fun AndroidCalendarProjection.captureCapturedCurrent(baseline: Captured
     }
     val personal = handoff != null || !supportsCapturedHandoff(baseline.change)
     val personalBase = handoff?.base ?: baseline.change
+    val series = baseline.receipt.binding.identity.fingerprintVersion == 2
+    if (series && handoff != null) return CapturedNativeObservation.Unsupported
     val ackMarker = (expectedAck ?: writeAck)?.let(::capturedAcknowledgementMarker)
     val receipt = baseline.receipt
     val expected = capturedAttachmentValues(receipt) // Strict canonical identity before Provider IO.
@@ -87,7 +89,11 @@ internal fun AndroidCalendarProjection.captureCapturedCurrent(baseline: Captured
     if (!remoteMatches) return CapturedNativeObservation.Unresolved
     val localOwnerPlaceholder = if (personal) personalMetadata.knownLocalPlaceholder(values, account)
         else simpleLocalOwnerPlaceholder(values, account)
-    val personalOwner = personal && knownPersonalOwner(values, account, personalBase.content)
+    val personalOwner = personal && knownPersonalOwner(values, account,
+        if (series) personalBase.content.copy(recurrence = null) else personalBase.content)
+    val seriesSnapshot = if (series) nativeCreateSeriesSnapshot(values, localOwnerPlaceholder) { logical, placeholder ->
+        readSimpleTime(logical, placeholder)
+    } ?: return CapturedNativeObservation.Unsupported else null
     val rawColor = values.getAsInteger(Events.EVENT_COLOR)
     val style = NativeColorStyle.read(values.getAsString(Events.SYNC_DATA3))
         ?: return CapturedNativeObservation.Unsupported
@@ -95,13 +101,14 @@ internal fun AndroidCalendarProjection.captureCapturedCurrent(baseline: Captured
     if (personal && rawColor != null && rawColor != 0 && rawColor.ushr(24) != 0xff)
         return CapturedNativeObservation.Unsupported
     if (unsupported.any { values[it] != null && !(it == Events.EVENT_COLOR && (personal || rawColor == 0)) &&
+            !(seriesSnapshot != null && it in setOf(Events.RRULE, Events.DURATION)) &&
             !(it == Events.ORGANIZER && (localOwnerPlaceholder || personalOwner)) } ||
         (!localOwnerPlaceholder && emptyFlags.any { if (personal && it == Events.HAS_ALARM)
             values.getAsInteger(it) !in 0..1 else !simplePersonalFlag(values, it, personalOwner) }) ||
         values.getAsInteger(Events.STATUS) != Events.STATUS_CONFIRMED ||
         values.getAsInteger(Events.AVAILABILITY) != Events.AVAILABILITY_BUSY)
         return CapturedNativeObservation.Unsupported
-    val time = readSimpleTime(values, localOwnerPlaceholder) ?: return CapturedNativeObservation.Unsupported
+    val time = seriesSnapshot?.first ?: readSimpleTime(values, localOwnerPlaceholder) ?: return CapturedNativeObservation.Unsupported
     val reminders = if (personal) personalMetadata.captureReminders(account, row, personalBase.content)
         ?: return CapturedNativeObservation.Unsupported else null
     if (reminders != null && values.getAsInteger(Events.HAS_ALARM) != (if (reminders.reminders.isEmpty()) 0 else 1))
@@ -110,6 +117,7 @@ internal fun AndroidCalendarProjection.captureCapturedCurrent(baseline: Captured
         val content = EventContent(values.getAsString(Events.TITLE) ?: "", time,
             values.getAsString(Events.DESCRIPTION) ?: "", values.getAsString(Events.EVENT_LOCATION) ?: "",
             colorRgb = if (!personal) null else style.logicalColor(rawColor),
+            recurrence = seriesSnapshot?.let { baseline.change.content.recurrence!!.copy(rule = it.second.rule) },
             details = EventDetails(reminders?.reminders.orEmpty()))
         if (handoff == null) CapturedCreateCurrent(baseline, content, deleted == 1, acknowledgement = expectedAck)
         else CapturedHandoffCurrent(handoff, content, deleted == 1)
@@ -126,6 +134,15 @@ internal fun AndroidCalendarProjection.captureCapturedCurrent(baseline: Captured
             .withValue(Events._ID, row).withExpectedCount(1).build())
     val expectedCounts = mutableListOf(1, 1, 1)
     if (reminders != null) personalMetadata.assertReminders(reminders, checks, expectedCounts)
+    if (series) {
+        val children = "${Events.ORIGINAL_ID}=? OR (${Events.CALENDAR_ID}=? AND ${Events.ORIGINAL_SYNC_ID}=?)"
+        val args = arrayOf(row.toString(), calendar.toString(), expected.getAsString(Events._SYNC_ID))
+        val absent = resolver.query(uri, arrayOf(Events._ID), children, args, null)?.use { it.count == 0 }
+            ?: fail(CalendarProjectionFailure.PROVIDER_UNAVAILABLE)
+        if (!absent) return CapturedNativeObservation.Unsupported
+        checks += ContentProviderOperation.newAssertQuery(uri).withSelection(children, args).withExpectedCount(0).build()
+        expectedCounts += 0
+    }
     val absentChildren = if (!personal) listOf(Reminders.CONTENT_URI to Reminders.EVENT_ID,
         Attendees.CONTENT_URI to Attendees.EVENT_ID, ExtendedProperties.CONTENT_URI to ExtendedProperties.EVENT_ID)
         else listOf(Attendees.CONTENT_URI to Attendees.EVENT_ID, ExtendedProperties.CONTENT_URI to ExtendedProperties.EVENT_ID)

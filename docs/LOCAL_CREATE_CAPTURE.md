@@ -71,9 +71,17 @@ Dispatch fingerprint v2 includes the canonical rule and personal content; v1 byt
 stay unchanged. Create schema 8 and import schema 25 expand only the four existing
 captured identity constraints, preserving old rows, foreign keys and uniqueness in
 upgrade transactions. A v2 baseline retains the verified UID and rule; this equality
-fingerprint does not authenticate a UID. Current-row/ACK and controller integration
-remain closed to series pending their own qualification. No service submission or
-client journey is established by these synthetic crypto/SQL checks.
+fingerprint does not authenticate a UID.
+
+Explicit current-row and ACK operations accept that v2 series profile with the same
+verified UID. They derive time from native RRULE/DURATION without rewriting either;
+the complete row and reminder identities, plus absence of detached children by local
+or sync parent identity, are asserted in the same batch. Changed content, duration,
+rule or tombstones cannot be cleaned as the sent snapshot. A lost ACK response permits
+only inspection of its original historical marker, independent of later edits.
+Historical simple profiles keep their recurrence refusal. Series handoff, controller
+integration and submission remain closed pending end-to-end qualification. Synthetic
+crypto/SQL/Provider checks do not establish a live service or calendar-client journey.
 
 An additional measured native-editor profile accepts the bridge's own opaque
 local organizer label, with the exact self-organizer/default guest flags and no

@@ -30,6 +30,125 @@ import org.junit.runner.RunWith
  */
 @RunWith(AndroidJUnit4::class)
 class CapturedCreateAcknowledgementProviderDeviceTest {
+    @Test fun dailySeriesCurrentAndAckPreserveTheCompleteTimedAndAllDayRows() {
+        for (allDay in listOf(false, true)) for (rich in listOf(false, true)) fixture(allDay, series = true, rich = rich) {
+            val before = values(); assertTrue(supported().unchanged)
+            acknowledged()
+            assertEquals(before + (Events.DIRTY to "0") + (Events.SYNC_DATA7 to marker), values())
+            assertEquals(CapturedCreateCleanWitness(ack), projection.inspectAcknowledgedCreateClean(ack))
+            assertEquals(AppliedCapturedCreateAcknowledgement(ack), projection.inspectCapturedAcknowledgement(ack))
+            assertNull(projection.acknowledgeCapturedCreate(ack))
+        }
+    }
+
+    @Test fun changedSeriesRuleDurationAndTombstoneRemainDirty() {
+        for (kind in 0..2) fixture(series = true) {
+            assertTrue(supported().unchanged)
+            mutate(ContentValues().apply { when (kind) {
+                0 -> put(Events.RRULE, "FREQ=DAILY;COUNT=4")
+                1 -> put(Events.DURATION, "PT7200S")
+                else -> put(Events.DELETED, 1)
+            } })
+            val before = values(); assertFalse(supported().unchanged)
+            assertNull(projection.acknowledgeCapturedCreate(ack)); assertEquals(before, values())
+        }
+    }
+
+    @Test fun unsupportedSeriesEditsNeverLoseTheirRuleOrExclusions() {
+        for ((column, value) in listOf(Events.RRULE to "FREQ=WEEKLY;COUNT=5", Events.EXDATE to "20300330T110000Z")) fixture(series = true) {
+            mutate(ContentValues().apply { put(column, value) }); val before = values()
+            assertEquals(CapturedCreateCurrentObservation.Unsupported, capture())
+            assertNull(projection.acknowledgeCapturedCreate(ack)); assertEquals(before, values())
+        }
+    }
+
+    @Test fun detachedSeriesChildrenBlockCurrentAndAckByLocalOrSyncParentIdentity() {
+        for (bySyncId in listOf(false, true)) fixture(series = true) {
+            exception(bySyncId); val before = values()
+            assertEquals(CapturedCreateCurrentObservation.Unsupported, capture())
+            assertNull(projection.acknowledgeCapturedCreate(ack)); assertEquals(before, values()); assertEquals(2, rows())
+        }
+    }
+
+    @Test fun concurrentSeriesExceptionAbortsTheWholeAcknowledgementBatch() = fixture(series = true) {
+        val adapter = intercepted(writes = 1) { exception(false) }
+        assertRejected { adapter.acknowledgeCapturedCreate(ack) }; assertEquals(1, realBatchAttempts)
+        assertEquals("1", field(Events.DIRTY)); assertNull(field(Events.SYNC_DATA7)); assertEquals(2, rows())
+    }
+
+    @Test fun concurrentSeriesRuleDurationAndReminderChangesCannotBeCleaned() {
+        for (kind in 0..2) fixture(series = true) {
+            val adapter = intercepted(writes = 1) { when (kind) {
+                0 -> mutate(ContentValues().apply { put(Events.RRULE, "FREQ=DAILY;COUNT=4") })
+                1 -> mutate(ContentValues().apply { put(Events.DURATION, "PT7200S") })
+                else -> reminder()
+            } }
+            assertRejected { adapter.acknowledgeCapturedCreate(ack) }; assertEquals(1, realBatchAttempts)
+            assertEquals("1", field(Events.DIRTY)); assertNull(field(Events.SYNC_DATA7))
+        }
+    }
+
+    @Test fun seriesLostAckResponseOnlyInspectsHistoryAndPreservesLaterEdits() = fixture(series = true, rich = true) {
+        val adapter = intercepted(writes = 1, afterBatch = { throw IllegalStateException("Synthetic response lost") })
+        assertRejected { adapter.acknowledgeCapturedCreate(ack) }; assertEquals(1, realBatchAttempts)
+        mutate(ContentValues().apply { put(Events.DIRTY, 1); put(Events.TITLE, "Later series title") })
+        val before = values(); val reopened = AndroidCalendarProjection(context)
+        assertEquals(AppliedCapturedCreateAcknowledgement(ack), reopened.inspectCapturedAcknowledgement(ack))
+        val current = (reopened.captureAcknowledgedCreateCurrent(ack) as CapturedCreateCurrentObservation.Supported).snapshot
+        assertFalse(current.unchanged); assertEquals(content.copy(title = "Later series title"), current.content)
+        assertNull(reopened.acknowledgeCapturedCreate(ack)); assertNull(reopened.inspectAcknowledgedCreateClean(ack))
+        assertEquals(before, values())
+        exception(false)
+        assertEquals(AppliedCapturedCreateAcknowledgement(ack), reopened.inspectCapturedAcknowledgement(ack))
+        assertEquals(CapturedCreateCurrentObservation.Unsupported, reopened.captureAcknowledgedCreateCurrent(ack))
+    }
+
+    @Test fun seriesNativeOwnerPlaceholderIsNotARemoteParticipant() = fixture(series = true, rich = true) {
+        mutate(ContentValues().apply {
+            put(Events.ORGANIZER, projection.accountFor(target.account).name); put(Events.IS_ORGANIZER, 1)
+        })
+        val before = values(); acknowledged()
+        assertEquals(before + (Events.DIRTY to "0") + (Events.SYNC_DATA7 to marker), values())
+    }
+
+    @Test fun seriesLeaseRevocationBeforeAndAfterBatchPreservesItsOutcome() = fixture(series = true) {
+        val blocked = intercepted(writes = 1); blocked.admitOperation = { false }
+        try { blocked.acknowledgeCapturedCreate(ack); fail("Inactive series lease must cancel") } catch (_: CancellationException) { }
+        assertEquals(0, interceptedQueries); assertEquals(0, realBatchAttempts)
+        var active = true
+        val lost = intercepted(writes = 1, afterBatch = { active = false }); lost.admitOperation = { active }
+        try { lost.acknowledgeCapturedCreate(ack); fail("Revoked lease must cancel") } catch (_: CancellationException) { }
+        assertEquals(1, realBatchAttempts)
+        assertEquals(AppliedCapturedCreateAcknowledgement(ack), projection.inspectCapturedAcknowledgement(ack))
+    }
+
+    @Test fun seriesPermissionLossBeforeAndAfterBatchNeverRearmsTheWrite() = fixture(series = true) {
+        var allowed = false
+        val blocked = intercepted(writes = 1, permissions = { allowed })
+        try { blocked.acknowledgeCapturedCreate(ack); fail("Calendar permission required") }
+        catch (failure: CalendarProjectionException) { assertEquals(CalendarProjectionFailure.PERMISSION_REQUIRED, failure.category) }
+        assertEquals(0, interceptedQueries); assertEquals(0, realBatchAttempts)
+        allowed = true
+        val lost = intercepted(writes = 1, permissions = { allowed }, afterBatch = { allowed = false })
+        try { lost.acknowledgeCapturedCreate(ack); fail("Permission loss must be reported") }
+        catch (failure: CalendarProjectionException) { assertEquals(CalendarProjectionFailure.PERMISSION_REQUIRED, failure.category) }
+        assertEquals(1, realBatchAttempts)
+        assertEquals(AppliedCapturedCreateAcknowledgement(ack), projection.inspectCapturedAcknowledgement(ack))
+        assertNull(projection.acknowledgeCapturedCreate(ack))
+    }
+
+    @Test fun seriesForeignGenerationAndSubstitutedAttachmentCannotBeAdopted() = fixture(series = true) {
+        val identity = receipt.binding.identity
+        val foreign = baseline.copy(receipt = receipt.copy(binding = receipt.binding.copy(identity = identity.copy(
+            attempt = identity.attempt.copy(scope = target.copy(generation = 1))))))
+        assertEquals(CapturedCreateCurrentObservation.Unresolved, projection.captureCapturedCreateCurrent(foreign))
+        assertNull(projection.acknowledgeCapturedCreate(ack.copy(baseline = foreign)))
+        val original = field(Events.SYNC_DATA6)
+        mutate(ContentValues().apply { put(Events.SYNC_DATA6, "synthetic-foreign-attachment") }); val before = values()
+        assertNull(projection.acknowledgeCapturedCreate(ack)); assertEquals(before, values())
+        mutate(ContentValues().apply { put(Events.SYNC_DATA6, original) })
+    }
+
     @Test fun exactUnchangedOriginalUpdatesOnlyDirtyAndAcknowledgementInOneBatch() = fixture {
         val before = values(); val adapter = intercepted(writes = 1)
         assertEquals(AppliedCapturedCreateAcknowledgement(ack), adapter.acknowledgeCapturedCreate(ack))
@@ -252,19 +371,22 @@ class CapturedCreateAcknowledgementProviderDeviceTest {
         assertEquals(AppliedCapturedCreateAcknowledgement(ack), projection.inspectCapturedAcknowledgement(ack))
     }
 
-    private class Fixture(val context: Context, val allDay: Boolean) {
+    private class Fixture(val context: Context, val allDay: Boolean, val series: Boolean, val rich: Boolean) {
         val target = CalendarScope(AccountId("captured-ack-provider-${UUID.randomUUID()}"), CalendarId("fixture"), 0)
         val localId = LocalEventId(UUID.randomUUID().toString())
         val projection = AndroidCalendarProjection(context)
         val content = EventContent("Captured acknowledgement provider fixture", if (allDay)
             EventTime.AllDay(LocalDate.of(2030, 3, 30), LocalDate.of(2030, 4, 1)) else
+            if (series) EventTime.Timed(Instant.parse("2030-03-29T11:00:00Z"), Instant.parse("2030-03-29T12:00:00Z"), ZoneId.of("Europe/Paris")) else
             EventTime.Timed(Instant.parse("2030-10-27T00:30:00Z"), Instant.parse("2030-10-27T02:30:00Z"), ZoneId.of("Europe/Paris")),
-            details = EventDetails())
+            details = EventDetails(if (rich) listOf(EventReminder(10)) else emptyList()), colorRgb = if (rich) 0x123456 else null,
+            recurrence = if (series) EventRecurrence("synthetic@calendeer.invalid", "FREQ=DAILY;COUNT=5") else null)
         private val captured = LocalCreateIntent(LocalCreateReservation(MutationId("capture"), localId, target,
-            AdapterFormat("ack-provider-import", 1), Instant.parse("2030-10-01T12:00:00Z")), content)
-        private val stage = LocalCreateSubmission(LocalCreateSubmissionReservation(captured,
-            MutationId(UUID.randomUUID().toString()), AdapterFormat("ack-provider-submission", 2)), "opaque-fixture")
-        val receipt = CapturedCreateAttachmentReceipt(CapturedCreateBinding(CapturedCreateDispatchIdentity.of(stage),
+            AdapterFormat("ack-provider-import", 1), Instant.parse("2030-10-01T12:00:00Z")), content.copy(recurrence = null),
+            if (series) CreateSeriesRule(5) else null)
+        private val record = CreateAttemptRecord(MutationId(UUID.randomUUID().toString()), target,
+            AdapterFormat("ack-provider-submission", if (series) 4 else 2), "opaque-fixture")
+        val receipt = CapturedCreateAttachmentReceipt(CapturedCreateBinding(CapturedCreateDispatchIdentity.of(record, captured),
             EventId("fixture-remote"), Revision("fixture-revision")), UUID.randomUUID().toString())
         val baseline = CapturedCreateBaseline(receipt, RemoteChange.Upsert(receipt.binding.eventId, receipt.binding.verifiedRevision, content))
         val ack = CapturedCreateAcknowledgementReceipt(baseline, UUID.randomUUID().toString())
@@ -288,11 +410,12 @@ class CapturedCreateAcknowledgementProviderDeviceTest {
         fun candidateValues() = ContentValues().apply {
             put(Events.CALENDAR_ID, calendar); put(Events.TITLE, content.title); put(Events.DESCRIPTION, content.description)
             put(Events.EVENT_LOCATION, content.location); put(Events.DIRTY, 1); put(Events.DELETED, 0)
-            put(Events.STATUS, Events.STATUS_CONFIRMED); put(Events.HAS_ATTENDEE_DATA, 0); put(Events.HAS_ALARM, 0)
+            put(Events.STATUS, Events.STATUS_CONFIRMED); put(Events.HAS_ATTENDEE_DATA, 0); put(Events.HAS_ALARM, if (rich) 1 else 0)
             putNull(Events.ORGANIZER); put(Events.IS_ORGANIZER, 0); put(Events.GUESTS_CAN_MODIFY, 0)
             put(Events.GUESTS_CAN_INVITE_OTHERS, 0); put(Events.GUESTS_CAN_SEE_GUESTS, 0)
             put(Events.ACCESS_LEVEL, Events.ACCESS_DEFAULT); put(Events.AVAILABILITY, Events.AVAILABILITY_BUSY)
-            putNull(Events.EVENT_COLOR); putNull(Events.EVENT_COLOR_KEY)
+            if (rich) put(Events.EVENT_COLOR, 0xff123456.toInt()) else putNull(Events.EVENT_COLOR)
+            putNull(Events.EVENT_COLOR_KEY)
             when (val time = content.time) {
                 is EventTime.Timed -> {
                     put(Events.DTSTART, time.start.toEpochMilli()); put(Events.DTEND, time.end.toEpochMilli())
@@ -304,11 +427,19 @@ class CapturedCreateAcknowledgementProviderDeviceTest {
                     put(Events.ALL_DAY, 1); put(Events.EVENT_TIMEZONE, "UTC"); put(Events.EVENT_END_TIMEZONE, "UTC")
                 }
             }
+            if (series) {
+                put(Events.RRULE, content.recurrence!!.rule); putNull(Events.DTEND)
+                put(Events.DURATION, if (allDay) "P2D" else "PT3600S")
+            }
         }
         suspend fun seed() {
             calendar = projection.ensureCalendar(target, CalendarSummary(target.calendar, "Calendeer captured current provider fixture"))
             row = ContentUris.parseId(context.contentResolver.insert(uri, candidateValues())!!)
-            assertEquals(content, projection.captureAndStampSimpleCreate(target, row, localId)!!.content)
+            if (rich) reminder()
+            val observed = if (series) projection.captureAndStampSeriesCreate(target, row, localId)
+                else projection.captureAndStampSimpleCreate(target, row, localId)
+            assertEquals(content.copy(recurrence = null), observed!!.content)
+            assertEquals(captured.series, observed.series)
             assertEquals(AppliedCapturedCreateAttachment(receipt), projection.attachCapturedCreate(receipt))
         }
         suspend fun capture(candidate: CapturedCreateBaseline = baseline) = projection.captureCapturedCreateCurrent(candidate)
@@ -319,6 +450,15 @@ class CapturedCreateAcknowledgementProviderDeviceTest {
         fun reminder() {
             context.contentResolver.insert(syncUri(Reminders.CONTENT_URI), ContentValues().apply {
                 put(Reminders.EVENT_ID, row); put(Reminders.MINUTES, 10); put(Reminders.METHOD, Reminders.METHOD_ALERT)
+            })!!
+        }
+        fun exception(bySyncId: Boolean) {
+            context.contentResolver.insert(uri, candidateValues().apply {
+                put(Events.TITLE, "Synthetic detached series exception"); putNull(Events.RRULE); putNull(Events.DURATION)
+                val start = getAsLong(Events.DTSTART)
+                put(Events.DTEND, start + if (allDay) 172800000L else 3600000L)
+                if (bySyncId) put(Events.ORIGINAL_SYNC_ID, field(Events._SYNC_ID)) else put(Events.ORIGINAL_ID, row)
+                put(Events.ORIGINAL_INSTANCE_TIME, start); put(Events.ORIGINAL_ALL_DAY, if (allDay) 1 else 0)
             })!!
         }
         fun children(child: Uri, column: String) = context.contentResolver.query(syncUri(child), arrayOf("_id"),
@@ -339,7 +479,7 @@ class CapturedCreateAcknowledgementProviderDeviceTest {
                 Events.ACCESS_LEVEL, Events.AVAILABILITY, Events.CUSTOM_APP_PACKAGE, Events.CUSTOM_APP_URI)
             return columns.associateWith(::field)
         }
-        fun intercepted(writes: Int = 0, afterBatch: () -> Unit = {}, beforeBatch: () -> Unit = {}): AndroidCalendarProjection {
+        fun intercepted(writes: Int = 0, afterBatch: () -> Unit = {}, permissions: () -> Boolean = { true }, beforeBatch: () -> Unit = {}): AndroidCalendarProjection {
             val real = context.contentResolver
             val provider = object : ContentProvider() {
                 override fun onCreate() = true
@@ -354,9 +494,10 @@ class CapturedCreateAcknowledgementProviderDeviceTest {
                     assertEquals(writes, operations.count { it.isUpdate })
                     assertTrue(operations.all { it.isAssertQuery || it.isUpdate })
                     if (writes == 1) {
-                        assertEquals(7, operations.size); assertTrue(operations.last().isUpdate)
+                        assertEquals(if (series) 8 + (if (rich) 1 else 0) else 7, operations.size); assertTrue(operations.last().isUpdate)
                         val update = operations.last().resolveValueBackReferences(emptyArray<ContentProviderResult>(), 0)!!
-                        assertEquals(setOf(Events.DIRTY, Events.SYNC_DATA7), update.keySet())
+                        assertEquals(setOf(Events.DIRTY, Events.SYNC_DATA7, Events.SYNC_DATA3), update.keySet())
+                        assertNull(update.getAsString(Events.SYNC_DATA3))
                         assertEquals(0, update.getAsInteger(Events.DIRTY)); assertEquals(marker, update.getAsString(Events.SYNC_DATA7))
                     } else assertTrue(operations.size == 3 || operations.size == 6)
                     interceptedBatches++; beforeBatch(); realBatchAttempts++
@@ -367,6 +508,9 @@ class CapturedCreateAcknowledgementProviderDeviceTest {
             val wrapped = object : ContextWrapper(context) {
                 override fun getApplicationContext(): Context = this
                 override fun getContentResolver() = wrappedResolver
+                override fun checkPermission(permission: String, pid: Int, uid: Int): Int =
+                    if (permission in listOf(android.Manifest.permission.READ_CALENDAR, android.Manifest.permission.WRITE_CALENDAR) && !permissions())
+                        android.content.pm.PackageManager.PERMISSION_DENIED else super.checkPermission(permission, pid, uid)
             }
             return AndroidCalendarProjection(wrapped)
         }
@@ -375,9 +519,9 @@ class CapturedCreateAcknowledgementProviderDeviceTest {
             projection.removeOwnedCalendar(target); AccountManager.get(context).removeAccountExplicitly(projection.accountFor(target.account))
         }
     }
-    private fun fixture(allDay: Boolean = false, block: suspend Fixture.() -> Unit) = runBlocking {
+    private fun fixture(allDay: Boolean = false, series: Boolean = false, rich: Boolean = false, block: suspend Fixture.() -> Unit) = runBlocking {
         assumeTrue(InstrumentationRegistry.getArguments().getString("providerFixture") == "true")
-        val fixture = Fixture(ApplicationProvider.getApplicationContext(), allDay)
+        val fixture = Fixture(ApplicationProvider.getApplicationContext(), allDay, series, rich)
         assumeTrue(fixture.projection.hasPermissions())
         try { fixture.seed(); fixture.block() } finally { fixture.close() }
     }

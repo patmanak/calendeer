@@ -116,5 +116,7 @@ L9b's [qualified foundations](../LOCAL_CREATE_CAPTURE.md#series-create-foundatio
 now include strict rule admission, content snapshot schema 3, explicit native
 observation, shared signed/encrypted serialization, protected v4 capsules and their
 canonical readback, plus v2 dispatch fingerprints and existing-table migration.
-Historical capsule paths remain closed to series. Next: current native content and
-exact acknowledgement, then end-to-end controller E3 before enabling submission.
+Explicit native current-content and acknowledgement operations now retain the rule,
+duration and verified UID, with atomic child guards and historical ACK recovery.
+Historical capsule paths remain closed to series. Next: propagate the canonical
+verified baseline through restoration and controller E3 before enabling submission.

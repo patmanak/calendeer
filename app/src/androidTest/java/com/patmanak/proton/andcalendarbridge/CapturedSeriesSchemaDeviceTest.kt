@@ -211,4 +211,41 @@ class CapturedSeriesSchemaDeviceTest {
             ImportStore(context, name).use { assertEquals(baseline, it.capturedBaseline(scope, change.eventId)) }
         } finally { context.deleteDatabase(name) }
     }
+
+    @Test fun seriesAckReservationNeverRearmsOnReopenAndKeepsTheExactVerifiedBaseline() = runBlocking {
+        assumeTrue(InstrumentationRegistry.getArguments().getString("providerFixture") == "true")
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val name = "series-ack-fixture-${UUID.randomUUID()}.db"
+        val attachment = receipt(2)
+        val baseline = CapturedCreateBaseline(attachment, RemoteChange.Upsert(attachment.binding.eventId, attachment.binding.verifiedRevision,
+            content.copy(recurrence = EventRecurrence("synthetic@calendeer.invalid", "FREQ=DAILY;COUNT=5"))))
+        val proposed = CapturedCreateAcknowledgementReceipt(baseline, UUID(0, 999).toString())
+        try {
+            ImportStore(context, name).use { store ->
+                store.remember(scope.account, listOf(CalendarSummary(scope.calendar, "Synthetic fixture")))
+                store.setEnabled(scope, true)
+                store.transaction(scope) { checkpoint = PageCheckpoint(scope, identity(2).captureFormat) }
+                assertTrue(store.retainCapturedBaseline(baseline, AppliedCapturedCreateAttachment(attachment)))
+                val first = store.reserveCapturedAcknowledgement(proposed)
+                assertTrue(first.fresh); assertEquals(CapturedCreateAcknowledgementState.UNKNOWN, first.record.state)
+            }
+            ImportStore(context, name).use { store ->
+                val reopened = store.reserveCapturedAcknowledgement(proposed.copy(nonce = UUID(0, 1000).toString()))
+                assertFalse(reopened.fresh); assertEquals(proposed, reopened.record.receipt)
+                assertEquals(CapturedCreateAcknowledgementState.UNKNOWN, reopened.record.state)
+                val foreign = baseline.copy(change = baseline.change.copy(content = baseline.change.content.copy(
+                    recurrence = baseline.change.content.recurrence!!.copy(uid = "foreign@calendeer.invalid"))))
+                try { store.reserveCapturedAcknowledgement(proposed.copy(baseline = foreign)); fail("Foreign UID baseline adopted") }
+                catch (_: IllegalStateException) { }
+                val proven = store.retainCapturedAcknowledgement(AppliedCapturedCreateAcknowledgement(proposed))
+                assertEquals(CapturedCreateAcknowledgementState.PROVEN, proven.state)
+            }
+            ImportStore(context, name).use { store ->
+                val replay = store.reserveCapturedAcknowledgement(proposed.copy(nonce = UUID(0, 1001).toString()))
+                assertFalse(replay.fresh); assertEquals(proposed, replay.record.receipt)
+                assertEquals(CapturedCreateAcknowledgementState.PROVEN, replay.record.state)
+                assertEquals(baseline, store.capturedBaseline(scope, baseline.change.eventId))
+            }
+        } finally { context.deleteDatabase(name) }
+    }
 }

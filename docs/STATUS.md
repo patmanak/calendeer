@@ -87,7 +87,7 @@ isolated fresh password login were tested. Remote CI, canonical release/update
 installation, other ABIs/OEMs and signing remain release gates.
 [Distribution](LICENSING.md), [build security](BUILD_SECURITY.md).
 
-Still required: recurring CREATE submission/ACK and remaining V05 editing
+Still required: recurring CREATE end-to-end integration and remaining V05 editing
 ([recurrence plan](research/RECURRENCE_WRITES.md)), milestone qualification,
 unresolved historical associations/conflicts, remote CI and signed packaging.
 Trustworthy comparable modification timestamps remain unavailable for general

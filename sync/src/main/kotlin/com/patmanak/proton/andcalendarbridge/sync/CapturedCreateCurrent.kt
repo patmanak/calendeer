@@ -10,7 +10,9 @@ import java.nio.charset.CodingErrorAction
  */
 class CapturedCreateCurrent(val baseline: CapturedCreateBaseline, content: EventContent, val deleted: Boolean,
     val acknowledgement: CapturedCreateAcknowledgementReceipt? = null) {
-    val content = freezeCapturedCreateContent(content)
+    val content = if (baseline.receipt.binding.identity.fingerprintVersion == 2) freezeCapturedSeriesContent(content).also {
+        require(it.recurrence!!.uid == baseline.change.content.recurrence!!.uid) { "Current series UID differs from its baseline" }
+    } else freezeCapturedCreateContent(content)
     init {
         require(acknowledgement == null || acknowledgement.baseline == baseline)
         // Preserve the original pre-handoff profile for historical known-empty captures.

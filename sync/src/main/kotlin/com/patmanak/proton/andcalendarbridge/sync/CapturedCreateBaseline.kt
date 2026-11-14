@@ -6,11 +6,7 @@ package com.patmanak.proton.andcalendarbridge.sync
  */
 class CapturedCreateBaseline(val receipt: CapturedCreateAttachmentReceipt, change: RemoteChange.Upsert) {
     val change = change.copy(content = if (receipt.binding.identity.fingerprintVersion == 1) freezeCapturedCreateContent(change.content)
-        else {
-            capturedCreateSeries(change.content)
-            freezeCapturedCreateContent(change.content.copy(recurrence = null)).copy(
-                recurrence = requireNotNull(change.content.recurrence).copy(additionalDates = emptyList(), excludedDates = emptyList()))
-        })
+        else freezeCapturedSeriesContent(change.content))
     init {
         require(this.change.eventId == receipt.binding.eventId && this.change.revision == receipt.binding.verifiedRevision)
         require(receipt.binding.identity.matchesContent(this.change.content)) { "Baseline differs from the frozen capture" }
@@ -24,4 +20,11 @@ class CapturedCreateBaseline(val receipt: CapturedCreateAttachmentReceipt, chang
     override fun equals(other: Any?) = other is CapturedCreateBaseline && receipt == other.receipt && change == other.change
     override fun hashCode() = 31 * receipt.hashCode() + change.hashCode()
     override fun toString() = "CapturedCreateBaseline(REDACTED)"
+}
+
+/** Series-only owning copy. Historical simple captures keep their recurrence refusal. */
+internal fun freezeCapturedSeriesContent(content: EventContent): EventContent {
+    capturedCreateSeries(content)
+    return freezeCapturedCreateContent(content.copy(recurrence = null)).copy(
+        recurrence = requireNotNull(content.recurrence).copy(additionalDates = emptyList(), excludedDates = emptyList()))
 }
