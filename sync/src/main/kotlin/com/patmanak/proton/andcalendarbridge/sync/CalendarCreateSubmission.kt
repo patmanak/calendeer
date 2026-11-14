@@ -33,6 +33,12 @@ interface CalendarCreateSubmissionPort {
     suspend fun submit(record: CreateAttemptRecord, journal: CreateAttemptJournal): CreateSubmissionObservation
     suspend fun inspect(record: CreateAttemptRecord): CreateSubmissionObservation
 
+    /** Read the canonical expectation from this exact immutable protected request, without HTTP,
+     * preparation or admission. This is not remote proof: callers need the matching durable binding.
+     * The complete captured draft and record identity must match; unreadable/unknown profiles refuse.
+     */
+    suspend fun readCapturedExpectation(record: CreateAttemptRecord, expected: CalendarCreateDraft): EventContent? = null
+
     /** Fail-closed captured path. The sealed submission MUST match its declared profile and entire
      * immutable captured draft before fresh preparation or inspection. Final local qualification
      * belongs to journal.claim, after the adapter's last fresh rights/key/session reads.

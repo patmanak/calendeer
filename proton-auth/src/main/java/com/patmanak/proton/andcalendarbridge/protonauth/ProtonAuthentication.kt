@@ -702,6 +702,10 @@ internal class SerializedAuthenticationPort(
         val frozen = expected.frozen()
         return submissionOperation { it.inspectCaptured(record, frozen) }
     }
+    override suspend fun readCapturedExpectation(record: CreateAttemptRecord, expected: CalendarCreateDraft): EventContent? {
+        val frozen = expected.frozen()
+        return submissionOperation { it.readCapturedExpectation(record, frozen) }
+    }
     private suspend fun <T> submissionOperation(block: suspend (CalendarCreateSubmissionPort) -> T): T = withContext(dispatcher) {
         lock.withLock {
             if (!authenticated) createUnavailable(CreatePreparationFailure.AUTHENTICATION)

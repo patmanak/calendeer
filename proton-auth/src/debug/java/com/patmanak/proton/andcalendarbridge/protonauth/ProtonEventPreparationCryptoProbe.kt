@@ -398,6 +398,9 @@ object ProtonEventPreparationCryptoProbe {
                             reopened, CatalogSessionSource { session }, readRemote, readEvents, decoder::decodeCreated)
                         val unknown = CreateAttemptRecord(draft.correlation, scope, prepared.format, prepared.protectedPayload,
                             state = CreateAttemptState.OUTCOME_UNKNOWN)
+                        val beforeExpectation = uidReads
+                        check(submissions.readCapturedExpectation(unknown, draft) == expectedContent)
+                        check(uidReads == beforeExpectation)
                         if (captured) {
                             val foreign = draft.copy(content = content.copy(title = "Foreign captured expectation"))
                             val before = uidReads

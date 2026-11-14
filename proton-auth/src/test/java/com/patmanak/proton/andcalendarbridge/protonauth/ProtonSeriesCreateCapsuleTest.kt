@@ -9,6 +9,15 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class ProtonSeriesCreateCapsuleTest {
+    @Test fun protectedExpectationReopensWithoutSessionReadsOrRemoteProof() = runTest {
+        val f = fixture()
+        assertEquals(f.verified!!.content, f.adapter.readCapturedExpectation(f.record, f.draft))
+        assertEquals(f.verified!!.content, f.adapter.readCapturedExpectation(f.record.copy(state = CreateAttemptState.OUTCOME_UNKNOWN), f.draft))
+        assertEquals(0, f.prepares); assertEquals(0, f.sends)
+        assertNull(f.adapter.readCapturedExpectation(f.record, f.draft.copy(series = CreateSeriesRule(4))))
+        assertNull(f.adapter.readCapturedExpectation(f.record.copy(scope = f.record.scope.copy(generation = f.scope.generation + 1)), f.draft))
+        assertNull(f.adapter.readCapturedExpectation(f.record.copy(protectedPayload = "unreadable"), f.draft))
+    }
     private fun fixture() = CreateSubmissionFixture(EventContent("Synthetic series", EventTime.AllDay(
         LocalDate.parse("2030-03-29"), LocalDate.parse("2030-03-31")), details = EventDetails()), CreateSeriesRule(5))
     @Test fun newCapsuleRetainsTheRuleWithExplicitPersonalMetadataEvenWhenEmpty() {

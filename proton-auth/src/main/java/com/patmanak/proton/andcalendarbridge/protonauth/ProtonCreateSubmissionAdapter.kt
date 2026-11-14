@@ -22,6 +22,13 @@ internal class ProtonCreateSubmissionAdapter(private val preparations: CalendarC
     override val personalSubmissionFormat = PERSONAL_CREATE_SUBMISSION_FORMAT
     private val readback = ProtonCreatedEventReadback(sessions, remote, events, verifier)
     override suspend fun prepareSubmission(draft: CalendarCreateDraft) = preparations.prepareCreate(draft)
+    override suspend fun readCapturedExpectation(record: CreateAttemptRecord, expected: CalendarCreateDraft): EventContent? = try {
+        val frozen = expected.frozen()
+        val submission = ProtonCreateSubmissionCodec.open(record, protector)
+        qualifyCaptured(record, submission, frozen)
+        frozen.canonicalContent(submission.uid)
+    } catch (cancelled: CancellationException) { throw cancelled }
+      catch (_: Exception) { null }
 
     override suspend fun submit(record: CreateAttemptRecord, journal: CreateAttemptJournal): CreateSubmissionObservation =
         submitWithExpectation(record, journal, null)
