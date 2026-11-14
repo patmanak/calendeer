@@ -5,7 +5,7 @@ package com.patmanak.proton.andcalendarbridge.sync
 enum class LocalEditState { PAUSED, CONFLICT }
 
 /** Immutable supported-field edit against an exact successfully projected remote baseline.
- * Personal reminders/color remain complete observations; participants and recurrence stay held.
+ * Series observations require an explicit separate profile; this grants no writer capability.
  */
 data class LocalEditIntent(
     val id: MutationId,
@@ -14,10 +14,15 @@ data class LocalEditIntent(
     val base: RemoteChange.Upsert,
     val content: EventContent,
     val state: LocalEditState = LocalEditState.PAUSED,
+    val seriesProfile: SeriesEditProfile? = null,
 ) {
     init {
-        require(base.content.recurrence == null && (base.content.details == null || (base.content.details.organizer == null && base.content.details.attendees.isEmpty())))
-        require(content.recurrence == null)
+        require(base.content.details == null || (base.content.details.organizer == null && base.content.details.attendees.isEmpty()))
+        if (seriesProfile == null) require(base.content.recurrence == null && content.recurrence == null)
+        else {
+            require(base.content.details != null)
+            seriesProfile.requireCompatible(base.content, content)
+        }
         require(if (base.content.details == null) content.details == null && content.colorRgb == base.content.colorRgb
             else content.details?.let { it.organizer == null && it.attendees.isEmpty() } == true)
         require(content != base.content) { "Local edit has no supported change" }

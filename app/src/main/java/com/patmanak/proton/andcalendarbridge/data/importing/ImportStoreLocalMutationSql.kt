@@ -196,11 +196,14 @@ internal class ImportStoreLocalMutationSql(
     fun readBaseline(db: SQLiteDatabase, scope: CalendarScope, eventId: EventId): RemoteChange.Upsert? =
         readProjectionBase(db, scope, eventId)?.change
     fun readLocalEdit(db: SQLiteDatabase, scope: CalendarScope, eventId: EventId): LocalEditIntent? =
-        db.rawQuery("SELECT mutation,adapter,version,base,local,state FROM local_edits WHERE scope=? AND event=? AND kind='UPDATE'",
-            arrayOf(key(scope), eventId.value)).use { if (!it.moveToFirst()) null else LocalEditIntent(
-            MutationId(it.getString(0)), scope, AdapterFormat(it.getString(1), it.getInt(2)),
-            decodeChange(it.getString(3)) as RemoteChange.Upsert, (decodeChange(it.getString(4)) as RemoteChange.Upsert).content,
-            LocalEditState.valueOf(it.getString(5))) }
+        db.rawQuery("SELECT mutation,adapter,version,base,local,state,edit_profile FROM local_edits WHERE scope=? AND event=? AND kind='UPDATE'",
+            arrayOf(key(scope), eventId.value)).use { row -> if (!row.moveToFirst()) null else {
+            val base = decodeChange(row.getString(3)) as RemoteChange.Upsert
+            val local = decodeChange(row.getString(4)) as RemoteChange.Upsert
+            require(base.eventId == eventId && local.eventId == eventId && local.revision == base.revision)
+            LocalEditIntent(MutationId(row.getString(0)), scope, AdapterFormat(row.getString(1), row.getInt(2)),
+                base, local.content, LocalEditState.valueOf(row.getString(5)), readLocalEditProfile(row, 6, base, local))
+        } }
     fun readLocalDelete(db: SQLiteDatabase, scope: CalendarScope, eventId: EventId): LocalDeleteIntent? =
         db.rawQuery("SELECT mutation,adapter,version,base,local,state FROM local_edits WHERE scope=? AND event=? AND kind='DELETE'",
             arrayOf(key(scope), eventId.value)).use {
@@ -333,7 +336,8 @@ internal class ImportStoreLocalMutationSql(
             arrayOf(key(scope),event.value,intent.id.value)) == 1
     }
 
-    fun captureLocalEdit(db: SQLiteDatabase, intent: LocalEditIntent): LocalEditIntent = run {
+    fun captureLocalEdit(db: SQLiteDatabase, intent: LocalEditIntent, series: Boolean = false): LocalEditIntent = run {
+        require((intent.seriesProfile != null) == series) { "Mismatched local observation profile" }
         require(intent.state == LocalEditState.PAUSED) { "Caller cannot declare conflict state" }
         check(isAvailable(db, intent.scope) && db.rawQuery("SELECT enabled FROM calendars WHERE scope=?",
             arrayOf(key(intent.scope))).use { it.moveToFirst() && it.getInt(0) != 0 }) { "Inactive local capture scope" }
@@ -352,6 +356,7 @@ internal class ImportStoreLocalMutationSql(
         val captured = intent.copy(state = if (hasDeferred || remote != intent.base) LocalEditState.CONFLICT else LocalEditState.PAUSED)
         db.insertOrThrow("local_edits", null, ContentValues().apply {
             put("kind", "UPDATE")
+            put("edit_profile", if (series) 2 else 1)
             put("scope", key(intent.scope)); put("mutation", intent.id.value); put("event", intent.base.eventId.value)
             put("adapter", intent.format.id); put("version", intent.format.version); put("base", encodeChange(intent.base))
             put("local", encodeChange(intent.base.copy(content = intent.content))); put("state", captured.state.name)

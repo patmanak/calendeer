@@ -81,7 +81,7 @@ class NativeRemovalStoreDeviceTest {
             val before = rows(db, "calendars")
             db.version = version; store.close()
             ImportStore(context, name).use { reopened ->
-                assertEquals(25, reopened.readableDatabase.version)
+                assertEquals(26, reopened.readableDatabase.version)
                 assertTrue(reopened.pendingNativeRemovals().isEmpty())
                 assertEquals(before, rows(reopened.readableDatabase, "calendars").map { it.dropLast(1) })
                 reopened.queueNativeRemovals()

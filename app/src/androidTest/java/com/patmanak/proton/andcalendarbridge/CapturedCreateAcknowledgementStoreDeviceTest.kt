@@ -72,7 +72,7 @@ class CapturedCreateAcknowledgementStoreDeviceTest {
         SQLiteDatabase.openDatabase(context.getDatabasePath(name).absolutePath, null, SQLiteDatabase.OPEN_READWRITE).use(block)
     }
     private fun rows(db: SQLiteDatabase, table: String): List<List<String?>> =
-        db.rawQuery("SELECT * FROM $table ORDER BY rowid", null).use { row ->
+        db.rawQuery("SELECT ${if (table == "local_edits") "scope,mutation,event,adapter,version,base,local,state,kind" else "*"} FROM $table ORDER BY rowid", null).use { row ->
             buildList { while (row.moveToNext()) add(List(row.columnCount) { if (row.isNull(it)) null else row.getString(it) }) }
         }
     private fun rawRows(store: ImportStore, table: String) = rows(store.writableDatabase, table)
@@ -161,7 +161,7 @@ class CapturedCreateAcknowledgementStoreDeviceTest {
         assertTrue(rawRows(store, "captured_create_acknowledgements").isEmpty())
         raw(context, name) { it.execSQL("DELETE FROM local_edits") }
         val reserved = store.reserveCapturedAcknowledgement(proposal())
-        raw(context, name) { it.execSQL("INSERT INTO local_edits VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", before.single().toTypedArray()) }
+        raw(context, name) { it.execSQL("INSERT INTO local_edits(scope,mutation,event,adapter,version,base,local,state,kind) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", before.single().toTypedArray()) }
         reject { store.retainCapturedAcknowledgement(AppliedCapturedCreateAcknowledgement(proposal())) }
         reject { store.reserveCapturedAcknowledgement(proposal(nonce = 202)) }
         assertEquals(reserved.record, store.capturedAcknowledgement(scope, first.change.eventId))
@@ -451,7 +451,7 @@ class CapturedCreateAcknowledgementStoreDeviceTest {
                 old.execSQL("INSERT INTO mapping_profiles VALUES (?, ?, 1, 1)", arrayOf(scopeKey(), format.id))
                 old.execSQL("INSERT INTO projection_bases VALUES (?, ?, ?)", arrayOf(scopeKey(), first.change.eventId.value, encoded(first.change)))
                 old.execSQL("INSERT INTO projection_bases VALUES (?, 'generic-event', ?)", arrayOf(scopeKey(), encoded(first.change.copy(eventId = EventId("generic-event")))))
-                old.execSQL("INSERT INTO local_edits VALUES (?, 'local-mutation', 'generic-event', ?, 1, ?, ?, 'CONFLICT', 'DELETE')", arrayOf(scopeKey(), format.id,
+                old.execSQL("INSERT INTO local_edits(scope,mutation,event,adapter,version,base,local,state,kind) VALUES (?, 'local-mutation', 'generic-event', ?, 1, ?, ?, 'CONFLICT', 'DELETE')", arrayOf(scopeKey(), format.id,
                     encoded(first.change.copy(eventId = EventId("generic-event"))), encoded(first.change.copy(eventId = EventId("generic-event")))))
                 old.execSQL("INSERT INTO projection_receipts VALUES (?, 'receipt-event', ?, ?, ?, 1, NULL, 1)", arrayOf(scopeKey(), UUID(0, 500).toString(),
                     encoded(first.change.copy(eventId = EventId("receipt-event"))), format.id))
@@ -465,7 +465,7 @@ class CapturedCreateAcknowledgementStoreDeviceTest {
                 old.version = 11
                 for (table in tables) before[table] = rows(old, table)
             }
-            assertEquals(25, store.writableDatabase.version)
+            assertEquals(26, store.writableDatabase.version)
             store.writableDatabase.rawQuery("PRAGMA synchronous", null).use { assertTrue(it.moveToFirst()); assertEquals(2, it.getInt(0)) }
             for (table in tables) {
                 val after = rawRows(store, table)

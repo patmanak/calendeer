@@ -56,7 +56,7 @@ internal class ConflictArchiveSql(private val db: SQLiteDatabase, private val ch
     }
     private fun readConflictArchive(ref: ConflictArchiveRef): ConflictArchiveDetail? = stagedQuery(db,
         "SELECT id,${archiveText("event", 4096)},${archiveText("mutation", 4096)},${archiveText("kind", 8)}," +
-            "${archiveText("adapter", 4096)},${archiveVersion()},${archiveText("base")},${archiveText("local")} FROM conflict_archives WHERE scope=? AND id=?",
+            "${archiveText("adapter", 4096)},${archiveVersion()},${archiveText("base")},${archiveText("local")},${profileColumn("conflict_archives")} FROM conflict_archives WHERE scope=? AND id=?",
         arrayOf(key(ref.scope), ref.id.toString())).use { row ->
         if (!row.moveToFirst()) null else {
             if (archiveRef(ref.scope, row) != ref) return@use null
@@ -65,13 +65,29 @@ internal class ConflictArchiveSql(private val db: SQLiteDatabase, private val ch
             val base = decodeChange(archiveString(row, 6)) as? RemoteChange.Upsert ?: error("Invalid conflict base")
             val local = decodeChange(archiveString(row, 7)) as? RemoteChange.Upsert ?: error("Invalid conflict capture")
             check(base.eventId == ref.eventId && local.eventId == ref.eventId && local.revision == base.revision) { "Invalid conflict binding" }
-            validateConflictCapture(ref, format, base, local.content)
-            ConflictArchiveDetail(ref, format, base, local.content)
+            val profile = readLocalEditProfile(row, 8, base, local)
+            validateConflictCapture(ref, format, base, local.content, profile)
+            ConflictArchiveDetail(ref, format, base, local.content, profile)
         }
     }
-    private fun validateConflictCapture(ref: ConflictArchiveRef, format: AdapterFormat, base: RemoteChange.Upsert, local: EventContent) {
-        if (ref.kind == MutationKind.UPDATE) LocalEditIntent(ref.mutationId, ref.scope, format, base, local, LocalEditState.CONFLICT)
-        else LocalDeleteIntent(ref.mutationId, ref.scope, format, base, local, LocalEditState.CONFLICT)
+    private fun validateConflictCapture(ref: ConflictArchiveRef, format: AdapterFormat, base: RemoteChange.Upsert,
+        local: EventContent, profile: SeriesEditProfile?) {
+        if (ref.kind == MutationKind.UPDATE) LocalEditIntent(ref.mutationId, ref.scope, format, base, local, LocalEditState.CONFLICT, profile)
+        else {
+            require(profile == null)
+            LocalDeleteIntent(ref.mutationId, ref.scope, format, base, local, LocalEditState.CONFLICT)
+        }
+    }
+    /** Pre-26 migration backfill has only the frozen simple shape; never infer a series there. */
+    private fun profileColumn(table: String): String {
+        val found = db.rawQuery("PRAGMA table_info($table)", null).use { columns ->
+            var exists = false
+            while (columns.moveToNext()) if (columns.getString(1) == "edit_profile") exists = true
+            exists
+        }
+        if (found) return "edit_profile"
+        check(db.version < 26) { "Missing conflict capture profile" }
+        return "1"
     }
     private fun readConflictObservation(ref: ConflictArchiveRef, id: Long): ConflictObservation = stagedQuery(db,
         "SELECT ${archiveText("kind", 16)},${archiveText("origin", 16)},${archiveText("observed_at", 64)}," +
@@ -106,7 +122,7 @@ internal class ConflictArchiveSql(private val db: SQLiteDatabase, private val ch
     /** Called before replacing cache/deferred evidence. B/L is copied once and never updated. */
     fun ensure(scope: CalendarScope, event: EventId, force: Boolean = false): Long? = archiveRead {
         val owner = stagedQuery(db, "SELECT ${archiveText("mutation", 4096)},${archiveText("kind", 8)},${archiveText("adapter", 4096)},${archiveVersion()}," +
-            "${archiveText("base")},${archiveText("local")},${archiveText("state", 8)} FROM local_edits WHERE scope=? AND event=?",
+            "${archiveText("base")},${archiveText("local")},${archiveText("state", 8)},${profileColumn("local_edits")} FROM local_edits WHERE scope=? AND event=?",
             arrayOf(key(scope), event.value)).use { row ->
             if (!row.moveToFirst()) null else {
                 val state = LocalEditState.valueOf(archiveString(row, 6))
@@ -117,15 +133,17 @@ internal class ConflictArchiveSql(private val db: SQLiteDatabase, private val ch
                 val base = decodeChange(archiveString(row, 4)) as? RemoteChange.Upsert ?: error("Invalid conflict base")
                 val local = decodeChange(archiveString(row, 5)) as? RemoteChange.Upsert ?: error("Invalid conflict capture")
                 check(base.eventId == event && local.eventId == event && local.revision == base.revision)
-                validateConflictCapture(ref, format, base, local.content)
-                ConflictArchiveDetail(ref, format, base, local.content)
+                val profile = readLocalEditProfile(row, 7, base, local)
+                validateConflictCapture(ref, format, base, local.content, profile)
+                ConflictArchiveDetail(ref, format, base, local.content, profile)
             }
         } ?: return@archiveRead null
         val existing = db.rawQuery("SELECT id FROM conflict_archives WHERE scope=? AND mutation=?", arrayOf(key(scope), owner.ref.mutationId.value))
             .use { if (it.moveToFirst()) it.getLong(0) else null }
         if (existing != null) {
             val retained = checkNotNull(readConflictArchive(owner.ref.copy(id = existing)))
-            check(retained.format == owner.format && retained.base == owner.base && retained.local == owner.local) { "Conflict archive is immutable" }
+            check(retained.format == owner.format && retained.base == owner.base && retained.local == owner.local &&
+                retained.seriesProfile == owner.seriesProfile) { "Conflict archive is immutable" }
             return@archiveRead existing
         }
         val base = encodeChange(owner.base).also(::requirePreparationSnapshotBudget)
@@ -133,6 +151,7 @@ internal class ConflictArchiveSql(private val db: SQLiteDatabase, private val ch
         val id = db.insertOrThrow("conflict_archives", null, ContentValues().apply {
             put("scope", key(scope)); put("event", event.value); put("mutation", owner.ref.mutationId.value); put("kind", owner.ref.kind.name)
             put("adapter", owner.format.id); put("version", owner.format.version); put("base", base); put("local", local)
+            if (owner.seriesProfile != null) put("edit_profile", 2)
         })
         var observed = false
         stagedQuery(db, "SELECT ${archiveText("payload")} FROM records WHERE scope=? AND event=?", arrayOf(key(scope), event.value)).use { row ->

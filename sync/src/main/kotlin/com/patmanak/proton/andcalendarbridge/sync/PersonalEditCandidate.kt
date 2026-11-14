@@ -15,6 +15,7 @@ class PersonalEditCandidate(intent: LocalEditIntent) {
     override fun toString() = "PersonalEditCandidate(REDACTED)"
 
     private fun freeze(intent: LocalEditIntent): LocalEditIntent {
+        require(intent.seriesProfile == null)
         require(intent.state == LocalEditState.PAUSED)
         listOf(intent.id.value, intent.scope.account.value, intent.scope.calendar.value,
             intent.base.eventId.value, intent.base.revision.value, intent.format.id).forEach { boundedPersonalEdit(it, 4_096) }

@@ -148,7 +148,7 @@ class CapturedCreateBaselineStoreDeviceTest {
 
     @Test fun rawLocalMutationAndOutstandingProjectionReceiptRefuseFirstRetention() = fixture { context, name, store ->
         store.queue(first.change)
-        raw(context, name) { it.execSQL("INSERT INTO local_edits VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", arrayOf<Any>(
+        raw(context, name) { it.execSQL("INSERT INTO local_edits(scope,mutation,event,adapter,version,base,local,state,kind) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", arrayOf<Any>(
             scopeKey(), "synthetic-local", first.change.eventId.value, format.id, format.version,
             encoded(first.change), encoded(first.change), "PAUSED", "DELETE")) }
         assertFalse(store.retainCapturedBaseline(first, witness())); assertNull(store.capturedBaseline(scope, first.change.eventId))
@@ -320,7 +320,7 @@ class CapturedCreateBaselineStoreDeviceTest {
             val path = context.getDatabasePath(name); path.parentFile?.mkdirs()
             val tables = listOf("calendars", "records", "inbox", "deferred_events", "delta_state", "delta_jobs",
                 "delta_reconciliation", "coverage_state", "series_members", "mapping_profiles", "projection_bases", "local_edits", "projection_receipts")
-            fun rows(db: SQLiteDatabase, table: String): List<List<String?>> = db.rawQuery("SELECT * FROM $table ORDER BY rowid", null).use { row ->
+            fun rows(db: SQLiteDatabase, table: String): List<List<String?>> = db.rawQuery("SELECT ${if (table == "local_edits") "scope,mutation,event,adapter,version,base,local,state,kind" else "*"} FROM $table ORDER BY rowid", null).use { row ->
                 buildList { while (row.moveToNext()) add(List(row.columnCount) { if (row.isNull(it)) null else row.getString(it) }) }
             }
             val before = mutableMapOf<String, List<List<String?>>>()
@@ -351,14 +351,14 @@ class CapturedCreateBaselineStoreDeviceTest {
                 old.execSQL("INSERT INTO series_members VALUES (?, 'series-event', 'synthetic-series', 'master')", arrayOf(scopeKey()))
                 old.execSQL("INSERT INTO mapping_profiles VALUES (?, ?, 1, 1)", arrayOf(scopeKey(), format.id))
                 old.execSQL("INSERT INTO projection_bases VALUES (?, 'generic-event', ?)", arrayOf(scopeKey(), encoded(first.change.copy(eventId = EventId("generic-event")))))
-                old.execSQL("INSERT INTO local_edits VALUES (?, 'local-mutation', 'generic-event', ?, 1, ?, ?, 'CONFLICT', 'DELETE')", arrayOf(scopeKey(), format.id,
+                old.execSQL("INSERT INTO local_edits(scope,mutation,event,adapter,version,base,local,state,kind) VALUES (?, 'local-mutation', 'generic-event', ?, 1, ?, ?, 'CONFLICT', 'DELETE')", arrayOf(scopeKey(), format.id,
                     encoded(first.change.copy(eventId = EventId("generic-event"))), encoded(first.change.copy(eventId = EventId("generic-event")))))
                 old.execSQL("INSERT INTO projection_receipts VALUES (?, 'receipt-event', ?, ?, ?, 1, NULL, 1)", arrayOf(scopeKey(), UUID(0, 500).toString(),
                     encoded(first.change.copy(eventId = EventId("receipt-event"))), format.id))
                 old.version = 10
                 for (table in tables) before[table] = rows(old, table)
             }
-            assertEquals(25, store.writableDatabase.version)
+            assertEquals(26, store.writableDatabase.version)
             for (table in tables) {
                 val after = rows(store.writableDatabase, table)
                 val added = when (table) { "calendars", "projection_bases" -> 1; "projection_receipts" -> 2; else -> 0 }

@@ -306,7 +306,7 @@ internal object ImportStoreLocalPreparations {
     fun readLocalPreparationOwner(db: SQLiteDatabase, scope: CalendarScope, eventId: EventId): LocalEditIntent? =
         try {
             stagedQuery(db, "SELECT ${archiveText("mutation", 4096)},${archiveText("adapter", 4096)},version," +
-                "${archiveText("base")},${archiveText("local")},${archiveText("state", 16)},${archiveText("kind", 16)} FROM local_edits WHERE scope=? AND event=?",
+                "${archiveText("base")},${archiveText("local")},${archiveText("state", 16)},${archiveText("kind", 16)},edit_profile FROM local_edits WHERE scope=? AND event=?",
                 arrayOf(key(scope), eventId.value)).use { row ->
                 if (!row.moveToFirst()) null else {
                     require(archiveString(row, 6) == "UPDATE")
@@ -316,7 +316,7 @@ internal object ImportStoreLocalPreparations {
                     val local = decodeChange(localJson) as RemoteChange.Upsert
                     require(base.eventId == eventId && local.eventId == eventId && local.revision == base.revision)
                     LocalEditIntent(MutationId(archiveString(row, 0)), scope, AdapterFormat(archiveString(row, 1), preparationVersion(row, 2)),
-                        base, local.content, LocalEditState.valueOf(archiveString(row, 5)))
+                        base, local.content, LocalEditState.valueOf(archiveString(row, 5)), readLocalEditProfile(row, 7, base, local))
                 }
             }
         } catch (failure: CancellationException) { throw failure }
@@ -329,7 +329,7 @@ internal object ImportStoreLocalPreparations {
     }
     fun readPreparationOwner(db: SQLiteDatabase, scope: CalendarScope, eventId: EventId): LocalEditIntent? =
         try {
-            stagedQuery(db, "SELECT mutation,adapter,version,base,local,state,kind FROM local_edits WHERE scope=? AND event=?",
+            stagedQuery(db, "SELECT mutation,adapter,version,base,local,state,kind,edit_profile FROM local_edits WHERE scope=? AND event=?",
                 arrayOf(key(scope), eventId.value)).use { row ->
                 if (!row.moveToFirst()) null else {
                     require(row.getString(6) == "UPDATE")
@@ -339,7 +339,7 @@ internal object ImportStoreLocalPreparations {
                     val local = decodeChange(localJson) as RemoteChange.Upsert
                     require(base.eventId == eventId && local.eventId == eventId && local.revision == base.revision)
                     LocalEditIntent(MutationId(row.getString(0)), scope, AdapterFormat(row.getString(1), preparationVersion(row, 2)),
-                        base, local.content, LocalEditState.valueOf(row.getString(5)))
+                        base, local.content, LocalEditState.valueOf(row.getString(5)), readLocalEditProfile(row, 7, base, local))
                 }
             }
         } catch (failure: CancellationException) { throw failure }

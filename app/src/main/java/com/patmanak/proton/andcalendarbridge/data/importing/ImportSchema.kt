@@ -28,6 +28,7 @@ internal object ImportSchema {
         createSeries(db)
         createMappingProfiles(db)
         createLocalEdits(db)
+        addLocalEditProfile(db)
         createProjectionReceipts(db)
         createCapturedBases(db)
         createCapturedAcknowledgements(db)
@@ -40,12 +41,29 @@ internal object ImportSchema {
         createTimePreparationAndAcknowledgements(db)
         createPersonalPreparationAndAcknowledgements(db)
         createConflictArchives(db)
+        addEditProfile(db, "conflict_archives")
         createDeleteAcknowledgements(db)
     }
     fun upgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int, checkCapacity: (SQLiteDatabase) -> Unit) {
-        check(oldVersion in 1..24 && newVersion == 25) { "Explicit import schema migration required" }
-        if (oldVersion < 24) upgradeTo24(db, oldVersion, 24, checkCapacity)
-        CapturedCreateSchemaMigration.rebuild(db, listOf("captured_create_bases")) { createCapturedBases(db) }
+        check(oldVersion in 1..25 && newVersion in 25..26 && oldVersion < newVersion) { "Explicit import schema migration required" }
+        if (oldVersion < 25) {
+            if (oldVersion < 24) upgradeTo24(db, oldVersion, 24, checkCapacity)
+            CapturedCreateSchemaMigration.rebuild(db, listOf("captured_create_bases")) { createCapturedBases(db) }
+        }
+        if (newVersion == 26) {
+            addLocalEditProfile(db)
+            addEditProfile(db, "conflict_archives")
+        }
+    }
+    private fun addLocalEditProfile(db: SQLiteDatabase) = addEditProfile(db, "local_edits")
+    private fun addEditProfile(db: SQLiteDatabase, table: String) {
+        val exists = db.rawQuery("PRAGMA table_info($table)", null).use { columns ->
+            var found = false
+            while (columns.moveToNext()) if (columns.getString(1) == "edit_profile") found = true
+            found
+        }
+        if (!exists) db.execSQL("ALTER TABLE $table ADD COLUMN edit_profile INTEGER NOT NULL DEFAULT 1 " +
+            "CHECK(edit_profile IN (1,2) AND (edit_profile=1 OR kind='UPDATE'))")
     }
     private fun upgradeTo24(db: SQLiteDatabase, oldVersion: Int, newVersion: Int, checkCapacity: (SQLiteDatabase) -> Unit) {
         check(oldVersion in 1..23 && newVersion == 24) { "Explicit import schema migration required" }

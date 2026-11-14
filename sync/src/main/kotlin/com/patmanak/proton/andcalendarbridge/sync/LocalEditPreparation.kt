@@ -31,6 +31,7 @@ data class LocalEditPreparation(val intent: LocalEditIntent, val timestamp: Inst
         }
         /** Snapshot the admitted empty-detail profile before adapter/storage suspension. */
         fun freezeIntent(intent: LocalEditIntent): LocalEditIntent {
+            require(intent.seriesProfile == null)
             listOf(intent.id.value, intent.scope.account.value, intent.scope.calendar.value,
                 intent.base.eventId.value, intent.base.revision.value, intent.format.id).forEach {
                 bounded(it, MAX_CONTEXT_BYTES)

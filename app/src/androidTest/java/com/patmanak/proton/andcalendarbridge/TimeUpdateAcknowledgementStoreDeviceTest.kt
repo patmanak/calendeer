@@ -339,7 +339,7 @@ class TimeUpdateAcknowledgementStoreDeviceTest {
         assertFalse(before.getValue("text_update_acknowledgement_history").isEmpty())
         store.writableDatabase.version = 20; store.close()
         ImportStore(context, name).use { reopened ->
-            assertEquals(25, reopened.readableDatabase.version)
+            assertEquals(26, reopened.readableDatabase.version)
             assertEquals(before, existing.associateWith { rows(reopened.readableDatabase, it) })
             for (table in added) assertTrue(rows(reopened.readableDatabase, table).isEmpty())
             assertEquals(LocalTimePreparationAdmission.STORED, reopened.retainCurrentLocalTimePreparation(preparation))

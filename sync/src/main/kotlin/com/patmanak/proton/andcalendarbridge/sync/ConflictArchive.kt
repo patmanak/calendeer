@@ -33,10 +33,16 @@ class ConflictArchivePage(val scope: CalendarScope, entries: List<ConflictArchiv
     override fun toString() = "ConflictArchivePage(REDACTED)"
 }
 class ConflictArchiveDetail(val ref: ConflictArchiveRef, val format: AdapterFormat,
-    base: RemoteChange.Upsert, local: EventContent) {
+    base: RemoteChange.Upsert, local: EventContent, val seriesProfile: SeriesEditProfile? = null) {
     val base = base.copy(content = archiveContent(base.content))
     val local = archiveContent(local)
-    init { archiveId(format.id); require(base.eventId == ref.eventId); archiveId(base.revision.value) }
+    init {
+        archiveId(format.id); require(base.eventId == ref.eventId); archiveId(base.revision.value)
+        if (seriesProfile != null) {
+            require(ref.kind == MutationKind.UPDATE)
+            seriesProfile.requireCompatible(this.base.content, this.local)
+        }
+    }
     override fun toString() = "ConflictArchiveDetail(REDACTED)"
 }
 data class ConflictObservationCursor(val ref: ConflictArchiveRef, val afterId: Long, val protocol: Int = 1) {

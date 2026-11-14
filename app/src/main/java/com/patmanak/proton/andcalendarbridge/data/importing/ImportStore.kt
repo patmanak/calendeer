@@ -41,7 +41,7 @@ enum class LocalTimePreparationAdmission { ELIGIBLE, STORED, HISTORICAL, INACTIV
 enum class PersonalPreparationAdmission { ELIGIBLE, STORED, HISTORICAL, INACTIVE, UNQUALIFIED, CONFLICT }
 
 class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
-    SQLiteOpenHelper(context, name, null, 25), SyncStore {
+    SQLiteOpenHelper(context, name, null, 26), SyncStore {
     private val lock = Mutex()
     /** Derived read-only status; never changes an intent, capsule or acknowledgement. */
     suspend fun hasUnsupportedLegacyUpdates(scope: CalendarScope): Boolean {
@@ -720,8 +720,15 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
         projection.localDelete(db, scope, eventId)
     }
     /** Capture and projection suppression share one database transaction. No dispatch/reset exists. */
-    suspend fun captureLocalEdit(intent: LocalEditIntent): LocalEditIntent = stagingMutation(intent.scope) { db ->
-        localMutations.captureLocalEdit(db, intent)
+    suspend fun captureLocalEdit(intent: LocalEditIntent): LocalEditIntent {
+        require(intent.seriesProfile == null) { "Series observation requires its explicit storage profile" }
+        return stagingMutation(intent.scope) { db -> localMutations.captureLocalEdit(db, intent) }
+    }
+
+    /** Retention only; no family-membership proof, preparation or dispatch authority. */
+    suspend fun captureSeriesEdit(intent: LocalEditIntent): LocalEditIntent {
+        val frozen = SeriesEditCandidate(intent).intent
+        return stagingMutation(frozen.scope) { db -> localMutations.captureLocalEdit(db, frozen, series = true) }
     }
 
     /** Retain a qualified Android tombstone snapshot without consuming its flags or sending DELETE. */

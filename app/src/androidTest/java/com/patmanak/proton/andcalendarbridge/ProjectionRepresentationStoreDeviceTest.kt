@@ -156,7 +156,7 @@ class ProjectionRepresentationStoreDeviceTest {
             db.version = 14
         }
         ImportStore(context, name).use { reopened ->
-            assertEquals(25, reopened.readableDatabase.version); assertEquals(receipt, reopened.projectionReceipt(scope, next.eventId))
+            assertEquals(26, reopened.readableDatabase.version); assertEquals(receipt, reopened.projectionReceipt(scope, next.eventId))
             assertEquals(basePayload, reopened.readableDatabase.rawQuery("SELECT payload FROM projection_bases", null).use { it.moveToFirst(); it.getString(0) })
             assertEquals(receiptPayload, reopened.readableDatabase.rawQuery("SELECT payload FROM projection_receipts", null).use { it.moveToFirst(); it.getString(0) })
             assertTrue(reopened.restoreProjection(AppliedProjectionWitness(receipt)))

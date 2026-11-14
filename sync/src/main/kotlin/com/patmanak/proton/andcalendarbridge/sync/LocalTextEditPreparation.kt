@@ -44,6 +44,7 @@ class LocalTextEditPreparation(intent: LocalEditIntent, val timestamp: Instant,
          * A raw CRLF/LF difference remains an intent even if the adapter later prepares a no-op.
          */
         fun freezeIntent(intent: LocalEditIntent): LocalEditIntent {
+            require(intent.seriesProfile == null)
             listOf(intent.id.value, intent.scope.account.value, intent.scope.calendar.value,
                 intent.base.eventId.value, intent.base.revision.value, intent.format.id).forEach {
                 bounded(it, MAX_CONTEXT_BYTES)

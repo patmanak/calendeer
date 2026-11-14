@@ -20,6 +20,22 @@ personal API siblings and the complete readback are checked separately.
 The calendar client provides the editor. Calendeer never delivers
 reminder notifications; the system calendar continues to own that behavior.
 
+## Finite daily series observations
+
+An internal `SeriesEditCandidate` qualifies whole-master changes for canonical
+finite DAILY rules (COUNT 2–366, INTERVAL 1–365), with the same UID and no
+RDATE, EXDATE, detached slot or participant metadata. Both versions must have
+valid, unambiguous slots and stable elapsed durations. This shape is not evidence
+that a complete remote family or native row has no detached children.
+
+The existing local-edit and conflict-archive tables retain these observations
+through explicit profile 2 (finite-daily-v1); profile 1 keeps historical simple
+semantics. Schema 26 adds default-simple profile columns without changing saved
+event JSON, preparation capsules or uncertain requests. Conflicts keep their
+profile and both variants after reopening. Simple capture/preparation paths
+reject the series profile. Native edit capture, family qualification, series
+preparation/submission and acknowledgement are not enabled yet.
+
 ## Wire and local state
 
 `PersonalEditCandidate` freezes the full raw observation, including ordered
