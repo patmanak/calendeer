@@ -16,6 +16,8 @@ import androidx.test.platform.app.InstrumentationRegistry
 import com.patmanak.proton.andcalendarbridge.data.calendar.AndroidCalendarProjection
 import com.patmanak.proton.andcalendarbridge.data.importing.*
 import com.patmanak.proton.andcalendarbridge.data.outgoing.*
+import com.patmanak.proton.andcalendarbridge.protonauth.ProtonEventPreparationCryptoProbe
+import com.patmanak.proton.andcalendarbridge.protonauth.SeriesCreateNativeJourney
 import com.patmanak.proton.andcalendarbridge.sync.*
 import com.patmanak.proton.andcalendarbridge.sync.catalog.CalendarSummary
 import java.time.Instant
@@ -32,6 +34,90 @@ import org.junit.runner.RunWith
 /** Real isolated Provider and durable journals with a controlled submission port; no Proton IO. */
 @RunWith(AndroidJUnit4::class)
 class SystemCreatePipelineDeviceTest {
+    @Test fun dailySeriesTraversesProviderSqlCryptoSyntheticHttpAndNativeAcknowledgement() = runBlocking {
+        var current: Fixture? = null
+        try {
+            val result = ProtonEventPreparationCryptoProbe.runSeriesNativePipeline(object : SeriesCreateNativeJourney {
+                override suspend fun draft(scope: CalendarScope, content: EventContent, series: CreateSeriesRule): CalendarCreateDraft {
+                    val fixture = Fixture(ApplicationProvider.getApplicationContext(), scope)
+                    current = fixture
+                    assumeTrue(fixture.projection.hasPermissions())
+                    fixture.seed()
+                    fixture.content = content; fixture.series = series; fixture.writeSeries()
+                    val work = fixture.work.reserve(scope, fixture.row)
+                    return CalendarCreateDraft(scope, work.attempt, work.timestamp, content, series)
+                }
+                override suspend fun beforeSend(draft: CalendarCreateDraft) {
+                    val f = current!!
+                    assertEquals(CreateAttemptState.OUTCOME_UNKNOWN, f.attempts.read(draft.scope, draft.correlation)!!.state)
+                    assertEquals("1", f.field(Events.DIRTY))
+                }
+                override suspend fun run(port: CalendarCreateSubmissionPort, makeVisible: () -> Unit) {
+                    val f = current!!
+                    f.usePort(port)
+                    assertEquals(ImportRunResult.COMPLETE, f.controller.run(network = false))
+                    assertEquals(SystemCreateWorkStatus.CAPTURED, f.work.read(f.target, f.row)!!.status)
+                    f.reopen(); f.usePort(port)
+                    assertEquals(ImportRunResult.COMPLETE, f.controller.run(network = true))
+                    if (f.work.read(f.target, f.row)!!.status == SystemCreateWorkStatus.UNKNOWN) {
+                        assertEquals("1", f.field(Events.DIRTY))
+                        makeVisible()
+                        assertEquals(ImportRunResult.COMPLETE, f.controller.run(network = true))
+                    }
+                    assertEquals(SystemCreateWorkStatus.COMPLETE, f.work.read(f.target, f.row)!!.status)
+                    assertEquals("0", f.field(Events.DIRTY)); assertEquals(1, f.rows())
+                    val identity = f.attempts.capturedIdentity(f.target, f.work.read(f.target, f.row)!!.attempt)!!
+                    val binding = f.attempts.capturedBinding(identity)!!
+                    val base = f.handoff(binding.eventId)!!.frame.base.content
+                    assertEquals(f.series!!.rule, base.recurrence!!.rule)
+                    assertEquals(f.content.time, base.time); assertEquals(f.content.details, base.details)
+                    assertEquals(f.content.colorRgb, base.colorRgb)
+                    f.close(); current = null
+                }
+            })
+            assertEquals("RESULT=SUCCESS", result)
+        } finally { current?.close() }
+    }
+    @Test fun dailySeriesIsCapturedOfflineThenSentAndTransferredWithoutChangingItsRow() = fixture {
+        makeSeries()
+        assertEquals(ImportRunResult.COMPLETE, controller.run(network = false))
+        val captured = work.read(target, row)!!
+        assertEquals(SystemCreateWorkStatus.CAPTURED, captured.status)
+        assertEquals(series, capturedIntent(captured.localId)!!.series)
+        assertEquals(0, preparations); assertEquals(0, sends)
+        reopen()
+        assertEquals(ImportRunResult.COMPLETE, controller.run(network = true))
+        assertEquals(SystemCreateWorkStatus.COMPLETE, work.read(target, row)!!.status)
+        assertEquals(1, preparations); assertEquals(1, sends); assertEquals(1, rows())
+        assertEquals("0", field(Events.DIRTY)); assertEquals(series!!.rule, field(Events.RRULE))
+        assertEquals(remoteEvent, handoff()!!.frame.base)
+        assertEquals(ImportRunResult.COMPLETE, controller.run(network = true))
+        assertEquals(1, sends)
+    }
+
+    @Test fun dailySeriesLostResponseReopensAsInspectionOnlyAndKeepsNewerLocalEdit() = fixture {
+        makeSeries(); loseResponse = true
+        assertEquals(ImportRunResult.COMPLETE, controller.run(network = true))
+        val unknown = work.read(target, row)!!
+        assertEquals(SystemCreateWorkStatus.UNKNOWN, unknown.status)
+        assertEquals(1, sends)
+        mutate(ContentValues().apply { put(Events.TITLE, "Newer local series title") })
+        reopen(); loseResponse = false
+        assertEquals(ImportRunResult.COMPLETE, controller.run(network = true))
+        assertEquals(1, preparations); assertEquals(1, sends); assertTrue(inspections > 0)
+        assertEquals("Newer local series title", field(Events.TITLE)); assertEquals("1", field(Events.DIRTY))
+    }
+
+    @Test fun unsupportedRecurrenceNeverFallsBackToSimpleCaptureOrStampsTheRow() = fixture {
+        makeSeries("FREQ=WEEKLY;COUNT=3")
+        assertEquals(ImportRunResult.COMPLETE, controller.run(network = true))
+        assertEquals(0, preparations); assertEquals(0, sends); assertNull(field(Events.SYNC_DATA5))
+        assertEquals("1", field(Events.DIRTY)); assertEquals("FREQ=WEEKLY;COUNT=3", field(Events.RRULE))
+        makeSeries()
+        assertEquals(ImportRunResult.COMPLETE, controller.run(network = true))
+        assertEquals(0, preparations); assertEquals(0, sends); assertNull(field(Events.SYNC_DATA5))
+    }
+
     @Test fun titleRecoveryRunsBeforeNativeDiscoveryInBothOfflineAndOnlinePasses() {
         for (network in listOf(false, true)) fixture {
             var pages = 0
@@ -249,7 +335,7 @@ class SystemCreatePipelineDeviceTest {
         assertEquals(1, preparations); assertEquals(1, sends); assertEquals(1, rows())
     }
 
-    @Test fun unsupportedPersonalReminderPreservesTheWholeNativeCandidateAndNeverSends() = fixture {
+    @Test fun unsupportedPersonalSubmissionRetainsTheReminderAndCapturedIntentWithoutSending() = fixture {
         val reminder = context.contentResolver.insert(syncUri(Reminders.CONTENT_URI), ContentValues().apply {
             put(Reminders.EVENT_ID, row); put(Reminders.MINUTES, 15); put(Reminders.METHOD, Reminders.METHOD_ALERT)
         })!!
@@ -257,7 +343,10 @@ class SystemCreatePipelineDeviceTest {
         assertEquals(ImportRunResult.COMPLETE, controller.run(network = false))
         assertEquals(ImportRunResult.COMPLETE, controller.run(network = true))
         assertEquals(0, preparations); assertEquals(0, sends)
-        assertEquals(before, providerSnapshot()); assertNull(field(Events.SYNC_DATA5))
+        assertEquals(before - Events.SYNC_DATA5, providerSnapshot() - Events.SYNC_DATA5)
+        assertNotNull(field(Events.SYNC_DATA5))
+        val captured = work.read(target, row)!!
+        assertEquals(EventDetails(listOf(EventReminder(15))), capturedIntent(captured.localId)!!.content.details)
         assertEquals("1", field(Events.DIRTY)); assertEquals(1, rows())
         context.contentResolver.query(reminder, arrayOf(Reminders.MINUTES, Reminders.METHOD), null, null, null)!!.use {
             assertEquals(1, it.count); assertTrue(it.moveToFirst())
@@ -340,7 +429,7 @@ class SystemCreatePipelineDeviceTest {
         assertEquals(0, preparations); assertEquals(0, sends)
     }
 
-    private class Fixture(base: Context) {
+    private class Fixture(base: Context, targetOverride: CalendarScope? = null) {
         private val token = UUID.randomUUID().toString()
         private val names = listOf("system-pipeline-import-$token.db", "system-pipeline-capture-$token.db",
             "system-pipeline-attempt-$token.db", "system-pipeline-work-$token.db")
@@ -353,13 +442,17 @@ class SystemCreatePipelineDeviceTest {
                 return base.getSharedPreferences(actual, mode)
             }
         }
-        val target = CalendarScope(AccountId("system-pipeline-$token"), CalendarId("fixture"), 0)
+        val target = targetOverride ?: CalendarScope(AccountId("system-pipeline-$token"), CalendarId("fixture"), 0)
         private val importFormat = AdapterFormat("system-pipeline-import", 1)
         private val submissionFormat = AdapterFormat("controlled-known-empty-submission", 2)
-        val content = EventContent("Controlled system creation fixture",
+        var content = EventContent("Controlled system creation fixture",
             EventTime.Timed(Instant.parse("2030-10-27T00:30:00Z"), Instant.parse("2030-10-27T02:30:00Z"), ZoneId.of("Europe/Paris")),
             details = EventDetails())
-        val remoteEvent = RemoteChange.Upsert(EventId("controlled-created-event"), Revision("controlled-created-revision"), content)
+        var series: CreateSeriesRule? = null
+        var seriesEnabled = false
+        val remoteEvent get() = RemoteChange.Upsert(EventId("controlled-created-event"), Revision("controlled-created-revision"),
+            if (series == null) content else CalendarCreateDraft(target, MutationId("fixture"), Instant.EPOCH, content, series)
+                .canonicalContent("controlled-series@calendeer.invalid"))
         val projection = AndroidCalendarProjection(context)
         var store = ImportStore(context, names[0])
         var captures = LocalCreateStore(context, names[1])
@@ -382,19 +475,30 @@ class SystemCreatePipelineDeviceTest {
             override fun requestNetwork() { schedules.incrementAndGet() }
             override fun continueWork(network: Boolean) = Unit
         }
-        private val remote = object : ReadOnlyCalendarRemote {
+        private var nativePort: CalendarCreateSubmissionPort? = null
+        private fun submissionPort() = nativePort ?: port
+        private val remote = object : ReadOnlyCalendarRemote, CalendarCreateSubmissionPort {
             override val format = importFormat
             override suspend fun currentAccount() = target.account
             override suspend fun fetch(request: PageRequest): RemotePage = error("No transport in controlled fixture")
             override suspend fun dispatch(mutation: Mutation): DispatchResult = error("No generic dispatch")
+            override suspend fun prepareSubmission(draft: CalendarCreateDraft) = submissionPort().prepareSubmission(draft)
+            override suspend fun submit(record: CreateAttemptRecord, journal: CreateAttemptJournal) = submissionPort().submit(record, journal)
+            override suspend fun inspect(record: CreateAttemptRecord) = submissionPort().inspect(record)
+            override suspend fun readCapturedExpectation(record: CreateAttemptRecord, expected: CalendarCreateDraft) =
+                submissionPort().readCapturedExpectation(record, expected)
         }
         private val port = object : CalendarCreateSubmissionPort {
             override val knownEmptySubmissionFormat = submissionFormat
+            override val seriesSubmissionFormat get() = if (seriesEnabled) AdapterFormat("controlled-series-submission", 4) else null
             override suspend fun prepareSubmission(draft: CalendarCreateDraft): PreparedCalendarCreate {
                 assertDraft(draft)
                 preparations++
-                return PreparedCalendarCreate(target, submissionFormat, "controlled-opaque-preparation")
+                return PreparedCalendarCreate(target, if (draft.series == null) submissionFormat else seriesSubmissionFormat!!,
+                    "controlled-opaque-preparation")
             }
+            override suspend fun readCapturedExpectation(record: CreateAttemptRecord, expected: CalendarCreateDraft) =
+                expected.canonicalContent("controlled-series@calendeer.invalid")
             override suspend fun submit(record: CreateAttemptRecord, journal: CreateAttemptJournal): CreateSubmissionObservation =
                 error("No generic submission")
             override suspend fun inspect(record: CreateAttemptRecord): CreateSubmissionObservation = error("No generic inspection")
@@ -425,6 +529,10 @@ class SystemCreatePipelineDeviceTest {
             creates = attempts, localCreates = captures, systemCreatesEnabled = work::modeEnabled)
         private fun newController() = SystemCreateController(context, coordinator, projection, work, captures,
             attempts, port, jobs, scheduler, titleRecovery = titleRecovery)
+        fun usePort(port: CalendarCreateSubmissionPort) {
+            nativePort = port
+            controller = SystemCreateController(context, coordinator, projection, work, captures, attempts, port, jobs, scheduler)
+        }
 
         fun installTitleRecovery(recover: suspend (TitleUpdateWorkQuery) -> TitleUpdateOfflineRecoveryProgress) {
             titleRecovery = SystemTitleRecoveryController(AndroidTitleRecoveryCursorStore(context), recover, pageSize = 1)
@@ -452,7 +560,43 @@ class SystemCreatePipelineDeviceTest {
 
         private suspend fun assertDraft(draft: CalendarCreateDraft) {
             val retained = work.read(target, row)!!
-            assertEquals(CalendarCreateDraft(target, retained.attempt, retained.timestamp, content), draft)
+            assertEquals(CalendarCreateDraft(target, retained.attempt, retained.timestamp, content, series), draft)
+        }
+
+        fun makeSeries(rule: String = "FREQ=DAILY;COUNT=3;INTERVAL=2") {
+            series = CreateSeriesRule(3, 2)
+            content = content.copy(time = EventTime.Timed(Instant.parse("2030-04-01T10:00:00Z"),
+                Instant.parse("2030-04-01T11:00:00Z"), ZoneId.of("UTC")))
+            writeSeries(rule)
+        }
+        fun writeSeries(rule: String = series!!.rule) {
+            seriesEnabled = true
+            val time = content.time
+            val start = when (time) {
+                is EventTime.Timed -> time.start
+                is EventTime.AllDay -> time.start.atStartOfDay(java.time.ZoneOffset.UTC).toInstant()
+            }
+            val end = when (time) {
+                is EventTime.Timed -> time.end
+                is EventTime.AllDay -> time.endExclusive.atStartOfDay(java.time.ZoneOffset.UTC).toInstant()
+            }
+            val duration = java.time.Duration.between(start, end)
+            val zone = if (time is EventTime.Timed) time.zone.id else "UTC"
+            mutate(ContentValues().apply {
+                put(Events.TITLE, content.title); put(Events.DESCRIPTION, content.description); put(Events.EVENT_LOCATION, content.location)
+                put(Events.DTSTART, start.toEpochMilli()); putNull(Events.DTEND)
+                put(Events.DURATION, if (time is EventTime.AllDay) "P${duration.toDays()}D" else "PT${duration.seconds}S")
+                put(Events.ALL_DAY, if (time is EventTime.AllDay) 1 else 0); put(Events.RRULE, rule)
+                put(Events.EVENT_TIMEZONE, zone); put(Events.EVENT_END_TIMEZONE, zone)
+                content.colorRgb?.let { put(Events.EVENT_COLOR, it or (0xff shl 24)) }
+            })
+            for (reminder in content.details!!.reminders) context.contentResolver.insert(syncUri(Reminders.CONTENT_URI), ContentValues().apply {
+                put(Reminders.EVENT_ID, row); put(Reminders.MINUTES, reminder.minutesBefore); put(Reminders.METHOD, Reminders.METHOD_ALERT)
+            })!!
+        }
+        suspend fun capturedIntent(localId: LocalEventId): LocalCreateIntent? {
+            captures.admitCapture = { it == target }
+            return try { captures.readIntent(target, localId) } finally { captures.admitCapture = { false } }
         }
 
         fun syncUri(uri: android.net.Uri) = uri.buildUpon()
@@ -507,7 +651,7 @@ class SystemCreatePipelineDeviceTest {
             store.admitTransaction = { it == target }
             try { return block() } finally { store.admitTransaction = previous }
         }
-        suspend fun handoff() = stored { store.capturedHandoff(target, remoteEvent.eventId) }
+        suspend fun handoff(eventId: EventId = remoteEvent.eventId) = stored { store.capturedHandoff(target, eventId) }
         suspend fun acknowledgement() = stored { store.capturedAcknowledgement(target, remoteEvent.eventId) }
         suspend fun localEdit() = stored { store.localEdit(target, remoteEvent.eventId) }
 

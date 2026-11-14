@@ -79,6 +79,8 @@ internal class SerializedAuthenticationPort(
     override val knownEmptySubmissionFormat = KNOWN_EMPTY_SUBMISSION_FORMAT
     override val personalSubmissionFormat = PERSONAL_CREATE_SUBMISSION_FORMAT
     override val personalLocalCreateFormat = PERSONAL_LOCAL_CREATE_PREPARATION_FORMAT
+    override val seriesLocalCreateFormat = SERIES_LOCAL_CREATE_PREPARATION_FORMAT
+    override val seriesSubmissionFormat = SERIES_CREATE_SUBMISSION_FORMAT
     override val localTitleFormat = LOCAL_TITLE_PREPARATION_FORMAT
     override val localTextFormat = LOCAL_TEXT_PREPARATION_FORMAT
     override val personalFormat = PERSONAL_PREPARATION_FORMAT

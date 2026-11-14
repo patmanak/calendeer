@@ -29,6 +29,7 @@ internal class ProtonCreatePreparationAdapter(private val sessions: CatalogSessi
     private val protector: EventPayloadProtector, private val submission: Boolean = false) : CalendarCreatePreparationPort {
     override val localCreateFormat: AdapterFormat? get() = if (submission) null else LOCAL_CREATE_PREPARATION_FORMAT
     override val personalLocalCreateFormat: AdapterFormat? get() = if (submission) null else PERSONAL_LOCAL_CREATE_PREPARATION_FORMAT
+    override val seriesLocalCreateFormat: AdapterFormat? get() = if (submission) null else SERIES_LOCAL_CREATE_PREPARATION_FORMAT
     override suspend fun prepareCreate(draft: CalendarCreateDraft): PreparedCalendarCreate = try {
         val frozen = try { draft.frozen() } catch (_: Exception) { createUnavailable(CreatePreparationFailure.UNSUPPORTED) }
         prepareFrozen(frozen)

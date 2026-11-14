@@ -138,6 +138,8 @@ interface CalendarProjection {
     /** Present, dirty local tombstone only; absence never establishes deletion intent. No ACK. */
     suspend fun captureOwnedSimpleDelete(scope: CalendarScope, base: RemoteChange.Upsert): OwnedLocalEditSnapshot? = null
     /** One-shot identity stamp after a durable claim; preserves DIRTY and never assigns remote IDs. */
+    /** Selection only; the chosen reader still qualifies and atomically stamps the full snapshot. */
+    suspend fun localCreateProfile(scope: CalendarScope, eventRow: Long): LocalCreateProfile? = null
     suspend fun captureAndStampSimpleCreate(scope: CalendarScope, eventRow: Long, localId: LocalEventId): OwnedLocalEditSnapshot? = null
     /** Reopening is marker-only inspection. Missing markers never fall back to a row locator. */
     suspend fun inspectStampedSimpleCreate(scope: CalendarScope, localId: LocalEventId): OwnedLocalEditSnapshot? = null

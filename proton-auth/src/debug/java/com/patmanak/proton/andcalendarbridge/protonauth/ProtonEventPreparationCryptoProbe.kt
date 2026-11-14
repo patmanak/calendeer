@@ -22,6 +22,12 @@ import okhttp3.HttpUrl.Companion.toHttpUrl
 import okio.Buffer
 
 /** Synthetic keys only. A fabricated server read shape does not establish live CREATE compatibility. */
+interface SeriesCreateNativeJourney {
+    suspend fun draft(scope: CalendarScope, content: EventContent, series: CreateSeriesRule): CalendarCreateDraft
+    suspend fun beforeSend(draft: CalendarCreateDraft)
+    suspend fun run(port: CalendarCreateSubmissionPort, makeVisible: () -> Unit)
+}
+
 object ProtonEventPreparationCryptoProbe {
     /** Native producer compatibility only: constructing/writing the body makes no HTTP call. */
     private fun checkCreateOnlyPermit(request: JsonObject) {
@@ -191,8 +197,18 @@ object ProtonEventPreparationCryptoProbe {
         }
         return "RESULT=SUCCESS"
     }
+    suspend fun runSeriesSubmissionDispatch(): String {
+        for (rich in listOf(false, true)) {
+            val result = runKnownEmpty(submission = true, captured = true, personal = rich, series = true, dispatchSeries = true)
+            if (result != "RESULT=SUCCESS") return result
+        }
+        return "RESULT=SUCCESS"
+    }
+    suspend fun runSeriesNativePipeline(journey: SeriesCreateNativeJourney): String =
+        runKnownEmpty(submission = true, personal = true, series = true, nativeJourney = journey)
     private suspend fun runKnownEmpty(submission: Boolean, foldedWhitespace: Boolean = false, captured: Boolean = false,
-        personal: Boolean = false, series: Boolean = false): String = withContext(Dispatchers.IO) {
+        personal: Boolean = false, series: Boolean = false, dispatchSeries: Boolean = false,
+        nativeJourney: SeriesCreateNativeJourney? = null): String = withContext(Dispatchers.IO) {
         var stage = "GENERATE"
         try {
             val crypto = AndroidCryptoContext()
@@ -240,7 +256,7 @@ object ProtonEventPreparationCryptoProbe {
                         }) }
                     }
                 }
-                val scope = CalendarScope(AccountId(user.id), CalendarId(calendar), 1)
+                val scope = CalendarScope(AccountId(user.id), CalendarId(calendar), if (nativeJourney == null) 1 else 0)
                 val session = CatalogSession(user, SessionId("synthetic-known-empty-session"))
                 val expectedSession = session
                 val metadata = buildJsonObject { put("ID", calendar); put("Type", 0) }
@@ -285,14 +301,18 @@ object ProtonEventPreparationCryptoProbe {
                 for ((index, time) in times.withIndex()) {
                     val content = EventContent("Known-empty creation; café, \\" + "é".repeat(100), time,
                         if (foldedWhitespace) "x".repeat(62) + " " + "y".repeat(30) else "Description\nLigne suivante",
-                        "Lieu de test", details = EventDetails(if (personal) listOf(EventReminder(10), EventReminder(0), EventReminder(-10)) else emptyList()),
+                        "Lieu de test", details = EventDetails(if (!personal) emptyList() else if (nativeJourney != null)
+                            listOf(EventReminder(-10), EventReminder(0), EventReminder(10))
+                            else listOf(EventReminder(10), EventReminder(0), EventReminder(-10))),
                         colorRgb = if (personal) 0x123456 else null)
                     if (foldedWhitespace) {
                         stage = "FOLDED_WHITESPACE_FIXTURE"
                         check(ProtonSimpleEventSerializer.serialize("synthetic@calendeer.invalid", stamp, content)
                             .encryptedShared.split("\r\n").any { it.endsWith(" ") })
                     }
-                    val draft = CalendarCreateDraft(scope, MutationId("synthetic-known-empty-$index"), stamp, content, seriesRule)
+                    val draft = nativeJourney?.draft(scope, content, seriesRule!!)
+                        ?: CalendarCreateDraft(scope, MutationId("synthetic-known-empty-$index"), stamp, content, seriesRule)
+                    check(draft.scope == scope && draft.content == content && draft.series == seriesRule)
                     stage = "PREPARE"
                     val prepared = adapter.prepareCreate(draft)
                     check(prepared.scope == scope && prepared.format == expectedFormat)
@@ -310,7 +330,7 @@ object ProtonEventPreparationCryptoProbe {
                     check(envelope.number("generation") == scope.generation && envelope.string("correlation") == draft.correlation.value)
                     val uid = envelope.string("uid")
                     val expectedContent = draft.canonicalContent(uid)
-                    check(uid == adapter.correlationUid(draft) && envelope.string("timestamp") == stamp.toString())
+                    check(uid == adapter.correlationUid(draft) && envelope.string("timestamp") == draft.timestamp.toString())
                     val event = if (submission) {
                         val decoded = ProtonCreateSubmissionCodec.open(CreateAttemptRecord(draft.correlation, scope,
                             prepared.format, prepared.protectedPayload), reopened)
@@ -324,7 +344,9 @@ object ProtonEventPreparationCryptoProbe {
                     stage = "EXPLICIT_NOTIFICATION_OVERRIDE"
                     val notifications = event.getValue("Notifications")
                     check(notifications is JsonArray && notifications.size == if (personal) 3 else 0)
-                    if (personal) check(notifications == Json.parseToJsonElement("""[{"Type":1,"Trigger":"-PT10M"},{"Type":1,"Trigger":"PT0S"},{"Type":1,"Trigger":"PT10M"}]"""))
+                    if (personal) check(notifications == Json.parseToJsonElement(if (nativeJourney != null)
+                        """[{"Type":1,"Trigger":"PT10M"},{"Type":1,"Trigger":"PT0S"},{"Type":1,"Trigger":"-PT10M"}]"""
+                        else """[{"Type":1,"Trigger":"-PT10M"},{"Type":1,"Trigger":"PT0S"},{"Type":1,"Trigger":"PT10M"}]"""))
                     val shared = event.array("SharedEventContent").map { it as JsonObject }
                     check(shared.map { it.number("Type") } == listOf(2L, 3L))
                     check(shared.all { it.string("Author").isEmpty() })
@@ -338,7 +360,7 @@ object ProtonEventPreparationCryptoProbe {
                     }
                     // Author and response field normalization are synthetic. Notifications are copied
                     // from the reopened protected preparation, never manufactured for the decoder.
-                    val row = buildJsonObject {
+                    var row = buildJsonObject {
                         put("ID", "synthetic-known-empty-event-$index"); put("CalendarID", calendar); put("ModifyTime", 1)
                         put("UID", uid); put("SharedKeyPacket", event.getValue("SharedKeyPacket"))
                         put("SharedEvents", JsonArray(shared.map { JsonObject(it + ("Author" to JsonPrimitive(email))) }))
@@ -369,12 +391,25 @@ object ProtonEventPreparationCryptoProbe {
                     var readRow = row
                     var readBootstrapCalls = 0
                     var uidReads = 0
+                    val dispatch = if (dispatchSeries || nativeJourney != null) ProtonSeriesCreateDispatchProbe(
+                        CreateAttemptRecord(draft.correlation, scope, prepared.format, prepared.protectedPayload), lostResponse = index == 1) else null
                     val readRemote = object : CreateSubmissionRemote {
-                        override suspend fun send(session: CatalogSession, calendar: String, request: JsonObject): String =
-                            error("Native UNKNOWN readback must never dispatch")
+                        override suspend fun send(actual: CatalogSession, actualCalendar: String, request: JsonObject): String {
+                            check(actual == session && actualCalendar == calendar)
+                            if (nativeJourney != null) {
+                                nativeJourney.beforeSend(draft)
+                                val sent = request.array("Events").single().jsonObject.obj("Event")
+                                row = JsonObject(row + mapOf("SharedKeyPacket" to sent.getValue("SharedKeyPacket"),
+                                    "SharedEvents" to JsonArray(sent.array("SharedEventContent").map {
+                                        JsonObject(it.jsonObject + ("Author" to JsonPrimitive(email))) }),
+                                    "Notifications" to sent.getValue("Notifications"), "Color" to sent.getValue("Color")))
+                                readRow = row
+                            }
+                            return (dispatch ?: error("Native UNKNOWN readback must never dispatch")).send(request, callerClaimed = nativeJourney != null)
+                        }
                         override suspend fun byUid(actual: CatalogSession, actualCalendar: String, expectedUid: String, page: Int): List<JsonObject> {
                             check(actual == session && actualCalendar == calendar && expectedUid == uid && page == 0)
-                            uidReads++; return listOf(row)
+                            uidReads++; return if (dispatch != null && !dispatch.visible) emptyList() else listOf(row)
                         }
                         override suspend fun event(actual: CatalogSession, actualCalendar: String, id: String): JsonObject {
                             check(actual == session && actualCalendar == calendar && id == row.string("ID")); return readRow
@@ -389,6 +424,15 @@ object ProtonEventPreparationCryptoProbe {
                     }
                     val readback = ProtonCreatedEventReadback(CatalogSessionSource { session }, readRemote, readEvents, decoder::decodeCreated)
                     val strict = if (series) CreatedEventReadbackPolicy.SERIES_CREATE_V4 else if (personal) CreatedEventReadbackPolicy.PERSONAL_CREATE_V3 else CreatedEventReadbackPolicy.KNOWN_EMPTY_V2
+                    if (dispatch != null) {
+                        stage = "SERIES_DISPATCH"
+                        val submissions = ProtonCreateSubmissionAdapter(adapter, reopened, CatalogSessionSource { session },
+                            readRemote, readEvents, decoder::decodeCreated)
+                        if (nativeJourney == null) dispatch.qualify(submissions, draft)
+                        else nativeJourney.run(submissions, dispatch::expose)
+                        check(dispatch.sends == 1)
+                        uidReads = 0; readBootstrapCalls = 0
+                    }
                     val observed = readback.inspect(session, scope, uid, expectedContent, strict)?.content
                         ?: error("Known-empty readback was not verified")
                     check(observed.copy(description = observed.description.replace("\r\n", "\n")) == expectedContent)
@@ -475,11 +519,16 @@ object ProtonEventPreparationCryptoProbe {
                     }
                 }
                 stage = "READ_ONLY_CONTEXT"
-                check(refreshes == 2 && calendarReads == 2 && bootstrapReads == 2 && addressReads == 2 && pageReads == 0)
+                val preparations = if (nativeJourney != null) 6 else if (dispatchSeries) 4 else 2
+                check(refreshes == preparations && calendarReads == preparations && bootstrapReads == preparations &&
+                    addressReads == preparations && pageReads == 0)
                 "RESULT=SUCCESS"
             } finally { addressSecret.fill(0); calendarSecret.fill(0) }
         } catch (cancelled: CancellationException) { throw cancelled }
-          catch (_: Exception) { "RESULT=FAILURE STAGE=$stage" }
+          catch (failure: Exception) {
+              if (nativeJourney != null) throw AssertionError("Synthetic native journey stage=$stage type=${failure.javaClass.simpleName} at=${failure.stackTrace.firstOrNull()}")
+              "RESULT=FAILURE STAGE=$stage"
+          }
     }
     private fun refused(action: () -> Any) {
         try { action(); error("Invalid crypto context accepted") }

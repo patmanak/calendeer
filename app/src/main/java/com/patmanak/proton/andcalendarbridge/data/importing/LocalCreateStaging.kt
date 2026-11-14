@@ -1,6 +1,7 @@
 package com.patmanak.proton.andcalendarbridge.data.importing
 
 import com.patmanak.proton.andcalendarbridge.data.calendar.CalendarProjection
+import com.patmanak.proton.andcalendarbridge.data.calendar.LocalCreateProfile
 import com.patmanak.proton.andcalendarbridge.data.outgoing.LocalCreateStore
 import com.patmanak.proton.andcalendarbridge.sync.*
 import java.time.Instant
@@ -33,7 +34,8 @@ internal class LocalCreateStaging(
         journal.admitCapture = { false }
     }
 
-    suspend fun capture(eventRow: Long, localId: LocalEventId, id: MutationId, timestamp: Instant, series: Boolean = false): LocalEditCaptureResult {
+    suspend fun capture(eventRow: Long, localId: LocalEventId, id: MutationId, timestamp: Instant,
+        series: Boolean = false, autoProfile: Boolean = false): LocalEditCaptureResult {
         installAdmission()
         return try {
             val selected = store.selections(target.account).singleOrNull { it.scope == target }
@@ -49,18 +51,28 @@ internal class LocalCreateStaging(
                 val identity = retained.reservation
                 if (identity.id != id || identity.localId != localId || identity.scope != target ||
                     identity.format != format || identity.markerProtocol != 1 ||
-                    (previous != null && identity != previous) || (retained.series != null) != series) return LocalEditCaptureResult.UNQUALIFIED
+                    (previous != null && identity != previous)) return LocalEditCaptureResult.UNQUALIFIED
                 return LocalEditCaptureResult.RETAINED
             }
             if (previous == null && (eventRow <= 0 || timestamp.nano != 0)) return LocalEditCaptureResult.UNQUALIFIED
+            val captureSeries = if (autoProfile) when (projection.localCreateProfile(target, eventRow)) {
+                LocalCreateProfile.SIMPLE -> false
+                LocalCreateProfile.SERIES -> true
+                null -> return LocalEditCaptureResult.UNQUALIFIED
+            } else series
+            // Classification is an await, not permission to reserve against an obsolete owner.
+            if (!currentAccount() || !active()) return LocalEditCaptureResult.INACTIVE
+            val admitted = store.selections(target.account).singleOrNull { it.scope == target }
+            if (admitted?.enabled != true || !admitted.available) return LocalEditCaptureResult.INACTIVE
+            if (store.transaction(target) { checkpoint?.format } != format) return LocalEditCaptureResult.UNQUALIFIED
             val reservation = previous ?: LocalCreateReservation(id, localId, target, format, timestamp)
             val firstClaim = journal.reserve(reservation)
-            val snapshot = if (series) {
+            val snapshot = if (captureSeries) {
                 if (firstClaim) projection.captureAndStampSeriesCreate(target, eventRow, localId)
                 else projection.inspectStampedSeriesCreate(target, localId)
             } else if (firstClaim) projection.captureAndStampSimpleCreate(target, eventRow, localId)
                 else projection.inspectStampedSimpleCreate(target, localId)
-            if (snapshot == null || (snapshot.series != null) != series) return LocalEditCaptureResult.UNQUALIFIED
+            if (snapshot == null || (snapshot.series != null) != captureSeries) return LocalEditCaptureResult.UNQUALIFIED
             if (!currentAccount() || !active()) return LocalEditCaptureResult.INACTIVE
             val currentSelection = store.selections(target.account).singleOrNull { it.scope == target }
             if (currentSelection?.enabled != true || !currentSelection.available) return LocalEditCaptureResult.INACTIVE

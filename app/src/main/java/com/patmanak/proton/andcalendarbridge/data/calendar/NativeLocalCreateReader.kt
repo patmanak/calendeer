@@ -27,6 +27,19 @@ internal class NativeLocalCreateReader(
 ) {
     private val personal = NativePersonalMetadata(resolver, syncUri, fail)
     private fun digest(vararg parts: String) = hash(parts)
+    fun profile(scope: CalendarScope, eventRow: Long): LocalCreateProfile? {
+        if (eventRow <= 0) return null
+        val account = accountFor(scope.account)
+        val calendar = calendarRow(scope, account) ?: return null
+        val result = resolver.query(syncUri(Events.CONTENT_URI, account), arrayOf(Events.RRULE),
+            "${Events.CALENDAR_ID}=? AND ${Events._ID}=?", arrayOf(calendar.toString(), eventRow.toString()), null)?.use {
+            if (it.count != 1 || !it.moveToFirst()) return null
+            // Even an empty or unsupported rule must never fall back to the simple reader.
+            if (it.isNull(0)) LocalCreateProfile.SIMPLE else LocalCreateProfile.SERIES
+        } ?: fail(CalendarProjectionFailure.PROVIDER_UNAVAILABLE)
+        requirePermissions()
+        return result
+    }
     fun readLocalCreate(scope: CalendarScope, localId: LocalEventId, firstRow: Long?, seriesOnly: Boolean = false): OwnedLocalEditSnapshot? {
         if (firstRow != null && firstRow <= 0) return null
         val account = accountFor(scope.account)

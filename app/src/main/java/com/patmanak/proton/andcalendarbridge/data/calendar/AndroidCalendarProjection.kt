@@ -524,6 +524,8 @@ class AndroidCalendarProjection(context: Context,
     }
 
 
+    override suspend fun localCreateProfile(scope: CalendarScope, eventRow: Long): LocalCreateProfile? =
+        operation { localCreateReader.profile(scope, eventRow) }
     override suspend fun captureAndStampSimpleCreate(scope: CalendarScope, eventRow: Long, localId: LocalEventId): OwnedLocalEditSnapshot? = operation {
         readLocalCreate(scope, localId, eventRow)
     }

@@ -657,8 +657,8 @@ class ImportCoordinator(
         localChanges.captureLocalDelete(target, eventId, id, beforeNewOwner)
 
     suspend fun captureLocalCreate(target: CalendarScope, eventRow: Long, localId: LocalEventId,
-        id: MutationId, timestamp: java.time.Instant, series: Boolean = false): LocalEditCaptureResult =
-        capturedCreates.captureLocalCreate(target, eventRow, localId, id, timestamp, series)
+        id: MutationId, timestamp: java.time.Instant, series: Boolean = false, autoProfile: Boolean = false): LocalEditCaptureResult =
+        capturedCreates.captureLocalCreate(target, eventRow, localId, id, timestamp, series, autoProfile)
 
     suspend fun prepareLocalCreate(target: CalendarScope, localId: LocalEventId, id: MutationId,
         port: CalendarCreatePreparationPort): LocalCreatePreparationResult =

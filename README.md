@@ -34,12 +34,16 @@ usual calendar app; Calendeer keeps them in sync in the background.
 
 **Edit from your phone** (Editable calendars)
 - Create an event, with its reminders and color.
+- Create a finite daily series (2–366 occurrences, every 1–365 days), with
+  reminders and color. Times must remain valid and unambiguous across the series.
 - Change the title, description, location, dates, times, all-day setting or
   time zone.
 - Add, change or remove reminders, and change an event's color.
 - Delete an event.
 - Changes are sent to Proton automatically; **Synchronize** requests a sync now.
   Proton's email reminders are preserved when you edit an event.
+- Editing and deleting repeating events is not supported yet. Such local changes
+  stay on the phone, pending support; they are not sent or silently discarded.
 
 **Stay in sync without thinking about it**
 - Automatic synchronization every 15 minutes up to every 6 hours (hourly by
@@ -62,7 +66,7 @@ usual calendar app; Calendeer keeps them in sync in the background.
 
 ## Coming next
 
-- Repeating events (series and single occurrences).
+- Editing/deleting repeating events and changing single occurrences; other repeat rules.
 - Guests and invitations.
 
 ## Learn more

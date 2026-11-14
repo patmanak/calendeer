@@ -28,7 +28,7 @@ class ProtonSeriesCreateCapsuleTest {
         assertEquals(4, f.record.format.version); assertEquals(f.draft, opened.draft)
         assertEquals(5, opened.policy.version)
         assertEquals(JsonArray(emptyList()), f.fragment["Notifications"]); assertEquals(JsonNull, f.fragment["Color"])
-        assertFalse(f.adapter.supportsCapturedSubmission(f.format))
+        assertTrue(f.adapter.supportsCapturedSubmission(f.format))
     }
     @Test fun unknownInspectionKeepsTheCanonicalUidAndRuleWithoutRepreparingOrSending() = runTest {
         val f = fixture(); val unknown = f.record.copy(state = CreateAttemptState.OUTCOME_UNKNOWN)
@@ -39,10 +39,23 @@ class ProtonSeriesCreateCapsuleTest {
         assertEquals(0, f.prepares); assertEquals(0, f.sends)
         assertTrue(f.adapter.inspectCaptured(unknown, f.draft) is CreateSubmissionObservation.Verified)
     }
-    @Test fun preparedSeriesIsNeverClaimedUntilNativeAcknowledgementIsQualified() = runTest {
+    @Test fun preparedSeriesClaimsOnceAndNeverResendsAfterALostResponse() = runTest {
         val f = fixture()
-        assertEquals(CreateSubmissionObservation.Unknown, f.adapter.submitCaptured(f.record, f.draft, f.journal))
-        assertEquals(f.record, f.journal.stored); assertEquals(0, f.prepares); assertEquals(0, f.sends)
+        f.sendFailure = IllegalStateException("Synthetic lost series response")
+        assertTrue(f.adapter.submitCaptured(f.record, f.draft, f.journal) is CreateSubmissionObservation.Verified)
+        assertEquals(CreateAttemptState.OUTCOME_UNKNOWN, f.journal.stored!!.state)
+        assertEquals(1, f.prepares); assertEquals(1, f.sends)
+        assertTrue(f.adapter.submitCaptured(f.record, f.draft, f.journal) is CreateSubmissionObservation.Verified)
+        assertEquals(1, f.prepares); assertEquals(1, f.sends)
+    }
+    @Test fun signedSeriesPartsRoundTripCanonicalIntervalsThroughTheImportParser() {
+        val content = fixture().draft.content
+        for (interval in listOf(1, 2, 365)) {
+            val rule = CreateSeriesRule(5, interval)
+            val parts = ProtonSimpleEventSerializer.serializeSeries("synthetic@calendeer.invalid", java.time.Instant.parse("2030-01-01T00:00:00Z"), content, rule)
+            val parsed = ProtonICalendar.parse(listOf(parts.clearShared, parts.encryptedShared))
+            assertEquals(rule.rule, parsed.recurrence!!.rule); assertEquals(content.time, parsed.time)
+        }
     }
     @Test fun foreignUidDowngradesUnboundedRulesAndWrongExpectedSeriesStayUnknown() = runTest {
         val f = fixture()

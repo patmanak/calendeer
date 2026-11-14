@@ -22,6 +22,32 @@ import org.junit.runner.RunWith
 /** Real separate SQLite journals; controlled Provider/account ports, no API calls or CREATE dispatch. */
 @RunWith(AndroidJUnit4::class)
 class LocalCreateCaptureCoordinatorDeviceTest {
+    @Test fun automaticProfileIsSelectedBeforeTheFirstReservationAndHistoricalSeriesSurvivesDisabledDiscovery() = fixture {
+        profile = LocalCreateProfile.SERIES
+        snapshot = snapshot!!.copy(series = CreateSeriesRule(3))
+        onProfile = { assertNull(journal.readReservation(target, localId)) }
+        assertEquals(LocalEditCaptureResult.RETAINED, capture(autoProfile = true))
+        assertEquals(CreateSeriesRule(3), retained()!!.series)
+        reopen(); onProfile = { error("Historical intent must not classify again") }; snapshot = null
+        assertEquals(LocalEditCaptureResult.RETAINED, capture())
+        assertEquals(CreateSeriesRule(3), retained()!!.series); assertEquals(1, stamps)
+    }
+    @Test fun missingProfileOrInvalidatedAccountCannotConsumeTheFirstReservation() = fixture {
+        profile = null
+        assertEquals(LocalEditCaptureResult.UNQUALIFIED, capture(autoProfile = true))
+        profile = LocalCreateProfile.SERIES
+        onProfile = { account = null }
+        assertEquals(LocalEditCaptureResult.INACTIVE, capture(autoProfile = true))
+        journal.admitCapture = { it == target }
+        assertNull(journal.readReservation(target, localId)); assertEquals(0, stamps); assertEquals(0, inspections)
+    }
+    @Test fun automaticSeriesProfileWithBareReservationIsInspectionOnlyAndNeverRestamps() = fixture {
+        profile = LocalCreateProfile.SERIES
+        journal.admitCapture = { it == target }; assertTrue(journal.reserve(reservation))
+        snapshot = null
+        assertEquals(LocalEditCaptureResult.UNQUALIFIED, capture(row = 999, autoProfile = true))
+        assertEquals(0, stamps); assertEquals(1, inspections); assertNull(retained())
+    }
     @Test fun historicalSimplePortCannotSilentlyDropASeriesReturnedByAnotherAdapter() = fixture {
         snapshot = snapshot!!.copy(series = CreateSeriesRule(3))
         assertEquals(LocalEditCaptureResult.UNQUALIFIED, capture())
@@ -176,6 +202,8 @@ class LocalCreateCaptureCoordinatorDeviceTest {
         var stamps = 0
         var inspections = 0
         var onRead: suspend () -> Unit = {}
+        var onProfile: suspend () -> Unit = {}
+        var profile: LocalCreateProfile? = LocalCreateProfile.SIMPLE
         var snapshot: OwnedLocalEditSnapshot? = OwnedLocalEditSnapshot(3, 7, content)
         private val projection = object : CalendarProjection {
             override var admitOperation: () -> Boolean = { true }
@@ -183,6 +211,13 @@ class LocalCreateCaptureCoordinatorDeviceTest {
             override fun accountFor(accountId: AccountId) = Account("create-$token", "fixture")
             override suspend fun ensureCalendarState(scope: CalendarScope, summary: CalendarSummary): EnsuredCalendar = error("No import during capture")
             override suspend fun apply(intent: ProjectionIntent, seriesUid: String?) = error("No projection during capture")
+            override suspend fun localCreateProfile(scope: CalendarScope, eventRow: Long): LocalCreateProfile? {
+                assertEquals(target, scope); check(admitOperation()); onProfile(); return profile
+            }
+            override suspend fun captureAndStampSeriesCreate(scope: CalendarScope, eventRow: Long, localId: LocalEventId) =
+                captureAndStampSimpleCreate(scope, eventRow, localId)
+            override suspend fun inspectStampedSeriesCreate(scope: CalendarScope, localId: LocalEventId) =
+                inspectStampedSimpleCreate(scope, localId)
             override suspend fun captureAndStampSimpleCreate(scope: CalendarScope, eventRow: Long, localId: LocalEventId): OwnedLocalEditSnapshot? {
                 assertEquals(target, scope); assertEquals(7, eventRow.toInt()); assertEquals(this@Fixture.localId, localId)
                 check(admitOperation()); stamps++; onRead(); return snapshot
@@ -217,8 +252,8 @@ class LocalCreateCaptureCoordinatorDeviceTest {
             val before = schedules.get(); coordinator.authenticationChanged(true)
             withTimeout(10_000) { while (schedules.get() == before) delay(10) }
         }
-        suspend fun capture(row: Long = 7, mutation: MutationId = id, time: Instant = timestamp) =
-            coordinator.captureLocalCreate(target, row, localId, mutation, time)
+        suspend fun capture(row: Long = 7, mutation: MutationId = id, time: Instant = timestamp, autoProfile: Boolean = false) =
+            coordinator.captureLocalCreate(target, row, localId, mutation, time, autoProfile = autoProfile)
         suspend fun retained(): LocalCreateIntent? {
             journal.admitCapture = { it == target }; return journal.readIntent(target, localId)
         }

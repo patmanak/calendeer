@@ -4,5 +4,6 @@
     <string name="calendar_support_events">✓ Tworzenie, edycja i usuwanie prostych wydarzeń</string>
     <string name="calendar_support_personal">✓ Przypomnienia i kolory wydarzeń</string>
     <string name="calendar_support_dates">✓ Wydarzenia całodniowe i strefy czasowe</string>
-    <string name="calendar_support_coming">Powtarzanie i goście: wkrótce</string>
+    <string name="calendar_support_series">✓ Tworzenie skończonych serii codziennych</string>
+    <string name="calendar_support_coming">Zmiany i usunięcia wydarzeń cyklicznych pozostają zapisane na tym telefonie, oczekując na obsługę. Inne powtórzenia i goście: wkrótce.</string>
 </resources>

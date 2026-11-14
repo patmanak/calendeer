@@ -4,5 +4,6 @@
     <string name="calendar_support_events">✓ Créer, modifier et supprimer les événements simples</string>
     <string name="calendar_support_personal">✓ Rappels et couleur des événements</string>
     <string name="calendar_support_dates">✓ Journées entières et fuseaux horaires</string>
-    <string name="calendar_support_coming">Répétitions et invités : bientôt</string>
+    <string name="calendar_support_series">✓ Créer des séries quotidiennes avec une fin</string>
+    <string name="calendar_support_coming">Les modifications et suppressions de répétitions restent conservées sur ce téléphone, en attente de leur prise en charge. Autres répétitions et invités : à venir.</string>
 </resources>

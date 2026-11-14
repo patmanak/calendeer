@@ -71,8 +71,8 @@ Extend the existing CREATE, personal-update and DELETE pipelines and their seale
 preparations/attempt stores. Do not add a separate recurring-event synchronization
 engine. New admitted profiles need versioned capture/preparation/request contracts;
 do not relax historical constructors/decoders or reinterpret saved requests.
-`LocalCreateIntent`, `LocalEditIntent`, personal-v2 preparation/readback and native
-capture currently reject recurrence deliberately. A change to only the iCalendar
+`LocalEditIntent` and personal-v2 preparation/readback still reject recurrence.
+CREATE now has a separate finite DAILY profile. A change to only the iCalendar
 serializer cannot complete this feature.
 
 | Slice | Observable result and owned boundary | Required evidence before activation |
@@ -110,9 +110,8 @@ inspectable; unsupported transitions must not be normalized or silently shifted.
 
 PASS: current official refs resolved, complete trees checked, listed implementations
 and licenses read, existing Calendeer admission boundaries compared. No new upstream
-dependency was introduced. Live service/client journeys remain NOT RUN; no recurring
-writer is enabled in the controller.
-L9b's [qualified foundations](../LOCAL_CREATE_CAPTURE.md#series-create-foundations--not-enabled-for-submission)
+dependency was introduced. Live service/client journeys remain NOT RUN.
+L9b's [finite daily CREATE](../LOCAL_CREATE_CAPTURE.md#finite-daily-series-create)
 now include strict rule admission, content snapshot schema 3, explicit native
 observation, shared signed/encrypted serialization, protected v4 capsules and their
 canonical readback, plus v2 dispatch fingerprints and existing-table migration.
@@ -120,8 +119,8 @@ Explicit native current-content and acknowledgement operations now retain the ru
 duration and verified UID, with atomic child guards and historical ACK recovery.
 Canonical expectations now reopen from the exact capsule and reach binding,
 restoration and ACK through an explicit internal series-staging route. Historical
-capsule profiles remain unchanged; the worker's default capture and Proton v4
-dispatch stay closed. Series handoff and historical recovery now use that same source;
+capsule profiles remain unchanged. Series handoff and historical recovery use that same source;
 contextual transfer checks preserve the simple-edit refusal and hold unsupported
-local changes. Next: enable the qualified fresh Proton submission capability and
-worker route with end-to-end E3, then group live-service/client journeys in E4.
+local changes. The Proton v4 capability and worker route now enable this subset;
+profile selection precedes reservation and UNKNOWN never resends. Next: L9c series
+editing, then occurrence changes and deletion. Group live-service/client journeys in E4.

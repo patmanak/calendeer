@@ -49,13 +49,13 @@ internal class ImportCoordinatorCapturedCreates(
 
     /** Explicit internal capture only; no preparation, submission or Android acknowledgement. */
     suspend fun captureLocalCreate(target: CalendarScope, eventRow: Long, localId: LocalEventId,
-        id: MutationId, timestamp: java.time.Instant, series: Boolean = false): LocalEditCaptureResult = mutex.withLock {
+        id: MutationId, timestamp: java.time.Instant, series: Boolean = false, autoProfile: Boolean = false): LocalEditCaptureResult = mutex.withLock {
         val journal = localCreates ?: return@withLock LocalEditCaptureResult.UNAVAILABLE
         val expected = generation()
         val policy = policyRevision()
         if (!isCurrent(expected, target.account) || !hasCalendarPermissions())
             return@withLock LocalEditCaptureResult.INACTIVE
-        localCreateStaging(target, journal, expected, policy).capture(eventRow, localId, id, timestamp, series)
+        localCreateStaging(target, journal, expected, policy).capture(eventRow, localId, id, timestamp, series, autoProfile)
     }
 
     /** Explicit read-only preparation; no outgoing journal, dispatch, or Provider acknowledgement. */

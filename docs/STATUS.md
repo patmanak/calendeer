@@ -64,8 +64,9 @@ Samsung/One UI is outside 0.1. Signature management remains deferred by the owne
   removal and calendar-color fallback, while retaining Proton email reminders and
   default inheritance when alerts are unchanged. Changed inherited alerts freeze default emails.
   A bounded signed calendar part preserves supported status/transparency and Web fragment framing.
-  Initial CREATE also captures reminders/color using a separate personal-v3 preparation
-  and submission profile. Historical formats stay unchanged; client journeys remain an E4 gate.
+  Initial CREATE captures reminders/color with personal-v3. Finite DAILY CREATE (COUNT 2–366, INTERVAL 1–365) uses
+  capsule v4 and fingerprint v2, with a guarded native profile chosen before reservation.
+  Unsupported series edits/deletions remain visible and retained. Historical formats stay unchanged.
 - UNKNOWN is inspect-only, never reset/resend. Unsupported local changes and
   conflicts retain their variants. Native permission/account/generation and consent
   are rechecked; a system sync request cannot lift a paused CREATE.
@@ -87,7 +88,7 @@ isolated fresh password login were tested. Remote CI, canonical release/update
 installation, other ABIs/OEMs and signing remain release gates.
 [Distribution](LICENSING.md), [build security](BUILD_SECURITY.md).
 
-Still required: recurring CREATE adapter/worker activation and remaining V05 editing
+Still required: remaining V05 series/occurrence/guest editing
 ([recurrence plan](research/RECURRENCE_WRITES.md)), milestone qualification,
 unresolved historical associations/conflicts, remote CI and signed packaging.
 Trustworthy comparable modification timestamps remain unavailable for general

@@ -4,5 +4,6 @@
     <string name="calendar_support_events">✓ Criar, editar e eliminar eventos simples</string>
     <string name="calendar_support_personal">✓ Lembretes e cores dos eventos</string>
     <string name="calendar_support_dates">✓ Eventos de dia inteiro e fusos horários</string>
-    <string name="calendar_support_coming">Repetições e convidados: brevemente</string>
+    <string name="calendar_support_series">✓ Criar séries diárias com um fim</string>
+    <string name="calendar_support_coming">As alterações e eliminações de eventos repetidos ficam guardadas neste telefone, à espera de suporte. Outras repetições e convidados: brevemente.</string>
 </resources>

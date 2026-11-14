@@ -20,6 +20,7 @@ internal class ProtonCreateSubmissionAdapter(private val preparations: CalendarC
     verifier: CreateEventVerifier) : CalendarCreateSubmissionPort {
     override val knownEmptySubmissionFormat = KNOWN_EMPTY_SUBMISSION_FORMAT
     override val personalSubmissionFormat = PERSONAL_CREATE_SUBMISSION_FORMAT
+    override val seriesSubmissionFormat = SERIES_CREATE_SUBMISSION_FORMAT
     private val readback = ProtonCreatedEventReadback(sessions, remote, events, verifier)
     override suspend fun prepareSubmission(draft: CalendarCreateDraft) = preparations.prepareCreate(draft)
     override suspend fun readCapturedExpectation(record: CreateAttemptRecord, expected: CalendarCreateDraft): EventContent? = try {
@@ -42,8 +43,6 @@ internal class ProtonCreateSubmissionAdapter(private val preparations: CalendarC
         if (stored.format != record.format || stored.protectedPayload != record.protectedPayload)
             createUnavailable(CreatePreparationFailure.CONTEXT)
         if (stored.state == CreateAttemptState.OUTCOME_UNKNOWN) return@guarded inspectWithExpectation(stored, expected)
-        // Native series acknowledgement is not qualified yet. Historical UNKNOWN is still inspect-only.
-        if (stored.format == SERIES_CREATE_SUBMISSION_FORMAT) return@guarded CreateSubmissionObservation.Unknown
         val submission = ProtonCreateSubmissionCodec.open(stored, protector)
         qualifyCaptured(stored, submission, expected)
         val session = session(record.scope)

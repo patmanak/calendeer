@@ -36,10 +36,10 @@ captures. Rich content uses JSON v2 and a distinct complete fingerprint domain,
 without changing the native identity marker or database schema. The historical
 known-empty guards described below still apply to their original formats.
 
-## Series CREATE foundations — not enabled for submission
+## Finite daily series CREATE
 
-Explicit native series observation and snapshot storage are available internally;
-the system controller still uses the simple profile and refuses recurring uploads.
+The system controller selects the native profile before the first reservation;
+a non-null RRULE selects series observation, never a fallback after simple capture.
 `CreateSeriesRule` carries no UID. It accepts finite DAILY rules with COUNT 2–366
 and INTERVAL 1–365, validates every start/end slot and rejects gaps, folds, changing
 elapsed durations and instants outside 1970–9999. Unknown rule parameters remain
@@ -59,8 +59,8 @@ legacy content-only readers refuse schema 3. Schemas 1/2 keep their original
 interpretation. Internal staging preserves the rule in preparation/submission
 reservations and drafts. It requires a distinct explicit series capability and typed
 native observation; absent or reused simple-profile capabilities refuse staging.
-The controller's default capture still uses the simple profile. Proton's fresh series
-submission declaration and PREPARED v4 dispatch remain closed.
+The Proton adapter advertises v4 explicitly. The default port capability stays null;
+other adapters cannot stage a series through their simple preparation profile.
 
 The explicit series serializer adds RRULE only to the signed clear shared part,
 using the existing Biweekly builder and Proton encryption primitives. Shared text
@@ -68,7 +68,8 @@ bytes remain unchanged. Protected local/submission capsules use a separate v4
 profile, bind the derived UID and canonical rule, and always carry explicit personal
 metadata, including empty reminders/color. Synthetic native crypto checks cover
 production, Keystore reopening, canonical readback and altered signatures. UNKNOWN
-v4 remains inspection-only; PREPARED v4 cannot dispatch and is not advertised.
+v4 remains inspection-only. PREPARED v4 requalifies context, then durably claims UNKNOWN
+before one send; a stale PREPARED replay inspects the stored UNKNOWN without resending.
 
 Dispatch fingerprint v2 includes the canonical rule and personal content; v1 bytes
 stay unchanged. Create schema 8 and import schema 25 expand only the four existing
@@ -98,8 +99,8 @@ Historical queue recovery also reopens the original capsule after later projecti
 Unqualified rules, participants or exceptions stay pending. Local series edits and
 tombstones remain visibly unsupported and dirty; they cannot enter simple writers.
 The direct RRULE representation stays on this guarded path; ordinary finite import
-representations are unchanged. Fresh Proton dispatch and worker activation remain
-closed. These checks do not establish a live service or calendar-client journey.
+representations are unchanged. Focused Provider/SQL, crypto and intercepted synthetic
+HTTP qualify activation; live service and calendar-client journeys remain an E4 gate.
 
 An additional measured native-editor profile accepts the bridge's own opaque
 local organizer label, with the exact self-organizer/default guest flags and no

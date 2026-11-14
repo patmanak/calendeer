@@ -208,7 +208,8 @@ private fun CalendarCard(
                 }
                 if (selection.scope in creates.modeReview) Text(stringResource(R.string.calendar_mode_migration),
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                for (resource in listOf(R.string.calendar_support_events, R.string.calendar_support_personal, R.string.calendar_support_dates, R.string.calendar_support_coming))
+                for (resource in listOf(R.string.calendar_support_events, R.string.calendar_support_personal, R.string.calendar_support_dates,
+                    R.string.calendar_support_series, R.string.calendar_support_coming))
                     Text(stringResource(resource), style = MaterialTheme.typography.bodySmall)
                 CalendarIssues(selection, creates)
                 if (hasIssues) Text(stringResource(R.string.calendar_mode_description), style = MaterialTheme.typography.bodySmall)
