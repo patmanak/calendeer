@@ -12,7 +12,7 @@ data class CapturedCreateHandoffReceipt(
     init {
         require(protocol == 1 && nonce.matches(Regex("[a-f0-9]{8}(-[a-f0-9]{4}){3}-[a-f0-9]{12}")))
         require(nonce != acknowledgement.nonce && nonce != acknowledgement.baseline.receipt.nonce)
-        require(supportsPersonalCapturedOrigin(acknowledgement.baseline))
+        require(supportsCapturedHandoffOrigin(acknowledgement.baseline))
     }
     val scope: CalendarScope get() = acknowledgement.baseline.scope
     val format: AdapterFormat get() = acknowledgement.baseline.format
@@ -32,20 +32,20 @@ class CapturedCreateHandoffFrame(
     val receipt: CapturedCreateHandoffReceipt = receipt.let {
         val acknowledgement = it.acknowledgement
         val baseline = acknowledgement.baseline
-        require(supportsPersonalCapturedOrigin(baseline))
+        require(supportsCapturedHandoffOrigin(baseline))
         it.copy(acknowledgement = acknowledgement.copy(baseline = baseline.copy(
             change = baseline.change.copy(content = freezeHandoffContent(baseline.change.content)))))
     }
     val base: RemoteChange.Upsert = base.copy(content = freezeHandoffContent(base.content))
     val lastProjection: ProjectionReceipt? = lastProjection?.snapshot()
     init {
-        require(this.base.eventId == this.receipt.eventId && supportsPersonalHandoff(this.base))
+        require(this.base.eventId == this.receipt.eventId && supportsCapturedHandoffContent(this.receipt.acknowledgement.baseline, this.base))
         val last = this.lastProjection
         if (last == null) require(this.base == this.receipt.acknowledgement.baseline.change)
         else {
             require(last.representation == null && last.previousRepresentation == null)
             require(last.scope == this.receipt.scope && last.format == this.receipt.format && last.change == this.base)
-            require(last.previousBase?.let(::supportsPersonalHandoff) == true)
+            require(last.previousBase?.let { supportsCapturedHandoffContent(this.receipt.acknowledgement.baseline, it) } == true)
             require(last.nonce !in listOf(this.receipt.nonce, this.receipt.acknowledgement.nonce,
                 this.receipt.acknowledgement.baseline.receipt.nonce))
         }
@@ -77,7 +77,7 @@ class CapturedHandoffProjection(val frame: CapturedCreateHandoffFrame, receipt: 
     init {
         require(this.receipt.representation == null && this.receipt.previousRepresentation == null)
         require(this.receipt.scope == frame.scope && this.receipt.format == frame.format && this.receipt.previousBase == frame.base)
-        require(this.receipt.change.eventId == frame.eventId && supportsPersonalHandoff(this.receipt.change))
+        require(this.receipt.change.eventId == frame.eventId && supportsCapturedHandoffContent(frame.receipt.acknowledgement.baseline, this.receipt.change))
         require(this.receipt.nonce !in listOf(frame.receipt.nonce, frame.receipt.acknowledgement.nonce,
             frame.receipt.acknowledgement.baseline.receipt.nonce, frame.lastProjection?.nonce))
     }
@@ -102,7 +102,7 @@ data class CapturedHandoffCleanWitness(val frame: CapturedCreateHandoffFrame) {
 
 class CapturedHandoffCurrent(val frame: CapturedCreateHandoffFrame, content: EventContent, val deleted: Boolean) {
     val content: EventContent = freezeHandoffContent(content)
-    init { require(supportsPersonalHandoff(frame.base.copy(content = this.content))) }
+    init { require(supportsCapturedHandoffContent(frame.receipt.acknowledgement.baseline, frame.base.copy(content = this.content))) }
     val unchanged: Boolean get() = !deleted && content == frame.base.content
     fun copy(frame: CapturedCreateHandoffFrame = this.frame, content: EventContent = this.content,
         deleted: Boolean = this.deleted) = CapturedHandoffCurrent(frame, content, deleted)
@@ -127,7 +127,26 @@ private fun freezeHandoffContent(content: EventContent): EventContent {
     val details = requireNotNull(content.details)
     return content.copy(details = details.copy(
         reminders = java.util.Collections.unmodifiableList(details.reminders.toList()),
-        attendees = java.util.Collections.unmodifiableList(details.attendees.toList())))
+        attendees = java.util.Collections.unmodifiableList(details.attendees.toList())),
+        recurrence = content.recurrence?.let { it.copy(
+            additionalDates = java.util.Collections.unmodifiableList(it.additionalDates.toList()),
+            excludedDates = java.util.Collections.unmodifiableList(it.excludedDates.toList())) })
+}
+
+/** Transfer capability only. It never widens the simple personal-update submission profile. */
+fun supportsCapturedHandoffOrigin(baseline: CapturedCreateBaseline): Boolean =
+    if (baseline.receipt.binding.identity.fingerprintVersion == 1) supportsPersonalCapturedOrigin(baseline)
+    else supportsCapturedHandoffContent(baseline, baseline.change) && baseline.receipt.binding.identity.matchesContent(baseline.change.content)
+
+fun supportsCapturedHandoffContent(origin: CapturedCreateBaseline, change: RemoteChange): Boolean {
+    if (origin.receipt.binding.identity.fingerprintVersion == 1) return supportsPersonalHandoff(change)
+    val value = (change as? RemoteChange.Upsert)?.content ?: return false
+    if (change.eventId != origin.change.eventId ||
+        !supportsPersonalHandoff(change.copy(content = value.copy(recurrence = null)))) return false
+    return try {
+        capturedCreateSeries(value)
+        value.recurrence!!.uid == origin.change.content.recurrence!!.uid && ProjectionReceipt.supports(change)
+    } catch (_: IllegalArgumentException) { false }
 }
 
 /** Original personal creation admission requires the complete frozen dispatch identity. */

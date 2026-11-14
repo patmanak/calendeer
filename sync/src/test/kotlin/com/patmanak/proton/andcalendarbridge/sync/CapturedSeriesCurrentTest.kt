@@ -29,8 +29,7 @@ class CapturedSeriesCurrentTest {
             assertFalse(current.copy(content = later).unchanged)
         }
         assertTrue(current.copy(deleted = true).deleted); assertFalse(current.copy(deleted = true).unchanged)
-        assertThrows(IllegalArgumentException::class.java) { CapturedCreateHandoffReceipt(
-            CapturedCreateAcknowledgementReceipt(baseline, UUID(0, 4).toString()), UUID(0, 5).toString()) }
+        assertFalse(supportsPersonalHandoff(change))
     }
     @Test fun missingForeignOrUnsupportedRecurrenceCannotBecomeCurrentSeriesContent() {
         for (later in listOf(local, content.copy(recurrence = content.recurrence!!.copy(uid = "foreign@calendeer.invalid")),

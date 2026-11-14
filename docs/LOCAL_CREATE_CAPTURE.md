@@ -88,8 +88,18 @@ protected capsule. This local read is not remote proof; an unreadable capsule re
 restoration. Full canonical content, including UID, is compared before binding;
 source/admission checks after awaits protect baseline retention, ACK and clean checks.
 Internal orchestration is qualified with real Provider/SQL and synthetic transport.
-Series handoff, fresh Proton dispatch and worker activation remain closed. These
-checks do not establish a live service or calendar-client journey.
+
+Series handoff uses a contextual capability bound to the original fingerprint-v2
+baseline, same verified UID and strict finite DAILY profile. The simple personal-edit
+capability is unchanged. The transferred frame can receive supported canonical rule,
+date and personal-metadata updates through the existing conditional projection path;
+it keeps the original CREATE/ACK evidence and the current projection receipt separate.
+Historical queue recovery also reopens the original capsule after later projections.
+Unqualified rules, participants or exceptions stay pending. Local series edits and
+tombstones remain visibly unsupported and dirty; they cannot enter simple writers.
+The direct RRULE representation stays on this guarded path; ordinary finite import
+representations are unchanged. Fresh Proton dispatch and worker activation remain
+closed. These checks do not establish a live service or calendar-client journey.
 
 An additional measured native-editor profile accepts the bridge's own opaque
 local organizer label, with the exact self-organizer/default guest flags and no

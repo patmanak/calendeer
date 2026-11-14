@@ -169,7 +169,7 @@ internal class ImportCoordinatorProjection(
             }
             // Recovery can advance the reference and leave a different/newer queue entry.
             val current = store.capturedHandoffPending(role.frame) ?: return
-            if (!store.capturedHandoffCanProject(role.frame) || !supportsPersonalHandoff(current.change)) {
+            if (!store.capturedHandoffCanProject(role.frame) || !supportsCapturedHandoffContent(role.frame.receipt.acknowledgement.baseline, current.change)) {
                 waitForResolution(); return
             }
             if (prepared != null && prepared.receipt.change != current.change) { waitForResolution(); return }

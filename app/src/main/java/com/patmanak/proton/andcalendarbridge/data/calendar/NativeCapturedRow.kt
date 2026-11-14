@@ -42,7 +42,7 @@ internal fun AndroidCalendarProjection.captureCapturedCurrent(baseline: Captured
     val personal = handoff != null || !supportsCapturedHandoff(baseline.change)
     val personalBase = handoff?.base ?: baseline.change
     val series = baseline.receipt.binding.identity.fingerprintVersion == 2
-    if (series && handoff != null) return CapturedNativeObservation.Unsupported
+    if (series && editAcknowledgement != null) return CapturedNativeObservation.Unsupported
     val ackMarker = (expectedAck ?: writeAck)?.let(::capturedAcknowledgementMarker)
     val receipt = baseline.receipt
     val expected = capturedAttachmentValues(receipt) // Strict canonical identity before Provider IO.
@@ -117,7 +117,7 @@ internal fun AndroidCalendarProjection.captureCapturedCurrent(baseline: Captured
         val content = EventContent(values.getAsString(Events.TITLE) ?: "", time,
             values.getAsString(Events.DESCRIPTION) ?: "", values.getAsString(Events.EVENT_LOCATION) ?: "",
             colorRgb = if (!personal) null else style.logicalColor(rawColor),
-            recurrence = seriesSnapshot?.let { baseline.change.content.recurrence!!.copy(rule = it.second.rule) },
+            recurrence = seriesSnapshot?.let { personalBase.content.recurrence!!.copy(rule = it.second.rule) },
             details = EventDetails(reminders?.reminders.orEmpty()))
         if (handoff == null) CapturedCreateCurrent(baseline, content, deleted == 1, acknowledgement = expectedAck)
         else CapturedHandoffCurrent(handoff, content, deleted == 1)

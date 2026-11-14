@@ -20,6 +20,8 @@ import com.patmanak.proton.andcalendarbridge.data.outgoing.TitleUpdateAttemptSto
 import com.patmanak.proton.andcalendarbridge.sync.*
 import com.patmanak.proton.andcalendarbridge.sync.catalog.CalendarSummary
 import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneOffset
 import java.time.ZoneId
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicInteger
@@ -34,6 +36,92 @@ import org.junit.runner.RunWith
 /** Native Provider and three real journals; controlled incoming data, no network upload. */
 @RunWith(AndroidJUnit4::class)
 class CapturedHandoffIntegrationDeviceTest {
+    @Test fun seriesTransfersAndProjectsANewerCanonicalRuleAfterReopen() = fixture(series = true) {
+        transferred(); assertEquals(verifiedEvent, role()!!.frame.base)
+        reopen()
+        val next = verifiedEvent.copy(revision = Revision("series-next"), content = verifiedEvent.content.copy(title = "Incoming series title",
+            recurrence = verifiedEvent.content.recurrence!!.copy(rule = "FREQ=DAILY;COUNT=4")))
+        incoming(next); drain()
+        assertEquals(next, role()!!.frame.base); assertEquals("FREQ=DAILY;COUNT=4", field(Events.RRULE))
+        assertEquals("PT3600S", field(Events.DURATION)); assertEquals(1, sends)
+    }
+    @Test fun allDaySeriesKeepsPersonalMetadataAcrossIncomingDurationAndRuleChanges() = fixture(series = true, allDay = true, richOrigin = true) {
+        transferred(); val time = verifiedEvent.content.time as EventTime.AllDay
+        val next = verifiedEvent.copy(revision = Revision("series-all-day-next"), content = verifiedEvent.content.copy(
+            time = time.copy(endExclusive = time.endExclusive.plusDays(1)), recurrence = verifiedEvent.content.recurrence!!.copy(rule = "FREQ=DAILY;COUNT=4")))
+        incoming(next); drain(); reopen()
+        assertEquals(next, role()!!.frame.base); assertEquals("P3D", field(Events.DURATION))
+        assertEquals(content.details, role()!!.frame.base.content.details); assertEquals(content.colorRgb, role()!!.frame.base.content.colorRgb)
+        val inspector = AndroidCalendarProjection(context)
+        assertNotNull(inspector.inspectCapturedHandoffBase(role()!!.frame))
+        val second = next.copy(revision = Revision("series-all-day-second"), content = next.content.copy(title = "Second incoming series title"))
+        incoming(second); drain()
+        assertEquals(second, role()!!.frame.base); assertNotNull(inspector.inspectCapturedHandoffBase(role()!!.frame))
+        assertEquals(1, sends)
+    }
+    @Test fun historicalSeriesRecoveryUsesTheOriginalCapsuleAfterAnIncomingProjection() = fixture(series = true) {
+        titleMode = true; transferred()
+        val next = verifiedEvent.copy(revision = Revision("series-advanced"), content = verifiedEvent.content.copy(title = "Advanced series"))
+        incoming(next); drain(); reopen()
+        val recovered = coordinator.recoverHistoricalSystemCreate(target, row, field(Events.SYNC_DATA5), null)
+        assertEquals(localId, recovered.work!!.localId); assertEquals(attempt, recovered.work!!.attempt)
+        assertEquals(next, role()!!.frame.base); assertEquals(1, sends)
+        expectationAvailable = false
+        assertNull(coordinator.recoverHistoricalSystemCreate(target, row, field(Events.SYNC_DATA5), null).work)
+    }
+    @Test fun seriesCapsuleUnavailableBeforeTransferCannotReserveARole() = fixture(series = true) {
+        ready(); acknowledge(); expectationAvailable = false
+        assertEquals(CapturedCreateHandoffResult.UNRESOLVED, handoff()); assertNull(role())
+        assertEquals("0", field(Events.DIRTY)); assertEquals(1, sends)
+    }
+    @Test fun changedSubmissionDuringSeriesTransferCannotReserveARole() = fixture(series = true) {
+        ready(); acknowledge()
+        beforeExpectation = { journal.writableDatabase.execSQL("UPDATE local_create_submissions SET payload=?", arrayOf("synthetic-altered")) }
+        assertEquals(CapturedCreateHandoffResult.UNRESOLVED, handoff()); assertNull(role())
+    }
+    @Test fun seriesPermissionLossDuringCapsuleReadPreventsTransfer() = fixture(series = true) {
+        ready(); acknowledge(); beforeExpectation = { permitted = false }
+        assertEquals(CapturedCreateHandoffResult.INACTIVE, handoff()); assertNull(role())
+    }
+    @Test fun unsupportedIncomingSeriesIdentityRulesAndExclusionsStayPending() {
+        for (kind in 0..2) fixture(series = true) {
+            transferred(); val recurrence = verifiedEvent.content.recurrence!!
+            val next = verifiedEvent.copy(revision = Revision("unsupported-series"), content = verifiedEvent.content.copy(recurrence = when (kind) {
+                0 -> recurrence.copy(uid = "foreign-series@calendeer.invalid")
+                1 -> recurrence.copy(rule = "FREQ=WEEKLY;COUNT=5")
+                else -> recurrence.copy(excludedDates = listOf(RecurrencePoint.Timed((content.time as EventTime.Timed).start)))
+            }))
+            val before = providerSnapshot(); incoming(next); drain()
+            assertEquals(before, providerSnapshot()); assertEquals(verifiedEvent, role()!!.frame.base)
+            assertEquals(1, rawPending()); assertEquals(0, handoffWrites)
+        }
+    }
+    @Test fun incomingSeriesWriteResponseLossRecoversTheSameReceiptWithoutRewriting() = fixture(series = true) {
+        transferred(); val next = verifiedEvent.copy(revision = Revision("series-response-lost"), content = verifiedEvent.content.copy(title = "Incoming recovered series"))
+        incoming(next); afterHandoffWrite = { throw IllegalStateException("Synthetic lost series projection response") }
+        interruptedDrain(); val saved = prepared()!!
+        assertEquals(verifiedEvent, currentBase()); assertEquals(next.content.title, field(Events.TITLE))
+        afterHandoffWrite = {}; reopen(); drain()
+        assertEquals(next, role()!!.frame.base); assertEquals(saved, role()!!.frame.lastProjection)
+        assertEquals(1, handoffWrites); assertEquals(1, sends)
+    }
+    @Test fun dirtySeriesEditsAndTombstonesStayVisibleAndCannotEnterSimpleWriters() {
+        for (deleted in listOf(false, true)) fixture(series = true) {
+            transferred(); incoming(verifiedEvent)
+            mutate(ContentValues().apply { put(Events.DIRTY, 1); if (deleted) put(Events.DELETED, 1) else put(Events.TITLE, "Later unsupported series edit") })
+            val before = providerSnapshot()
+            assertEquals(CapturedCreateReconciliationResult.UNSUPPORTED, reconcileTransferred())
+            assertEquals(before, providerSnapshot()); assertTrue(role()!!.waiting); assertNull(edit()); assertNull(deletion())
+            assertEquals(1, sends)
+        }
+    }
+    @Test fun seriesExceptionBetweenPreflightAndWriteKeepsThePendingProjection() = fixture(series = true) {
+        transferred(); incoming(verifiedEvent.copy(revision = Revision("after-exception"), content = verifiedEvent.content.copy(title = "Must wait")))
+        beforeHandoffWrite = { exception() }
+        drain()
+        assertEquals(content.title, field(Events.TITLE)); assertEquals(2, rows()); assertTrue(role()!!.waiting)
+        assertNotNull(prepared()); assertEquals(verifiedEvent, currentBase()); assertEquals(1, rawPending())
+    }
     @Test fun personalCreationKeepsItsMetadataThroughUploadAcknowledgementReopenAndNextEdit() = fixture(safePersonal = true, richOrigin = true) {
         transferred(); incoming(verifiedEvent); titleMode = true; personalMode = true
         val original = record()
@@ -393,7 +481,8 @@ class CapturedHandoffIntegrationDeviceTest {
         assertEquals("Held during backlog", field(Events.TITLE)); assertTrue(role()!!.waiting); assertEquals(0, handoffWrites)
         assertEquals(ImportRunResult.COMPLETE, drain()); assertEquals(runs - 1, continuations.get())
     }
-    private class Fixture(val context: Context, safePersonal: Boolean = false, val richOrigin: Boolean = false) {
+    private class Fixture(val context: Context, safePersonal: Boolean = false, val richOrigin: Boolean = false,
+        val series: Boolean = false, val allDay: Boolean = false) {
         private val token = UUID.randomUUID().toString()
         private val importName = "dispatch-integration-import-$token.db"
         private val dispatchName = "captured-provider-dispatch-$token.db"
@@ -401,17 +490,18 @@ class CapturedHandoffIntegrationDeviceTest {
         val target = CalendarScope(AccountId("dispatch-integration-$token"), CalendarId("fixture"), 0)
         val format = AdapterFormat("dispatch-integration-import", 1)
         var currentFormat = format
-        val preparationFormat = AdapterFormat("controlled-known-empty-submission", if (richOrigin) 3 else 2)
+        val preparationFormat = AdapterFormat("controlled-known-empty-submission", if (series) 4 else if (richOrigin) 3 else 2)
         val localId = LocalEventId(UUID.randomUUID().toString())
         val id = MutationId(UUID.randomUUID().toString())
         val attempt = MutationId(UUID.randomUUID().toString())
         val timestamp = Instant.parse("2030-10-01T12:00:00Z")
         val content = EventContent("Preparation integration fixture",
-            if (safePersonal) EventTime.Timed(Instant.parse("2030-05-01T09:00:00Z"), Instant.parse("2030-05-01T10:00:00Z"), ZoneId.of("Europe/Paris")) else
+            if (allDay) EventTime.AllDay(LocalDate.parse("2030-03-29"), LocalDate.parse("2030-03-31")) else
+            if (series || safePersonal) EventTime.Timed(Instant.parse("2030-05-01T09:00:00Z"), Instant.parse("2030-05-01T10:00:00Z"), ZoneId.of("Europe/Paris")) else
                 EventTime.Timed(Instant.parse("2030-10-27T00:30:00Z"), Instant.parse("2030-10-27T02:30:00Z"), ZoneId.of("Europe/Paris")),
             details = EventDetails(if (richOrigin) listOf(EventReminder(10)) else emptyList()),
             colorRgb = if (richOrigin) 0x123456 else null)
-        val intent = LocalCreateIntent(LocalCreateReservation(id, localId, target, format, timestamp), content)
+        val intent = LocalCreateIntent(LocalCreateReservation(id, localId, target, format, timestamp), content, if (series) CreateSeriesRule(5) else null)
         val projection = AndroidCalendarProjection(context)
         var handoffWrites = 0
         var handoffInspections = 0
@@ -500,37 +590,44 @@ class CapturedHandoffIntegrationDeviceTest {
         var sends = 0
         var inspections = 0
         var beforeClaim: suspend () -> Unit = { }
-        val verifiedEvent get() = RemoteChange.Upsert(EventId("synthetic-remote"), Revision("synthetic-revision"), content)
+        val verifiedEvent get() = RemoteChange.Upsert(EventId("synthetic-remote"), Revision("synthetic-revision"),
+            if (series) content.copy(recurrence = EventRecurrence("synthetic-series@calendeer.invalid", "FREQ=DAILY;COUNT=5")) else content)
+        var expectationAvailable = true
+        var beforeExpectation: suspend () -> Unit = {}
         var calls = 0
         fun receipt() = PreparedCalendarCreate(target, preparationFormat, "synthetic-protected-preparation-$calls")
         var onPrepare: suspend (CalendarCreateDraft) -> PreparedCalendarCreate = { receipt() }
         val port = object : CalendarCreateSubmissionPort {
-            override val knownEmptySubmissionFormat: AdapterFormat get() = preparationFormat
-            override val personalSubmissionFormat: AdapterFormat? get() = preparationFormat.takeIf { richOrigin }
+            override val knownEmptySubmissionFormat: AdapterFormat get() = preparationFormat.copy(version = 2)
+            override val personalSubmissionFormat: AdapterFormat? get() = preparationFormat.copy(version = 3).takeIf { richOrigin }
+            override val seriesSubmissionFormat: AdapterFormat? get() = preparationFormat.takeIf { series }
+            override suspend fun readCapturedExpectation(record: CreateAttemptRecord, expected: CalendarCreateDraft): EventContent? {
+                assertEquals(target, record.scope); assertEquals(attempt, record.id)
+                beforeExpectation()
+                return if (expectationAvailable) expected.canonicalContent("synthetic-series@calendeer.invalid") else null
+            }
             override suspend fun prepareSubmission(draft: CalendarCreateDraft): PreparedCalendarCreate {
-                assertEquals(CalendarCreateDraft(target, attempt, timestamp, content), draft)
+                assertEquals(CalendarCreateDraft(target, attempt, timestamp, content, intent.series), draft)
                 calls++; return onPrepare(draft)
             }
             override suspend fun submit(record: CreateAttemptRecord, journal: CreateAttemptJournal): CreateSubmissionObservation = error("No generic upload")
             override suspend fun submitCaptured(record: CreateAttemptRecord, expected: CalendarCreateDraft, journal: CreateAttemptJournal): CreateSubmissionObservation {
-                assertEquals(CalendarCreateDraft(target, attempt, timestamp, content), expected)
+                assertEquals(CalendarCreateDraft(target, attempt, timestamp, content, intent.series), expected)
                 beforeClaim()
                 if (!journal.claim(record)) return CreateSubmissionObservation.Unknown
                 sends++
-                return CreateSubmissionObservation.Verified(CreateAttemptIdentity.of(record), RemoteChange.Upsert(
-                    EventId("synthetic-remote"), Revision("synthetic-revision"), content))
+                return CreateSubmissionObservation.Verified(CreateAttemptIdentity.of(record), verifiedEvent)
             }
             override suspend fun inspectCaptured(record: CreateAttemptRecord, expected: CalendarCreateDraft): CreateSubmissionObservation {
                 inspections++
-                return CreateSubmissionObservation.Verified(CreateAttemptIdentity.of(record), RemoteChange.Upsert(
-                    EventId("synthetic-remote"), Revision("synthetic-revision"), content))
+                return CreateSubmissionObservation.Verified(CreateAttemptIdentity.of(record), verifiedEvent)
             }
             override suspend fun inspect(record: CreateAttemptRecord): CreateSubmissionObservation = error("No remote inspection")
         }
         val uri get() = Events.CONTENT_URI.buildUpon().appendQueryParameter(CalendarContract.CALLER_IS_SYNCADAPTER, "true")
             .appendQueryParameter(CalendarContract.Calendars.ACCOUNT_NAME, projection.accountFor(target.account).name)
             .appendQueryParameter(CalendarContract.Calendars.ACCOUNT_TYPE, projection.accountFor(target.account).type).build()
-        private val remote = object : ReadOnlyCalendarRemote {
+        private val remote = object : ReadOnlyCalendarRemote, CalendarCreateSubmissionPort by port {
             override val format get() = currentFormat
             override suspend fun currentAccount(): AccountId { onAccount(); return target.account }
             override suspend fun fetch(request: PageRequest): RemotePage = error("No imports")
@@ -558,14 +655,13 @@ class CapturedHandoffIntegrationDeviceTest {
             row = ContentUris.parseId(context.contentResolver.insert(uri, candidateValues())!!)
             if (richOrigin) addReminder(10)
             start()
-            assertEquals(LocalEditCaptureResult.RETAINED, coordinator.captureLocalCreate(target, row, localId, id, timestamp))
+            assertEquals(LocalEditCaptureResult.RETAINED, coordinator.captureLocalCreate(target, row, localId, id, timestamp, series))
         }
         private suspend fun start() {
             val before = schedules.get(); coordinator.authenticationChanged(true)
             withTimeout(10_000) { while (schedules.get() == before) delay(10) }
         }
         fun candidateValues() = ContentValues().apply {
-            val time = content.time as EventTime.Timed
             put(Events.CALENDAR_ID, calendar); put(Events.TITLE, content.title); put(Events.DESCRIPTION, content.description)
             put(Events.EVENT_LOCATION, content.location); put(Events.DIRTY, 1); put(Events.DELETED, 0)
             put(Events.STATUS, Events.STATUS_CONFIRMED); put(Events.HAS_ATTENDEE_DATA, 0); put(Events.HAS_ALARM, 0)
@@ -574,8 +670,26 @@ class CapturedHandoffIntegrationDeviceTest {
             put(Events.ACCESS_LEVEL, Events.ACCESS_DEFAULT); put(Events.AVAILABILITY, Events.AVAILABILITY_BUSY)
             if (richOrigin) put(Events.EVENT_COLOR, 0xff123456.toInt()) else putNull(Events.EVENT_COLOR)
             putNull(Events.EVENT_COLOR_KEY)
-            put(Events.DTSTART, time.start.toEpochMilli()); put(Events.DTEND, time.end.toEpochMilli())
-            put(Events.ALL_DAY, 0); put(Events.EVENT_TIMEZONE, time.zone.id); put(Events.EVENT_END_TIMEZONE, time.zone.id)
+            when (val time = content.time) {
+                is EventTime.Timed -> {
+                    put(Events.DTSTART, time.start.toEpochMilli()); put(Events.DTEND, time.end.toEpochMilli())
+                    put(Events.ALL_DAY, 0); put(Events.EVENT_TIMEZONE, time.zone.id); put(Events.EVENT_END_TIMEZONE, time.zone.id)
+                }
+                is EventTime.AllDay -> {
+                    put(Events.DTSTART, time.start.atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli())
+                    put(Events.DTEND, time.endExclusive.atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli())
+                    put(Events.ALL_DAY, 1); put(Events.EVENT_TIMEZONE, "UTC"); put(Events.EVENT_END_TIMEZONE, "UTC")
+                }
+            }
+            if (series) { put(Events.RRULE, "FREQ=DAILY;COUNT=5"); put(Events.DURATION, if (allDay) "P2D" else "PT3600S"); putNull(Events.DTEND) }
+        }
+        fun exception() {
+            context.contentResolver.insert(uri, candidateValues().apply {
+                put(Events.TITLE, "Synthetic detached exception"); putNull(Events.RRULE); putNull(Events.DURATION)
+                val start = getAsLong(Events.DTSTART)
+                put(Events.DTEND, start + if (allDay) 172800000L else 3600000L)
+                put(Events.ORIGINAL_ID, row); put(Events.ORIGINAL_INSTANCE_TIME, start); put(Events.ORIGINAL_ALL_DAY, if (allDay) 1 else 0)
+            })!!
         }
         val mutation = MutationId("after-create-change")
         suspend fun handoff() = coordinator.handoffLocalCreate(target, localId, id, attempt)
@@ -701,9 +815,10 @@ class CapturedHandoffIntegrationDeviceTest {
             AccountManager.get(context).removeAccountExplicitly(projection.accountFor(target.account))
         }
     }
-    private fun fixture(safePersonal: Boolean = false, richOrigin: Boolean = false, block: suspend Fixture.() -> Unit) = runBlocking {
+    private fun fixture(safePersonal: Boolean = false, richOrigin: Boolean = false, series: Boolean = false, allDay: Boolean = false,
+        block: suspend Fixture.() -> Unit) = runBlocking {
         assumeTrue(InstrumentationRegistry.getArguments().getString("providerFixture") == "true")
-        val fixture = Fixture(ApplicationProvider.getApplicationContext(), safePersonal, richOrigin)
+        val fixture = Fixture(ApplicationProvider.getApplicationContext(), safePersonal, richOrigin, series, allDay)
         assumeTrue(fixture.projection.hasPermissions())
         try { fixture.seed(); fixture.block() } finally { fixture.close() }
     }

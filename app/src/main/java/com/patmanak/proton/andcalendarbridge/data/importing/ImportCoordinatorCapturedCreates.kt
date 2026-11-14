@@ -280,8 +280,10 @@ internal class ImportCoordinatorCapturedCreates(
                     journal.capturedIdentity(target, attempt.id) != identity) return@qualify null
                 val binding = journal.capturedBinding(identity) ?: return@qualify null
                 val attachment = journal.capturedAttachment(binding) ?: return@qualify null
-                val original = CapturedCreateBaseline(attachment, RemoteChange.Upsert(binding.eventId,
-                    binding.verifiedRevision, submission.reservation.intent.content))
+                val canonical = capturedCreateExpectation(submission, remote as? CalendarCreateSubmissionPort) ?: return@qualify null
+                if (!available() || captures.readSubmission(target, localId) != submission ||
+                    journal.capturedBinding(identity) != binding || journal.capturedAttachment(binding) != attachment) return@qualify null
+                val original = CapturedCreateBaseline(attachment, RemoteChange.Upsert(binding.eventId, binding.verifiedRevision, canonical))
                 // This accessor validates the retained historical baseline and PROVEN ACK too.
                 // The pre-handoff baseline accessor deliberately refuses every transferred event.
                 val role = store.capturedHandoff(target, binding.eventId) ?: return@qualify null
@@ -370,7 +372,7 @@ internal class ImportCoordinatorCapturedCreates(
         CapturedCreateHandoff(target, store, projection, captures, journal, scheduler,
             currentFormat = { remote.format }, active = active,
             currentAccount = { account -> isCurrent(expected, account) },
-            source = { frame -> handoffSource(frame, active) })
+            source = { frame -> handoffSource(frame, active) }, expectations = remote as? CalendarCreateSubmissionPort)
 
     /** Explicit transfer; never submit again or adopt an original through ordinary projection. */
     suspend fun handoffLocalCreate(target: CalendarScope, localId: LocalEventId, id: MutationId,
@@ -404,10 +406,12 @@ internal class ImportCoordinatorCapturedCreates(
         captures.admitCapture = { it == frame.scope && active() }
         try {
             val submission = captures.readSubmission(frame.scope, identity.localId) ?: return false
+            val canonical = capturedCreateExpectation(submission, remote as? CalendarCreateSubmissionPort) ?: return false
             return CapturedCreateDispatchIdentity.of(submission) == identity &&
-                submission.reservation.intent.content == original.change.content &&
+                canonical == original.change.content && captures.readSubmission(frame.scope, identity.localId) == submission &&
                 journal.capturedBinding(identity) == attachment.binding &&
-                journal.capturedAttachment(attachment.binding) == attachment && active()
+                journal.capturedAttachment(attachment.binding) == attachment && remote.format == frame.format &&
+                store.transaction(frame.scope) { checkpoint?.format } == frame.format && active()
         } finally { captures.admitCapture = previous }
     }
 

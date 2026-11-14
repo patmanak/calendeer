@@ -22,6 +22,7 @@ internal class CapturedCreateHandoff(
     private val active: () -> Boolean,
     private val currentAccount: suspend (AccountId) -> Boolean,
     private val source: suspend (CapturedCreateHandoffFrame) -> Boolean,
+    private val expectations: CalendarCreateSubmissionPort? = null,
 ) {
     private suspend fun available(): Boolean = currentAccount(target.account) && active() &&
         store.selections(target.account).singleOrNull { it.scope == target }?.let { it.enabled && it.available } == true && active()
@@ -50,8 +51,11 @@ internal class CapturedCreateHandoff(
             val identity = CapturedCreateDispatchIdentity.of(submission)
             val binding = journal.capturedBinding(identity) ?: return CapturedCreateHandoffResult.UNRESOLVED
             val attachment = journal.capturedAttachment(binding) ?: return CapturedCreateHandoffResult.UNRESOLVED
-            val original = CapturedCreateBaseline(attachment, RemoteChange.Upsert(binding.eventId,
-                binding.verifiedRevision, submission.reservation.intent.content))
+            val canonical = capturedCreateExpectation(submission, expectations) ?: return CapturedCreateHandoffResult.UNRESOLVED
+            val original = CapturedCreateBaseline(attachment, RemoteChange.Upsert(binding.eventId, binding.verifiedRevision, canonical))
+            if (!available()) return CapturedCreateHandoffResult.INACTIVE
+            if (captures.readSubmission(target, localId) != submission || journal.capturedBinding(identity) != binding ||
+                journal.capturedAttachment(binding) != attachment) return CapturedCreateHandoffResult.UNRESOLVED
             var role = store.capturedHandoff(target, binding.eventId)
             if (role == null) {
                 val ack = store.capturedAcknowledgement(target, binding.eventId) ?: return CapturedCreateHandoffResult.UNRESOLVED
@@ -177,6 +181,10 @@ internal class CapturedCreateHandoff(
                 store.waitCapturedHandoff(role.frame)
                 return if (observed == CapturedHandoffCurrentObservation.Unsupported)
                     CapturedCreateReconciliationResult.UNSUPPORTED else CapturedCreateReconciliationResult.UNRESOLVED
+            }
+            if (role.frame.receipt.acknowledgement.baseline.receipt.binding.identity.fingerprintVersion == 2 && !snapshot.unchanged) {
+                store.waitCapturedHandoff(role.frame)
+                return CapturedCreateReconciliationResult.UNSUPPORTED
             }
             val owner = mutation ?: store.localEdit(target, binding.eventId)?.id ?: store.localDelete(target, binding.eventId)?.id
                 ?: MutationId(java.util.UUID.randomUUID().toString())

@@ -121,5 +121,7 @@ duration and verified UID, with atomic child guards and historical ACK recovery.
 Canonical expectations now reopen from the exact capsule and reach binding,
 restoration and ACK through an explicit internal series-staging route. Historical
 capsule profiles remain unchanged; the worker's default capture and Proton v4
-dispatch stay closed. Next: qualify series handoff/historical recovery, then enable
-the fresh Proton submission capability and worker with end-to-end E3.
+dispatch stay closed. Series handoff and historical recovery now use that same source;
+contextual transfer checks preserve the simple-edit refusal and hold unsupported
+local changes. Next: enable the qualified fresh Proton submission capability and
+worker route with end-to-end E3, then group live-service/client journeys in E4.
