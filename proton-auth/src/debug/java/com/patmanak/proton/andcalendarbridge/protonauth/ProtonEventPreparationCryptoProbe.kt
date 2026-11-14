@@ -33,7 +33,9 @@ object ProtonEventPreparationCryptoProbe {
         finally { buffer.clear() }
     }
 
-    suspend fun run(): String = withContext(Dispatchers.IO) {
+    suspend fun run(): String = runProfile(false)
+    suspend fun runSeries(): String = runProfile(true)
+    private suspend fun runProfile(seriesMode: Boolean): String = withContext(Dispatchers.IO) {
         var stage = "GENERATE"
         try {
             val crypto = AndroidCryptoContext()
@@ -83,18 +85,23 @@ object ProtonEventPreparationCryptoProbe {
                 val metadata = buildJsonObject { put("ID", scope.calendar.value); put("Type", 0) }
                 val decoder = ProtonEventDecryptor(crypto) { listOf(address) }
                 val stamp = Instant.parse("2026-09-29T10:00:00Z")
-                val times = listOf<EventTime>(EventTime.Timed(Instant.parse("2027-03-28T00:30:00Z"),
+                val series = if (seriesMode) CreateSeriesRule(5) else null
+                val times = if (seriesMode) listOf<EventTime>(
+                    EventTime.Timed(Instant.parse("2030-03-29T11:00:00Z"), Instant.parse("2030-03-29T12:00:00Z"), ZoneId.of("Europe/Paris")),
+                    EventTime.AllDay(LocalDate.parse("2030-03-29"), LocalDate.parse("2030-03-31")))
+                else listOf<EventTime>(EventTime.Timed(Instant.parse("2027-03-28T00:30:00Z"),
                     Instant.parse("2027-03-28T01:30:00Z"), ZoneId.of("Europe/Paris")),
                     EventTime.AllDay(LocalDate.parse("2027-03-28"), LocalDate.parse("2027-03-30")))
                 for (time in times) {
                     val content = EventContent("Création; café, \\" + "é".repeat(100), time,
                         "Description\nLigne suivante", "Lieu de test")
                     stage = "PREPARE"
-                    val direct = encryptor.prepare("synthetic-stable@calendeer.invalid", stamp, content,
-                        addressKey, calendarKey.publicKey(crypto))
+                    val direct = if (series != null) encryptor.prepareSeries("synthetic-stable@calendeer.invalid", stamp, content,
+                        series, addressKey, calendarKey.publicKey(crypto)) else encryptor.prepare("synthetic-stable@calendeer.invalid", stamp,
+                        content, addressKey, calendarKey.publicKey(crypto))
                     check(direct.format == AdapterFormat("proton-calendar-simple-create", 1))
                     val draft = CalendarCreateDraft(scope, MutationId("synthetic-correlation"), stamp, content)
-                    val prepared = resolver.prepare(scope, metadata, bootstrap, listOf(address),
+                    val prepared = if (seriesMode) direct else resolver.prepare(scope, metadata, bootstrap, listOf(address),
                         "synthetic-stable@calendeer.invalid", draft)
                     check(prepared.format == AdapterFormat("proton-calendar-simple-create", 1))
                     check(!prepared.toString().contains(content.title))
@@ -118,7 +125,12 @@ object ProtonEventPreparationCryptoProbe {
                     }
                     stage = "ROUND_TRIP"
                     val actual = decoder.decrypt(user, "synthetic-calendar", bootstrap, listOf(row)).single().content
-                    check(actual.copy(description = actual.description.replace("\r\n", "\n"), details = null) == content)
+                    if (series != null) {
+                        check(actual.recurrence?.uid == "synthetic-stable@calendeer.invalid")
+                        check(CreateSeriesRule.parse(actual.recurrence!!.rule!!) == series)
+                    }
+                    check(actual.copy(description = actual.description.replace("\r\n", "\n"), details = null,
+                        recurrence = if (series != null) null else actual.recurrence) == content)
                     check(actual.details == EventDetails())
                     stage = "SIGNED_UID_BINDING"
                     val session = CatalogSession(user, SessionId("synthetic-session"))
@@ -127,6 +139,17 @@ object ProtonEventPreparationCryptoProbe {
                     val foreign = "foreign@calendeer.invalid"
                     val substituted = JsonObject(row + ("UID" to JsonPrimitive(foreign)))
                     check(decoder.decodeCreated(session, "synthetic-calendar", bootstrap, substituted, foreign) == null)
+                    if (series != null) {
+                        stage = "SERIES_RULE_SIGNATURE"
+                        val parts = row.array("SharedEvents").map { it as JsonObject }.toMutableList()
+                        val original = parts[0].string("Data")
+                        val altered = original.replace("COUNT=5", "COUNT=6")
+                        check(altered != original)
+                        parts[0] = JsonObject(parts[0] + ("Data" to JsonPrimitive(altered)))
+                        val tampered = decoder.decodePage(user, "synthetic-calendar", bootstrap,
+                            listOf(JsonObject(row + ("SharedEvents" to JsonArray(parts)))))
+                        check(tampered.changes.isEmpty() && tampered.deferred.single().reason == DeferredEventReason.UNVERIFIED_CONTENT)
+                    }
                     for (index in requestParts.indices) {
                         stage = if (index == 0) "CLEAR_SIGNATURE" else "ENCRYPTED_SIGNATURE"
                         val parts = row.array("SharedEvents").map { it as JsonObject }.toMutableList()

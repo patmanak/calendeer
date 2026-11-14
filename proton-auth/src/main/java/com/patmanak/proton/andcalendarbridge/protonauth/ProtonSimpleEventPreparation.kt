@@ -9,6 +9,9 @@ import biweekly.component.VTimezone
 import biweekly.io.TimezoneAssignment
 import biweekly.util.DateTimeComponents
 import biweekly.util.ICalDate
+import biweekly.util.Recurrence
+import biweekly.util.Frequency
+import com.patmanak.proton.andcalendarbridge.sync.CreateSeriesRule
 import com.patmanak.proton.andcalendarbridge.sync.AdapterFormat
 import com.patmanak.proton.andcalendarbridge.sync.EventContent
 import com.patmanak.proton.andcalendarbridge.sync.EventTime
@@ -40,12 +43,17 @@ internal class ProtonEventTextParts(val clearShared: String, val encryptedShared
 
 /** CREATE only. Never rebuild an UPDATE from the lossy display model. No clock, network or key access. */
 internal object ProtonSimpleEventSerializer {
-    fun serialize(uid: String, timestamp: Instant, content: EventContent): ProtonEventTextParts {
+    fun serializeSeries(uid: String, timestamp: Instant, content: EventContent,
+        series: CreateSeriesRule): ProtonEventTextParts = serializeValue(uid, timestamp, content, series)
+    fun serialize(uid: String, timestamp: Instant, content: EventContent): ProtonEventTextParts =
+        serializeValue(uid, timestamp, content, null)
+    private fun serializeValue(uid: String, timestamp: Instant, content: EventContent, series: CreateSeriesRule?): ProtonEventTextParts {
         fun unsupported(): Nothing = throw ProtonEventPreparationException(ProtonEventPreparationFailure.UNSUPPORTED_CONTENT)
         try {
             if (!uid.matches(Regex("[A-Za-z0-9][A-Za-z0-9@._+-]{0,254}")) || timestamp.nano != 0 ||
                 timestamp.atOffset(ZoneOffset.UTC).year !in MIN_YEAR..9999 || content.recurrence != null ||
-                (content.details != null && content.details != EventDetails()) || content.colorRgb != null) unsupported()
+                (content.details != null && content.details != EventDetails()) || content.colorRgb != null ||
+                series?.supports(content.time) == false) unsupported()
             val text = listOf(content.title, content.description, content.location)
                 .map { it.replace("\r\n", "\n") }
             if (text.any { it.length > MAX_BYTES || '\u0000' in it ||
@@ -93,6 +101,9 @@ internal object ProtonSimpleEventSerializer {
                     }
                 }
             }
+            if (series != null) clear.setRecurrenceRule(Recurrence.Builder(Frequency.DAILY).count(series.count).apply {
+                if (series.interval != 1) interval(series.interval)
+            }.build())
             val parts = ProtonEventTextParts(Biweekly.write(clearCalendar).go(), Biweekly.write(wrap(secret)).go())
             if (parts.clearShared.toByteArray(Charsets.UTF_8).size.toLong() +
                 parts.encryptedShared.toByteArray(Charsets.UTF_8).size > MAX_BYTES) unsupported()
@@ -116,6 +127,14 @@ internal class ProtonSimpleEventEncryptor(private val crypto: CryptoContext) {
     fun prepare(uid: String, timestamp: Instant, content: EventContent,
         memberSigningKey: PrivateKey, calendarEncryptionKey: PublicKey): ProtonPreparedCreateEvent {
         val parts = ProtonSimpleEventSerializer.serialize(uid, timestamp, content)
+        return encrypt(parts, memberSigningKey, calendarEncryptionKey)
+    }
+    /** Shared cryptographic primitive only; no recurring submission capability or protected capsule. */
+    fun prepareSeries(uid: String, timestamp: Instant, content: EventContent, series: CreateSeriesRule,
+        memberSigningKey: PrivateKey, calendarEncryptionKey: PublicKey): ProtonPreparedCreateEvent =
+        encrypt(ProtonSimpleEventSerializer.serializeSeries(uid, timestamp, content, series), memberSigningKey, calendarEncryptionKey)
+
+    private fun encrypt(parts: ProtonEventTextParts, memberSigningKey: PrivateKey, calendarEncryptionKey: PublicKey): ProtonPreparedCreateEvent {
         if (!memberSigningKey.isActive || !memberSigningKey.isPrimary || !memberSigningKey.canVerify ||
             !calendarEncryptionKey.isActive || !calendarEncryptionKey.isPrimary || !calendarEncryptionKey.canEncrypt)
             throw ProtonEventPreparationException(ProtonEventPreparationFailure.KEYS)

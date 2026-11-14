@@ -22,6 +22,11 @@ import org.junit.runner.RunWith
 /** Real separate SQLite journals; controlled Provider/account ports, no API calls or CREATE dispatch. */
 @RunWith(AndroidJUnit4::class)
 class LocalCreateCaptureCoordinatorDeviceTest {
+    @Test fun historicalSimplePortCannotSilentlyDropASeriesReturnedByAnotherAdapter() = fixture {
+        snapshot = snapshot!!.copy(series = CreateSeriesRule(3))
+        assertEquals(LocalEditCaptureResult.UNQUALIFIED, capture())
+        assertNull(retained()); assertEquals(1, stamps)
+    }
     @Test fun simpleLocalCreateIsRetainedOfflineWithoutDispatch() = fixture {
         assertEquals(LocalEditCaptureResult.RETAINED, capture())
         assertEquals(LocalCreateIntent(reservation, content), retained())

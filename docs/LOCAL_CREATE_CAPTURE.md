@@ -36,6 +36,37 @@ captures. Rich content uses JSON v2 and a distinct complete fingerprint domain,
 without changing the native identity marker or database schema. The historical
 known-empty guards described below still apply to their original formats.
 
+## Series CREATE foundations — not enabled for submission
+
+Explicit native series observation and snapshot storage are available internally;
+the system controller still uses the simple profile and refuses recurring uploads.
+`CreateSeriesRule` carries no UID. It accepts finite DAILY rules with COUNT 2–366
+and INTERVAL 1–365, validates every start/end slot and rejects gaps, folds, changing
+elapsed durations and instants outside 1970–9999. Unknown rule parameters remain
+unsupported. Only known parameter order/case and default interval are normalized.
+
+`captureAndStampSeriesCreate` and its inspection counterpart retain RRULE and
+DURATION exactly in the Provider. This profile requires null DTEND, positive
+whole-second `PT…` timed durations or `P…D` all-day durations, at most 366 days.
+It asserts the absence of existing exception children along with the complete
+observed row, reminder identities and other child guards before stamping. A logical
+exclusive end is derived only in memory. DIRTY stays set; no remote ID is assigned.
+The simple observation ports retain their previous refusal of recurrence.
+
+Content JSON schema 3 retains the explicit rule beside simple event fields,
+reminders and color in the existing journal. Full-intent reload preserves it;
+legacy content-only readers refuse schema 3. Schemas 1/2 keep their original
+interpretation. Preparation and submission currently reject every series intent,
+so it cannot pass through a historical capsule with its rule discarded.
+
+The explicit series serializer adds RRULE only to the signed clear shared part,
+using the existing Biweekly builder and Proton encryption primitives. Shared text
+bytes remain unchanged. Synthetic native crypto checks cover canonical UID/rule
+readback and altered clear/encrypted signatures. This is not a qualified service
+submission or an advertised v4 capability. Protected capsule selection, versioned
+dispatch fingerprints and SQL migration, full source readback and original-row
+acknowledgement must be integrated before controller activation.
+
 An additional measured native-editor profile accepts the bridge's own opaque
 local organizer label, with the exact self-organizer/default guest flags and no
 participants or extended properties. This local label is not an

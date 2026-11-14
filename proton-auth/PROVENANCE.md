@@ -296,6 +296,13 @@ does not establish server UID idempotency or conditional writes.
 
 ## Offline simple CREATE preparation
 
+The explicit local series extension reuses the same partition/encryption assembly
+and Biweekly `Recurrence.Builder` for a bounded DAILY rule in the clear signed
+part. It neither copies another upstream use case nor changes the historical
+simple preparation/submission profiles. Admission and original-slot constraints
+are project-owned policy; the current source references and limits are recorded
+in [the recurring-write study](../docs/research/RECURRENCE_WRITES.md).
+
 `ProtonSimpleEventPreparation.kt` adapts the bounded simple-event partition and
 encryption assembly from Proton Android Calendar at
 `83bbd6a15b0aaa135e424fb5ac195c0a52929b4f`, under GPL version 3:

@@ -57,7 +57,7 @@ internal class LocalCreateStaging(
             val firstClaim = journal.reserve(reservation)
             val snapshot = if (firstClaim) projection.captureAndStampSimpleCreate(target, eventRow, localId)
                 else projection.inspectStampedSimpleCreate(target, localId)
-            if (snapshot == null) return LocalEditCaptureResult.UNQUALIFIED
+            if (snapshot == null || snapshot.series != null) return LocalEditCaptureResult.UNQUALIFIED
             if (!currentAccount() || !active()) return LocalEditCaptureResult.INACTIVE
             val currentSelection = store.selections(target.account).singleOrNull { it.scope == target }
             if (currentSelection?.enabled != true || !currentSelection.available) return LocalEditCaptureResult.INACTIVE

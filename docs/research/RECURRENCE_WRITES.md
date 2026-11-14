@@ -112,5 +112,8 @@ PASS: current official refs resolved, complete trees checked, listed implementat
 and licenses read, existing Calendeer admission boundaries compared. NOT RUN:
 new upstream dependency build, recurrence write crypto/Provider integration or live
 service/client journey. No new recurring writer or network format is enabled.
-Next: L9b's failing capture/version and protected-payload fixtures, followed by
-its narrow end-to-end E3 implementation.
+L9b's [qualified foundations](../LOCAL_CREATE_CAPTURE.md#series-create-foundations--not-enabled-for-submission)
+now include strict rule admission, content snapshot schema 3, explicit native
+observation and shared signed/encrypted serialization. Historical capsule paths
+remain closed to series. Next: protected v4 capsule selection, versioned dispatch
+fingerprints/SQL and full readback/native acknowledgement, then controller E3.
