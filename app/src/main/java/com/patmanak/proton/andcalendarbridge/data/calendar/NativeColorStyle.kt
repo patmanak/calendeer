@@ -16,6 +16,12 @@ internal data class NativeColorStyle(val proof: String?, val masked: Boolean, va
     fun logicalColor(nativeColor: Int?): Int? = if (masked) colorRgb else
         nativeColor?.takeUnless { it == 0 }?.and(0xffffff)
 
+    fun forDisplay(mode: EventColorMode, nativeColor: Int?): NativeColorStyle? {
+        if (masked && nativeColor != null) return null
+        if (!masked && nativeColor != null && nativeColor != 0 && nativeColor.ushr(24) != 0xff) return null
+        return copy(masked = mode == EventColorMode.CALENDAR, colorRgb = logicalColor(nativeColor))
+    }
+
     companion object {
         private const val SUFFIX = "|calendeer-color-v1:"
         fun read(raw: String?): NativeColorStyle? {

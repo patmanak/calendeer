@@ -22,6 +22,110 @@ import org.junit.Test
 
 /** Isolated Provider fixtures; never accesses a Proton session or existing calendars. */
 class PersonalNativeProfileDeviceTest {
+    @Test fun finiteDisplayProofKeepsItsBarrierAndUnknownFiniteVersionsAreUntouched() {
+        var mode = EventColorMode.EVENT
+        fixture(colorMode = { mode }) {
+            val unknown = "calendeer-finite-daily-dates-v1-receipt-v2:${UUID.randomUUID()}"
+            mutate(ContentValues().apply { put(Events.DIRTY, 0); put(Events.SYNC_DATA3, unknown) })
+            val color = field(Events.EVENT_COLOR); mode = EventColorMode.CALENDAR
+            projection.reprojectEventColors(scope)
+            assertEquals(unknown, field(Events.SYNC_DATA3)); assertEquals(color, field(Events.EVENT_COLOR))
+            val known = unknown.replace("receipt-v2:", "receipt-v1:")
+            mutate(ContentValues().apply { put(Events.SYNC_DATA3, known) })
+            projection.reprojectEventColors(scope)
+            assertNull(field(Events.EVENT_COLOR)); assertTrue(field(Events.SYNC_DATA3)!!.startsWith("calendeer-finite-"))
+            try { projection.apply(ProjectionIntent(scope, base)); fail("Finite barrier must remain active") }
+            catch (failure: CalendarProjectionException) { assertEquals(CalendarProjectionFailure.PROVIDER_REJECTED, failure.category) }
+            mode = EventColorMode.EVENT; projection.reprojectEventColors(scope)
+            assertEquals(known, field(Events.SYNC_DATA3)); assertEquals(color, field(Events.EVENT_COLOR))
+        }
+    }
+    @Test fun displayRewriteCannotConsumeAConcurrentEditAndLostResponseReplaysWithoutEcho() {
+        var mode = EventColorMode.EVENT
+        fixture(colorMode = { mode }) {
+            mutate(ContentValues().apply { put(Events.DIRTY, 0) }); mode = EventColorMode.CALENDAR
+            val racing = colorProjection(before = { mutate(ContentValues().apply {
+                put(Events.TITLE, "Concurrent phone edit"); put(Events.DIRTY, 1)
+            }) })
+            try { racing.reprojectEventColors(scope); fail("Dirty CAS must reject") }
+            catch (failure: CalendarProjectionException) { assertEquals(CalendarProjectionFailure.PROVIDER_REJECTED, failure.category) }
+            assertEquals("1", field(Events.DIRTY)); assertNull(field(Events.SYNC_DATA3))
+            assertEquals("Concurrent phone edit", field(Events.TITLE))
+            mutate(ContentValues().apply { put(Events.DIRTY, 0) })
+            val lost = colorProjection(after = { throw android.os.RemoteException("Synthetic lost response") })
+            try { lost.reprojectEventColors(scope); fail("No successful response") }
+            catch (failure: CalendarProjectionException) { assertEquals(CalendarProjectionFailure.PROVIDER_UNAVAILABLE, failure.category) }
+            val marker = field(Events.SYNC_DATA3); assertNotNull(marker)
+            projection.reprojectEventColors(scope)
+            assertEquals(marker, field(Events.SYNC_DATA3)); assertNull(field(Events.EVENT_COLOR))
+            assertEquals("0", field(Events.DIRTY)); assertEquals("Concurrent phone edit", field(Events.TITLE))
+        }
+    }
+    @Test fun localDisplayRewriteRestoresColorsOfflineWithoutDirtyEchoOrChangingReceiptAndChildren() {
+        var mode = EventColorMode.EVENT
+        fixture(colorMode = { mode }) {
+            for (color in listOf(null, 0, 0xff000000.toInt(), 0xff123456.toInt())) {
+                mutate(ContentValues().apply { put(Events.DIRTY, 0); put(Events.EVENT_COLOR, color) })
+                val children = reminders(); val revision = field(Events.SYNC_DATA2)
+                mode = EventColorMode.CALENDAR
+                assertFalse(projection.reprojectEventColors(scope).hasMore)
+                assertNull(field(Events.EVENT_COLOR)); assertEquals("0", field(Events.DIRTY))
+                assertEquals(if (color == null || color == 0) null else color and 0xffffff,
+                    NativeColorStyle.read(field(Events.SYNC_DATA3))!!.colorRgb)
+                val masked = field(Events.SYNC_DATA3)
+                projection.reprojectEventColors(scope)
+                assertEquals(masked, field(Events.SYNC_DATA3))
+                mode = EventColorMode.EVENT
+                projection.reprojectEventColors(scope)
+                assertEquals(if (color == 0) null else color?.toString(), field(Events.EVENT_COLOR))
+                assertEquals(revision, field(Events.SYNC_DATA2)); assertNull(field(Events.SYNC_DATA3))
+                assertEquals(children, reminders()); assertEquals("0", field(Events.DIRTY))
+            }
+        }
+    }
+    @Test fun localDisplayRewritePreservesDirtyUnknownReservedAndUnexpectedColorRows() {
+        var mode = EventColorMode.EVENT
+        fixture(colorMode = { mode }) {
+            mode = EventColorMode.CALENDAR
+            val originalColor = field(Events.EVENT_COLOR)
+            projection.reprojectEventColors(scope)
+            assertEquals(originalColor, field(Events.EVENT_COLOR)); assertEquals("1", field(Events.DIRTY))
+            mutate(ContentValues().apply { put(Events.DIRTY, 0); put(Events.SYNC_DATA8, "unknown-profile") })
+            projection.reprojectEventColors(scope); assertEquals(originalColor, field(Events.EVENT_COLOR))
+            mutate(ContentValues().apply { putNull(Events.SYNC_DATA8); put(Events.SYNC_DATA3, "future-receipt") })
+            projection.reprojectEventColors(scope); assertEquals("future-receipt", field(Events.SYNC_DATA3))
+            mutate(ContentValues().apply { put(Events.SYNC_DATA3, "|calendeer-color-v2:none") })
+            projection.reprojectEventColors(scope); assertEquals(originalColor, field(Events.EVENT_COLOR))
+            mutate(ContentValues().apply { putNull(Events.SYNC_DATA3) })
+            projection.reprojectEventColors(scope)
+            val marker = field(Events.SYNC_DATA3)
+            mutate(ContentValues().apply { put(Events.EVENT_COLOR, 0xff654321.toInt()) })
+            mode = EventColorMode.EVENT
+            projection.reprojectEventColors(scope)
+            assertEquals(marker, field(Events.SYNC_DATA3)); assertEquals(0xff654321.toInt().toString(), field(Events.EVENT_COLOR))
+        }
+    }
+    @Test fun pagedDisplayRewriteResumesAndConvergesAfterTheDesiredModeChanges() {
+        var mode = EventColorMode.EVENT
+        fixture(colorMode = { mode }) {
+            mutate(ContentValues().apply { put(Events.DIRTY, 0) })
+            repeat(5) { projection.apply(ProjectionIntent(scope, base.copy(eventId = EventId("color-page-$it")))) }
+            mode = EventColorMode.CALENDAR
+            val first = projection.reprojectEventColors(scope, limit = 2)
+            assertTrue(first.hasMore); assertTrue(first.afterRow > 0)
+            // A setting change queues another full pass; an older pass never owns the setting.
+            mode = EventColorMode.EVENT
+            var next = projection.reprojectEventColors(scope, first.afterRow, 2)
+            while (next.hasMore) next = projection.reprojectEventColors(scope, next.afterRow, 2)
+            assertNull(field(Events.EVENT_COLOR))
+            next = projection.reprojectEventColors(scope, limit = 2)
+            var pages = 1
+            while (next.hasMore) { next = projection.reprojectEventColors(scope, next.afterRow, 2); pages++ }
+            assertEquals(3, pages)
+            assertEquals((original.colorRgb!! or 0xff000000.toInt()).toString(), field(Events.EVENT_COLOR))
+            assertEquals("0", field(Events.DIRTY)); assertNull(field(Events.SYNC_DATA3))
+        }
+    }
     @Test fun maskedColorPreservesCanonicalColorAcrossTitleEditAcknowledgementAndLaterInspection() =
         fixture(colorMode = { EventColorMode.CALENDAR }) {
             assertNull(field(Events.EVENT_COLOR))
@@ -292,7 +396,7 @@ class PersonalNativeProfileDeviceTest {
     }
 
     private class Fixture(val context: Context, richMetadata: Boolean = true, val simpleTitle: Boolean = false,
-        colorMode: () -> EventColorMode = { EventColorMode.EVENT }) {
+        val colorMode: () -> EventColorMode = { EventColorMode.EVENT }) {
         val scope = CalendarScope(AccountId("personal-native-${UUID.randomUUID()}"), CalendarId("fixture"), 0)
         val projection = AndroidCalendarProjection(context, colorMode)
         val format = AdapterFormat("synthetic-personal-native", 1)
@@ -315,6 +419,26 @@ class PersonalNativeProfileDeviceTest {
         fun field(column: String): String? = context.contentResolver.query(sync(Events.CONTENT_URI), arrayOf(column), "${Events._ID}=?", arrayOf(row.toString()), null)!!.use { check(it.moveToFirst()); it.getString(0) }
         fun reminders(): List<List<String?>> = context.contentResolver.query(sync(Reminders.CONTENT_URI), arrayOf(Reminders._ID, Reminders.EVENT_ID, Reminders.MINUTES, Reminders.METHOD), "${Reminders.EVENT_ID}=?", arrayOf(row.toString()), Reminders._ID)!!.use { cursor -> buildList { while(cursor.moveToNext()) add((0..3).map { cursor.getString(it) }) } }
         fun addReminder(minutes: Int): Uri = context.contentResolver.insert(sync(Reminders.CONTENT_URI), ContentValues().apply { put(Reminders.EVENT_ID, row); put(Reminders.MINUTES, minutes); put(Reminders.METHOD, Reminders.METHOD_ALERT) })!!
+        fun colorProjection(before: () -> Unit = {}, after: () -> Unit = {}): AndroidCalendarProjection {
+            val real = context.contentResolver
+            val provider = object : ContentProvider() {
+                override fun onCreate() = true
+                override fun getType(uri: Uri): String? = null
+                override fun insert(uri: Uri, values: ContentValues?): Uri? = error("Use batch")
+                override fun delete(uri: Uri, selection: String?, args: Array<out String>?): Int = error("Use batch")
+                override fun update(uri: Uri, values: ContentValues?, selection: String?, args: Array<out String>?): Int = error("Use batch")
+                override fun query(uri: Uri, columns: Array<out String>?, selection: String?, args: Array<out String>?, order: String?) =
+                    real.query(uri, columns, selection, args, order)
+                override fun applyBatch(operations: ArrayList<ContentProviderOperation>): Array<ContentProviderResult> {
+                    before(); val result = real.applyBatch(CalendarContract.AUTHORITY, operations); after(); return result
+                }
+            }
+            val wrapped = object : ContextWrapper(context) {
+                override fun getApplicationContext(): Context = this
+                override fun getContentResolver() = ContentResolver.wrap(provider)
+            }
+            return AndroidCalendarProjection(wrapped, colorMode)
+        }
         suspend fun seed() {
             val calendar = projection.ensureCalendarState(scope, CalendarSummary(scope.calendar, "Synthetic personal fixture"), true).id
             projection.apply(ProjectionIntent(scope, base))

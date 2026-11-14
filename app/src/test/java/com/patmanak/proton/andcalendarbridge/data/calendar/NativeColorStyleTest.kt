@@ -41,4 +41,22 @@ class NativeColorStyleTest {
         assertEquals(0, style.logicalColor(0xff000000.toInt()))
         assertEquals(0x123456, style.logicalColor(0xff123456.toInt()))
     }
+    @Test fun displayChangeRoundTripKeepsBlackFallbackAndProofWithoutAccumulatingSuffixes() {
+        for (native in listOf(null, 0, 0xff000000.toInt(), 0xff123456.toInt())) {
+            val original = NativeColorStyle(proof, false, null)
+            val hidden = original.forDisplay(EventColorMode.CALENDAR, native)!!
+            assertTrue(hidden.masked); assertEquals(original.logicalColor(native), hidden.colorRgb)
+            val restored = hidden.forDisplay(EventColorMode.EVENT, null)!!
+            assertFalse(restored.masked); assertEquals(proof, restored.marker())
+            assertEquals(hidden, hidden.forDisplay(EventColorMode.CALENDAR, null))
+            assertEquals(hidden, NativeColorStyle.read(hidden.marker()))
+        }
+    }
+    @Test fun displayRewriteNeverConsumesAnExplicitColorOnAMaskedRowOrUnknownAlpha() {
+        for (mode in EventColorMode.entries) {
+            assertNull(NativeColorStyle(proof, true, 0x123456).forDisplay(mode, 0xff654321.toInt()))
+            assertNull(NativeColorStyle(proof, true, null).forDisplay(mode, 0))
+            assertNull(NativeColorStyle(proof, false, null).forDisplay(mode, 0x123456))
+        }
+    }
 }

@@ -31,6 +31,24 @@ import org.junit.runner.RunWith
 /** Isolated native conditional update and historical recovery qualification; no server writes. */
 @RunWith(AndroidJUnit4::class)
 class CapturedHandoffProviderDeviceTest {
+    @Test fun localDisplayRewriteKeepsAcknowledgedCreationAndHandoffProofsRecoverable() {
+        var mode = EventColorMode.EVENT
+        fixture(allDay = true, colorMode = { mode }) {
+            mode = EventColorMode.CALENDAR
+            projection.reprojectEventColors(target)
+            assertEquals(CapturedCreateCleanWitness(ack), projection.inspectAcknowledgedCreateClean(ack))
+            assertEquals(AppliedCapturedCreateAcknowledgement(ack), projection.inspectCapturedAcknowledgement(ack))
+            val plan = plan()
+            applied(plan)
+            val proof = NativeColorStyle.read(field(Events.SYNC_DATA3))!!.proof
+            mode = EventColorMode.EVENT
+            projection.reprojectEventColors(target)
+            assertEquals(proof, field(Events.SYNC_DATA3))
+            assertEquals(AppliedCapturedHandoffProjection(plan), projection.inspectCapturedHandoffProjection(plan))
+            assertEquals(CapturedHandoffCleanWitness(advanced(plan)), projection.inspectCapturedHandoffBase(advanced(plan)))
+            assertEquals("0", field(Events.DIRTY))
+        }
+    }
     @Test fun maskedTransferredCreationAndIncomingColorKeepOriginAndHistoricalProof() =
         fixture(allDay = true, colorMode = { EventColorMode.CALENDAR }) {
             assertEquals(CapturedCreateCleanWitness(ack), projection.inspectAcknowledgedCreateClean(ack))

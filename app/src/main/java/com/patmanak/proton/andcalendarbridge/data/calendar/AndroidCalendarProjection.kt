@@ -112,6 +112,8 @@ data class EnsuredCalendar(val id: Long, val created: Boolean)
  */
 class AndroidCalendarProjection(context: Context,
     internal val colorMode: () -> EventColorMode = { EventColorMode.EVENT }) : CalendarProjection {
+    override suspend fun reprojectEventColors(scope: CalendarScope, afterRow: Long, limit: Int) =
+        reprojectColorPage(scope, afterRow, limit)
     private val localCreateReader by lazy { NativeLocalCreateReader(resolver, ::accountFor, ::calendarRow,
         ::syncUri, ::calendarSyncId, ::calendarSelection, ::assertion,
         { values, placeholder -> readSimpleTime(values, placeholder) }, ::requirePermissions, ::capturedBatch, ::fail,

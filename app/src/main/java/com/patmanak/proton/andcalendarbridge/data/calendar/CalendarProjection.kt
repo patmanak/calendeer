@@ -37,6 +37,9 @@ import com.patmanak.proton.andcalendarbridge.sync.catalog.CalendarSummary
 
 /** Android-layer boundary. A failed apply leaves its durable intent unacknowledged for replay. */
 interface CalendarProjection {
+    /** Local representation only; never capture/send edits. Pages include skipped rows. */
+    suspend fun reprojectEventColors(scope: CalendarScope, afterRow: Long = 0, limit: Int = 100): ColorProjectionPage =
+        ColorProjectionPage(afterRow, false)
     val deleteAcknowledgementProtocol: Int? get() = null
     /** Metadata-only ACK of one exact ordinary dirty tombstone. Keep DELETED and base revision.
      * Caller must first reserve this receipt durably. Never purge or insert.
