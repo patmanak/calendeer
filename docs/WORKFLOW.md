@@ -71,6 +71,26 @@ Native roles live in `.codex/agents/*.toml`; project settings in
 for future applicable sessions; a live chat can retain earlier settings. Follow
 this bounded method immediately without claiming a hot reload was verified.
 
+Six project agents are defined in `.codex/agents/` (`calendar_specifier`,
+`calendar_planner`, `calendar_proton_researcher`, `calendar_developer`,
+`calendar_tester`, `calendar_reviewer`) and five skills in `.agents/skills/`
+(`$calendar-specify`, `$calendar-plan`, `$calendar-proton-research`,
+`$calendar-implement`, `$calendar-verify`). The primary agent coordinates the work
+and owns integration. A fresh checkout works without the Git-ignored
+`AGENTS.local.md`; keep its contents out of public documentation and commits.
+
+Open the Calendar directory itself as the Codex project for native discovery of
+these files; starting from its parent does not imply discovery, and existing
+sessions may need a reload. Respect the project trust prompt instead of changing
+global trust or permissions. From a parent-directory task, explicitly read
+`Calendar/AGENTS.md` and the relevant skill, or pass the role's instructions in a
+subagent task; do not describe this fallback as proof of native discovery.
+
+With Python 3.11+, `python -m pip install --target .local/workflow-python -r
+tools/requirements.txt` then `python tools/validate_workflow.py` checks skill/agent
+metadata, references and source records. It proves neither agent loading nor app
+behavior; the helper dependency stays in ignored `.local/`.
+
 Configuration fields were checked against the official
 [subagent documentation](https://learn.chatgpt.com/docs/agent-configuration/subagents).
 TOML/link checks validate files, not native role discovery or measured session

@@ -1,110 +1,101 @@
 # Calendeer
 
-An Android bridge being developed to synchronize Proton Calendar
-with Android's system calendars. The application will not provide an event editor
-or calendar browsing interface. The development baseline specifies
-bidirectional synchronization as the final target and a possible read-only first
-milestone. Offline processing, progressive loading and maximum practical reuse
-of Proton libraries are confirmed requirements.
-Each selected calendar will also offer a persistent read-only/editable mode,
-with editing available where permissions and supported capabilities allow it.
-Event viewing and editing stay in the Android calendar application.
+Calendeer brings your Proton Calendar into Android's own calendar. Your Proton
+events appear in the calendar app you already use (for example /e/OS Calendar,
+Etar or Google Calendar), alongside your other calendars, and changes you make
+there can be sent back to Proton.
 
-The confirmed architectural constraint is a replaceable Proton integration:
-changes to Proton's network API, cryptography or future SDK must be contained at
-the integration boundary rather than spread through the application.
+Calendeer is an independent application, not an official Proton product. It is
+a bridge: it has no event editor of its own. You view and edit events in your
+usual calendar app; Calendeer keeps them in sync in the background.
 
-## Start here
+## What you can do
 
-- [Implementation status](docs/STATUS.md): available behavior and current limits.
-- [Specification](docs/SPECIFICATION.md): requirements, provisional policies and acceptance scenarios.
-- [Architecture](docs/ARCHITECTURE.md): module boundaries and incremental delivery.
-- [Synchronization behavior](docs/SYNCHRONIZATION_BEHAVIOR.md): proposed read-only and editing capability gates.
-- [Build and validation](docs/VALIDATION.md): repeatable checks and qualification scope.
-- [Build security](docs/BUILD_SECURITY.md): dependency checks, CI and remaining release gates.
-- [F-Droid preparation](docs/FDROID.md): disabled recipe, listing, source builds and pending distribution choices.
-- [Licensing and source reuse](docs/LICENSING.md): imported components and notices.
-- [Agent instructions](AGENTS.md): project rules and task routing.
-- [Working method](docs/WORKFLOW.md): roles, handoffs and verification.
-- [Selected upstream methods](docs/WORKFLOW_SOURCES.md): sources and adaptations.
-- [Proton research baseline](docs/research/PROTON.md): findings to revalidate before implementation.
+**Connect your Proton account**
+- Sign in with your Proton account, including two-factor authentication and
+  Proton's human verification. The session is kept, so you sign in once.
+- Settings show which account is connected.
 
-## Agents and skills
+**Choose your calendars**
+- Calendeer lists your Proton calendars with their names and colors.
+- Turn each calendar on or off to show it or hide it on the phone.
+- For each calendar, choose **Read-only** (the default: Proton is copied to the
+  phone, nothing is sent back) or **Editable** (changes made on the phone are
+  sent to Proton).
 
-`AGENTS.md` contains public project instructions. If present, `AGENTS.local.md`
-adds private operator preferences and workstation restrictions; it is Git-ignored
-and explicitly read by the primary and delegated agents. A fresh checkout works
-without it. Keep its contents out of public documentation and commits.
+**See your events in your Android calendar app**
+- Events from the selected calendars appear in Android's calendar, with their
+  title, description, location, dates and times, all-day events and time zones.
+- Your personal reminders and event colors come along too.
+- Choose how events are colored: **each event's own color** (default) or
+  **the calendar's color**. Switching only changes the display on the phone;
+  your colors in Proton are untouched.
+- Events stay available without a network connection.
 
-Six project agents are defined in `.codex/agents/`: `calendar_specifier`,
-`calendar_planner`, `calendar_proton_researcher`, `calendar_developer`,
-`calendar_tester`, and `calendar_reviewer`.
+**Edit from your phone** (Editable calendars)
+- Create an event, with its reminders and color.
+- Change the title, description, location, dates, times, all-day setting or
+  time zone.
+- Add, change or remove reminders, and change an event's color.
+- Delete an event.
+- Changes are sent to Proton automatically; **Synchronize** requests a sync now.
+  Proton's email reminders are preserved when you edit an event.
 
-Five project skills are installed in `.agents/skills/`: `$calendar-specify`,
-`$calendar-plan`, `$calendar-proton-research`, `$calendar-implement`, and
-`$calendar-verify`. The primary agent coordinates the work and owns integration.
+**Stay in sync without thinking about it**
+- Automatic synchronization every 15 minutes up to every 6 hours (hourly by
+  default), plus the **Synchronize** button to request an update.
+- Pull-to-refresh in your calendar app also triggers a synchronization.
+- One status line tells you at a glance whether everything is up to date,
+  in progress, offline or needs your attention.
+- If a change can't be sent, it stays on the phone and the
+  affected calendar says so in plain words.
 
-Open **this Calendar directory** as the working project in Codex for native
-discovery of these files. Starting from its parent directory does not imply that
-child-project skills and agent configuration are discovered. Existing sessions
-may need to reload the project or start a fresh task. Respect Codex's project
-trust prompt; do not change global trust or permission settings to bypass it.
+**Sign out cleanly**
+- Sign-out asks for confirmation and tells you if changes are still waiting to
+  be sent.
+- It removes the Proton session and Calendeer's calendars from the phone.
 
-From a parent-directory task, the usable fallback is to explicitly read
-`Calendar/AGENTS.md` and the relevant skill. A subagent can receive the selected
-role's instructions in its task message when named-agent selection is unavailable.
-Do not describe this fallback as proof of native agent discovery.
+**Make it yours**
+- Light, dark or system theme.
+- Available in English, French, German, Spanish, Italian, Dutch, Polish and
+  Portuguese.
 
-Example next request: "Poursuivons les spécifications de Calendar avec
-$calendar-specify."
+## Coming next
 
-The Android configuration application, pure synchronization engine and Proton
-authentication integration are implemented. The connection UI uses a real Proton
-Core adapter and discovers calendar names and colors through the retained session.
-Selected calendars mirror supported events into Android with durable offline
-processing and bounded background refresh. Read-only remains the default. Separate
-experimental options enable creation, title, description/location, dates and
-supported deletion through the system calendar. The new [personal edit profile](docs/PERSONAL_UPDATE.md)
-combines title/text/date changes, including timed/all-day and time-zone transitions,
-while preserving unchanged supported personal reminders and event colors. Existing
-requests retain their original strict profiles. Uncertain sends are inspected
-instead of resent; unsupported edits and conflicts remain retained. See the
-[current capabilities and RC limits](docs/STATUS.md) for measured qualification.
-Upstream workflow frameworks are selectively adapted; no installer/hook is required.
+- Repeating events (series and single occurrences).
+- Guests and invitations.
+
+## Learn more
+
+- [Current status](docs/STATUS.md): what is available today and what remains
+  before the first release.
+- [Interface](docs/DESIGN.md): screens and their behavior.
+- [Specification](docs/SPECIFICATION.md): requirements and accepted limits.
+- [Synchronization behavior](docs/SYNCHRONIZATION_BEHAVIOR.md),
+  [scheduling](docs/SYNC_SCHEDULING.md) and [permissions](docs/PERMISSIONS.md).
+- [Architecture](docs/ARCHITECTURE.md) and [validation](docs/VALIDATION.md).
+- [F-Droid preparation](docs/FDROID.md), [build security](docs/BUILD_SECURITY.md)
+  and [signed release preparation](docs/RELEASE_DISTRIBUTION.md).
+- Contributors and agents: [AGENTS.md](AGENTS.md) and [working method](docs/WORKFLOW.md).
 
 ## Build
 
-Use JDK 21 and Android SDK platform 37. Configure the SDK in ignored
-`local.properties` or `ANDROID_HOME`. First reconstruct the Proton native
-dependency using the [Linux reference builder](proton-auth/native/golib/README.md)
-with Go 1.27.1 and NDK r27c. Gradle refuses a missing or altered native artifact;
-it never falls back to upstream precompiled JNI libraries. Then run:
+Use JDK 21 and Android SDK platform 37 (set the SDK in ignored `local.properties`
+or `ANDROID_HOME`). First rebuild the Proton native dependency with the
+[Linux reference builder](proton-auth/native/golib/README.md) (Go 1.27.1, NDK r27c);
+Gradle refuses a missing or altered native artifact. Then run:
 
 ```sh
 ./gradlew :sync:test :auth:test :proton-auth:testDebugUnitTest :app:testDebugUnitTest :app:assembleDebug :app:lintDebug
 ```
 
-Use `gradlew.bat` on Windows. Initial setup downloads dependencies. The debug APK
-is generated under `app/build/outputs/apk/debug/`; do not commit build outputs.
-See [validation](docs/VALIDATION.md) for the scope of these checks.
-Resolved dependencies and checksums are locked; follow the
-[reviewed update procedure](docs/BUILD_SECURITY.md) when changing them.
+Use `gradlew.bat` on Windows. The debug APK is generated under
+`app/build/outputs/apk/debug/`. See [validation](docs/VALIDATION.md) and the
+[dependency update procedure](docs/BUILD_SECURITY.md).
 
-## Workflow validation
-
-With Python 3.11+, install the validation-only dependency locally if needed:
-
-```powershell
-python -m pip install --target .local/workflow-python -r tools/requirements.txt
-python tools/validate_workflow.py
-```
-
-This checks local skill/agent metadata, references and source records. It does not
-prove that the desktop app loaded the agents or that an Android app works.
-The helper dependency stays in ignored `.local/`; it is not an app dependency.
+## License
 
 Original contributions use [GPL-3.0-or-later](LICENSE). Imported Proton adaptations
-retain GPL-3.0-only terms; the combined application is constrained to GPL version 3.
-See [licensing and remaining distribution gates](docs/LICENSING.md) and
-[signed candidate preparation](docs/RELEASE_DISTRIBUTION.md). Upstream notices
-are retained in [docs/licenses](docs/licenses) and the dependency notice inventory.
+retain GPL-3.0-only terms, so the combined application is distributed under GPL
+version 3. See [licensing](docs/LICENSING.md) and the notices in
+[docs/licenses](docs/licenses).
