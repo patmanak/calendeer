@@ -153,7 +153,7 @@ class ConflictArchiveStoreDeviceTest {
         }
         store.close()
         ImportStore(ApplicationProvider.getApplicationContext(), name).use { migrated ->
-            assertEquals(24, migrated.readableDatabase.version); assertEquals(original, bytes(migrated.readableDatabase))
+            assertEquals(25, migrated.readableDatabase.version); assertEquals(original, bytes(migrated.readableDatabase))
             val observation = migrated.observations().single()
             assertEquals(changed, observation.change); assertEquals(ConflictObservationOrigin.CACHED, observation.origin); assertNull(observation.observedAt)
             assertEquals(base, migrated.conflictArchive(migrated.ref())?.base)
@@ -244,7 +244,7 @@ class ConflictArchiveStoreDeviceTest {
         store.writableDatabase.execSQL("UPDATE sqlite_sequence SET seq=90 WHERE name='conflict_observations'")
         store.close()
         ImportStore(ApplicationProvider.getApplicationContext(), name).use { migrated ->
-            assertEquals(24, migrated.readableDatabase.version); assertEquals(before, evidenceRows(migrated.readableDatabase))
+            assertEquals(25, migrated.readableDatabase.version); assertEquals(before, evidenceRows(migrated.readableDatabase))
             assertEquals(owner, migrated.localEdit(scope, base.eventId)); assertEquals(ref, migrated.ref())
             val tail = migrated.conflictObservations(ConflictObservationQuery(ref, 1, first.next))
             assertEquals(changed, tail.entries.single().change); assertNull(tail.next)
@@ -276,7 +276,7 @@ class ConflictArchiveStoreDeviceTest {
             }
             raw.execSQL("UPDATE conflict_observations SET kind='VERIFIED' WHERE id=1")
         }
-        ImportStore(context, name).use { assertEquals(24, it.readableDatabase.version) }
+        ImportStore(context, name).use { assertEquals(25, it.readableDatabase.version) }
     }
     private fun evidenceRows(db: SQLiteDatabase): List<List<String?>> = db.rawQuery("SELECT * FROM conflict_observations ORDER BY id", null).use { row ->
         buildList { while (row.moveToNext()) add(List(row.columnCount) { if (row.isNull(it)) null else row.getString(it) }) }

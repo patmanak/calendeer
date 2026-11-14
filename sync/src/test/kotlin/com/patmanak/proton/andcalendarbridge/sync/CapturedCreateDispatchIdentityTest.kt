@@ -46,7 +46,7 @@ class CapturedCreateDispatchIdentityTest {
         assertEquals(intent.reservation.localId, link.localId); assertEquals(intent.reservation.id, link.captureId)
         assertEquals(intent.reservation.timestamp, link.timestamp); assertEquals(intent.reservation.format, link.captureFormat)
         assertFalse(link.toString().contains(content.title)); assertFalse(link.toString().contains(link.contentFingerprint))
-        try { link.copy(fingerprintVersion = 2); fail("Implicit fingerprint migration accepted") }
+        try { link.copy(fingerprintVersion = 3); fail("Unknown fingerprint version accepted") }
         catch (_: IllegalArgumentException) { }
     }
 }

@@ -309,7 +309,7 @@ class LocalDeleteStoreDeviceTest {
                 db.version = 9
             }
             ImportStore(context, name).use { store ->
-                assertEquals(24, store.readableDatabase.version)
+                assertEquals(25, store.readableDatabase.version)
                 store.readableDatabase.rawQuery("SELECT mutation,event,adapter,version,base,local,state,kind FROM local_edits ORDER BY event", null).use {
                     assertEquals(2, it.count)
                     while (it.moveToNext()) {

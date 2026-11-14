@@ -278,7 +278,7 @@ class CreateAttemptStoreDeviceTest {
         assertEquals(prepared, store.read(scope, prepared.id))
         assertEquals(legacyUnknown, store.read(scope, legacyUnknown.id))
         SQLiteDatabase.openDatabase(path.absolutePath, null, SQLiteDatabase.OPEN_READONLY).use { migrated ->
-            assertEquals(7, migrated.version)
+            assertEquals(8, migrated.version)
         }
         assertTrue(store.claim(prepared))
         assertFalse(store.claim(legacyUnknown.copy(state = CreateAttemptState.PREPARED)))

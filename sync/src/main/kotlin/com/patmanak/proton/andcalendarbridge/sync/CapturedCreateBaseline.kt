@@ -5,7 +5,12 @@ package com.patmanak.proton.andcalendarbridge.sync
  * a Provider clean acknowledgement, or permission to release incoming projection.
  */
 class CapturedCreateBaseline(val receipt: CapturedCreateAttachmentReceipt, change: RemoteChange.Upsert) {
-    val change = change.copy(content = freezeCapturedCreateContent(change.content))
+    val change = change.copy(content = if (receipt.binding.identity.fingerprintVersion == 1) freezeCapturedCreateContent(change.content)
+        else {
+            capturedCreateSeries(change.content)
+            freezeCapturedCreateContent(change.content.copy(recurrence = null)).copy(
+                recurrence = requireNotNull(change.content.recurrence).copy(additionalDates = emptyList(), excludedDates = emptyList()))
+        })
     init {
         require(this.change.eventId == receipt.binding.eventId && this.change.revision == receipt.binding.verifiedRevision)
         require(receipt.binding.identity.matchesContent(this.change.content)) { "Baseline differs from the frozen capture" }

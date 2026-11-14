@@ -192,7 +192,7 @@ class TextLocalPreparationStoreDeviceTest {
                 store.writableDatabase.execSQL("DROP TABLE $table")
             store.writableDatabase.version = version; store.close()
             ImportStore(context, name).use { reopened ->
-                assertEquals(24, reopened.readableDatabase.version)
+                assertEquals(25, reopened.readableDatabase.version)
                 assertEquals(before, tables.associateWith { rows(reopened.readableDatabase, it) })
                 for (table in listOf("local_text_edit_preparations", "text_update_acknowledgements", "text_update_acknowledgement_history"))
                     assertTrue(rows(reopened.readableDatabase, table).isEmpty())

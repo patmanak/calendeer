@@ -109,11 +109,12 @@ inspectable; unsupported transitions must not be normalized or silently shifted.
 ## Evidence and next action
 
 PASS: current official refs resolved, complete trees checked, listed implementations
-and licenses read, existing Calendeer admission boundaries compared. NOT RUN:
-new upstream dependency build, recurrence write crypto/Provider integration or live
-service/client journey. No new recurring writer or network format is enabled.
+and licenses read, existing Calendeer admission boundaries compared. No new upstream
+dependency was introduced. Live service/client journeys remain NOT RUN; no recurring
+writer is enabled in the controller.
 L9b's [qualified foundations](../LOCAL_CREATE_CAPTURE.md#series-create-foundations--not-enabled-for-submission)
 now include strict rule admission, content snapshot schema 3, explicit native
-observation and shared signed/encrypted serialization. Historical capsule paths
-remain closed to series. Next: protected v4 capsule selection, versioned dispatch
-fingerprints/SQL and full readback/native acknowledgement, then controller E3.
+observation, shared signed/encrypted serialization, protected v4 capsules and their
+canonical readback, plus v2 dispatch fingerprints and existing-table migration.
+Historical capsule paths remain closed to series. Next: current native content and
+exact acknowledgement, then end-to-end controller E3 before enabling submission.

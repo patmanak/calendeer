@@ -61,11 +61,19 @@ so it cannot pass through a historical capsule with its rule discarded.
 
 The explicit series serializer adds RRULE only to the signed clear shared part,
 using the existing Biweekly builder and Proton encryption primitives. Shared text
-bytes remain unchanged. Synthetic native crypto checks cover canonical UID/rule
-readback and altered clear/encrypted signatures. This is not a qualified service
-submission or an advertised v4 capability. Protected capsule selection, versioned
-dispatch fingerprints and SQL migration, full source readback and original-row
-acknowledgement must be integrated before controller activation.
+bytes remain unchanged. Protected local/submission capsules use a separate v4
+profile, bind the derived UID and canonical rule, and always carry explicit personal
+metadata, including empty reminders/color. Synthetic native crypto checks cover
+production, Keystore reopening, canonical readback and altered signatures. UNKNOWN
+v4 remains inspection-only; PREPARED v4 cannot dispatch and is not advertised.
+
+Dispatch fingerprint v2 includes the canonical rule and personal content; v1 bytes
+stay unchanged. Create schema 8 and import schema 25 expand only the four existing
+captured identity constraints, preserving old rows, foreign keys and uniqueness in
+upgrade transactions. A v2 baseline retains the verified UID and rule; this equality
+fingerprint does not authenticate a UID. Current-row/ACK and controller integration
+remain closed to series pending their own qualification. No service submission or
+client journey is established by these synthetic crypto/SQL checks.
 
 An additional measured native-editor profile accepts the bridge's own opaque
 local organizer label, with the exact self-organizer/default guest flags and no

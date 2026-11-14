@@ -19,14 +19,16 @@ data class CapturedCreateDispatchIdentity(
     val fingerprintVersion: Int = 1,
 ) {
     init {
-        require(timestamp.nano == 0 && fingerprintVersion == 1 && contentFingerprint.matches(Regex("[a-f0-9]{64}")))
+        require(timestamp.nano == 0 && fingerprintVersion in 1..2 && contentFingerprint.matches(Regex("[a-f0-9]{64}")))
         require(attempt.id != captureId && attempt.id.value != localId.value)
     }
     override fun toString() = "CapturedCreateDispatchIdentity(REDACTED)"
 
     /** Equality qualification only; it does not authenticate a remote observation. */
     fun matchesContent(content: EventContent): Boolean = try {
-        val original = LocalCreateIntent(LocalCreateReservation(captureId, localId, attempt.scope, captureFormat, timestamp), content)
+        val series = if (fingerprintVersion == 2) capturedCreateSeries(content) else null
+        val original = LocalCreateIntent(LocalCreateReservation(captureId, localId, attempt.scope, captureFormat, timestamp),
+            if (series == null) content else content.copy(recurrence = null), series)
         contentFingerprint == Companion.contentFingerprint(original)
     } catch (_: IllegalArgumentException) { false }
 
@@ -35,8 +37,15 @@ data class CapturedCreateDispatchIdentity(
             val reserved = submission.reservation
             val captured = reserved.intent.reservation
             val record = CreateAttemptRecord(reserved.attempt, captured.scope, reserved.format, submission.protectedPayload)
+            return of(record, reserved.intent)
+        }
+
+        /** A retained link only. Does not prepare, reserve or admit a submission. */
+        fun of(record: CreateAttemptRecord, intent: LocalCreateIntent): CapturedCreateDispatchIdentity {
+            val captured = intent.reservation
+            require(record.scope == captured.scope)
             return CapturedCreateDispatchIdentity(CreateAttemptIdentity.of(record), captured.localId, captured.id,
-                captured.format, captured.timestamp, contentFingerprint(reserved.intent))
+                captured.format, captured.timestamp, contentFingerprint(intent), if (intent.series == null) 1 else 2)
         }
 
         private fun contentFingerprint(intent: LocalCreateIntent): String {
@@ -50,8 +59,10 @@ data class CapturedCreateDispatchIdentity(
                 digest.update(ByteBuffer.allocate(4).putInt(bytes.size).array()); digest.update(bytes)
             }
             val content = intent.content
-            val knownEmpty = content.details == EventDetails() && content.colorRgb == null
-            field(if (knownEmpty) "calendeer-captured-create-content-v1" else "calendeer-captured-create-personal-content-v1")
+            val series = intent.series
+            val knownEmpty = series == null && content.details == EventDetails() && content.colorRgb == null
+            field(if (series != null) "calendeer-captured-create-series-content-v2"
+                else if (knownEmpty) "calendeer-captured-create-content-v1" else "calendeer-captured-create-personal-content-v1")
             field(content.title); field(content.description); field(content.location)
             when (val time = content.time) {
                 is EventTime.AllDay -> { field("ALL_DAY"); field(time.start.toString()); field(time.endExclusive.toString()) }
@@ -64,11 +75,21 @@ data class CapturedCreateDispatchIdentity(
                 val details = requireNotNull(content.details)
                 field("KNOWN_PERSONAL_DETAILS"); field(details.reminders.size.toString())
                 details.reminders.forEach { field(it.minutesBefore.toString()) }
-                field("NO_ORGANIZER"); field("NO_ATTENDEES"); field("NO_RECURRENCE")
+                field("NO_ORGANIZER"); field("NO_ATTENDEES")
+                if (series == null) field("NO_RECURRENCE") else { field("DAILY_SERIES"); field(series.rule) }
                 if (content.colorRgb == null) field("NO_COLOR")
                 else { field("RGB_COLOR"); field(content.colorRgb.toString()) }
             }
             return digest.digest().joinToString("") { "%02x".format(it.toInt() and 0xff) }
         }
+    }
+}
+
+/** Strict canonical master profile; UID authenticity belongs to the adapter's verified readback. */
+internal fun capturedCreateSeries(content: EventContent): CreateSeriesRule {
+    val recurrence = requireNotNull(content.recurrence)
+    require(recurrence.isMaster && recurrence.additionalDates.isEmpty() && recurrence.excludedDates.isEmpty() && !recurrence.cancelled)
+    return CreateSeriesRule.parse(requireNotNull(recurrence.rule)).also {
+        require(it.rule == recurrence.rule && it.supports(content.time))
     }
 }

@@ -41,7 +41,7 @@ enum class LocalTimePreparationAdmission { ELIGIBLE, STORED, HISTORICAL, INACTIV
 enum class PersonalPreparationAdmission { ELIGIBLE, STORED, HISTORICAL, INACTIVE, UNQUALIFIED, CONFLICT }
 
 class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
-    SQLiteOpenHelper(context, name, null, 24), SyncStore {
+    SQLiteOpenHelper(context, name, null, 25), SyncStore {
     private val lock = Mutex()
     /** Derived read-only status; never changes an intent, capsule or acknowledgement. */
     suspend fun hasUnsupportedLegacyUpdates(scope: CalendarScope): Boolean {

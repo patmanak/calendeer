@@ -6,6 +6,7 @@ import android.content.Context
 import android.database.Cursor
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
+import com.patmanak.proton.andcalendarbridge.data.CapturedCreateSchemaMigration
 import com.patmanak.proton.andcalendarbridge.sync.AdapterFormat
 import com.patmanak.proton.andcalendarbridge.sync.AccountId
 import com.patmanak.proton.andcalendarbridge.sync.CalendarScope
@@ -46,7 +47,7 @@ enum class CreatePauseReason {
  * This does not capture Provider edits, send requests, or acknowledge remote creation.
  */
 class CreateAttemptStore(context: Context, name: String = "calendar-create-attempt-v1.db") :
-    SQLiteOpenHelper(context, name, null, 7), CreateAssociationJournal {
+    SQLiteOpenHelper(context, name, null, 8), CreateAssociationJournal {
     private val lock = Mutex()
     @Volatile var admitAssociation: (CalendarScope) -> Boolean = { true }
     @Volatile var admitDispatch: (CalendarScope) -> Boolean = { true }
@@ -80,13 +81,17 @@ class CreateAttemptStore(context: Context, name: String = "calendar-create-attem
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        check(oldVersion in 1..6 && newVersion == 7) { "Explicit create journal schema migration required" }
+        check(oldVersion in 1..7 && newVersion == 8) { "Explicit create journal schema migration required" }
         if (oldVersion == 1) db.execSQL("ALTER TABLE create_attempts ADD COLUMN evidence TEXT")
         if (oldVersion < 3) createBindings(db)
         if (oldVersion < 4) createPauses(db)
         if (oldVersion < 5) createCapturedLinks(db)
         if (oldVersion < 6) createCapturedBindings(db)
-        createCapturedAttachments(db)
+        if (oldVersion < 7) createCapturedAttachments(db)
+        CapturedCreateSchemaMigration.rebuild(db,
+            listOf("captured_create_links", "captured_create_bindings", "captured_create_attachments")) {
+            createCapturedLinks(db); createCapturedBindings(db); createCapturedAttachments(db)
+        }
     }
 
     private fun createCapturedAttachments(db: SQLiteDatabase) {
@@ -99,7 +104,7 @@ class CreateAttemptStore(context: Context, name: String = "calendar-create-attem
                 local_id TEXT NOT NULL, capture_id TEXT NOT NULL,
                 capture_adapter TEXT NOT NULL, capture_version INTEGER NOT NULL CHECK(capture_version > 0),
                 timestamp INTEGER NOT NULL, content_fingerprint TEXT NOT NULL,
-                fingerprint_version INTEGER NOT NULL CHECK(fingerprint_version = 1),
+                fingerprint_version INTEGER NOT NULL CHECK(fingerprint_version IN (1,2)),
                 event TEXT NOT NULL, verified_revision TEXT NOT NULL,
                 nonce TEXT NOT NULL UNIQUE, protocol INTEGER NOT NULL CHECK(protocol = 1),
                 PRIMARY KEY(account, calendar, generation, mutation),
@@ -120,7 +125,7 @@ class CreateAttemptStore(context: Context, name: String = "calendar-create-attem
                 local_id TEXT NOT NULL, capture_id TEXT NOT NULL,
                 capture_adapter TEXT NOT NULL, capture_version INTEGER NOT NULL CHECK(capture_version > 0),
                 timestamp INTEGER NOT NULL, content_fingerprint TEXT NOT NULL,
-                fingerprint_version INTEGER NOT NULL CHECK(fingerprint_version = 1),
+                fingerprint_version INTEGER NOT NULL CHECK(fingerprint_version IN (1,2)),
                 event TEXT NOT NULL, verified_revision TEXT NOT NULL,
                 PRIMARY KEY(account, calendar, generation, mutation),
                 UNIQUE(account, calendar, generation, event),
@@ -140,7 +145,7 @@ class CreateAttemptStore(context: Context, name: String = "calendar-create-attem
                 local_id TEXT NOT NULL, capture_id TEXT NOT NULL,
                 capture_adapter TEXT NOT NULL, capture_version INTEGER NOT NULL CHECK(capture_version > 0),
                 timestamp INTEGER NOT NULL, content_fingerprint TEXT NOT NULL,
-                fingerprint_version INTEGER NOT NULL CHECK(fingerprint_version = 1),
+                fingerprint_version INTEGER NOT NULL CHECK(fingerprint_version IN (1,2)),
                 PRIMARY KEY(account, calendar, generation, mutation),
                 UNIQUE(account, calendar, generation, local_id),
                 UNIQUE(account, calendar, generation, capture_id),

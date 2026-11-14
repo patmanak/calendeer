@@ -3,6 +3,7 @@ package com.patmanak.proton.andcalendarbridge.data.importing
 import android.content.ContentValues
 import android.database.Cursor
 import android.database.sqlite.SQLiteDatabase
+import com.patmanak.proton.andcalendarbridge.data.CapturedCreateSchemaMigration
 import com.patmanak.proton.andcalendarbridge.data.importing.ImportPayloadCodec.decodeChange
 import com.patmanak.proton.andcalendarbridge.data.importing.ImportPayloadCodec.key
 import com.patmanak.proton.andcalendarbridge.data.importing.ImportSqlValues.archiveString
@@ -42,6 +43,11 @@ internal object ImportSchema {
         createDeleteAcknowledgements(db)
     }
     fun upgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int, checkCapacity: (SQLiteDatabase) -> Unit) {
+        check(oldVersion in 1..24 && newVersion == 25) { "Explicit import schema migration required" }
+        if (oldVersion < 24) upgradeTo24(db, oldVersion, 24, checkCapacity)
+        CapturedCreateSchemaMigration.rebuild(db, listOf("captured_create_bases")) { createCapturedBases(db) }
+    }
+    private fun upgradeTo24(db: SQLiteDatabase, oldVersion: Int, newVersion: Int, checkCapacity: (SQLiteDatabase) -> Unit) {
         check(oldVersion in 1..23 && newVersion == 24) { "Explicit import schema migration required" }
         addNativeRemovalPending(db)
         if (oldVersion == 23) return
@@ -322,7 +328,7 @@ internal object ImportSchema {
             payload_fingerprint TEXT NOT NULL, local_id TEXT NOT NULL, capture_id TEXT NOT NULL,
             capture_adapter TEXT NOT NULL, capture_version INTEGER NOT NULL CHECK(capture_version > 0),
             timestamp INTEGER NOT NULL, content_fingerprint TEXT NOT NULL,
-            fingerprint_version INTEGER NOT NULL CHECK(fingerprint_version = 1),
+            fingerprint_version INTEGER NOT NULL CHECK(fingerprint_version IN (1,2)),
             verified_revision TEXT NOT NULL, nonce TEXT NOT NULL UNIQUE,
             protocol INTEGER NOT NULL CHECK(protocol = 1), payload TEXT NOT NULL,
             PRIMARY KEY(scope,event), UNIQUE(scope,attempt), UNIQUE(scope,local_id), UNIQUE(scope,capture_id)
