@@ -44,10 +44,6 @@ class CapturedSeriesIdentityTest {
         assertEquals("synthetic@calendeer.invalid", baseline.change.content.recurrence!!.uid)
         assertThrows(IllegalArgumentException::class.java) { CapturedCreateBaseline(receipt, change) }
     }
-    @Test fun versionTwoDoesNotAuthorizeLegacyPreparationOrSubmission() {
-        assertThrows(IllegalArgumentException::class.java) { LocalCreatePreparation(intent, AdapterFormat("preparation", 4), "opaque") }
-        assertThrows(IllegalArgumentException::class.java) { LocalCreateSubmissionReservation(intent, record.id, record.format) }
-    }
     @Test fun ruleAndPersonalMetadataChooseVersionTwoWithoutReinterpretingOldBytes() {
         val rich = intent.copy(content = content.copy(details = EventDetails(listOf(EventReminder(10))), colorRgb = 0x123456))
         val richIdentity = CapturedCreateDispatchIdentity.of(record, rich)

@@ -40,7 +40,12 @@ fun interface CalendarCreatePreparationPort {
      */
     val localCreateFormat: AdapterFormat? get() = null
     val personalLocalCreateFormat: AdapterFormat? get() = null
+    val seriesLocalCreateFormat: AdapterFormat? get() = null
     fun capturedPreparationFormat(content: EventContent): AdapterFormat? =
         if (content.details == EventDetails() && content.colorRgb == null) localCreateFormat else personalLocalCreateFormat
+    fun capturedPreparationFormat(content: EventContent, series: CreateSeriesRule?): AdapterFormat? =
+        if (series == null) capturedPreparationFormat(content) else seriesLocalCreateFormat?.takeUnless {
+            it == localCreateFormat || it == personalLocalCreateFormat
+        }
     suspend fun prepareCreate(draft: CalendarCreateDraft): PreparedCalendarCreate
 }

@@ -11,9 +11,11 @@ import org.junit.Test
 class ProtonSeriesCreateCapsuleTest {
     @Test fun protectedExpectationReopensWithoutSessionReadsOrRemoteProof() = runTest {
         val f = fixture()
+        f.current = null
         assertEquals(f.verified!!.content, f.adapter.readCapturedExpectation(f.record, f.draft))
         assertEquals(f.verified!!.content, f.adapter.readCapturedExpectation(f.record.copy(state = CreateAttemptState.OUTCOME_UNKNOWN), f.draft))
         assertEquals(0, f.prepares); assertEquals(0, f.sends)
+        assertTrue(f.steps.isEmpty())
         assertNull(f.adapter.readCapturedExpectation(f.record, f.draft.copy(series = CreateSeriesRule(4))))
         assertNull(f.adapter.readCapturedExpectation(f.record.copy(scope = f.record.scope.copy(generation = f.scope.generation + 1)), f.draft))
         assertNull(f.adapter.readCapturedExpectation(f.record.copy(protectedPayload = "unreadable"), f.draft))

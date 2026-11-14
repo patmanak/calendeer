@@ -118,5 +118,8 @@ observation, shared signed/encrypted serialization, protected v4 capsules and th
 canonical readback, plus v2 dispatch fingerprints and existing-table migration.
 Explicit native current-content and acknowledgement operations now retain the rule,
 duration and verified UID, with atomic child guards and historical ACK recovery.
-Historical capsule paths remain closed to series. Next: propagate the canonical
-verified baseline through restoration and controller E3 before enabling submission.
+Canonical expectations now reopen from the exact capsule and reach binding,
+restoration and ACK through an explicit internal series-staging route. Historical
+capsule profiles remain unchanged; the worker's default capture and Proton v4
+dispatch stay closed. Next: qualify series handoff/historical recovery, then enable
+the fresh Proton submission capability and worker with end-to-end E3.

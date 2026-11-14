@@ -21,6 +21,7 @@ internal class CapturedCreateRestoration(
     private val currentFormat: () -> AdapterFormat,
     private val active: () -> Boolean,
     private val currentAccount: suspend () -> Boolean,
+    private val expectations: CalendarCreateSubmissionPort? = null,
 ) {
     private suspend fun available(): Boolean {
         if (!currentAccount() || !active()) return false
@@ -51,8 +52,9 @@ internal class CapturedCreateRestoration(
                 if (!inspections.supportsCapturedSubmission(reserved.format)) return CapturedCreateBindingResult.UNRESOLVED
                 val observed = inspections.inspectCaptured(unknown, reserved.draft) as? CreateSubmissionObservation.Verified
                     ?: return CapturedCreateBindingResult.UNRESOLVED
+                val canonical = capturedCreateExpectation(submission, inspections) ?: return CapturedCreateBindingResult.UNRESOLVED
                 if (!available()) return CapturedCreateBindingResult.INACTIVE
-                if (observed.attempt != identity.attempt || observed.event.content != reserved.draft.content ||
+                if (observed.attempt != identity.attempt || observed.event.content != canonical ||
                     !inspections.supportsCapturedSubmission(reserved.format) || currentFormat() != captured.format ||
                     store.transaction(target) { checkpoint?.format } != captured.format ||
                     captures.readSubmission(target, localId) != submission || journal.capturedIdentity(target, attempt) != identity)
@@ -135,8 +137,9 @@ internal class CapturedCreateRestoration(
             val binding = journal.capturedBinding(identity) ?: return CapturedCreateBaselineResult.UNRESOLVED
             // This path only reads an existing durable attachment plan and its current Provider proof.
             val receipt = journal.capturedAttachment(binding) ?: return CapturedCreateBaselineResult.UNRESOLVED
+            val canonical = capturedCreateExpectation(submission, expectations) ?: return CapturedCreateBaselineResult.UNRESOLVED
             val baseline = CapturedCreateBaseline(receipt,
-                RemoteChange.Upsert(binding.eventId, binding.verifiedRevision, reserved.intent.content))
+                RemoteChange.Upsert(binding.eventId, binding.verifiedRevision, canonical))
             suspend fun exact(): Boolean = captures.readSubmission(target, localId) == submission &&
                 currentFormat() == capture.format && projection.capturedAttachmentProtocol == receipt.protocol &&
                 store.transaction(target) { checkpoint?.format } == capture.format &&
@@ -179,8 +182,9 @@ internal class CapturedCreateRestoration(
             val identity = CapturedCreateDispatchIdentity.of(submission)
             val binding = journal.capturedBinding(identity) ?: return CapturedCreateAcknowledgementResult.UNRESOLVED
             val attachment = journal.capturedAttachment(binding) ?: return CapturedCreateAcknowledgementResult.UNRESOLVED
+            val canonical = capturedCreateExpectation(submission, expectations) ?: return CapturedCreateAcknowledgementResult.UNRESOLVED
             val baseline = CapturedCreateBaseline(attachment,
-                RemoteChange.Upsert(binding.eventId, binding.verifiedRevision, reserved.intent.content))
+                RemoteChange.Upsert(binding.eventId, binding.verifiedRevision, canonical))
             suspend fun exactSource(): Boolean = captures.readSubmission(target, localId) == submission &&
                 currentFormat() == capture.format && projection.capturedAttachmentProtocol == attachment.protocol &&
                 projection.capturedAcknowledgementProtocol == 1 &&
@@ -250,8 +254,9 @@ internal class CapturedCreateRestoration(
             val identity = CapturedCreateDispatchIdentity.of(submission)
             val binding = journal.capturedBinding(identity) ?: return CapturedCreateCleanResult.UNRESOLVED
             val attachment = journal.capturedAttachment(binding) ?: return CapturedCreateCleanResult.UNRESOLVED
+            val canonical = capturedCreateExpectation(submission, expectations) ?: return CapturedCreateCleanResult.UNRESOLVED
             val baseline = CapturedCreateBaseline(attachment,
-                RemoteChange.Upsert(binding.eventId, binding.verifiedRevision, reserved.intent.content))
+                RemoteChange.Upsert(binding.eventId, binding.verifiedRevision, canonical))
             val record = store.capturedAcknowledgement(target, binding.eventId)
                 ?: return CapturedCreateCleanResult.UNRESOLVED
             if (record.state != CapturedCreateAcknowledgementState.PROVEN || record.receipt.baseline != baseline)
@@ -301,8 +306,9 @@ internal class CapturedCreateRestoration(
             val identity = CapturedCreateDispatchIdentity.of(submission)
             val binding = journal.capturedBinding(identity) ?: return CapturedCreateReconciliationResult.UNRESOLVED
             val receipt = journal.capturedAttachment(binding) ?: return CapturedCreateReconciliationResult.UNRESOLVED
+            val canonical = capturedCreateExpectation(submission, expectations) ?: return CapturedCreateReconciliationResult.UNRESOLVED
             val baseline = CapturedCreateBaseline(receipt,
-                RemoteChange.Upsert(binding.eventId, binding.verifiedRevision, reserved.intent.content))
+                RemoteChange.Upsert(binding.eventId, binding.verifiedRevision, canonical))
             val acknowledgement = store.capturedAcknowledgement(target, binding.eventId)
             if (acknowledgement != null && (acknowledgement.state != CapturedCreateAcknowledgementState.PROVEN ||
                 acknowledgement.receipt.baseline != baseline || projection.capturedAcknowledgementProtocol != acknowledgement.receipt.protocol))

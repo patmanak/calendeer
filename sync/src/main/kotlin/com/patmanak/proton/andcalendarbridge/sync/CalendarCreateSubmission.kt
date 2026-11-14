@@ -24,11 +24,16 @@ interface CalendarCreateSubmissionPort {
     val knownEmptySubmissionFormat: AdapterFormat? get() = null
     /** Separate versioned capability; historical known-empty capsules keep their original format. */
     val personalSubmissionFormat: AdapterFormat? get() = null
+    val seriesSubmissionFormat: AdapterFormat? get() = null
     fun capturedSubmissionFormat(content: EventContent): AdapterFormat? =
         if (content.details == EventDetails() && content.colorRgb == null) knownEmptySubmissionFormat else personalSubmissionFormat
+    fun capturedSubmissionFormat(content: EventContent, series: CreateSeriesRule?): AdapterFormat? =
+        if (series == null) capturedSubmissionFormat(content) else seriesSubmissionFormat?.takeUnless {
+            it == knownEmptySubmissionFormat || it == personalSubmissionFormat
+        }
     /** Inspection accepts retained formats, independently of the fresh content selector. */
     fun supportsCapturedSubmission(format: AdapterFormat): Boolean =
-        format == knownEmptySubmissionFormat || format == personalSubmissionFormat
+        format == knownEmptySubmissionFormat || format == personalSubmissionFormat || format == seriesSubmissionFormat
     suspend fun prepareSubmission(draft: CalendarCreateDraft): PreparedCalendarCreate
     suspend fun submit(record: CreateAttemptRecord, journal: CreateAttemptJournal): CreateSubmissionObservation
     suspend fun inspect(record: CreateAttemptRecord): CreateSubmissionObservation

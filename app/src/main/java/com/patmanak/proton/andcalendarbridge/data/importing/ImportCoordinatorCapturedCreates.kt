@@ -49,13 +49,13 @@ internal class ImportCoordinatorCapturedCreates(
 
     /** Explicit internal capture only; no preparation, submission or Android acknowledgement. */
     suspend fun captureLocalCreate(target: CalendarScope, eventRow: Long, localId: LocalEventId,
-        id: MutationId, timestamp: java.time.Instant): LocalEditCaptureResult = mutex.withLock {
+        id: MutationId, timestamp: java.time.Instant, series: Boolean = false): LocalEditCaptureResult = mutex.withLock {
         val journal = localCreates ?: return@withLock LocalEditCaptureResult.UNAVAILABLE
         val expected = generation()
         val policy = policyRevision()
         if (!isCurrent(expected, target.account) || !hasCalendarPermissions())
             return@withLock LocalEditCaptureResult.INACTIVE
-        localCreateStaging(target, journal, expected, policy).capture(eventRow, localId, id, timestamp)
+        localCreateStaging(target, journal, expected, policy).capture(eventRow, localId, id, timestamp, series)
     }
 
     /** Explicit read-only preparation; no outgoing journal, dispatch, or Provider acknowledgement. */
@@ -115,8 +115,8 @@ internal class ImportCoordinatorCapturedCreates(
                     store.transaction(target) { checkpoint?.format } != captured.format ||
                     captures.readSubmission(target, localId) != submission ||
                     !port.supportsCapturedSubmission(submission.reservation.format)) return false
-                val row = projection.inspectStampedSimpleCreate(target, localId)
-                return row?.content == submission.reservation.intent.content && active() &&
+                val row = projection.inspectCapturedIntent(submission.reservation.intent)
+                return row.matches(submission.reservation.intent) && active() &&
                     captures.readSubmission(target, localId) == submission &&
                     store.transaction(target) { checkpoint?.format } == captured.format
             }
@@ -170,10 +170,13 @@ internal class ImportCoordinatorCapturedCreates(
             val prepared = CreateAttemptRecord(attempt, target, reserved.format, submission.protectedPayload)
             val existing = journal.read(target, attempt)
             if (existing != null && journal.capturedIdentity(target, attempt) != wanted) return@withLock CreateSubmissionObservation.Unknown
+            val canonical = capturedCreateExpectation(submission, port) ?: return@withLock CreateSubmissionObservation.Unknown
+            qualifyCreate(target, expected, policy)
+            if (captures.readSubmission(target, localId) != submission) return@withLock CreateSubmissionObservation.Unknown
 
             fun qualifiedObservation(observed: CreateSubmissionObservation): CreateSubmissionObservation {
                 return if (observed is CreateSubmissionObservation.Verified &&
-                    (observed.attempt != wanted.attempt || observed.event.content != draft.content)) CreateSubmissionObservation.Unknown
+                    (observed.attempt != wanted.attempt || observed.event.content != canonical)) CreateSubmissionObservation.Unknown
                 else observed
             }
             if (existing?.state == CreateAttemptState.OUTCOME_UNKNOWN) {
@@ -198,8 +201,8 @@ internal class ImportCoordinatorCapturedCreates(
                         captures.readSubmission(target, localId) == submission
                 }
                 if (!localStateMatches()) return false
-                val row = projection.inspectStampedSimpleCreate(target, localId)
-                return row?.content == draft.content && localStateMatches() && hasLease() &&
+                val row = projection.inspectCapturedIntent(reserved.intent)
+                return row.matches(reserved.intent) && localStateMatches() && hasLease() &&
                     port.supportsCapturedSubmission(reserved.format) && remote.format == captured.format
             }
             if (!qualifyLocal() || journal.pauseReason(target, attempt) != null) return@withLock CreateSubmissionObservation.Unknown
@@ -240,7 +243,7 @@ internal class ImportCoordinatorCapturedCreates(
         return CapturedCreateRestoration(target, store, projection, captures, journal,
             currentFormat = { remote.format },
             active = { authenticated() && generation() == expected && policyRevision() == policy && hasCalendarPermissions() },
-            currentAccount = { isCurrent(expected, target.account) })
+            currentAccount = { isCurrent(expected, target.account) }, expectations = remote as? CalendarCreateSubmissionPort)
     }
 
     /** Reconstruct only a fully proven historical queue association; never prepare, send or ACK. */

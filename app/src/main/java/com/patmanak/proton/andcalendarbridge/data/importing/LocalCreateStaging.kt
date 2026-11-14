@@ -33,7 +33,7 @@ internal class LocalCreateStaging(
         journal.admitCapture = { false }
     }
 
-    suspend fun capture(eventRow: Long, localId: LocalEventId, id: MutationId, timestamp: Instant): LocalEditCaptureResult {
+    suspend fun capture(eventRow: Long, localId: LocalEventId, id: MutationId, timestamp: Instant, series: Boolean = false): LocalEditCaptureResult {
         installAdmission()
         return try {
             val selected = store.selections(target.account).singleOrNull { it.scope == target }
@@ -49,20 +49,23 @@ internal class LocalCreateStaging(
                 val identity = retained.reservation
                 if (identity.id != id || identity.localId != localId || identity.scope != target ||
                     identity.format != format || identity.markerProtocol != 1 ||
-                    (previous != null && identity != previous)) return LocalEditCaptureResult.UNQUALIFIED
+                    (previous != null && identity != previous) || (retained.series != null) != series) return LocalEditCaptureResult.UNQUALIFIED
                 return LocalEditCaptureResult.RETAINED
             }
             if (previous == null && (eventRow <= 0 || timestamp.nano != 0)) return LocalEditCaptureResult.UNQUALIFIED
             val reservation = previous ?: LocalCreateReservation(id, localId, target, format, timestamp)
             val firstClaim = journal.reserve(reservation)
-            val snapshot = if (firstClaim) projection.captureAndStampSimpleCreate(target, eventRow, localId)
+            val snapshot = if (series) {
+                if (firstClaim) projection.captureAndStampSeriesCreate(target, eventRow, localId)
+                else projection.inspectStampedSeriesCreate(target, localId)
+            } else if (firstClaim) projection.captureAndStampSimpleCreate(target, eventRow, localId)
                 else projection.inspectStampedSimpleCreate(target, localId)
-            if (snapshot == null || snapshot.series != null) return LocalEditCaptureResult.UNQUALIFIED
+            if (snapshot == null || (snapshot.series != null) != series) return LocalEditCaptureResult.UNQUALIFIED
             if (!currentAccount() || !active()) return LocalEditCaptureResult.INACTIVE
             val currentSelection = store.selections(target.account).singleOrNull { it.scope == target }
             if (currentSelection?.enabled != true || !currentSelection.available) return LocalEditCaptureResult.INACTIVE
             if (store.transaction(target) { checkpoint?.format } != format) return LocalEditCaptureResult.UNQUALIFIED
-            journal.retain(LocalCreateIntent(reservation, snapshot.content))
+            journal.retain(LocalCreateIntent(reservation, snapshot.content, snapshot.series))
             LocalEditCaptureResult.RETAINED
         } catch (cancelled: CancellationException) { throw cancelled }
           catch (_: Exception) { LocalEditCaptureResult.UNAVAILABLE }
@@ -79,14 +82,11 @@ internal class LocalCreateStaging(
             val format = store.transaction(target) { checkpoint?.format }
             if (format != currentFormat()) return LocalCreatePreparationResult.UNQUALIFIED
             val intent = journal.readIntent(target, localId) ?: return LocalCreatePreparationResult.UNQUALIFIED
-            if (intent.series != null) return LocalCreatePreparationResult.UNSUPPORTED
             val reservation = intent.reservation
             if (reservation.scope != target || reservation.localId != localId || reservation.id != id ||
                 reservation.format != format || reservation.markerProtocol != 1) return LocalCreatePreparationResult.UNQUALIFIED
-            val preparationFormat = port.capturedPreparationFormat(intent.content) ?: return LocalCreatePreparationResult.UNSUPPORTED
-            val observed = projection.inspectStampedSimpleCreate(target, localId)
-                ?: return LocalCreatePreparationResult.UNQUALIFIED
-            if (observed.content != intent.content) return LocalCreatePreparationResult.UNQUALIFIED
+            val preparationFormat = port.capturedPreparationFormat(intent.content, intent.series) ?: return LocalCreatePreparationResult.UNSUPPORTED
+            if (!projection.inspectCapturedIntent(intent).matches(intent)) return LocalCreatePreparationResult.UNQUALIFIED
             val retained = journal.readPreparation(target, localId)
             if (retained != null) {
                 if (retained.intent != intent || retained.format != preparationFormat)
@@ -94,16 +94,14 @@ internal class LocalCreateStaging(
                 if (!currentAccount() || !active()) return LocalCreatePreparationResult.INACTIVE
                 return LocalCreatePreparationResult.RETAINED
             }
-            val prepared = port.prepareCreate(CalendarCreateDraft(target, reservation.id, reservation.timestamp, intent.content))
-            if (prepared.scope != target || prepared.format != preparationFormat || port.capturedPreparationFormat(intent.content) != preparationFormat ||
+            val prepared = port.prepareCreate(CalendarCreateDraft(target, reservation.id, reservation.timestamp, intent.content, intent.series))
+            if (prepared.scope != target || prepared.format != preparationFormat || port.capturedPreparationFormat(intent.content, intent.series) != preparationFormat ||
                 prepared.protectedPayload.isBlank()) return LocalCreatePreparationResult.UNQUALIFIED
             if (!currentAccount() || !active()) return LocalCreatePreparationResult.INACTIVE
             val currentSelection = store.selections(target.account).singleOrNull { it.scope == target }
             if (currentSelection?.enabled != true || !currentSelection.available) return LocalCreatePreparationResult.INACTIVE
             if (store.transaction(target) { checkpoint?.format } != format) return LocalCreatePreparationResult.UNQUALIFIED
-            val current = projection.inspectStampedSimpleCreate(target, localId)
-                ?: return LocalCreatePreparationResult.UNQUALIFIED
-            if (current.content != intent.content) return LocalCreatePreparationResult.UNQUALIFIED
+            if (!projection.inspectCapturedIntent(intent).matches(intent)) return LocalCreatePreparationResult.UNQUALIFIED
             journal.retainPreparation(LocalCreatePreparation(intent, preparationFormat, prepared.protectedPayload))
             LocalCreatePreparationResult.RETAINED
         } catch (cancelled: CancellationException) { throw cancelled }
@@ -133,23 +131,21 @@ internal class LocalCreateStaging(
             val importFormat = store.transaction(target) { checkpoint?.format }
             if (importFormat != currentFormat()) return LocalCreateSubmissionResult.UNQUALIFIED
             val intent = journal.readIntent(target, localId) ?: return LocalCreateSubmissionResult.UNQUALIFIED
-            if (intent.series != null) return LocalCreateSubmissionResult.UNSUPPORTED
             val captured = intent.reservation
             if (captured.scope != target || captured.localId != localId || captured.id != id ||
                 captured.format != importFormat || captured.markerProtocol != 1) return LocalCreateSubmissionResult.UNQUALIFIED
-            val submissionFormat = port.capturedSubmissionFormat(intent.content) ?: return LocalCreateSubmissionResult.UNSUPPORTED
+            val submissionFormat = port.capturedSubmissionFormat(intent.content, intent.series) ?: return LocalCreateSubmissionResult.UNSUPPORTED
             val reservation = try { LocalCreateSubmissionReservation(intent, attempt, submissionFormat) }
                 catch (_: IllegalArgumentException) { return LocalCreateSubmissionResult.UNQUALIFIED }
 
             suspend fun qualify(): LocalCreateSubmissionResult? {
                 admission()?.let { return it }
-                if (port.capturedSubmissionFormat(intent.content) != submissionFormat || currentFormat() != importFormat ||
+                if (port.capturedSubmissionFormat(intent.content, intent.series) != submissionFormat || currentFormat() != importFormat ||
                     store.transaction(target) { checkpoint?.format } != importFormat) return LocalCreateSubmissionResult.UNQUALIFIED
-                val observed = projection.inspectStampedSimpleCreate(target, localId)
-                if (observed?.content != intent.content) return LocalCreateSubmissionResult.UNQUALIFIED
+                if (!projection.inspectCapturedIntent(intent).matches(intent)) return LocalCreateSubmissionResult.UNQUALIFIED
                 // Provider inspection and SQLite are separate. Recheck app state after every external await.
                 admission()?.let { return it }
-                if (port.capturedSubmissionFormat(intent.content) != submissionFormat || currentFormat() != importFormat ||
+                if (port.capturedSubmissionFormat(intent.content, intent.series) != submissionFormat || currentFormat() != importFormat ||
                     store.transaction(target) { checkpoint?.format } != importFormat) return LocalCreateSubmissionResult.UNQUALIFIED
                 if (!active()) return LocalCreateSubmissionResult.INACTIVE
                 return null

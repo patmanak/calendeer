@@ -33,6 +33,74 @@ import org.junit.runner.RunWith
 /** Real original Provider row and durable journals; fake remote transport only. */
 @RunWith(AndroidJUnit4::class)
 class CapturedCreateAcknowledgementIntegrationDeviceTest {
+    @Test fun seriesLocalPreparationRequiresItsExplicitCapabilityAndRetainsTheRule() = fixture(series = true) {
+        val closed = CalendarCreatePreparationPort { error("Closed series capability must not prepare") }
+        assertEquals(LocalCreatePreparationResult.UNSUPPORTED, coordinator.prepareLocalCreate(target, localId, id, closed))
+        val open = object : CalendarCreatePreparationPort {
+            override val seriesLocalCreateFormat = preparationFormat
+            override suspend fun prepareCreate(draft: CalendarCreateDraft): PreparedCalendarCreate {
+                assertEquals(CalendarCreateDraft(target, id, timestamp, content, CreateSeriesRule(5)), draft)
+                return PreparedCalendarCreate(target, preparationFormat, "synthetic-local-series-capsule")
+            }
+        }
+        assertEquals(LocalCreatePreparationResult.RETAINED, coordinator.prepareLocalCreate(target, localId, id, open))
+        journal.admitCapture = { it == target }
+        assertEquals(CreateSeriesRule(5), journal.readPreparation(target, localId)!!.intent.series)
+        ready(); assertEquals(CapturedCreateAcknowledgementResult.ACKNOWLEDGED, acknowledge())
+    }
+    @Test fun seriesPipelineRetainsCanonicalBaselineAndAcknowledgesAfterReopen() = fixture(series = true) {
+        ready(); assertEquals(verifiedEvent, baseline()!!.change)
+        assertEquals(CreateSeriesRule(5), retainedSubmission()!!.reservation.draft.series)
+        assertEquals(CapturedCreateAcknowledgementResult.ACKNOWLEDGED, acknowledge())
+        reopen(); assertEquals(CapturedCreateCleanResult.CLEAN, qualify())
+        assertEquals(1, sends); assertEquals(1, calls)
+        assertEquals("FREQ=DAILY;COUNT=5", field(Events.RRULE)); assertEquals("PT3600S", field(Events.DURATION))
+    }
+    @Test fun seriesLostSubmissionResponseInspectsAndNeverSendsAgain() = fixture(series = true) {
+        loseSubmissionResponse = true
+        assertEquals(LocalCreateSubmissionResult.RETAINED, prepare()); assertEquals(CreateSubmissionObservation.Unknown, submit())
+        assertEquals(CapturedCreateBindingResult.RETAINED, bind()); assertEquals(CapturedCreateAttachmentResult.ATTACHED, attach())
+        assertEquals(CapturedCreateBaselineResult.RETAINED, retain())
+        assertEquals(CapturedCreateAcknowledgementResult.ACKNOWLEDGED, acknowledge()); reopen()
+        assertTrue(submit() is CreateSubmissionObservation.Verified); assertEquals(1, sends); assertEquals(1, calls)
+    }
+    @Test fun seriesForeignCanonicalUidCannotBeBoundToTheVerifiedEvent() = fixture(series = true) {
+        admitted(); expectationUid = "foreign-series@calendeer.invalid"
+        assertEquals(CapturedCreateBindingResult.UNRESOLVED, bind())
+        assertNull(creates.capturedBinding(CapturedCreateDispatchIdentity.of(retainedSubmission()!!)))
+        expectationUid = "synthetic-series@calendeer.invalid"
+        assertEquals(CapturedCreateBindingResult.RETAINED, bind()); assertEquals(1, sends)
+    }
+    @Test fun seriesUnreadableCapsuleBlocksAckWithoutReplacingItsBaseline() = fixture(series = true) {
+        ready(); val saved = baseline(); expectationAvailable = false
+        assertEquals(CapturedCreateAcknowledgementResult.UNRESOLVED, acknowledge())
+        assertEquals(saved, baseline()); assertEquals(0, ackAttempts); assertNull(ackRecord())
+        expectationAvailable = true; assertEquals(CapturedCreateAcknowledgementResult.ACKNOWLEDGED, acknowledge())
+    }
+    @Test fun seriesChangedSourceDuringCapsuleReadCannotRetainABaseline() = fixture(series = true) {
+        attached(); val before = providerSnapshot()
+        beforeExpectation = { journal.writableDatabase.execSQL("UPDATE local_create_submissions SET payload=?", arrayOf("synthetic-foreign-payload")) }
+        assertEquals(CapturedCreateBaselineResult.UNRESOLVED, retain()); assertNull(baseline())
+        assertEquals(before, providerSnapshot()); assertEquals(0, ackAttempts)
+    }
+    @Test fun seriesPermissionLossDuringCapsuleReadCannotRetainABaseline() = fixture(series = true) {
+        attached(); beforeExpectation = { permitted = false }
+        assertEquals(CapturedCreateBaselineResult.INACTIVE, retain()); assertEquals(0, ackAttempts)
+    }
+    @Test fun seriesRuleChangedAtFinalClaimNeverDispatches() = fixture(series = true) {
+        assertEquals(LocalCreateSubmissionResult.RETAINED, prepare())
+        beforeClaim = { mutate(ContentValues().apply { put(Events.RRULE, "FREQ=DAILY;COUNT=4") }) }
+        assertEquals(CreateSubmissionObservation.Unknown, submit()); assertEquals(0, sends)
+        assertEquals("1", field(Events.DIRTY)); assertEquals("FREQ=DAILY;COUNT=4", field(Events.RRULE))
+    }
+    @Test fun seriesLostNativeAckResponseUsesTheSameNonceAfterReopen() = fixture(series = true) {
+        ready(); afterAck = { throw IllegalStateException("Synthetic lost ACK response") }
+        assertEquals(CapturedCreateAcknowledgementResult.UNRESOLVED, acknowledge())
+        val saved = ackRecord()!!; assertEquals(CapturedCreateAcknowledgementState.UNKNOWN, saved.state)
+        afterAck = {}; reopen()
+        assertEquals(CapturedCreateAcknowledgementResult.ACKNOWLEDGED, acknowledge())
+        assertEquals(saved.receipt, ackRecord()!!.receipt); assertEquals(1, ackAttempts); assertEquals(1, sends)
+    }
     @Test fun cleanQualificationChecksTheOriginalWithoutWritingOrReleasingPendingWork() = fixture {
         ready(); incoming(verifiedEvent); assertEquals(CapturedCreateAcknowledgementResult.ACKNOWLEDGED, acknowledge())
         val before = providerSnapshot(); val saved = ackRecord()
@@ -269,7 +337,7 @@ class CapturedCreateAcknowledgementIntegrationDeviceTest {
         afterAckInspection = { currentFormat = AdapterFormat("replacement", 2) }
         assertEquals(CapturedCreateAcknowledgementResult.UNRESOLVED, acknowledge()); assertEquals(1, ackAttempts)
     }
-    private class Fixture(val context: Context) {
+    private class Fixture(val context: Context, val series: Boolean) {
         private val token = UUID.randomUUID().toString()
         private val importName = "dispatch-integration-import-$token.db"
         private val dispatchName = "captured-provider-dispatch-$token.db"
@@ -277,15 +345,17 @@ class CapturedCreateAcknowledgementIntegrationDeviceTest {
         val target = CalendarScope(AccountId("dispatch-integration-$token"), CalendarId("fixture"), 0)
         val format = AdapterFormat("dispatch-integration-import", 1)
         var currentFormat = format
-        val preparationFormat = AdapterFormat("controlled-known-empty-submission", 2)
+        val preparationFormat = AdapterFormat("controlled-known-empty-submission", if (series) 4 else 2)
         val localId = LocalEventId(UUID.randomUUID().toString())
         val id = MutationId("create")
         val attempt = MutationId(UUID.randomUUID().toString())
         val timestamp = Instant.parse("2030-10-01T12:00:00Z")
         val content = EventContent("Preparation integration fixture",
+            if (series) EventTime.Timed(Instant.parse("2030-03-29T11:00:00Z"), Instant.parse("2030-03-29T12:00:00Z"), ZoneId.of("Europe/Paris")) else
             EventTime.Timed(Instant.parse("2030-10-27T00:30:00Z"), Instant.parse("2030-10-27T02:30:00Z"), ZoneId.of("Europe/Paris")),
             details = EventDetails())
-        val intent = LocalCreateIntent(LocalCreateReservation(id, localId, target, format, timestamp), content)
+        val intent = LocalCreateIntent(LocalCreateReservation(id, localId, target, format, timestamp), content,
+            if (series) CreateSeriesRule(5) else null)
         val projection = AndroidCalendarProjection(context)
         var attachmentWrites = 0
         var ackAttempts = 0
@@ -352,36 +422,46 @@ class CapturedCreateAcknowledgementIntegrationDeviceTest {
         var sends = 0
         var inspections = 0
         var beforeClaim: suspend () -> Unit = { }
-        val verifiedEvent get() = RemoteChange.Upsert(EventId("synthetic-remote"), Revision("synthetic-revision"), content)
+        val verifiedEvent get() = RemoteChange.Upsert(EventId("synthetic-remote"), Revision("synthetic-revision"),
+            if (series) content.copy(recurrence = EventRecurrence("synthetic-series@calendeer.invalid", "FREQ=DAILY;COUNT=5")) else content)
+        var expectationUid = "synthetic-series@calendeer.invalid"
+        var expectationAvailable = true
+        var beforeExpectation: suspend () -> Unit = {}
+        var loseSubmissionResponse = false
         var calls = 0
         fun receipt() = PreparedCalendarCreate(target, preparationFormat, "synthetic-protected-preparation-$calls")
         var onPrepare: suspend (CalendarCreateDraft) -> PreparedCalendarCreate = { receipt() }
         val port = object : CalendarCreateSubmissionPort {
-            override val knownEmptySubmissionFormat: AdapterFormat get() = preparationFormat
+            override val knownEmptySubmissionFormat: AdapterFormat get() = preparationFormat.copy(version = 2)
+            override val seriesSubmissionFormat: AdapterFormat? get() = if (series) preparationFormat else null
+            override suspend fun readCapturedExpectation(record: CreateAttemptRecord, expected: CalendarCreateDraft): EventContent? {
+                assertEquals(target, record.scope); assertEquals(attempt, record.id)
+                assertEquals(intent.series, expected.series); beforeExpectation()
+                return if (expectationAvailable) expected.canonicalContent(expectationUid) else null
+            }
             override suspend fun prepareSubmission(draft: CalendarCreateDraft): PreparedCalendarCreate {
-                assertEquals(CalendarCreateDraft(target, attempt, timestamp, content), draft)
+                assertEquals(CalendarCreateDraft(target, attempt, timestamp, content, intent.series), draft)
                 calls++; return onPrepare(draft)
             }
             override suspend fun submit(record: CreateAttemptRecord, journal: CreateAttemptJournal): CreateSubmissionObservation = error("No generic upload")
             override suspend fun submitCaptured(record: CreateAttemptRecord, expected: CalendarCreateDraft, journal: CreateAttemptJournal): CreateSubmissionObservation {
-                assertEquals(CalendarCreateDraft(target, attempt, timestamp, content), expected)
+                assertEquals(CalendarCreateDraft(target, attempt, timestamp, content, intent.series), expected)
                 beforeClaim()
                 if (!journal.claim(record)) return CreateSubmissionObservation.Unknown
                 sends++
-                return CreateSubmissionObservation.Verified(CreateAttemptIdentity.of(record), RemoteChange.Upsert(
-                    EventId("synthetic-remote"), Revision("synthetic-revision"), content))
+                return if (loseSubmissionResponse) CreateSubmissionObservation.Unknown
+                    else CreateSubmissionObservation.Verified(CreateAttemptIdentity.of(record), verifiedEvent)
             }
             override suspend fun inspectCaptured(record: CreateAttemptRecord, expected: CalendarCreateDraft): CreateSubmissionObservation {
                 inspections++
-                return CreateSubmissionObservation.Verified(CreateAttemptIdentity.of(record), RemoteChange.Upsert(
-                    EventId("synthetic-remote"), Revision("synthetic-revision"), content))
+                return CreateSubmissionObservation.Verified(CreateAttemptIdentity.of(record), verifiedEvent)
             }
             override suspend fun inspect(record: CreateAttemptRecord): CreateSubmissionObservation = error("No remote inspection")
         }
         val uri get() = Events.CONTENT_URI.buildUpon().appendQueryParameter(CalendarContract.CALLER_IS_SYNCADAPTER, "true")
             .appendQueryParameter(CalendarContract.Calendars.ACCOUNT_NAME, projection.accountFor(target.account).name)
             .appendQueryParameter(CalendarContract.Calendars.ACCOUNT_TYPE, projection.accountFor(target.account).type).build()
-        private val remote = object : ReadOnlyCalendarRemote {
+        private val remote = object : ReadOnlyCalendarRemote, CalendarCreateSubmissionPort by port {
             override val format get() = currentFormat
             override suspend fun currentAccount(): AccountId { onAccount(); return target.account }
             override suspend fun fetch(request: PageRequest): RemotePage = error("No imports")
@@ -403,7 +483,7 @@ class CapturedCreateAcknowledgementIntegrationDeviceTest {
             calendar = projection.ensureCalendar(target, summary)
             row = ContentUris.parseId(context.contentResolver.insert(uri, candidateValues())!!)
             start()
-            assertEquals(LocalEditCaptureResult.RETAINED, coordinator.captureLocalCreate(target, row, localId, id, timestamp))
+            assertEquals(LocalEditCaptureResult.RETAINED, coordinator.captureLocalCreate(target, row, localId, id, timestamp, series))
         }
         private suspend fun start() {
             val before = schedules.get(); coordinator.authenticationChanged(true)
@@ -420,6 +500,7 @@ class CapturedCreateAcknowledgementIntegrationDeviceTest {
             putNull(Events.EVENT_COLOR); putNull(Events.EVENT_COLOR_KEY)
             put(Events.DTSTART, time.start.toEpochMilli()); put(Events.DTEND, time.end.toEpochMilli())
             put(Events.ALL_DAY, 0); put(Events.EVENT_TIMEZONE, time.zone.id); put(Events.EVENT_END_TIMEZONE, time.zone.id)
+            if (series) { put(Events.RRULE, "FREQ=DAILY;COUNT=5"); put(Events.DURATION, "PT3600S"); putNull(Events.DTEND) }
         }
         val mutation = MutationId("after-create-change")
         suspend fun acknowledge() = coordinator.acknowledgeLocalCreate(target, localId, id, attempt)
@@ -509,9 +590,9 @@ class CapturedCreateAcknowledgementIntegrationDeviceTest {
             AccountManager.get(context).removeAccountExplicitly(projection.accountFor(target.account))
         }
     }
-    private fun fixture(block: suspend Fixture.() -> Unit) = runBlocking {
+    private fun fixture(series: Boolean = false, block: suspend Fixture.() -> Unit) = runBlocking {
         assumeTrue(InstrumentationRegistry.getArguments().getString("providerFixture") == "true")
-        val fixture = Fixture(ApplicationProvider.getApplicationContext())
+        val fixture = Fixture(ApplicationProvider.getApplicationContext(), series)
         assumeTrue(fixture.projection.hasPermissions())
         try { fixture.seed(); fixture.block() } finally { fixture.close() }
     }

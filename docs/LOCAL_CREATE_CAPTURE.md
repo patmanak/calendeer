@@ -56,8 +56,11 @@ The simple observation ports retain their previous refusal of recurrence.
 Content JSON schema 3 retains the explicit rule beside simple event fields,
 reminders and color in the existing journal. Full-intent reload preserves it;
 legacy content-only readers refuse schema 3. Schemas 1/2 keep their original
-interpretation. Preparation and submission currently reject every series intent,
-so it cannot pass through a historical capsule with its rule discarded.
+interpretation. Internal staging preserves the rule in preparation/submission
+reservations and drafts. It requires a distinct explicit series capability and typed
+native observation; absent or reused simple-profile capabilities refuse staging.
+The controller's default capture still uses the simple profile. Proton's fresh series
+submission declaration and PREPARED v4 dispatch remain closed.
 
 The explicit series serializer adds RRULE only to the signed clear shared part,
 using the existing Biweekly builder and Proton encryption primitives. Shared text
@@ -79,9 +82,14 @@ the complete row and reminder identities, plus absence of detached children by l
 or sync parent identity, are asserted in the same batch. Changed content, duration,
 rule or tombstones cannot be cleaned as the sent snapshot. A lost ACK response permits
 only inspection of its original historical marker, independent of later edits.
-Historical simple profiles keep their recurrence refusal. Series handoff, controller
-integration and submission remain closed pending end-to-end qualification. Synthetic
-crypto/SQL/Provider checks do not establish a live service or calendar-client journey.
+Historical simple profiles keep their recurrence refusal. Restoration combines the
+durable verified binding with the canonical expectation reopened from the exact
+protected capsule. This local read is not remote proof; an unreadable capsule refuses
+restoration. Full canonical content, including UID, is compared before binding;
+source/admission checks after awaits protect baseline retention, ACK and clean checks.
+Internal orchestration is qualified with real Provider/SQL and synthetic transport.
+Series handoff, fresh Proton dispatch and worker activation remain closed. These
+checks do not establish a live service or calendar-client journey.
 
 An additional measured native-editor profile accepts the bridge's own opaque
 local organizer label, with the exact self-organizer/default guest flags and no

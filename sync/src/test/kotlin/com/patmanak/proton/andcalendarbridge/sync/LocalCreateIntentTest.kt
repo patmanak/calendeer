@@ -8,12 +8,10 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class LocalCreateIntentTest {
-    @Test fun seriesRuleIsExplicitAndCannotBeDroppedByCopyOrSentThroughHistoricalProfiles() {
+    @Test fun seriesRuleIsExplicitAndCannotBeDroppedByCopyOrHiddenInDisplayContent() {
         val series = LocalCreateIntent(reservation, content, CreateSeriesRule(3))
         assertNotEquals(LocalCreateIntent(reservation, content), series)
         assertEquals(series, series.copy()); assertEquals(CreateSeriesRule(3), series.copy(content = content.copy(title = "Changed")).series)
-        refused { LocalCreatePreparation(series, AdapterFormat("fixture-prep", 3), "opaque") }
-        refused { LocalCreateSubmissionReservation(series, MutationId("11111111-2222-3333-4444-555555555555"), AdapterFormat("fixture-wire", 3)) }
         refused { LocalCreateIntent(reservation, content.copy(recurrence = EventRecurrence("not-a-local-uid", "FREQ=DAILY;COUNT=3")), CreateSeriesRule(3)) }
         assertFalse(series.toString().contains("DAILY")); assertFalse(series.series.toString().contains("DAILY"))
     }

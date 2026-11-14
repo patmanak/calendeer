@@ -55,6 +55,6 @@ internal fun freezeCapturedCreateContent(content: EventContent): EventContent {
 
 /** Immutable adapter-protected preparation of one captured snapshot, never dispatch admission. */
 data class LocalCreatePreparation(val intent: LocalCreateIntent, val format: AdapterFormat, val protectedPayload: String) {
-    init { require(protectedPayload.isNotBlank() && intent.series == null) { "Series preparation not yet qualified" } }
+    init { require(protectedPayload.isNotBlank()) }
     override fun toString() = "LocalCreatePreparation(REDACTED)"
 }
