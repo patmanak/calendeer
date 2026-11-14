@@ -21,6 +21,27 @@ import org.junit.runner.RunWith
 /** Isolated SQLite fixtures only. No session, network or Calendar Provider/row locator access. */
 @RunWith(AndroidJUnit4::class)
 class LocalCreateStoreDeviceTest {
+    @Test fun seriesSnapshotReopensWithItsRuleAndNeverChangesLegacyPayloadsOrCreatesASubmission() = fixture { context, name, store ->
+        store.reserve(reservation); store.retain(intent)
+        val legacy = payload(store)
+        val seriesReservation = reservation.copy(id = MutationId("series-capture"), localId = LocalEventId(UUID.randomUUID().toString()))
+        val series = LocalCreateIntent(seriesReservation,
+            content.copy(colorRgb = 0x123456, details = EventDetails(listOf(EventReminder(10)))), CreateSeriesRule(3, 2))
+        assertTrue(store.reserve(seriesReservation)); assertEquals(series, store.retain(series))
+        val frozen = payload(store, seriesReservation.localId)
+        assertEquals(3, JSONObject(frozen).getInt("schema"))
+        store.close()
+        LocalCreateStore(context, name).use { reopened ->
+            assertEquals(series, reopened.readIntent(scope, seriesReservation.localId))
+            assertEquals(frozen, payload(reopened, seriesReservation.localId)); assertEquals(legacy, payload(reopened))
+            assertFalse(reopened.reserve(seriesReservation))
+            refused { reopened.retain(series.copy(series = CreateSeriesRule(4, 2))) }
+            assertNull(reopened.readPreparation(scope, seriesReservation.localId))
+            assertNull(reopened.readSubmission(scope, seriesReservation.localId))
+            assertEquals(frozen, payload(reopened, seriesReservation.localId))
+            assertEquals(3, reopened.readableDatabase.version)
+        }
+    }
     @Test fun personalCaptureSchemaKeepsRemindersAndColorAcrossReopenWithoutChangingOldRows() = fixture { context, name, store ->
         store.reserve(reservation); store.retain(intent)
         val legacy = payload(store)

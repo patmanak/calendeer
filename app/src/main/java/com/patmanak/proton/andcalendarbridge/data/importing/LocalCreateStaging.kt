@@ -79,6 +79,7 @@ internal class LocalCreateStaging(
             val format = store.transaction(target) { checkpoint?.format }
             if (format != currentFormat()) return LocalCreatePreparationResult.UNQUALIFIED
             val intent = journal.readIntent(target, localId) ?: return LocalCreatePreparationResult.UNQUALIFIED
+            if (intent.series != null) return LocalCreatePreparationResult.UNSUPPORTED
             val reservation = intent.reservation
             if (reservation.scope != target || reservation.localId != localId || reservation.id != id ||
                 reservation.format != format || reservation.markerProtocol != 1) return LocalCreatePreparationResult.UNQUALIFIED
@@ -132,6 +133,7 @@ internal class LocalCreateStaging(
             val importFormat = store.transaction(target) { checkpoint?.format }
             if (importFormat != currentFormat()) return LocalCreateSubmissionResult.UNQUALIFIED
             val intent = journal.readIntent(target, localId) ?: return LocalCreateSubmissionResult.UNQUALIFIED
+            if (intent.series != null) return LocalCreateSubmissionResult.UNSUPPORTED
             val captured = intent.reservation
             if (captured.scope != target || captured.localId != localId || captured.id != id ||
                 captured.format != importFormat || captured.markerProtocol != 1) return LocalCreateSubmissionResult.UNQUALIFIED

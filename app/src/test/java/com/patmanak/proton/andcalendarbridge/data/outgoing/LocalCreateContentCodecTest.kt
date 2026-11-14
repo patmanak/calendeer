@@ -9,6 +9,26 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class LocalCreateContentCodecTest {
+    @Test fun seriesSnapshotMustUseANewVersionAndCannotBecomeASimpleSnapshot() {
+        val value = LocalCreateIntent(reservation, empty, CreateSeriesRule(3))
+        val encoded = LocalCreateContentCodec.encodeContent(value)
+        assertEquals(3, JSONObject(encoded).getInt("schema"))
+        assertEquals("FREQ=DAILY;COUNT=3", JSONObject(encoded).getString("seriesRule"))
+        assertEquals(value, LocalCreateContentCodec.decodeIntent(encoded, reservation))
+        assertThrows(IllegalArgumentException::class.java) { LocalCreateContentCodec.decodeContent(encoded, reservation) }
+    }
+    @Test fun seriesSnapshotRetainsPersonalMetadataAndRejectsDowngradesUnknownFieldsAndUnboundedRules() {
+        val value = LocalCreateIntent(reservation, empty.copy(colorRgb = 0, details = EventDetails(listOf(EventReminder(10)))),
+            CreateSeriesRule(5, 2))
+        val encoded = LocalCreateContentCodec.encodeContent(value)
+        assertEquals(value, LocalCreateContentCodec.decodeIntent(encoded, reservation))
+        for (invalid in listOf(JSONObject(encoded).put("schema", 2), JSONObject(encoded).put("schema", 4),
+            JSONObject(encoded).put("seriesRule", "FREQ=DAILY"), JSONObject(encoded).put("seriesRule", "COUNT=5;FREQ=DAILY;INTERVAL=2"),
+            JSONObject(encoded).put("uid", "invented-uid"), JSONObject(encoded).put("seriesRule", JSONObject.NULL),
+            JSONObject(encoded).apply { remove("seriesRule") })) {
+            assertThrows(IllegalArgumentException::class.java) { LocalCreateContentCodec.decodeIntent(invalid.toString(), reservation) }
+        }
+    }
     private val reservation = LocalCreateReservation(MutationId("fixture-capture"),
         LocalEventId("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"),
         CalendarScope(AccountId("fixture-account"), CalendarId("fixture-calendar"), 0),

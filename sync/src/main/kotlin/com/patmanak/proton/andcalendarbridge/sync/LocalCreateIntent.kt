@@ -24,18 +24,22 @@ data class LocalCreateReservation(
 }
 
 /** First committed supported snapshot, permanently paused. No dispatch or remote association. */
-class LocalCreateIntent(val reservation: LocalCreateReservation, content: EventContent) {
+class LocalCreateIntent(val reservation: LocalCreateReservation, content: EventContent,
+    val series: CreateSeriesRule? = null) {
     val content: EventContent = freezeCapturedCreateContent(content)
     init {
+        require(series?.supports(this.content.time) != false) { "Unsupported series time" }
         val time = content.time
         if (time is EventTime.Timed) require(time.start.nano == 0 && time.end.nano == 0)
     }
-    fun copy(reservation: LocalCreateReservation = this.reservation, content: EventContent = this.content) =
-        LocalCreateIntent(reservation, content)
+    fun copy(reservation: LocalCreateReservation = this.reservation, content: EventContent = this.content,
+        series: CreateSeriesRule? = this.series) = LocalCreateIntent(reservation, content, series)
     operator fun component1() = reservation
     operator fun component2() = content
-    override fun equals(other: Any?) = other is LocalCreateIntent && reservation == other.reservation && content == other.content
-    override fun hashCode() = 31 * reservation.hashCode() + content.hashCode()
+    override fun equals(other: Any?) = other is LocalCreateIntent && reservation == other.reservation && content == other.content && series == other.series
+    override fun hashCode(): Int = (31 * reservation.hashCode() + content.hashCode()).let {
+        if (series == null) it else 31 * it + series.hashCode()
+    }
     override fun toString() = "LocalCreateIntent(REDACTED)"
 }
 
@@ -51,6 +55,6 @@ internal fun freezeCapturedCreateContent(content: EventContent): EventContent {
 
 /** Immutable adapter-protected preparation of one captured snapshot, never dispatch admission. */
 data class LocalCreatePreparation(val intent: LocalCreateIntent, val format: AdapterFormat, val protectedPayload: String) {
-    init { require(protectedPayload.isNotBlank()) }
+    init { require(protectedPayload.isNotBlank() && intent.series == null) { "Series preparation not yet qualified" } }
     override fun toString() = "LocalCreatePreparation(REDACTED)"
 }
