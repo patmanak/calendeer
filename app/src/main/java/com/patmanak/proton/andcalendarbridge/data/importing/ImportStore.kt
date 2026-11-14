@@ -753,35 +753,15 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
     private suspend fun <T> stagingMutation(scope: CalendarScope, action: (SQLiteDatabase) -> T): T {
         val coroutine = currentCoroutineContext()
         return access { db ->
-            coroutine.ensureActive()
-            check(admitTransaction(scope)) { "Inactive import lease" }
-            db.beginTransaction()
-            try {
-                requireKnown(db, scope)
-                val result = action(db)
-                check(admitTransaction(scope)) { "Inactive import lease" }
-                coroutine.ensureActive()
-                db.setTransactionSuccessful()
-                result
-            } finally { db.endTransaction() }
+            guardedImportTransaction(db, scope, coroutine, { admitTransaction(it) }, ::requireKnown, action)
         }
     }
     override suspend fun <T> transaction(scope: CalendarScope, block: SyncStore.Transaction.() -> T): T {
-        val coroutine = currentCoroutineContext()
-        return access { db ->
-        coroutine.ensureActive()
-        check(admitTransaction(scope)) { "Inactive import lease" }
-        db.beginTransaction()
-        try {
-            requireKnown(db, scope)
+        return stagingMutation(scope) { db ->
             val transaction = ImportStorePageTransaction(db, scope, ::conflicts, localMutations::matchingDeleteReservation)
             val result = block(transaction)
             checkStagingCapacity(db)
-            check(admitTransaction(scope)) { "Inactive import lease" }
-            coroutine.ensureActive()
-            db.setTransactionSuccessful()
             result
-        } finally { db.endTransaction() }
         }
     }
 
