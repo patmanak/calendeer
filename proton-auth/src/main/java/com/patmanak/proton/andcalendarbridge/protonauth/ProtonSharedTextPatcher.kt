@@ -9,6 +9,8 @@ import biweekly.io.text.ICalWriter
 import com.patmanak.proton.andcalendarbridge.sync.EventContent
 import com.patmanak.proton.andcalendarbridge.sync.EventDetails
 import com.patmanak.proton.andcalendarbridge.sync.EventTime
+import com.patmanak.proton.andcalendarbridge.sync.SeriesEditProfile
+import com.patmanak.proton.andcalendarbridge.sync.CreateSeriesRule
 import java.io.StringWriter
 import java.nio.CharBuffer
 import java.nio.charset.CodingErrorAction
@@ -126,8 +128,60 @@ internal object ProtonSharedTextPatcher {
         }
     }
 
-    fun patchPersonalAt(original: ProtonEventTextParts, expectedUid: String,
+    fun patchSeriesAt(original: ProtonEventTextParts, expectedUid: String,
         before: EventContent, after: EventContent, timestamp: Instant): ProtonEventTextParts {
+        try {
+            val old = SeriesEditProfile.freezeMaster(before)
+            val next = SeriesEditProfile.freezeMaster(after)
+            val profile = SeriesEditProfile.of(old, next)
+            require(old != next && old.recurrence!!.uid == expectedUid)
+            val (plain, originalRule) = seriesSource(original, profile.baseRule)
+            val patched = patchPersonal(plain, expectedUid, old.copy(recurrence = null), next.copy(recurrence = null), timestamp,
+                allowUnchanged = true)
+            val insertion = blocks(patched.clearShared).single { it.logical.equals("END:VEVENT", ignoreCase = true) }.start
+            val raw = if (profile.baseRule == profile.replacementRule) originalRule
+                else "RRULE:${profile.replacementRule.rule}\r\n"
+            val clear = patched.clearShared.substring(0, insertion) + raw + patched.clearShared.substring(insertion)
+            budget(clear, patched.encryptedShared)
+            return ProtonEventTextParts(clear, patched.encryptedShared)
+        } catch (_: Exception) { throw ProtonPersonalPatchException() }
+    }
+
+    /** Signed identity/base admission before crypto transformation; no clock advance or output write. */
+    fun assertSeriesBase(original: ProtonEventTextParts, expectedUid: String, before: EventContent) {
+        try {
+            val frozen = SeriesEditProfile.freezeMaster(before)
+            val recurrence = requireNotNull(frozen.recurrence)
+            require(recurrence.uid == expectedUid)
+            val plain = seriesSource(original, CreateSeriesRule.parse(recurrence.rule!!)).first
+            patch(plain, mapOf(ProtonSharedTextProperty.SUMMARY to ProtonSharedTextChange(frozen.title, frozen.title)), expectedUid)
+            val observed = observe(plain, ProtonSharedTextProperty.entries.toSet(), expectedUid)
+            require(observed[ProtonSharedTextProperty.SUMMARY].orEmpty() == text(frozen.title) &&
+                observed[ProtonSharedTextProperty.DESCRIPTION].orEmpty() == text(frozen.description) &&
+                observed[ProtonSharedTextProperty.LOCATION].orEmpty() == text(frozen.location))
+            require(decodeTime(temporalBlocks(plain.clearShared, true)) == frozen.time)
+            temporalBlocks(plain.encryptedShared, false)
+        } catch (_: Exception) { throw ProtonPersonalPatchException() }
+    }
+
+    private fun seriesSource(original: ProtonEventTextParts, expected: CreateSeriesRule): Pair<ProtonEventTextParts, String> {
+        budget(original.clearShared, original.encryptedShared)
+        val source = blocks(original.clearShared)
+        val rule = source.single { property(it.logical).first == "RRULE" }
+        require(property(rule.logical).second.equals("RRULE", ignoreCase = true) && CreateSeriesRule.parse(value(rule)) == expected)
+        val start = source.single { it.logical.equals("BEGIN:VEVENT", ignoreCase = true) }
+        val end = source.single { it.logical.equals("END:VEVENT", ignoreCase = true) }
+        require(rule.start > start.start && rule.end <= end.start)
+        return ProtonEventTextParts(original.clearShared.removeRange(rule.start, rule.end), original.encryptedShared) to
+            original.clearShared.substring(rule.start, rule.end)
+    }
+
+    fun patchPersonalAt(original: ProtonEventTextParts, expectedUid: String,
+        before: EventContent, after: EventContent, timestamp: Instant): ProtonEventTextParts =
+        patchPersonal(original, expectedUid, before, after, timestamp, allowUnchanged = false)
+
+    private fun patchPersonal(original: ProtonEventTextParts, expectedUid: String,
+        before: EventContent, after: EventContent, timestamp: Instant, allowUnchanged: Boolean): ProtonEventTextParts {
         try {
             budget(original.clearShared, original.encryptedShared)
             require(timestamp.nano == 0 && timestamp >= Instant.EPOCH && timestamp <= LAST_TIMESTAMP)
@@ -138,7 +192,7 @@ internal object ProtonSharedTextPatcher {
             require(before.details != null && after.details != null)
             require(before.details!!.organizer == null && before.details!!.attendees.isEmpty())
             require(after.details!!.organizer == null && after.details!!.attendees.isEmpty())
-            require(before.recurrence == null && after.recurrence == null && before != after)
+            require(before.recurrence == null && after.recurrence == null && (allowUnchanged || before != after))
             val expected = before.time
             val replacement = after.time
             for (time in listOf(expected, replacement)) if (time is EventTime.Timed) {
