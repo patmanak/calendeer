@@ -13,6 +13,18 @@ data class SeriesEditProfile(val baseRule: CreateSeriesRule, val replacementRule
     }
     override fun toString() = "SeriesEditProfile(REDACTED)"
     companion object {
+        /** Owned personal master snapshot before asynchronous qualification; no write authority. */
+        fun freezeMaster(content: EventContent): EventContent {
+            val recurrence = requireNotNull(content.recurrence)
+            val frozen = freezePersonalEditContent(content).copy(recurrence = recurrence.copy(
+                additionalDates = java.util.Collections.unmodifiableList(recurrence.additionalDates.toList()),
+                excludedDates = java.util.Collections.unmodifiableList(recurrence.excludedDates.toList())))
+            of(frozen, frozen)
+            boundedPersonalEdit(recurrence.uid, 4_096)
+            require(recurrence.uid.none { it.isISOControl() })
+            return frozen
+        }
+
         /** Canonical shape only; not a proof of complete native or remote family membership. */
         fun of(base: EventContent, replacement: EventContent): SeriesEditProfile = SeriesEditProfile(
             CreateSeriesRule.parse(requireNotNull(base.recurrence?.rule)),

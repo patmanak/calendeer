@@ -65,6 +65,28 @@ ten-million-occurrence expansion bound. Calendeer must retain an unresolved chan
 as unsupported, with bounded work. The Android save source itself contains timezone
 TODOs; published implementation is guidance, not proof that every case is correct.
 
+## Whole-series UID qualification
+
+Source review on 2026-11-16 confirms the existing scoped UID transport can be
+reused without displayed-date windows or a `RecurrenceID` filter. Web's pinned
+[family reader](https://github.com/ProtonMail/WebClients/blob/c9b5f2995744b6f7c8ff1301ca3d5ac4f7a18672/applications/calendar/src/app/containers/calendar/getAllEventsByUID.ts)
+uses page 0 and page size 100. Its
+[pagination helper](https://github.com/ProtonMail/WebClients/blob/c9b5f2995744b6f7c8ff1301ca3d5ac4f7a18672/packages/shared/lib/api/helpers/paginatedFetch.ts)
+stops on a short page but returns accumulated partial results at its page bound.
+Calendeer must refuse that partial result. Android's single-edit lookup has a
+paging TODO and cannot establish complete absence. These remain pinned source
+baselines; a current GitHub HEAD was not resolved during this review.
+
+The shared readback collector requires a short terminal page and a unique scoped
+event ID. A second event, including a cancelled exception, duplicate or foreign
+UID/calendar is refused immediately. Series qualification also requires a fresh
+individual read and signed decoding of the exact frozen master, including its
+revision, UID, rule and complete personal content. Inputs and results are owned
+snapshots across suspension; caller mutation cannot widen admission. Historical
+CREATE policies remain separate. This is successive observation, not an atomic
+server snapshot or conditional write. Requalification is required before sending.
+Service compatibility and dispatch wiring require separate qualification.
+
 ## Integration and ordered slices
 
 Extend the existing CREATE, personal-update and DELETE pipelines and their sealed
