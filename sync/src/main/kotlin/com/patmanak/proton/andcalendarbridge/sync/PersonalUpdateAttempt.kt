@@ -13,8 +13,7 @@ class PersonalUpdateAttemptRecord(val id: MutationId, preparation: PersonalEditP
     val format: AdapterFormat, val protectedPayload: String,
     val state: PersonalUpdateAttemptState = PersonalUpdateAttemptState.PREPARED,
     val protectedEvidence: String? = null) {
-    val preparation = PersonalEditPreparation(preparation.intent, preparation.timestamp,
-        preparation.format, preparation.protectedPayload)
+    val preparation = preparation.frozen()
     val scope: CalendarScope get() = preparation.intent.scope
     val eventId: EventId get() = preparation.intent.base.eventId
 
@@ -22,7 +21,6 @@ class PersonalUpdateAttemptRecord(val id: MutationId, preparation: PersonalEditP
         val intent = this.preparation.intent
         val original = intent.base.content
         val replacement = intent.content
-        PersonalEditCandidate(intent)
         require(state != PersonalUpdateAttemptState.PREPARED || protectedEvidence == null)
         bounded(id.value, PersonalEditPreparation.MAX_CONTEXT_BYTES)
         bounded(format.id, PersonalEditPreparation.MAX_CONTEXT_BYTES)

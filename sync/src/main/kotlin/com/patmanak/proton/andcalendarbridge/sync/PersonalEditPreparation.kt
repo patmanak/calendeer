@@ -5,11 +5,15 @@ import java.nio.CharBuffer
 import java.nio.charset.CodingErrorAction
 import java.time.Instant
 
-/** Frozen protected offline personal edit v2; no journal ownership, send permit or acknowledgement. */
-class PersonalEditPreparation(intent: LocalEditIntent, val timestamp: Instant,
-    val format: AdapterFormat, val protectedPayload: String) {
-    val intent: LocalEditIntent = PersonalEditCandidate(intent).intent
-    val changedFields get() = PersonalEditCandidate(intent).changedFields
+/** Frozen personal preparation; the historical constructor admits only simple v2 edits. */
+class PersonalEditPreparation private constructor(intent: LocalEditIntent, val timestamp: Instant,
+    val format: AdapterFormat, val protectedPayload: String, val isSeries: Boolean) {
+    constructor(intent: LocalEditIntent, timestamp: Instant, format: AdapterFormat, protectedPayload: String) :
+        this(intent, timestamp, format, protectedPayload, false)
+    val intent: LocalEditIntent = if (isSeries) SeriesEditCandidate(intent).intent else PersonalEditCandidate(intent).intent
+    val changedFields: Set<PersonalEditField> get() = if (isSeries) java.util.Collections.unmodifiableSet(
+        SeriesEditCandidate(intent).changedFields.mapTo(linkedSetOf()) { PersonalEditField.valueOf(it.name) })
+        else PersonalEditCandidate(intent).changedFields
     val requiredConsent get() = changedFields
     init {
         require(timestamp.nano == 0 && timestamp >= Instant.EPOCH && timestamp <= LAST_TIMESTAMP)
@@ -18,8 +22,11 @@ class PersonalEditPreparation(intent: LocalEditIntent, val timestamp: Instant,
         bounded(protectedPayload, MAX_PAYLOAD_BYTES)
     }
     override fun toString() = "PersonalEditPreparation(REDACTED)"
+    fun frozen() = PersonalEditPreparation(intent, timestamp, format, protectedPayload, isSeries)
 
     companion object {
+        fun forSeries(intent: LocalEditIntent, timestamp: Instant, format: AdapterFormat,
+            protectedPayload: String) = PersonalEditPreparation(intent, timestamp, format, protectedPayload, true)
         const val MAX_CONTEXT_BYTES = 4_096
         const val MAX_TEXT_BYTES = 65_536
         const val MAX_PAYLOAD_BYTES = 4_194_304

@@ -10,7 +10,7 @@ internal object PersonalEditConsent {
         PersonalEditCandidate(intent).requiredConsent.all { field -> when (field) {
             PersonalEditField.TITLE -> titles(intent.scope)
             PersonalEditField.TEXT -> texts(intent.scope)
-            PersonalEditField.TIME -> times(intent.scope)
+            PersonalEditField.TIME, PersonalEditField.RULE -> times(intent.scope)
             PersonalEditField.REMINDERS, PersonalEditField.COLOR -> editable(intent.scope)
         } }
     } catch (_: Exception) { false }

@@ -13,6 +13,15 @@ object PersonalUpdateContentPolicy {
     private fun canonical(value: EventContent) = value.copy(title = value.title.replace("\r\n", "\n"),
         description = value.description.replace("\r\n", "\n"), location = value.location.replace("\r\n", "\n"))
 
+    internal fun freezeObservation(preparation: PersonalEditPreparation, actual: EventContent): EventContent {
+        val expected = preparation.intent.content
+        if (!preparation.isSeries) return freezeObservation(expected, actual)
+        val frozen = SeriesEditProfile.freezeMaster(actual)
+        require(frozen.recurrence == expected.recurrence)
+        return freezeObservation(expected.copy(recurrence = null), frozen.copy(recurrence = null))
+            .copy(recurrence = frozen.recurrence)
+    }
+
     /** Check the actual decoded bytes before freezing. Never run a readback through the
      * raw personal candidate: its unchanged LF baseline may have been serialized as CRLF.
      */
@@ -56,7 +65,7 @@ data class PersonalUpdateAttemptIdentity(val scope: CalendarScope, val id: Mutat
             val frozen = record.frozen()
             return PersonalUpdateAttemptIdentity(frozen.scope, frozen.id, frozen.preparation.intent.id, frozen.eventId,
                 frozen.preparation.intent.base.revision, frozen.format, frozen.preparation.format,
-                preparationFingerprint(frozen.preparation), fingerprint("calendeer-personal-edit-v2-payload-v2") { field(frozen.protectedPayload) })
+                preparationFingerprint(frozen.preparation), fingerprint(tag(frozen.preparation, "payload")) { field(frozen.protectedPayload) })
         }
 
         /** Stable only for the exact committed local capsule and target request format.
@@ -65,20 +74,22 @@ data class PersonalUpdateAttemptIdentity(val scope: CalendarScope, val id: Mutat
         fun requestId(preparation: PersonalEditPreparation, requestFormat: AdapterFormat): MutationId {
             val frozen = freeze(preparation)
             boundedIdentity(requestFormat.id)
-            return MutationId("personal-edit-v2-" + fingerprint("calendeer-personal-edit-v2-request-id-v2") {
+            return MutationId((if (frozen.isSeries) "personal-series-v3-" else "personal-edit-v2-") + fingerprint(tag(frozen, "request-id")) {
                 this.preparation(frozen); field(requestFormat.id); field(requestFormat.version.toString())
             })
         }
 
         private fun freeze(value: PersonalEditPreparation): PersonalEditPreparation {
-            val frozen = PersonalEditPreparation(value.intent, value.timestamp, value.format, value.protectedPayload)
+            val frozen = value.frozen()
             val base = frozen.intent.base.content
-            PersonalEditCandidate(frozen.intent)
             require(!PersonalUpdateContentPolicy.sameSubmittedContent(base, frozen.intent.content))
             return frozen
         }
         private fun preparationFingerprint(value: PersonalEditPreparation) =
-            fingerprint("calendeer-personal-edit-v2-preparation-v2") { preparation(freeze(value)) }
+            fingerprint(tag(value, "preparation")) { preparation(freeze(value)) }
+
+        private fun tag(value: PersonalEditPreparation, purpose: String): String = if (value.isSeries)
+            "calendeer-personal-series-v3-$purpose-v1" else "calendeer-personal-edit-v2-$purpose-v2"
 
         private fun boundedIdentity(value: String) {
             require(value.isNotBlank() && value.length <= PersonalEditPreparation.MAX_CONTEXT_BYTES)
@@ -111,12 +122,16 @@ data class PersonalUpdateAttemptIdentity(val scope: CalendarScope, val id: Mutat
                     is EventTime.Timed -> listOf("TIMED", time.start.toString(), time.end.toString(), time.zone.id).forEach(::field)
                     is EventTime.AllDay -> listOf("ALL_DAY", time.start.toString(), time.endExclusive.toString()).forEach(::field)
                 }
-                field("PERSONAL_EDIT_COMPLETE_CONTENT_V2")
+                field(if (value.recurrence == null) "PERSONAL_EDIT_COMPLETE_CONTENT_V2" else "PERSONAL_SERIES_COMPLETE_CONTENT_V3")
                 field(value.colorRgb?.toString() ?: "NULL")
                 val details = checkNotNull(value.details)
                 field(details.reminders.size.toString())
                 details.reminders.forEach { field(it.minutesBefore.toString()) }
-                field("NO_ORGANIZER_NO_ATTENDEES_NO_RECURRENCE")
+                if (value.recurrence == null) field("NO_ORGANIZER_NO_ATTENDEES_NO_RECURRENCE") else {
+                    field("NO_ORGANIZER_NO_ATTENDEES_FINITE_DAILY")
+                    field(value.recurrence.uid); field(requireNotNull(value.recurrence.rule))
+                    field("NO_RDATES_NO_EXDATES")
+                }
             }
             fun finish() = digest.digest().joinToString("") { "%02x".format(it.toInt() and 0xff) }
         }
@@ -133,7 +148,7 @@ sealed interface PersonalUpdateSubmissionObservation {
             require(this.record.state == PersonalUpdateAttemptState.OUTCOME_UNKNOWN)
             require(observed.eventId == this.record.eventId && observed.revision != this.record.preparation.intent.base.revision)
             // Preserve the original raw text relation before accepting canonical readback.
-            val actual = PersonalUpdateContentPolicy.freezeObservation(this.record.preparation.intent.content, observed.content)
+            val actual = PersonalUpdateContentPolicy.freezeObservation(this.record.preparation, observed.content)
             event = observed.copy(content = actual)
         }
         override fun toString() = "PersonalUpdateSubmissionObservation.Verified(redacted)"

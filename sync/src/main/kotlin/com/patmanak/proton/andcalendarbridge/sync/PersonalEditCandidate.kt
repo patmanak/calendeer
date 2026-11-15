@@ -28,4 +28,4 @@ class PersonalEditCandidate(intent: LocalEditIntent) {
     }
 }
 
-enum class PersonalEditField { TITLE, TEXT, TIME, REMINDERS, COLOR }
+enum class PersonalEditField { TITLE, TEXT, TIME, REMINDERS, COLOR, RULE }
