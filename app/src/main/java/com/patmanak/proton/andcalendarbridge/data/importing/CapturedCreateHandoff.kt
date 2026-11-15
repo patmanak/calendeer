@@ -216,6 +216,61 @@ internal class CapturedCreateHandoff(
         }
     }
 
+    /** Explicit retention against the current transferred frame. No recovery, ACK or dispatch. */
+    suspend fun captureSeriesEdit(localId: LocalEventId, id: MutationId, attempt: MutationId,
+        mutation: MutationId): CapturedCreateReconciliationResult {
+        return try {
+            if (!available()) return CapturedCreateReconciliationResult.INACTIVE
+            installAdmission()
+            val submission = captures.readSubmission(target, localId) ?: return CapturedCreateReconciliationResult.UNRESOLVED
+            val capture = submission.reservation.intent.reservation
+            if (capture.scope != target || capture.localId != localId || capture.id != id ||
+                capture.format != currentFormat() || submission.reservation.attempt != attempt ||
+                mutation == id || mutation == attempt || mutation.value == localId.value)
+                return CapturedCreateReconciliationResult.UNRESOLVED
+            val identity = CapturedCreateDispatchIdentity.of(submission)
+            if (identity.fingerprintVersion != 2) return CapturedCreateReconciliationResult.UNSUPPORTED
+            val binding = journal.capturedBinding(identity) ?: return CapturedCreateReconciliationResult.UNRESOLVED
+            val role = store.capturedHandoff(target, binding.eventId) ?: return CapturedCreateReconciliationResult.UNRESOLVED
+            val frame = role.frame
+            if (frame.receipt.acknowledgement.baseline.receipt.binding != binding ||
+                role.state != CapturedCreateHandoffState.RELEASED || !source(frame) ||
+                store.capturedHandoffProjection(frame) != null) return CapturedCreateReconciliationResult.UNRESOLVED
+            if (!available()) return CapturedCreateReconciliationResult.INACTIVE
+            if (store.localDelete(target, binding.eventId) != null) return CapturedCreateReconciliationResult.UNRESOLVED
+            val retained = store.localEdit(target, binding.eventId)
+            if (retained != null) {
+                if (retained.id != mutation || retained.base != frame.base || retained.format != frame.format ||
+                    retained.seriesProfile == null) return CapturedCreateReconciliationResult.UNRESOLVED
+                if (!source(frame) || store.capturedHandoff(target, binding.eventId) != role)
+                    return CapturedCreateReconciliationResult.UNRESOLVED
+                if (!available()) return CapturedCreateReconciliationResult.INACTIVE
+                return if (retained.state == LocalEditState.CONFLICT) CapturedCreateReconciliationResult.CONFLICT
+                    else CapturedCreateReconciliationResult.RETAINED
+            }
+            val observed = projection.captureCapturedHandoffCurrent(frame)
+            if (!available()) return CapturedCreateReconciliationResult.INACTIVE
+            if (!source(frame) || store.capturedHandoff(target, binding.eventId) != role)
+                return CapturedCreateReconciliationResult.UNRESOLVED
+            if (!available()) return CapturedCreateReconciliationResult.INACTIVE
+            val snapshot = (observed as? CapturedHandoffCurrentObservation.Supported)?.snapshot
+                ?: return if (observed == CapturedHandoffCurrentObservation.Unsupported)
+                    CapturedCreateReconciliationResult.UNSUPPORTED else CapturedCreateReconciliationResult.UNRESOLVED
+            if (snapshot.frame != frame) return CapturedCreateReconciliationResult.UNRESOLVED
+            if (snapshot.deleted) return CapturedCreateReconciliationResult.UNSUPPORTED
+            if (snapshot.unchanged) return CapturedCreateReconciliationResult.UNCHANGED
+            val state = store.retainCapturedHandoffSeriesEdit(snapshot, mutation)
+            if (!available()) return CapturedCreateReconciliationResult.INACTIVE
+            if (state == LocalEditState.CONFLICT) CapturedCreateReconciliationResult.CONFLICT
+                else CapturedCreateReconciliationResult.RETAINED
+        } catch (cancelled: CancellationException) {
+            currentCoroutineContext().ensureActive()
+            if (!active()) CapturedCreateReconciliationResult.INACTIVE else throw cancelled
+        } catch (_: Exception) {
+            if (!active()) CapturedCreateReconciliationResult.INACTIVE else CapturedCreateReconciliationResult.UNRESOLVED
+        } finally { clearAdmission() }
+    }
+
     /** Recover only historical proof. No Provider write, even after a later edit or unsupported import. */
     private suspend fun recoverProjection(frame: CapturedCreateHandoffFrame): Boolean {
         if (!source(frame)) return false

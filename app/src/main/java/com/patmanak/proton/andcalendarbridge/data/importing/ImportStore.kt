@@ -347,6 +347,12 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
         ImportStoreCapturedSql.retainCapturedHandoffLocalChange(db, snapshot, mutation, ::conflicts)
     }
 
+    /** Explicit series retention in the existing handoff transaction and local-edit profile. */
+    suspend fun retainCapturedHandoffSeriesEdit(snapshot: CapturedHandoffCurrent, mutation: MutationId): LocalEditState? =
+        stagingMutation(snapshot.frame.scope) { db ->
+        ImportStoreCapturedSql.retainCapturedHandoffLocalChange(db, snapshot, mutation, ::conflicts, series = true)
+    }
+
     /** Origin decoding deliberately does not compare projection_bases, which advances after transfer. */
     /** Persist before Provider apply. Preparation alone is never evidence that the row was written. */
     suspend fun prepareProjection(intent: ProjectionIntent, format: AdapterFormat,

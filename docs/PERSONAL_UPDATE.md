@@ -41,8 +41,13 @@ of detached native children in one assertion batch. It leaves DIRTY and the raw
 Provider representation intact. Selection, permissions, account, generation,
 baseline and direct-source representation are rechecked before retention.
 Materialized RDATE sources and transferred CREATE rows are not admitted by this
-entry. No worker invokes it yet. Complete remote-family qualification, transferred
-CREATE edit capture, series preparation/submission and acknowledgement stay closed.
+entry. A separate explicit entry captures edits of transferred finite DAILY CREATE
+masters against their current handoff frame, using the original CREATE dispatch,
+attachment and acknowledgement proofs. It retains profile 2 and the handoff wait
+atomically, including conflict variants. Retries reuse the retained observation
+and preserve newer native edits. Simple reconciliation still refuses changed series.
+Neither entry is invoked by a worker yet. Complete remote-family qualification,
+series preparation/submission and acknowledgement stay closed.
 
 ## Wire and local state
 

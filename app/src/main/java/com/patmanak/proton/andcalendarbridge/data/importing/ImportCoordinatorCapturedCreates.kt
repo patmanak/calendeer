@@ -416,6 +416,17 @@ internal class ImportCoordinatorCapturedCreates(
     }
 
 
+    /** Explicit offline series capture only. It grants no preparation or sending capability. */
+    suspend fun captureHandoffSeriesEdit(target: CalendarScope, localId: LocalEventId, id: MutationId,
+        attempt: MutationId, mutation: MutationId): CapturedCreateReconciliationResult = mutex.withLock {
+        val captures = localCreates ?: return@withLock CapturedCreateReconciliationResult.UNRESOLVED
+        val journal = creates ?: return@withLock CapturedCreateReconciliationResult.UNRESOLVED
+        ensureCreateLifecycle()
+        val expected = generation(); val policy = policyRevision()
+        val active = { authenticated() && generation() == expected && policyRevision() == policy && hasCalendarPermissions() }
+        capturedCreateHandoff(target, captures, journal, expected, active).captureSeriesEdit(localId, id, attempt, mutation)
+    }
+
     /** Retain a later dirty intention against the current reference, never the original sent base.
      * Automatic observations reuse an existing durable owner, or allocate a distinct new UUID.
      * Explicit caller identities retain their original strict matching behavior.

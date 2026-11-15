@@ -13,6 +13,7 @@ import com.patmanak.proton.andcalendarbridge.data.calendar.CalendarProjection
 import com.patmanak.proton.andcalendarbridge.data.calendar.CalendarProjectionException
 import com.patmanak.proton.andcalendarbridge.data.calendar.CalendarProjectionFailure
 import com.patmanak.proton.andcalendarbridge.data.calendar.AndroidCalendarProjection
+import com.patmanak.proton.andcalendarbridge.data.calendar.EventColorMode
 import com.patmanak.proton.andcalendarbridge.data.importing.*
 import com.patmanak.proton.andcalendarbridge.data.outgoing.LocalCreateStore
 import com.patmanak.proton.andcalendarbridge.data.outgoing.CreateAttemptStore
@@ -36,6 +37,144 @@ import org.junit.runner.RunWith
 /** Native Provider and three real journals; controlled incoming data, no network upload. */
 @RunWith(AndroidJUnit4::class)
 class CapturedHandoffIntegrationDeviceTest {
+    @Test fun explicitTransferredSeriesEditKeepsCurrentFrameMetadataAndNewerNativeChangesAcrossReopen() = runBlocking {
+        for (allDay in listOf(false, true)) for (mode in EventColorMode.entries) fixture(series = true, allDay = allDay,
+            richOrigin = true, colorMode = mode) {
+            transferred()
+            val next = verifiedEvent.copy(revision = Revision("advanced-series"), content = verifiedEvent.content.copy(
+                recurrence = verifiedEvent.content.recurrence!!.copy(rule = "FREQ=DAILY;COUNT=4")))
+            incoming(next); drain()
+            val frame = role()!!.frame; val original = baseline(); val ack = frame.receipt.acknowledgement
+            mutate(ContentValues().apply { put(Events.TITLE, "Offline transferred series edit"); put(Events.DIRTY, 1)
+                put(Events.RRULE, "COUNT=8;FREQ=DAILY"); put(Events.DURATION, if (allDay) "P3D" else "PT7200S") })
+            addReminder(20)
+            val native = providerSnapshot(); val rawRule = field(Events.RRULE); val rawDuration = field(Events.DURATION)
+            assertEquals(CapturedCreateReconciliationResult.UNSUPPORTED, reconcileTransferred()); assertNull(edit())
+            assertEquals(CapturedCreateReconciliationResult.RETAINED, captureSeriesEdit())
+            val retained = edit()!!
+            assertEquals(next, retained.base); assertEquals(SeriesEditProfile(CreateSeriesRule(4), CreateSeriesRule(8)), retained.seriesProfile)
+            assertEquals(listOf(EventReminder(10), EventReminder(20)), retained.content.details!!.reminders)
+            assertEquals(content.colorRgb, retained.content.colorRgb)
+            assertEquals("Offline transferred series edit", retained.content.title)
+            assertEquals(native, providerSnapshot()); assertEquals(rawRule, field(Events.RRULE)); assertEquals(rawDuration, field(Events.DURATION))
+            assertEquals(frame, role()!!.frame); assertTrue(role()!!.waiting)
+            assertEquals(original, baseline()); assertEquals(ack, role()!!.frame.receipt.acknowledgement); assertEquals(1, sends)
+            reopen(); assertEquals(retained, edit())
+            mutate(ContentValues().apply { put(Events.TITLE, "Newer untouched series edit") })
+            assertEquals(CapturedCreateReconciliationResult.RETAINED, captureSeriesEdit())
+            assertEquals(retained, edit()); assertEquals("Newer untouched series edit", field(Events.TITLE)); assertEquals("1", field(Events.DIRTY))
+        }
+    }
+    @Test fun explicitSeriesCaptureRejectsSimpleCreateAndNativeTombstone() = runBlocking {
+        for (series in listOf(false, true)) fixture(series = series) {
+            transferred()
+            mutate(ContentValues().apply { put(Events.TITLE, "Unsupported local change"); put(Events.DIRTY, 1)
+                if (series) put(Events.DELETED, 1) })
+            val before = providerSnapshot()
+            assertEquals(CapturedCreateReconciliationResult.UNSUPPORTED, captureSeriesEdit())
+            assertNull(edit()); assertNull(deletion()); assertEquals(before, providerSnapshot())
+        }
+    }
+    @Test fun explicitSeriesCaptureRefusesDetachedChildrenWithoutChangingTheMaster() = fixture(series = true) {
+        transferred(); exception()
+        mutate(ContentValues().apply { put(Events.TITLE, "Series with child"); put(Events.DIRTY, 1) })
+        val before = providerSnapshot()
+        assertEquals(CapturedCreateReconciliationResult.UNSUPPORTED, captureSeriesEdit())
+        assertNull(edit()); assertEquals(before, providerSnapshot()); assertEquals(2, rows())
+    }
+    @Test fun explicitSeriesCaptureRechecksRevocationAfterNativeSnapshot() = runBlocking {
+        for (reason in listOf("permissions", "account", "selection")) fixture(series = true) {
+            transferred(); mutate(ContentValues().apply { put(Events.TITLE, "Revoked series edit"); put(Events.DIRTY, 1) })
+            afterHandoffSnapshot = {
+                when (reason) {
+                    "permissions" -> permitted = false
+                    "account" -> coordinator.authenticationChanged(false)
+                    else -> { allowStore(); store.setEnabled(target, false) }
+                }
+            }
+            assertEquals(CapturedCreateReconciliationResult.INACTIVE, captureSeriesEdit()); assertNull(edit())
+            assertEquals("Revoked series edit", field(Events.TITLE)); assertEquals("1", field(Events.DIRTY))
+        }
+    }
+    @Test fun explicitSeriesCaptureRefusesSourceOrRoleChangedDuringNativeSnapshot() = runBlocking {
+        for (sourceMissing in listOf(false, true)) fixture(series = true) {
+            transferred(); val frame = role()!!.frame
+            mutate(ContentValues().apply { put(Events.TITLE, "Stale series edit"); put(Events.DIRTY, 1) })
+            afterHandoffSnapshot = {
+                if (sourceMissing) expectationAvailable = false
+                else { allowStore(); assertTrue(store.waitCapturedHandoff(frame)) }
+            }
+            assertEquals(CapturedCreateReconciliationResult.UNRESOLVED, captureSeriesEdit()); assertNull(edit())
+            assertEquals("1", field(Events.DIRTY)); assertEquals(1, sends)
+        }
+    }
+    @Test fun explicitSeriesCaptureKeepsNewerNativeEditMadeAfterItsAssertionBatch() = fixture(series = true) {
+        currentTransferred(); mutate(ContentValues().apply { put(Events.TITLE, "First series edit"); put(Events.DIRTY, 1) })
+        afterHandoffSnapshot = { mutate(ContentValues().apply { put(Events.TITLE, "Newer series edit") }) }
+        assertEquals(CapturedCreateReconciliationResult.RETAINED, captureSeriesEdit())
+        assertEquals("First series edit", edit()!!.content.title); assertEquals("Newer series edit", field(Events.TITLE))
+        assertEquals("1", field(Events.DIRTY)); assertEquals(1, sends)
+    }
+    @Test fun explicitSeriesCapturePreservesARemoteConflictAcrossReopening() = fixture(series = true) {
+        transferred(); val base = role()!!.frame.base
+        mutate(ContentValues().apply { put(Events.TITLE, "Conflicting series edit"); put(Events.DIRTY, 1) })
+        val remote = base.copy(revision = Revision("concurrent-series"), content = base.content.copy(title = "Concurrent remote series"))
+        afterHandoffSnapshot = { incoming(remote) }
+        assertEquals(CapturedCreateReconciliationResult.CONFLICT, captureSeriesEdit())
+        val retained = edit()!!; assertEquals(base, retained.base); assertEquals(LocalEditState.CONFLICT, retained.state)
+        reopen(); assertEquals(retained, edit()); assertEquals(remote, remoteRecord()); assertTrue(role()!!.waiting)
+        allowStore()
+        val archive = store.conflictArchives(ConflictArchiveQuery(target)).entries.single()
+        assertEquals(retained.seriesProfile, store.conflictArchive(archive)!!.seriesProfile)
+    }
+    @Test fun explicitSeriesCaptureRollsBackTheIntentWhenItsHandoffWaitCannotCommit() = fixture(series = true) {
+        currentTransferred(); mutate(ContentValues().apply { put(Events.TITLE, "Interrupted series capture"); put(Events.DIRTY, 1) })
+        sql { it.execSQL("CREATE TRIGGER fixture_fail_series_wait BEFORE UPDATE OF waiting ON captured_create_handoffs " +
+            "WHEN NEW.waiting=1 BEGIN SELECT RAISE(ABORT, 'fixture wait interrupted'); END") }
+        assertEquals(CapturedCreateReconciliationResult.UNRESOLVED, captureSeriesEdit()); assertNull(edit()); assertFalse(role()!!.waiting)
+        sql { it.execSQL("DROP TRIGGER fixture_fail_series_wait") }
+        assertEquals(CapturedCreateReconciliationResult.RETAINED, captureSeriesEdit()); assertNotNull(edit()); assertTrue(role()!!.waiting)
+        assertEquals("1", field(Events.DIRTY)); assertEquals(1, sends)
+    }
+    @Test fun explicitSeriesCaptureRejectsReusedCreateIdsAndAnotherEditOwner() = fixture(series = true) {
+        currentTransferred(); mutate(ContentValues().apply { put(Events.TITLE, "Owned series edit"); put(Events.DIRTY, 1) })
+        for (request in listOf(id, attempt, MutationId(localId.value))) {
+            assertEquals(CapturedCreateReconciliationResult.UNRESOLVED, captureSeriesEdit(request)); assertNull(edit())
+        }
+        assertEquals(CapturedCreateReconciliationResult.RETAINED, captureSeriesEdit())
+        val retained = edit()!!
+        assertEquals(CapturedCreateReconciliationResult.UNRESOLVED, captureSeriesEdit(MutationId("another-series-edit")))
+        assertEquals(retained, edit())
+    }
+    @Test fun explicitSeriesStoreRetryCannotReinterpretARetainedSimpleProfile() = fixture(series = true) {
+        currentTransferred(); mutate(ContentValues().apply { put(Events.TITLE, "Frozen series profile"); put(Events.DIRTY, 1) })
+        assertEquals(CapturedCreateReconciliationResult.RETAINED, captureSeriesEdit())
+        val retained = edit()!!
+        val snapshot = CapturedHandoffCurrent(role()!!.frame, retained.content, false)
+        sql { assertEquals(1, it.update("local_edits", ContentValues().apply { put("edit_profile", 1) }, null, null)) }
+        allowStore(); var refused = false
+        try { store.retainCapturedHandoffSeriesEdit(snapshot, mutation) } catch (_: IllegalStateException) { refused = true }
+        assertTrue(refused)
+        sql {
+            it.rawQuery("SELECT edit_profile FROM local_edits", null).use { row -> assertTrue(row.moveToFirst()); assertEquals(1, row.getInt(0)) }
+            assertEquals(1, it.update("local_edits", ContentValues().apply { put("edit_profile", 2) }, null, null))
+        }
+        assertEquals(retained, edit()); assertEquals("1", field(Events.DIRTY))
+    }
+    @Test fun explicitSeriesStorePortCannotAdoptSimpleOriginsOrDisabledScopes() = runBlocking {
+        for (series in listOf(false, true)) fixture(series = series) {
+            transferred(); val frame = role()!!.frame
+            val snapshot = CapturedHandoffCurrent(frame, frame.base.content.copy(title = "Unqualified store edit"), false)
+            if (series) { allowStore(); store.setEnabled(target, false) }
+            allowStore(); var refused = false
+            try { store.retainCapturedHandoffSeriesEdit(snapshot, mutation) }
+            catch (_: IllegalArgumentException) { refused = true } catch (_: IllegalStateException) { refused = true }
+            assertTrue(refused); assertNull(edit())
+            sql { db -> db.rawQuery("SELECT waiting FROM captured_create_handoffs", null).use {
+                assertEquals(1, it.count); assertTrue(it.moveToFirst()); assertEquals(0, it.getInt(0))
+            } }
+        }
+    }
     @Test fun seriesTransfersAndProjectsANewerCanonicalRuleAfterReopen() = fixture(series = true) {
         transferred(); assertEquals(verifiedEvent, role()!!.frame.base)
         reopen()
@@ -482,7 +621,7 @@ class CapturedHandoffIntegrationDeviceTest {
         assertEquals(ImportRunResult.COMPLETE, drain()); assertEquals(runs - 1, continuations.get())
     }
     private class Fixture(val context: Context, safePersonal: Boolean = false, val richOrigin: Boolean = false,
-        val series: Boolean = false, val allDay: Boolean = false) {
+        val series: Boolean = false, val allDay: Boolean = false, colorMode: EventColorMode = EventColorMode.EVENT) {
         private val token = UUID.randomUUID().toString()
         private val importName = "dispatch-integration-import-$token.db"
         private val dispatchName = "captured-provider-dispatch-$token.db"
@@ -502,7 +641,7 @@ class CapturedHandoffIntegrationDeviceTest {
             details = EventDetails(if (richOrigin) listOf(EventReminder(10)) else emptyList()),
             colorRgb = if (richOrigin) 0x123456 else null)
         val intent = LocalCreateIntent(LocalCreateReservation(id, localId, target, format, timestamp), content, if (series) CreateSeriesRule(5) else null)
-        val projection = AndroidCalendarProjection(context)
+        val projection = AndroidCalendarProjection(context) { colorMode }
         var handoffWrites = 0
         var handoffInspections = 0
         var beforeHandoffWrite: suspend () -> Unit = {}
@@ -705,7 +844,9 @@ class CapturedHandoffIntegrationDeviceTest {
             catch (_: CancellationException) { currentCoroutineContext().ensureActive() }
         }
         suspend fun transferred() { ready(); acknowledge(); assertEquals(CapturedCreateHandoffResult.HANDED_OFF, handoff()) }
+        suspend fun currentTransferred() { transferred(); incoming(verifiedEvent); drain() }
         suspend fun reconcileTransferred() = coordinator.reconcileHandoffLocalCreate(target, localId, id, attempt, mutation)
+        suspend fun captureSeriesEdit(request: MutationId = mutation) = coordinator.captureHandoffSeriesEdit(target, localId, id, attempt, request)
         fun sql(block: (SQLiteDatabase) -> Unit) = SQLiteDatabase.openDatabase(context.getDatabasePath(importName).absolutePath, null, SQLiteDatabase.OPEN_READWRITE).use(block)
         fun failRestore(enabled: Boolean) = sql {
             if (enabled) it.execSQL("CREATE TRIGGER fixture_restore_failure BEFORE UPDATE OF payload ON projection_bases BEGIN SELECT RAISE(ABORT, 'Controlled restore failure'); END")
@@ -816,9 +957,10 @@ class CapturedHandoffIntegrationDeviceTest {
         }
     }
     private fun fixture(safePersonal: Boolean = false, richOrigin: Boolean = false, series: Boolean = false, allDay: Boolean = false,
+        colorMode: EventColorMode = EventColorMode.EVENT,
         block: suspend Fixture.() -> Unit) = runBlocking {
         assumeTrue(InstrumentationRegistry.getArguments().getString("providerFixture") == "true")
-        val fixture = Fixture(ApplicationProvider.getApplicationContext(), safePersonal, richOrigin, series, allDay)
+        val fixture = Fixture(ApplicationProvider.getApplicationContext(), safePersonal, richOrigin, series, allDay, colorMode)
         assumeTrue(fixture.projection.hasPermissions())
         try { fixture.seed(); fixture.block() } finally { fixture.close() }
     }

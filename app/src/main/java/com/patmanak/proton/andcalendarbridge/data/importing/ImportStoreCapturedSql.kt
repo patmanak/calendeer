@@ -272,7 +272,7 @@ internal object ImportStoreCapturedSql {
     }
 
     fun retainCapturedHandoffLocalChange(db: SQLiteDatabase, snapshot: CapturedHandoffCurrent, mutation: MutationId,
-        conflicts: (SQLiteDatabase) -> ConflictArchiveSql): LocalEditState? = run {
+        conflicts: (SQLiteDatabase) -> ConflictArchiveSql, series: Boolean = false): LocalEditState? = run {
         val frame = snapshot.frame; val scope = frame.scope; val event = frame.eventId
         check(requireHandoffFrame(db, frame).state == CapturedCreateHandoffState.RELEASED) { "Handoff is pending" }
         check(!hasRawEventRow(db, "projection_receipts", scope, event)) { "Handoff projection proof is unresolved" }
@@ -280,16 +280,21 @@ internal object ImportStoreCapturedSql {
         require(mutation != link.captureId && mutation != link.attempt.id && mutation.value != link.localId.value) {
             "Local change requires a separate mutation identity"
         }
-        if (snapshot.deleted) LocalDeleteIntent(mutation, scope, frame.format, frame.base, snapshot.content)
+        if (series) {
+            check(activeProjectionScope(db, scope)) { "Inactive series capture scope" }
+            require(link.fingerprintVersion == 2 && !snapshot.deleted && !snapshot.unchanged)
+            SeriesEditCandidate(LocalEditIntent(mutation, scope, frame.format, frame.base, snapshot.content,
+                seriesProfile = SeriesEditProfile.of(frame.base.content, snapshot.content)))
+        } else if (snapshot.deleted) LocalDeleteIntent(mutation, scope, frame.format, frame.base, snapshot.content)
         else if (!snapshot.unchanged) LocalEditIntent(mutation, scope, frame.format, frame.base, snapshot.content)
         val kind = if (snapshot.deleted) "DELETE" else "UPDATE"
         val base = encodeChange(frame.base); val local = encodeChange(frame.base.copy(content = snapshot.content))
-        val previous = db.rawQuery("SELECT mutation,adapter,version,base,local,state,kind FROM local_edits WHERE scope=? AND event=?",
+        val previous = db.rawQuery("SELECT mutation,adapter,version,base,local,state,kind,edit_profile FROM local_edits WHERE scope=? AND event=?",
             arrayOf(key(scope), event.value)).use { row ->
             if (!row.moveToFirst()) null else {
                 check(!snapshot.unchanged && row.getString(0) == mutation.value && row.getString(1) == frame.format.id &&
                     row.getString(2) == frame.format.version.toString() && row.getString(3) == base && row.getString(4) == local &&
-                    row.getString(6) == kind) { "Handoff local intention is immutable" }
+                    row.getString(6) == kind && row.getInt(7) == (if (series) 2 else 1)) { "Handoff local intention is immutable" }
                 LocalEditState.valueOf(row.getString(5))
             }
         }
@@ -309,7 +314,7 @@ internal object ImportStoreCapturedSql {
         } else db.insertOrThrow("local_edits", null, ContentValues().apply {
             put("scope", key(scope)); put("event", event.value); put("mutation", mutation.value)
             put("adapter", frame.format.id); put("version", frame.format.version); put("base", base)
-            put("local", local); put("state", state.name); put("kind", kind)
+            put("local", local); put("state", state.name); put("kind", kind); put("edit_profile", if (series) 2 else 1)
         })
         check(db.update("captured_create_handoffs", ContentValues().apply { put("waiting", 1) },
             "scope=? AND event=? AND nonce=?", arrayOf(key(scope), event.value, frame.receipt.nonce)) == 1)
