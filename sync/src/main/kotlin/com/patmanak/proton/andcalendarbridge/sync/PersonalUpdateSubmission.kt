@@ -158,6 +158,7 @@ sealed interface PersonalUpdateSubmissionObservation {
 /** No permissive overload: UNKNOWN is inspection-only and evidence has its own scoped lease. */
 interface CalendarPersonalUpdatePort {
     val personalUpdateFormat: AdapterFormat?
+    val seriesUpdateFormat: AdapterFormat? get() = null
     suspend fun prepareSubmission(id: MutationId, preparation: PersonalEditPreparation,
         admit: (CalendarScope) -> Boolean): PersonalUpdateAttemptRecord?
     suspend fun submit(record: PersonalUpdateAttemptRecord, journal: PersonalUpdateAttemptJournal,

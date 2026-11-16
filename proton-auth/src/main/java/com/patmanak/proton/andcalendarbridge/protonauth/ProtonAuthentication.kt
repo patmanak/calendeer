@@ -86,6 +86,7 @@ internal class SerializedAuthenticationPort(
     override val personalFormat = PERSONAL_PREPARATION_FORMAT
     override val seriesFormat = PERSONAL_SERIES_PREPARATION_FORMAT
     override val personalUpdateFormat = PERSONAL_UPDATE_REQUEST_FORMAT
+    override val seriesUpdateFormat = PERSONAL_SERIES_UPDATE_REQUEST_FORMAT
     override val localTimeFormat = LOCAL_TIME_PREPARATION_FORMAT
     override val titleUpdateFormat = TITLE_UPDATE_SUBMISSION_FORMAT
     override val textUpdateFormat = TEXT_UPDATE_REQUEST_FORMAT
@@ -173,13 +174,15 @@ internal class SerializedAuthenticationPort(
     override suspend fun prepareSubmission(id: MutationId, preparation: PersonalEditPreparation,
         admit: (CalendarScope) -> Boolean): PersonalUpdateAttemptRecord? {
         currentCoroutineContext().ensureActive()
-        val frozen = PersonalEditPreparation(freezePersonalRequest(preparation.intent, preparation.timestamp),
-            preparation.timestamp, preparation.format, preparation.protectedPayload)
-        if (frozen.format != PERSONAL_PREPARATION_FORMAT) return null
+        val frozen = preparation.frozen()
+        if (frozen.isSeries) freezeSeriesRequest(frozen.intent, frozen.timestamp) else freezePersonalRequest(frozen.intent, frozen.timestamp)
+        if (frozen.format != if (frozen.isSeries) PERSONAL_SERIES_PREPARATION_FORMAT else PERSONAL_PREPARATION_FORMAT) return null
+        val expectedFormat = if (frozen.isSeries) seriesUpdateFormat else personalUpdateFormat
         return personalOperation(frozen.intent.scope, admit, { false }, null, preparation = true) { runtime, lease, _ ->
+            if (frozen.isSeries && runtime.seriesUpdateFormat != expectedFormat) return@personalOperation null
             val result = runtime.prepareSubmission(id, frozen, lease::allows)
             currentCoroutineContext().ensureActive()
-            result?.takeIf { it.id == id && it.format == personalUpdateFormat && it.state == PersonalUpdateAttemptState.PREPARED &&
+            result?.takeIf { it.id == id && it.format == expectedFormat && it.preparation.isSeries == frozen.isSeries && it.state == PersonalUpdateAttemptState.PREPARED &&
                 it.protectedEvidence == null && it.preparation.intent == frozen.intent && it.preparation.timestamp == frozen.timestamp &&
                 it.preparation.format == frozen.format && it.preparation.protectedPayload == frozen.protectedPayload }?.frozen()
         }
@@ -190,10 +193,13 @@ internal class SerializedAuthenticationPort(
         admitEvidence: (CalendarScope) -> Boolean): PersonalUpdateSubmissionObservation {
         currentCoroutineContext().ensureActive()
         val frozen = record.frozen()
-        if (frozen.format != personalUpdateFormat || frozen.state != PersonalUpdateAttemptState.PREPARED || frozen.protectedEvidence != null)
+        val expectedFormat = if (frozen.preparation.isSeries) seriesUpdateFormat else personalUpdateFormat
+        if (frozen.format != expectedFormat || frozen.state != PersonalUpdateAttemptState.PREPARED || frozen.protectedEvidence != null)
             return PersonalUpdateSubmissionObservation.Unknown
         return personalOperation(frozen.scope, admit, admitEvidence, PersonalUpdateSubmissionObservation.Unknown as PersonalUpdateSubmissionObservation) {
                 runtime, lease, evidence ->
+            if (frozen.preparation.isSeries && runtime.seriesUpdateFormat != expectedFormat)
+                return@personalOperation PersonalUpdateSubmissionObservation.Unknown
             val source: suspend (CalendarScope) -> Boolean = { requested ->
                 if (!lease.allows(requested)) false else {
                     val qualified = try { qualifySource(requested) }
@@ -216,7 +222,8 @@ internal class SerializedAuthenticationPort(
         admit: (CalendarScope) -> Boolean): PersonalUpdateSubmissionObservation {
         currentCoroutineContext().ensureActive()
         val frozen = record.frozen()
-        if (frozen.format != personalUpdateFormat || frozen.state != PersonalUpdateAttemptState.OUTCOME_UNKNOWN)
+        val retainedFormat = if (frozen.preparation.isSeries) PERSONAL_SERIES_UPDATE_REQUEST_FORMAT else personalUpdateFormat
+        if (frozen.format != retainedFormat || frozen.state != PersonalUpdateAttemptState.OUTCOME_UNKNOWN)
             return PersonalUpdateSubmissionObservation.Unknown
         return personalOperation(frozen.scope, admit, { false }, PersonalUpdateSubmissionObservation.Unknown as PersonalUpdateSubmissionObservation) {
                 runtime, lease, _ ->

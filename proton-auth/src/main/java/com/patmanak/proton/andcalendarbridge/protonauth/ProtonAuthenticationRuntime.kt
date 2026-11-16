@@ -317,7 +317,11 @@ internal object ProtonAuthenticationRuntime {
             localTimes = timePreparations,
             personals = personalPreparations,
             personalUpdates = ProtonPersonalUpdateSubmissionAdapter(personalPreparations, eventProtector, readSession, titleContext,
-                ProtonPersonalUpdateSubmissionRemote(network.apiProvider), eventRemote, eventDecoder::decodeCreated),
+                ProtonPersonalUpdateSubmissionRemote(network.apiProvider), eventRemote, eventDecoder::decodeCreated,
+                seriesVerifier = seriesFamilyVerifier(eventDecoder),
+                seriesQualification = PersonalSeriesQualification { session, scope, base, checkpoint ->
+                    seriesReadback.requireSeries(session, scope, base, checkpoint)
+                }),
             titleUpdates = ProtonTitleUpdateSubmissionAdapter(titlePreparations, eventProtector, readSession, titleContext,
                 ProtonTitleUpdateSubmissionRemote(network.apiProvider), eventRemote, eventDecoder::decodeCreated),
             textUpdates = ProtonTextUpdateSubmissionAdapter(textPreparations, eventProtector, readSession, titleContext,

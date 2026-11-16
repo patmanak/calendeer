@@ -10,12 +10,13 @@ import kotlinx.serialization.json.JsonObject
 import java.nio.CharBuffer
 import java.nio.charset.CodingErrorAction
 
-/** Supplied personal-v2 observations only; exact signed parts AND API dates must match.
+/** Supplied explicit personal-v2/series-v3 observations; exact signed parts AND API dates must match.
  * This grants no authentication, dispatch, persistence or native acknowledgement authority.
  */
 internal class ProtonPersonalUpdateReadbackVerifier(
     private val codec: ProtonPersonalUpdateRequestCodec,
     private val verifier: CreateEventVerifier,
+    private val seriesVerifier: SeriesFamilyEventVerifier? = null,
 ) {
     suspend fun verify(session: CatalogSession, record: ProtonProtectedPersonalUpdateRequest,
         currentContext: JsonObject, bootstrap: JsonObject, row: JsonObject): RemoteChange.Upsert? = try {
@@ -33,25 +34,31 @@ internal class ProtonPersonalUpdateReadbackVerifier(
             val request = codec.open(frozen)
             currentCoroutineContext().ensureActive()
             val fragments = request.fragments
+            val wireMatches = if (preparation.isSeries) ProtonSeriesEventUpdate.matchesReadback(
+                fragments.originalRow, fragments.clearSharedPart, fragments.encryptedSharedPart, rowSnapshot,
+                intent.base.content, intent.content, fragments.defaults, fragments.calendarPart)
+            else ProtonPersonalEventUpdate.matchesReadback(fragments.originalRow, fragments.clearSharedPart,
+                fragments.encryptedSharedPart, rowSnapshot, intent.base.content, intent.content, fragments.defaults, fragments.calendarPart)
             if (contextSnapshot != request.context ||
                 ProtonSimpleEventUpdate.hash(bootstrapSnapshot.toString()) != request.context.string("bootstrap") ||
                 rowSnapshot.string("ID") != intent.base.eventId.value ||
                 rowSnapshot.string("CalendarID") != intent.scope.calendar.value ||
-                !ProtonPersonalEventUpdate.matchesReadback(fragments.originalRow, fragments.clearSharedPart,
-                    fragments.encryptedSharedPart, rowSnapshot, intent.base.content, intent.content, fragments.defaults, fragments.calendarPart) ||
-                !CreatedEventReadbackPolicy.PERSONAL_EDIT_V2.acceptsExpected(intent.content)) null else {
+                !wireMatches || !acceptsExpected(preparation.isSeries, intent.content)) null else {
                 val expectedRevision = rowSnapshot.revision(bootstrapSnapshot)
                 if (expectedRevision == intent.base.revision) null else {
                     // A supplied decoder receives independent copies, never the comparison snapshots.
                     val decoded = try {
-                        verifier.verify(session, intent.scope.calendar.value, snapshot(bootstrapSnapshot), snapshot(rowSnapshot),
+                        if (preparation.isSeries) seriesVerifier?.verify(session, intent.scope.calendar.value,
+                            snapshot(bootstrapSnapshot), snapshot(rowSnapshot), fragments.originalRow.string("UID"))
+                        else verifier.verify(session, intent.scope.calendar.value, snapshot(bootstrapSnapshot), snapshot(rowSnapshot),
                             fragments.originalRow.string("UID"), CreatedEventReadbackPolicy.PERSONAL_EDIT_V2)
                     } catch (cancelled: CancellationException) { throw cancelled }
                       catch (_: Exception) { currentCoroutineContext().ensureActive(); null }
                     currentCoroutineContext().ensureActive()
                     if (decoded == null || decoded.eventId != intent.base.eventId || decoded.revision != expectedRevision ||
-                        !CreatedEventReadbackPolicy.PERSONAL_EDIT_V2.acceptsExpected(decoded.content) ||
+                        !acceptsExpected(preparation.isSeries, decoded.content) ||
                         canonicalText(decoded.content) != canonicalText(intent.content)) null
+                    else if (preparation.isSeries) decoded.copy(content = SeriesEditProfile.freezeMaster(decoded.content))
                     else decoded.copy(content = decoded.content.copy(details = decoded.content.details!!.copy(reminders = java.util.Collections.unmodifiableList(decoded.content.details!!.reminders.toList()))))
                 }
             }
@@ -59,6 +66,11 @@ internal class ProtonPersonalUpdateReadbackVerifier(
     } catch (cancelled: CancellationException) { throw cancelled }
       catch (failure: ProtonPersonalUpdateRequestException) { currentCoroutineContext().ensureActive(); throw failure }
       catch (_: Exception) { currentCoroutineContext().ensureActive(); null }
+
+    private fun acceptsExpected(series: Boolean, content: EventContent): Boolean = if (series) try {
+        SeriesEditProfile.freezeMaster(content); true
+    } catch (_: Exception) { false }
+    else CreatedEventReadbackPolicy.PERSONAL_EDIT_V2.acceptsExpected(content)
 
     private fun snapshot(value: JsonObject): JsonObject {
         val encoded = value.toString()

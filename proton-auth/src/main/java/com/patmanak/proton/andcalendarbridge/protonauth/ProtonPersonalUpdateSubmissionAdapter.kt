@@ -19,10 +19,16 @@ internal class ProtonPersonalUpdateSubmissionAdapter(
     private val remote: TitleUpdateSubmissionRemote,
     private val events: EventImportRemote,
     private val verifier: CreateEventVerifier,
+    private val seriesVerifier: SeriesFamilyEventVerifier? = null,
+    private val seriesQualification: PersonalSeriesQualification? = null,
 ) : CalendarPersonalUpdatePort {
     override val personalUpdateFormat = PERSONAL_UPDATE_REQUEST_FORMAT
+    override val seriesUpdateFormat get() = PERSONAL_SERIES_UPDATE_REQUEST_FORMAT.takeIf {
+        seriesVerifier != null && seriesQualification != null &&
+            preparations.seriesFormat == PERSONAL_SERIES_PREPARATION_FORMAT && remote is SeriesUpdateSubmissionRemote
+    }
     private val codec = ProtonPersonalUpdateRequestCodec(protector)
-    private val readback = ProtonPersonalUpdateReadbackVerifier(codec, verifier)
+    private val readback = ProtonPersonalUpdateReadbackVerifier(codec, verifier, seriesVerifier)
 
     override suspend fun prepareSubmission(id: MutationId, preparation: PersonalEditPreparation,
         admit: (CalendarScope) -> Boolean): PersonalUpdateAttemptRecord? {
@@ -31,10 +37,17 @@ internal class ProtonPersonalUpdateSubmissionAdapter(
         val lease = UpdateRequestLease(frozen.intent.scope, admit, currentCoroutineContext())
         return try {
             lease.check()
+            if (frozen.isSeries && seriesUpdateFormat == null) return null
             val session = session(frozen.intent.scope, lease)
             val checkpoint: suspend () -> Unit = { checkSessionAndLease(session, lease) }
             ProtonPersonalPreparationCodec(protector).openLocal(frozen)
             checkpoint()
+            if (frozen.isSeries) {
+                val qualify = seriesQualification ?: return null
+                qualify.qualify(session, frozen.intent.scope, frozen.intent.base, checkpoint)
+                checkpoint()
+                if (seriesUpdateFormat == null) return null
+            }
             val qualified = snapshot(context.qualify(session, frozen.intent.scope, checkpoint))
             checkpoint()
             val protected = codec.seal(id, frozen, qualified)
@@ -65,7 +78,7 @@ internal class ProtonPersonalUpdateSubmissionAdapter(
             lease.check()
         }
         return try {
-            if (frozen.format != personalUpdateFormat || frozen.state != PersonalUpdateAttemptState.PREPARED ||
+            if (!accepts(frozen, sending = true) || frozen.state != PersonalUpdateAttemptState.PREPARED ||
                 frozen.protectedEvidence != null) return PersonalUpdateSubmissionObservation.Unknown
             source()
             val retained = journal.read(frozen.scope, frozen.id, lease::allows)?.frozen()
@@ -80,10 +93,13 @@ internal class ProtonPersonalUpdateSubmissionAdapter(
             checkpoint()
             val request = codec.open(protected(frozen))
             checkpoint()
-            val fresh = preparations.preparePersonal(frozen.preparation.intent, frozen.preparation.timestamp, lease::allows)
+            val fresh = if (frozen.preparation.isSeries)
+                preparations.prepareSeries(frozen.preparation.intent, frozen.preparation.timestamp, lease::allows)
+            else preparations.preparePersonal(frozen.preparation.intent, frozen.preparation.timestamp, lease::allows)
             checkpoint()
             if (fresh == null || fresh.intent != frozen.preparation.intent || fresh.timestamp != frozen.preparation.timestamp ||
-                fresh.format != frozen.preparation.format) return PersonalUpdateSubmissionObservation.Unknown
+                fresh.format != frozen.preparation.format || fresh.isSeries != frozen.preparation.isSeries)
+                return PersonalUpdateSubmissionObservation.Unknown
             val fragments = ProtonPersonalPreparationCodec(protector).openLocal(fresh)
             checkpoint()
             if (!fragments.changed || fragments.originalRow != request.fragments.originalRow)
@@ -91,6 +107,7 @@ internal class ProtonPersonalUpdateSubmissionAdapter(
             val qualified = snapshot(context.qualify(session, frozen.scope, checkpoint))
             checkpoint()
             if (qualified != request.context) return PersonalUpdateSubmissionObservation.Unknown
+            if (!accepts(frozen, sending = true)) return PersonalUpdateSubmissionObservation.Unknown
             val claimed = journal.claim(frozen, lease::allows)
             operation.ensureActive()
             if (!claimed) return PersonalUpdateSubmissionObservation.Unknown
@@ -98,7 +115,11 @@ internal class ProtonPersonalUpdateSubmissionAdapter(
             checkpoint()
             val unknown = frozen.copy(state = PersonalUpdateAttemptState.OUTCOME_UNKNOWN)
             var response: String? = null
-            try { response = remote.send(session, frozen.scope.calendar.value, request.request) }
+            try {
+                response = if (frozen.preparation.isSeries)
+                    (remote as SeriesUpdateSubmissionRemote).sendSeries(session, frozen.scope.calendar.value, request.request)
+                else remote.send(session, frozen.scope.calendar.value, request.request)
+            }
             catch (cancelled: CancellationException) { throw cancelled }
             catch (_: Exception) { operation.ensureActive() }
             operation.ensureActive()
@@ -130,7 +151,7 @@ internal class ProtonPersonalUpdateSubmissionAdapter(
         val frozen = record.frozen()
         val lease = UpdateRequestLease(frozen.scope, admit, currentCoroutineContext())
         return try {
-            if (frozen.format != personalUpdateFormat || frozen.state != PersonalUpdateAttemptState.OUTCOME_UNKNOWN)
+            if (!accepts(frozen, sending = false) || frozen.state != PersonalUpdateAttemptState.OUTCOME_UNKNOWN)
                 return PersonalUpdateSubmissionObservation.Unknown
             lease.check()
             val retained = journal.read(frozen.scope, frozen.id, lease::allows)?.frozen()
@@ -152,6 +173,11 @@ internal class ProtonPersonalUpdateSubmissionAdapter(
             val verified = readback.verify(session, protected(frozen), qualified, bootstrap, row)
             checkpoint()
             if (verified == null) return PersonalUpdateSubmissionObservation.Unknown
+            if (frozen.preparation.isSeries) {
+                val qualify = seriesQualification ?: return PersonalUpdateSubmissionObservation.Unknown
+                qualify.qualify(session, frozen.scope, verified, checkpoint)
+                checkpoint()
+            }
             // Membership/key selection is observed again after the actual GET and signature decode.
             // These remain successive observations, never a claimed atomic server precondition.
             val finalContext = snapshot(context.qualify(session, frozen.scope, checkpoint))
@@ -183,10 +209,16 @@ internal class ProtonPersonalUpdateSubmissionAdapter(
     }
 
     private fun freeze(value: PersonalEditPreparation): PersonalEditPreparation {
-        val intent = freezePersonalRequest(value.intent, value.timestamp)
-        if (value.format != PERSONAL_PREPARATION_FORMAT) localEditUnavailable(LocalEditPreparationFailure.UNSUPPORTED)
-        return PersonalEditPreparation(intent, value.timestamp, value.format, value.protectedPayload)
+        if (value.isSeries) freezeSeriesRequest(value.intent, value.timestamp) else freezePersonalRequest(value.intent, value.timestamp)
+        if (value.format != if (value.isSeries) PERSONAL_SERIES_PREPARATION_FORMAT else PERSONAL_PREPARATION_FORMAT)
+            localEditUnavailable(LocalEditPreparationFailure.UNSUPPORTED)
+        return value.frozen()
     }
+
+    private fun accepts(record: PersonalUpdateAttemptRecord, sending: Boolean): Boolean = if (record.preparation.isSeries) {
+        record.format == PERSONAL_SERIES_UPDATE_REQUEST_FORMAT && record.preparation.format == PERSONAL_SERIES_PREPARATION_FORMAT &&
+            (if (sending) seriesUpdateFormat != null else seriesVerifier != null && seriesQualification != null)
+    } else record.format == personalUpdateFormat && record.preparation.format == PERSONAL_PREPARATION_FORMAT
 
     private fun protected(value: PersonalUpdateAttemptRecord) =
         ProtonProtectedPersonalUpdateRequest(value.id, value.preparation, value.format, value.protectedPayload)
@@ -195,7 +227,8 @@ internal class ProtonPersonalUpdateSubmissionAdapter(
         body?.let(::bounded)
         val identity = PersonalUpdateAttemptIdentity.of(record)
         return buildJsonObject {
-            put("kind", "personal-edit-v2-evidence"); put("version", 2)
+            put("kind", if (record.preparation.isSeries) "personal-series-v3-evidence" else "personal-edit-v2-evidence")
+            put("version", if (record.preparation.isSeries) 3 else 2)
             put("attempt", record.id.value); put("payload", identity.payloadFingerprint)
             put("preparation", identity.preparationFingerprint)
             put("complete", body != null); put("body", body ?: "")
