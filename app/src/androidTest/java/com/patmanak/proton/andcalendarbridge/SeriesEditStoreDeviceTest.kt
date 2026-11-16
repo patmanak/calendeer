@@ -21,6 +21,28 @@ import org.junit.runner.RunWith
 /** Isolated SQL with synthetic series; no Provider, account session or service access. */
 @RunWith(AndroidJUnit4::class)
 class SeriesEditStoreDeviceTest {
+    @Test fun explicitSeriesPreparationAndPendingAcknowledgementKeepTheirProfileAcrossReopen() = fixture { store, name ->
+        val local = edit()
+        store.transaction(scope) { checkpoint = PageCheckpoint(scope, format, traversalComplete = true) }
+        assertEquals(local, store.captureSeriesEdit(local))
+        val preparation = PersonalEditPreparation.forSeries(local, java.time.Instant.parse("2030-04-01T12:00:00Z"),
+            AdapterFormat("series-preparation-fixture", 3), "protected-series")
+        assertEquals(PersonalPreparationAdmission.STORED, store.retainCurrentPersonalPreparation(preparation))
+        val work = PersonalUpdateAttemptRecord(MutationId("series-request"), preparation, AdapterFormat("series-request-fixture", 3),
+            "protected-request", PersonalUpdateAttemptState.OUTCOME_UNKNOWN)
+        val event = base.copy(revision = Revision("verified-series-revision"), content = local.content)
+        val proof = PersonalUpdateVerifiedResult.of(work, PersonalUpdateSubmissionObservation.Verified(work, event))
+        val acknowledgement = checkNotNull(store.preparePersonalUpdateAcknowledgement(proof))
+        assertTrue(acknowledgement.fresh); assertTrue(acknowledgement.record.receipt.isSeries)
+        store.close()
+        ImportStore(context, name).use { reopened ->
+            assertEquals(local, reopened.personalEditPreparation(scope, base.eventId)!!.intent)
+            assertTrue(reopened.personalEditPreparation(scope, base.eventId)!!.isSeries)
+            assertEquals(acknowledgement.record, reopened.personalUpdateAcknowledgement(scope, base.eventId, work.id))
+            assertEquals(acknowledgement.copy(fresh = false), reopened.preparePersonalUpdateAcknowledgement(proof))
+        }
+    }
+
     private val context get() = ApplicationProvider.getApplicationContext<Context>()
     private val scope = CalendarScope(AccountId("series-edit-fixture"), CalendarId("calendar"), 0)
     private val format = AdapterFormat("series-edit-fixture", 1)

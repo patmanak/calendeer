@@ -206,7 +206,7 @@ internal object ImportStoreLocalPreparations {
         a.intent == b.intent && a.timestamp == b.timestamp && a.format == b.format && a.protectedPayload == b.protectedPayload
 
     fun supportedPersonalIntent(intent: LocalEditIntent): LocalEditIntent? = try {
-        PersonalEditCandidate(intent).intent.takeIf {
+        (if (intent.seriesProfile != null) SeriesEditCandidate(intent).intent else PersonalEditCandidate(intent).intent).takeIf {
             !PersonalUpdateContentPolicy.sameSubmittedContent(it.base.content, it.content)
         }
     } catch (_: IllegalArgumentException) { null }
@@ -224,15 +224,18 @@ internal object ImportStoreLocalPreparations {
                     val base = decodeChange(baseJson) as RemoteChange.Upsert
                     val local = decodeChange(localJson) as RemoteChange.Upsert
                     require(base.eventId == eventId && local.eventId == eventId && local.revision == base.revision)
+                    val owner = requireNotNull(readLocalPreparationOwner(db, scope, eventId))
                     val frozen = LocalEditIntent(MutationId(archiveString(row, 0)), scope,
                         AdapterFormat(archiveString(row, 1), preparationVersion(row, 2)), base, local.content,
-                        LocalEditState.valueOf(archiveString(row, 5)))
+                        LocalEditState.valueOf(archiveString(row, 5)), owner.seriesProfile)
                     val timestamp = Instant.parse(archiveString(row, 6))
                     require(timestamp.toString() == archiveString(row, 6)) { "Noncanonical local preparation time" }
-                    val preparation = PersonalEditPreparation(frozen, timestamp,
-                        AdapterFormat(archiveString(row, 7), preparationVersion(row, 8)), archiveString(row, 9))
+                    val format = AdapterFormat(archiveString(row, 7), preparationVersion(row, 8))
+                    val preparation = if (owner.seriesProfile != null) {
+                        require(format.version == 3)
+                        PersonalEditPreparation.forSeries(frozen, timestamp, format, archiveString(row, 9))
+                    } else PersonalEditPreparation(frozen, timestamp, format, archiveString(row, 9))
                     require(supportedPersonalIntent(preparation.intent) != null)
-                    val owner = readLocalPreparationOwner(db, scope, eventId)
                     require(owner?.copy(state = LocalEditState.PAUSED) == frozen) { "Local preparation owner mismatch" }
                     preparation
                 }

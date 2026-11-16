@@ -32,7 +32,8 @@ object PersonalUpdateAttemptStorageCodec {
         require(bytes.size <= MAX_CAPSULE_BYTES)
         val reader = Reader(ByteBuffer.wrap(bytes))
         TAG.forEach { require(reader.tag() == it.code) }
-        require(reader.integer() == SCHEMA)
+        val schema = reader.integer().also { require(it == SCHEMA || it == 3) }
+        val series = schema == 3
         val id = MutationId(reader.string(ID_BYTES))
         val scope = CalendarScope(AccountId(reader.string(ID_BYTES)), CalendarId(reader.string(ID_BYTES)), reader.long())
         val owner = MutationId(reader.string(ID_BYTES))
@@ -40,8 +41,8 @@ object PersonalUpdateAttemptStorageCodec {
         require(reader.tag() == 1) // Retained local observation is explicitly PAUSED.
         val event = EventId(reader.string(ID_BYTES))
         val revision = Revision(reader.string(ID_BYTES))
-        val base = RemoteChange.Upsert(event, revision, reader.content())
-        val replacement = reader.content()
+        val base = RemoteChange.Upsert(event, revision, reader.content(series))
+        val replacement = reader.content(series)
         val timestamp = reader.instant()
         val preparationFormat = reader.format()
         val preparationPayload = reader.string(PAYLOAD_BYTES)
@@ -58,22 +59,24 @@ object PersonalUpdateAttemptStorageCodec {
             else -> invalid()
         }
         require(reader.finished())
-        val intent = LocalEditIntent(owner, scope, observationFormat, base, replacement, LocalEditState.PAUSED)
-        val preparation = PersonalEditPreparation(intent, timestamp, preparationFormat, preparationPayload)
+        val intent = LocalEditIntent(owner, scope, observationFormat, base, replacement, LocalEditState.PAUSED,
+            if (series) SeriesEditProfile.of(base.content, replacement) else null)
+        val preparation = if (series) PersonalEditPreparation.forSeries(intent, timestamp, preparationFormat, preparationPayload)
+            else PersonalEditPreparation(intent, timestamp, preparationFormat, preparationPayload)
         PersonalUpdateAttemptRecord(id, preparation, requestFormat, requestPayload, state, evidence)
     }
 
     /** Stable schema-two order. All tags are literals, independent of Kotlin enum ordering. */
     private fun write(writer: Writer, record: PersonalUpdateAttemptRecord) = with(writer) {
-        TAG.forEach { tag(it.code) }; integer(SCHEMA)
         val preparation = record.preparation
+        TAG.forEach { tag(it.code) }; integer(if (preparation.isSeries) 3 else SCHEMA)
         val intent = preparation.intent
         string(record.id.value, ID_BYTES)
         string(intent.scope.account.value, ID_BYTES); string(intent.scope.calendar.value, ID_BYTES)
         long(intent.scope.generation); string(intent.id.value, ID_BYTES); format(intent.format)
         require(intent.state == LocalEditState.PAUSED); tag(1)
         string(intent.base.eventId.value, ID_BYTES); string(intent.base.revision.value, ID_BYTES)
-        content(intent.base.content); content(intent.content); instant(preparation.timestamp)
+        content(intent.base.content, preparation.isSeries); content(intent.content, preparation.isSeries); instant(preparation.timestamp)
         format(preparation.format); string(preparation.protectedPayload, PAYLOAD_BYTES)
         format(record.format); string(record.protectedPayload, PAYLOAD_BYTES)
         tag(when (record.state) {
@@ -104,19 +107,21 @@ object PersonalUpdateAttemptStorageCodec {
         }
         fun format(value: AdapterFormat) { string(value.id, ID_BYTES); integer(value.version) }
         fun instant(value: Instant) { long(value.epochSecond); integer(value.nano) }
-        fun content(value: EventContent) {
+        fun content(value: EventContent, series: Boolean) {
             string(value.title, TEXT_BYTES); string(value.description, TEXT_BYTES); string(value.location, TEXT_BYTES)
             when (val time = value.time) {
                 is EventTime.Timed -> { tag(1); instant(time.start); instant(time.end); string(time.zone.id, ID_BYTES) }
                 is EventTime.AllDay -> { tag(2); string(time.start.toString(), ID_BYTES); string(time.endExclusive.toString(), ID_BYTES) }
             }
-            require(value.recurrence == null)
+            if (series) SeriesEditProfile.freezeMaster(value) else require(value.recurrence == null)
             val details = checkNotNull(value.details)
             require(details.organizer == null && details.attendees.isEmpty())
             val color = value.colorRgb
             tag(if (color == null) 0 else 1)
             if (color != null) { require(color in 0..0xffffff); integer(color) }
-            tag(0); tag(2) // No recurrence; known personal display reminders.
+            tag(if (series) 1 else 0)
+            if (series) { string(value.recurrence!!.uid, ID_BYTES); string(value.recurrence!!.rule!!, ID_BYTES) }
+            tag(2) // Known personal display reminders. Schema two retains tag zero above.
             require(details.reminders.size <= 5)
             integer(details.reminders.size)
             details.reminders.forEach { integer(it.minutesBefore) }
@@ -152,7 +157,7 @@ object PersonalUpdateAttemptStorageCodec {
             val text = string(ID_BYTES)
             return ZoneId.of(text).also { require(it.id == text) }
         }
-        fun content(): EventContent {
+        fun content(series: Boolean): EventContent {
             val title = string(TEXT_BYTES); val description = string(TEXT_BYTES); val location = string(TEXT_BYTES)
             val time = when (tag()) {
                 1 -> EventTime.Timed(instant(), instant(), zone())
@@ -160,10 +165,12 @@ object PersonalUpdateAttemptStorageCodec {
                 else -> invalid()
             }
             val color = when (tag()) { 0 -> null; 1 -> integer().also { require(it in 0..0xffffff) }; else -> invalid() }
-            require(tag() == 0 && tag() == 2)
+            require(tag() == if (series) 1 else 0)
+            val recurrence = if (series) EventRecurrence(string(ID_BYTES), string(ID_BYTES)) else null
+            require(tag() == 2)
             val count = integer().also { require(it in 0..5) }
             val details = EventDetails(reminders = List(count) { EventReminder(integer()) })
-            return EventContent(title, time, description, location, colorRgb = color, details = details)
+            return EventContent(title, time, description, location, colorRgb = color, details = details, recurrence = recurrence)
         }
         fun finished() = !input.hasRemaining()
     }

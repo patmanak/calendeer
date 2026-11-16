@@ -8,6 +8,40 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class PersonalUpdateStorageCodecTest {
+    private fun seriesRecord(): PersonalUpdateAttemptRecord {
+        val before = original.copy(recurrence = EventRecurrence("storage-series", "FREQ=DAILY;COUNT=3"))
+        val after = intent.content.copy(recurrence = EventRecurrence("storage-series", "FREQ=DAILY;COUNT=5"))
+        val local = intent.copy(base = intent.base.copy(content = before), content = after,
+            seriesProfile = SeriesEditProfile.of(before, after))
+        return PersonalUpdateAttemptRecord(MutationId("series-wire"),
+            PersonalEditPreparation.forSeries(local, stamp, AdapterFormat("fixture-series-prep", 3), "series-prepared"),
+            AdapterFormat("fixture-series-wire", 3), "series-request", PersonalUpdateAttemptState.OUTCOME_UNKNOWN, "series-evidence")
+    }
+
+    @Test fun seriesAttemptHasAnExplicitNewStorageSchemaAndUnknownHistoryStaysImmutable() {
+        val record = seriesRecord()
+        val encoded = PersonalUpdateAttemptStorageCodec.encode(record)
+        assertEquals(record, PersonalUpdateAttemptStorageCodec.decode(encoded))
+        assertTrue(PersonalUpdateAttemptStorageCodec.decode(encoded).preparation.isSeries)
+        val downgraded = encoded.copyOf()
+        java.nio.ByteBuffer.wrap(downgraded).putInt("CALENDAR_PERSONAL_UPDATE_ATTEMPT".length, 2)
+        refused { PersonalUpdateAttemptStorageCodec.decode(downgraded) }
+        refused { PersonalUpdateAttemptStorageCodec.decode(encoded + byteArrayOf(0)) }
+    }
+
+    @Test fun seriesAcknowledgementAndCompletionRoundTripWithoutOpeningLegacySchemas() {
+        val record = seriesRecord()
+        val event = record.preparation.intent.base.copy(revision = Revision("series-after"), content = record.preparation.intent.content)
+        val result = PersonalUpdateVerifiedResult.of(record, PersonalUpdateSubmissionObservation.Verified(record, event))
+        val receipt = PersonalUpdateAcknowledgementReceipt.of(result, "11111111-2222-3333-4444-555555555555")
+        val encoded = PersonalUpdateAcknowledgementCodec.encode(receipt)
+        assertEquals(receipt, PersonalUpdateAcknowledgementCodec.decode(encoded))
+        refused { PersonalUpdateAcknowledgementCodec.decode(org.json.JSONObject(encoded).put("schema", 1).toString()) }
+        val completion = PersonalUpdateCompletion.of(result,
+            PersonalUpdateAcknowledgementRecord(receipt, PersonalUpdateAcknowledgementState.RESTORED))
+        assertEquals(completion, PersonalUpdateProofStorageCodec.decodeCompletion(PersonalUpdateProofStorageCodec.encodeCompletion(completion)))
+    }
+
     private val scope = CalendarScope(AccountId("fixture-account"), CalendarId("fixture-calendar"), 3)
     private val stamp = Instant.parse("2026-10-17T12:00:00Z")
     private val time = EventTime.Timed(stamp, stamp.plusSeconds(3600), ZoneOffset.UTC)

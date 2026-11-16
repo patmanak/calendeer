@@ -541,7 +541,7 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
     /** First admission rechecks the owner, checkpoint, baseline and remote in the insertion transaction. */
     suspend fun retainCurrentPersonalPreparation(value: PersonalEditPreparation): PersonalPreparationAdmission {
         currentCoroutineContext().ensureActive()
-        val frozen = PersonalEditPreparation(value.intent, value.timestamp, value.format, value.protectedPayload)
+        val frozen = value.frozen()
         val base = encodeChange(frozen.intent.base).also(::requirePreparationSnapshotBudget)
         val local = encodeChange(frozen.intent.base.copy(content = frozen.intent.content)).also(::requirePreparationSnapshotBudget)
         return guardedEditMutation(frozen.intent.scope) { db ->

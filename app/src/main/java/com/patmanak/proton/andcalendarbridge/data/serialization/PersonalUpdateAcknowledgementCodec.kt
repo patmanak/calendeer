@@ -17,7 +17,8 @@ internal object PersonalUpdateAcknowledgementCodec {
         val receipt = value.snapshot()
         put("kind", "personal-update-acknowledgement")
         val attempt = receipt.attempt
-        put("schema", if (receipt.handoff == null) 1 else 2)
+        put("schema", if (receipt.isSeries) 3 else if (receipt.handoff == null) 1 else 2)
+        if (receipt.isSeries) { put("seriesProfile", 1); put("handoff", JSONObject.NULL) }
         put("attempt", JSONObject().apply {
             put("account", attempt.scope.account.value); put("calendar", attempt.scope.calendar.value); put("generation", attempt.scope.generation)
             put("id", attempt.id.value); put("intent", attempt.localIntentId.value); put("event", attempt.eventId.value)
@@ -45,9 +46,11 @@ internal object PersonalUpdateAcknowledgementCodec {
             require(it in 1..Int.MAX_VALUE.toLong()); it.toInt()
         }
         val schema = integer(json, "schema")
-        require(schema in 1L..2L && integer(json, "protocol") == 1L)
+        require(schema in 1L..3L && integer(json, "protocol") == 1L)
+        val series = schema == 3L
+        if (series) require(integer(json, "seriesProfile") == 1L)
         require(json.keys().asSequence().toSet() == setOf("kind", "schema", "attempt", "adapter", "version", "base", "local", "change", "nonce", "protocol") +
-            if (schema == 2L) setOf("handoff") else emptySet())
+            when (schema) { 2L -> setOf("handoff"); 3L -> setOf("handoff", "seriesProfile"); else -> emptySet() })
         val attempt = json.getJSONObject("attempt")
         require(attempt.keys().asSequence().toSet() == setOf("account", "calendar", "generation", "id", "intent", "event", "revision",
             "adapter", "version", "preparationAdapter", "preparationVersion", "preparationFingerprint", "payloadFingerprint"))
@@ -59,11 +62,13 @@ internal object PersonalUpdateAcknowledgementCodec {
         val base = decodeChange(json.getJSONObject("base").toString()) as RemoteChange.Upsert
         val local = decodeChange(json.getJSONObject("local").toString()) as RemoteChange.Upsert
         require(local.eventId == base.eventId && local.revision == base.revision)
-        val intent = LocalEditIntent(identity.localIntentId, scope, AdapterFormat(text(json, "adapter"), version(json, "version")), base, local.content)
+        val intent = LocalEditIntent(identity.localIntentId, scope, AdapterFormat(text(json, "adapter"), version(json, "version")), base, local.content,
+            seriesProfile = if (series) SeriesEditProfile.of(base.content, local.content) else null)
         val change = decodeChange(json.getJSONObject("change").toString()) as RemoteChange.Upsert
-        val handoff = if (schema == 1L) null else decodePersonalHandoffFrame(json.getJSONObject("handoff"))
-        val receipt = PersonalUpdateAcknowledgementReceipt(identity, intent,
-            ProjectionReceipt(scope, intent.format, change, text(json, "nonce"), base), handoff).snapshot()
+        val handoff = if (schema == 1L || (series && json.isNull("handoff"))) null else decodePersonalHandoffFrame(json.getJSONObject("handoff"))
+        val projection = ProjectionReceipt(scope, intent.format, change, text(json, "nonce"), base)
+        val receipt = if (series) PersonalUpdateAcknowledgementReceipt.forSeries(identity, intent, projection, handoff).snapshot()
+            else PersonalUpdateAcknowledgementReceipt(identity, intent, projection, handoff).snapshot()
         // Re-encoding rejects extra event/detail fields, coercions and noncanonical metadata.
         require(encode(receipt) == payload)
         return receipt

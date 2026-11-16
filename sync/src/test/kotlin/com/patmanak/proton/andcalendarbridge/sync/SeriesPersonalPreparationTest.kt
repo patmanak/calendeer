@@ -6,6 +6,19 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class SeriesPersonalPreparationTest {
+    @Test fun verifiedSeriesAcknowledgementKeepsTheExactProfileAndHistoricalConstructorRemainsClosed() {
+        val prepared = preparation()
+        val work = PersonalUpdateAttemptRecord(PersonalUpdateAttemptIdentity.requestId(prepared, request), prepared,
+            request, "sealed-request", PersonalUpdateAttemptState.OUTCOME_UNKNOWN)
+        val event = RemoteChange.Upsert(base.eventId, Revision("after"), prepared.intent.content)
+        val verified = PersonalUpdateVerifiedResult.of(work, PersonalUpdateSubmissionObservation.Verified(work, event))
+        val receipt = PersonalUpdateAcknowledgementReceipt.of(verified, "12345678-1234-1234-1234-123456789abc")
+        assertEquals(prepared.intent, receipt.intent)
+        assertEquals(event, receipt.projection.change)
+        assertEquals(receipt, receipt.snapshot()); assertTrue(receipt.matches(verified))
+        refused { PersonalUpdateAcknowledgementReceipt(receipt.attempt, receipt.intent, receipt.projection) }
+    }
+
     private val scope = CalendarScope(AccountId("series-profile-fixture"), CalendarId("calendar"), 0)
     private val time = Instant.parse("2030-04-01T10:00:00Z")
     private val format = AdapterFormat("fixture-series-preparation", 3)
