@@ -14,6 +14,24 @@ import org.junit.Test
 
 /** Complete UID reads and admission only; signature verification is a controlled port here. */
 class ProtonSeriesFamilyQualificationTest {
+    @Test fun strictPreparationContractKeepsIncompleteProofRetryableAndPropagatesReadFailures() = runTest {
+        suspend fun failure(expected: LocalEditPreparationFailure, configure: (Fixture) -> Unit) {
+            val f = Fixture().also(configure)
+            try { f.readback.requireSeries(f.session, f.scope, f.base) { }; fail("Expected closed qualification") }
+            catch (actual: LocalEditPreparationException) { assertEquals(expected, actual.reason) }
+        }
+        failure(LocalEditPreparationFailure.RETRY) { it.rows = emptyList() }
+        failure(LocalEditPreparationFailure.RETRY) { it.actual = null }
+        failure(LocalEditPreparationFailure.UNSUPPORTED) { it.rows = listOf(it.row, JsonObject(it.row + ("ID" to JsonPrimitive("child")))) }
+        failure(LocalEditPreparationFailure.CONFLICT) { it.actual = it.base.copy(revision = Revision("newer")) }
+        failure(LocalEditPreparationFailure.UNSUPPORTED) { it.individual = JsonObject(it.row + ("RecurrenceID" to JsonPrimitive(5))) }
+        failure(LocalEditPreparationFailure.CONTEXT) { it.individual = JsonObject(it.row + ("RecurrenceID" to buildJsonObject { })) }
+        failure(LocalEditPreparationFailure.CONTEXT) { it.individual = JsonObject(it.row + ("Exdates" to JsonPrimitive(5))) }
+        val f = Fixture().also { it.after = { throw IOException("Synthetic offline") } }
+        try { f.readback.requireSeries(f.session, f.scope, f.base) { }; fail("Read failure must survive") }
+        catch (_: IOException) { }
+    }
+
     @Test fun uniqueMasterNeedsAnIndependentSignedReadWithExactBaseAndRevision() = runTest {
         for (allDay in listOf(false, true)) {
             val f = Fixture(allDay)

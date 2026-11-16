@@ -8,6 +8,8 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.longOrNull
 
 /** Readback interpretation only. Neither profile grants dispatch or upgrades a stored preparation. */
 internal enum class CreatedEventReadbackPolicy(val version: Int) {
@@ -64,36 +66,56 @@ internal class ProtonCreatedEventReadback(private val sessions: CatalogSessionSo
     /** Complete UID family plus a fresh signed exact base. No atomic server snapshot or write authority. */
     suspend fun qualifySeries(session: CatalogSession, scope: CalendarScope, base: RemoteChange.Upsert,
         checkpoint: suspend () -> Unit): RemoteChange.Upsert? = try {
-        val verify = seriesVerifier
-        if (verify == null) null else {
-            val frozen = base.copy(content = SeriesEditProfile.freezeMaster(base.content))
-            val uid = frozen.content.recurrence!!.uid
-            suspend fun check() {
-                currentCoroutineContext().ensureActive(); checkpoint()
-                checkSession(session, scope)
-                checkpoint(); currentCoroutineContext().ensureActive()
-            }
-            check()
-            val id = uniqueUidEvent(session, scope, uid, ::check)
-            if (id != frozen.eventId.value) null else {
-                check()
-                val row = remote.event(session, scope.calendar.value, id)
-                check()
-                if (row.string("ID") != id || row.string("CalendarID") != scope.calendar.value || row.string("UID") != uid ||
-                    (row["RecurrenceID"] != null && row["RecurrenceID"] != JsonNull) ||
-                    (row["Exdates"] != null && row["Exdates"] != JsonNull && (row["Exdates"] as? JsonArray)?.isEmpty() != true)) null else {
-                    val bootstrap = events.bootstrap(session, scope.calendar.value)
-                    check()
-                    val actual = verify.verify(session, scope.calendar.value, bootstrap, row, uid)?.let {
-                        it.copy(content = SeriesEditProfile.freezeMaster(it.content))
-                    }
-                    check()
-                    if (actual == frozen) frozen else null
-                }
-            }
-        }
+        requireSeries(session, scope, base, checkpoint)
     } catch (cancelled: CancellationException) { throw cancelled }
       catch (_: Exception) { currentCoroutineContext().ensureActive(); null }
+
+    /** Throwing preparation contract: incomplete evidence is retryable, never silently unsupported. */
+    suspend fun requireSeries(session: CatalogSession, scope: CalendarScope, base: RemoteChange.Upsert,
+        checkpoint: suspend () -> Unit): RemoteChange.Upsert = try {
+        requireSeriesObservation(session, scope, base, checkpoint)
+    } catch (failure: RemoteImportException) {
+        if (failure.reason == RemoteImportFailure.UNSUPPORTED) localEditUnavailable(LocalEditPreparationFailure.CONTEXT)
+        throw failure
+    }
+
+    private suspend fun requireSeriesObservation(session: CatalogSession, scope: CalendarScope, base: RemoteChange.Upsert,
+        checkpoint: suspend () -> Unit): RemoteChange.Upsert {
+        val verify = seriesVerifier ?: localEditUnavailable(LocalEditPreparationFailure.UNSUPPORTED)
+        val frozen = try { base.copy(content = SeriesEditProfile.freezeMaster(base.content)) }
+            catch (_: IllegalArgumentException) { localEditUnavailable(LocalEditPreparationFailure.UNSUPPORTED) }
+        val uid = frozen.content.recurrence!!.uid
+        suspend fun check() {
+            currentCoroutineContext().ensureActive(); checkpoint()
+            checkSession(session, scope)
+            checkpoint(); currentCoroutineContext().ensureActive()
+        }
+        check()
+        val id = uniqueUidEvent(session, scope, uid, rejectMultiple = true, checkpoint = ::check)
+            ?: localEditUnavailable(LocalEditPreparationFailure.RETRY)
+        if (id != frozen.eventId.value) localEditUnavailable(LocalEditPreparationFailure.CONFLICT)
+        check()
+        val row = remote.event(session, scope.calendar.value, id)
+        check()
+        if (row.string("ID") != id || row.string("CalendarID") != scope.calendar.value || row.string("UID") != uid)
+            localEditUnavailable(LocalEditPreparationFailure.CONTEXT)
+        fun epoch(value: kotlinx.serialization.json.JsonElement) = value is JsonPrimitive && !value.isString && value.longOrNull != null
+        val point = row["RecurrenceID"]?.takeUnless { it == JsonNull }
+        val exclusions = row["Exdates"]?.takeUnless { it == JsonNull }
+        if ((point != null && !epoch(point)) || (exclusions != null &&
+                (exclusions !is JsonArray || exclusions.any { !epoch(it) })))
+            localEditUnavailable(LocalEditPreparationFailure.CONTEXT)
+        if (point != null || (exclusions is JsonArray && exclusions.isNotEmpty()))
+            localEditUnavailable(LocalEditPreparationFailure.UNSUPPORTED)
+        val bootstrap = events.bootstrap(session, scope.calendar.value)
+        check()
+        val actual = verify.verify(session, scope.calendar.value, bootstrap, row, uid)?.let {
+            it.copy(content = SeriesEditProfile.freezeMaster(it.content))
+        } ?: localEditUnavailable(LocalEditPreparationFailure.RETRY)
+        check()
+        if (actual != frozen) localEditUnavailable(LocalEditPreparationFailure.CONFLICT)
+        return frozen
+    }
 
     suspend fun inspect(session: CatalogSession, scope: CalendarScope, uid: String, expected: EventContent,
         policy: CreatedEventReadbackPolicy, candidateId: String? = null): RemoteChange.Upsert? {
@@ -117,7 +139,7 @@ internal class ProtonCreatedEventReadback(private val sessions: CatalogSessionSo
 
     /** A short terminal page is mandatory. An already ambiguous family is refused immediately. */
     private suspend fun uniqueUidEvent(session: CatalogSession, scope: CalendarScope, uid: String,
-        checkpoint: suspend () -> Unit): String? {
+        rejectMultiple: Boolean = false, checkpoint: suspend () -> Unit): String? {
         val ids = mutableSetOf<String>()
         var finished = false
         for (page in 0 until 100) {
@@ -128,7 +150,10 @@ internal class ProtonCreatedEventReadback(private val sessions: CatalogSessionSo
                 if (row.string("CalendarID") != scope.calendar.value || row.string("UID") != uid || row.string("ID").isBlank() ||
                     !ids.add(row.string("ID"))) return null
             }
-            if (ids.size > 1) return null
+            if (ids.size > 1) {
+                if (rejectMultiple) localEditUnavailable(LocalEditPreparationFailure.UNSUPPORTED)
+                return null
+            }
             if (rows.size < 100) { finished = true; break }
         }
         return if (finished && ids.size == 1) ids.single() else null

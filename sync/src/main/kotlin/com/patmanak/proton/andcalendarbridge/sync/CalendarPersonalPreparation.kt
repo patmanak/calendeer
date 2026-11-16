@@ -10,6 +10,7 @@ import java.time.Instant
  */
 fun interface CalendarPersonalPreparationPort {
     val personalFormat: AdapterFormat? get() = null
+    val seriesFormat: AdapterFormat? get() = null
     suspend fun preparePersonal(intent: LocalEditIntent, timestamp: Instant): PersonalEditPreparation
 
     /** The original caller lease must stay open around every suspension and crypto stage.
@@ -17,5 +18,9 @@ fun interface CalendarPersonalPreparationPort {
      * without calling the unrestricted overload. Caller owns generation, consent and retention.
      */
     suspend fun preparePersonal(intent: LocalEditIntent, timestamp: Instant,
+        admit: (CalendarScope) -> Boolean): PersonalEditPreparation? = null
+
+    /** Finite master only. A complete authenticated family observation is required; no fallback. */
+    suspend fun prepareSeries(intent: LocalEditIntent, timestamp: Instant,
         admit: (CalendarScope) -> Boolean): PersonalEditPreparation? = null
 }

@@ -14,6 +14,29 @@ import org.junit.Test
 /** Real serialization facade with synthetic ports; no network, crypto or account qualification. */
 @OptIn(ExperimentalCoroutinesApi::class)
 class ProtonGuardedPersonalPreparationFacadeTest {
+    @Test fun explicitSeriesEntryKeepsItsProfileAndNeverEntersSimplePreparation() = runTest {
+        var calls = 0
+        var retainedLease: ((CalendarScope) -> Boolean)? = null
+        val old = base.content.copy(recurrence = EventRecurrence("series-fixture", "FREQ=DAILY;COUNT=3"))
+        val next = intent.content.copy(recurrence = EventRecurrence("series-fixture", "FREQ=DAILY;COUNT=5"))
+        val recurring = intent.copy(base = base.copy(content = old), content = next, seriesProfile = SeriesEditProfile.of(old, next))
+        val runtime = object : Runtime() {
+            override val seriesFormat = PERSONAL_SERIES_PREPARATION_FORMAT
+            override suspend fun prepareSeries(intent: LocalEditIntent, timestamp: Instant,
+                admit: (CalendarScope) -> Boolean): PersonalEditPreparation? {
+                calls++; retainedLease = admit; assertTrue(admit(scope))
+                return PersonalEditPreparation.forSeries(intent, timestamp, seriesFormat, "synthetic-series")
+            }
+        }
+        val port = facade(runtime, StandardTestDispatcher(testScheduler))
+        port.restore()
+        val result = port.prepareSeries(recurring, timestamp) { true }
+        assertNotNull(result); assertTrue(result!!.isSeries); assertEquals(recurring, result.intent)
+        assertEquals(1, calls); assertFalse(retainedLease!!(scope))
+        failure(LocalEditPreparationFailure.UNSUPPORTED) { port.preparePersonal(recurring, timestamp) { true } }
+        assertNull(port.prepareSeries(recurring, timestamp) { false }); assertEquals(1, calls)
+    }
+
     private val scope = CalendarScope(AccountId("synthetic-account"), CalendarId("synthetic-calendar"), 2)
     private val timestamp = Instant.parse("2030-01-01T12:00:00Z")
     private val base = RemoteChange.Upsert(EventId("synthetic-event"), Revision("synthetic-revision"),

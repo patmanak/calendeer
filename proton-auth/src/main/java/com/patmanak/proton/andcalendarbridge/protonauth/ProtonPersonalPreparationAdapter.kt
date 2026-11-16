@@ -22,6 +22,20 @@ internal fun freezePersonalRequest(intent: LocalEditIntent, timestamp: Instant):
   catch (failure: LocalEditPreparationException) { throw failure }
   catch (_: Exception) { localEditUnavailable(LocalEditPreparationFailure.UNSUPPORTED) }
 
+internal fun freezeSeriesRequest(intent: LocalEditIntent, timestamp: Instant): LocalEditIntent = try {
+    val frozen = SeriesEditCandidate(intent).intent
+    if (frozen.format != EVENT_FORMAT || timestamp.nano != 0 || timestamp.atOffset(ZoneOffset.UTC).year !in 1970..9999)
+        localEditUnavailable(LocalEditPreparationFailure.UNSUPPORTED)
+    frozen
+} catch (cancelled: CancellationException) { throw cancelled }
+  catch (failure: LocalEditPreparationException) { throw failure }
+  catch (_: Exception) { localEditUnavailable(LocalEditPreparationFailure.UNSUPPORTED) }
+
+internal fun interface PersonalSeriesQualification {
+    suspend fun qualify(session: CatalogSession, scope: CalendarScope, base: RemoteChange.Upsert,
+        checkpoint: suspend () -> Unit)
+}
+
 internal fun interface PersonalContextPreparation {
     suspend fun prepare(session: CatalogSession, intent: LocalEditIntent, uid: String, timestamp: Instant,
         metadata: JsonObject, bootstrap: JsonObject, row: JsonObject, addresses: List<UserAddress>): PersonalEditPreparation
@@ -36,26 +50,43 @@ internal fun personalCryptoPreparation(crypto: CryptoContext, protector: EventPa
         }.prepareAndSealPersonalEdit(session, intent, uid, time, metadata, bootstrap, row, protector)
     }
 
+internal fun seriesCryptoPreparation(crypto: CryptoContext, protector: EventPayloadProtector) =
+    PersonalContextPreparation { session, intent, uid, time, metadata, bootstrap, row, addresses ->
+        ProtonEventDecryptor(crypto) { user ->
+            if (user != session.userId) localEditUnavailable(LocalEditPreparationFailure.AUTHENTICATION)
+            addresses
+        }.prepareAndSealSeriesEdit(session, intent, uid, time, metadata, bootstrap, row, protector)
+    }
+
 /** Read-only personal-edit preparation. The shared facade supplies serialization with logout. */
 internal class ProtonPersonalPreparationAdapter(private val sessions: CatalogSessionSource,
     private val context: EventContextRefresher, private val metadata: CreateCalendarMetadataRemote,
     private val events: EventImportRemote, private val originals: LocalTitleEventRemote,
     private val addresses: LocalEventAddresses, private val prepare: PersonalContextPreparation,
-    private val guardedRefresh: LocalTitleContextRefresh? = null) : CalendarPersonalPreparationPort {
+    private val guardedRefresh: LocalTitleContextRefresh? = null,
+    private val seriesPreparation: PersonalContextPreparation? = null,
+    private val seriesQualification: PersonalSeriesQualification? = null) : CalendarPersonalPreparationPort {
     override val personalFormat = PERSONAL_PREPARATION_FORMAT
+    override val seriesFormat get() = PERSONAL_SERIES_PREPARATION_FORMAT.takeIf {
+        guardedRefresh != null && seriesPreparation != null && seriesQualification != null
+    }
     override suspend fun preparePersonal(intent: LocalEditIntent, timestamp: Instant): PersonalEditPreparation =
         checkNotNull(prepareWithAdmission(intent, timestamp, null))
     override suspend fun preparePersonal(intent: LocalEditIntent, timestamp: Instant,
         admit: (CalendarScope) -> Boolean): PersonalEditPreparation? = prepareWithAdmission(intent, timestamp, admit)
+    override suspend fun prepareSeries(intent: LocalEditIntent, timestamp: Instant,
+        admit: (CalendarScope) -> Boolean): PersonalEditPreparation? = prepareWithAdmission(intent, timestamp, admit, series = true)
 
     private class AdmissionClosed : RuntimeException()
 
     private suspend fun prepareWithAdmission(intent: LocalEditIntent, timestamp: Instant,
-        admit: ((CalendarScope) -> Boolean)?): PersonalEditPreparation? {
+        admit: ((CalendarScope) -> Boolean)?, series: Boolean = false): PersonalEditPreparation? {
         val closed = AtomicBoolean(false)
         try {
             currentCoroutineContext().ensureActive()
-            val frozen = freezePersonalRequest(intent, timestamp)
+            val frozen = if (series) freezeSeriesRequest(intent, timestamp) else freezePersonalRequest(intent, timestamp)
+            val format = if (series) seriesFormat ?: throw AdmissionClosed() else personalFormat
+            val crypto = if (series) seriesPreparation ?: throw AdmissionClosed() else prepare
             if (admit != null && guardedRefresh == null) throw AdmissionClosed()
             suspend fun admission() {
                 currentCoroutineContext().ensureActive()
@@ -102,11 +133,15 @@ internal class ProtonPersonalPreparationAdapter(private val sessions: CatalogSes
             checkpoint()
             ProtonCreateContextPolicy.select(frozen.scope, calendar, bootstrap, local)
             checkpoint()
-            val result = prepare.prepare(initial, frozen, uid, timestamp, calendar, bootstrap, row, local)
+            if (series) {
+                requireNotNull(seriesQualification).qualify(initial, frozen.scope, frozen.base, ::checkpoint)
+                checkpoint()
+            }
+            val result = crypto.prepare(initial, frozen, uid, timestamp, calendar, bootstrap, row, local)
             checkpoint()
-            if (result.intent != frozen || result.timestamp != timestamp || result.format != personalFormat)
+            if (result.intent != frozen || result.timestamp != timestamp || result.format != format || result.isSeries != series)
                 localEditUnavailable(LocalEditPreparationFailure.CONTEXT)
-            return PersonalEditPreparation(frozen, timestamp, personalFormat, result.protectedPayload)
+            return result.frozen()
         } catch (cancelled: CancellationException) { throw cancelled }
           catch (_: AdmissionClosed) { currentCoroutineContext().ensureActive(); return null }
           catch (failure: LocalEditPreparationException) { currentCoroutineContext().ensureActive(); throw failure }

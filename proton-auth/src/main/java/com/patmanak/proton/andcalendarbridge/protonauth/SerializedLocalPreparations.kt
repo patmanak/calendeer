@@ -16,6 +16,7 @@ internal class SerializedLocalPreparations(
 ) : CalendarLocalTimePreparationPort, CalendarPersonalPreparationPort, CalendarLocalTextPreparationPort {
     override val localTimeFormat = LOCAL_TIME_PREPARATION_FORMAT
     override val personalFormat = PERSONAL_PREPARATION_FORMAT
+    override val seriesFormat = PERSONAL_SERIES_PREPARATION_FORMAT
     override val localTextFormat = LOCAL_TEXT_PREPARATION_FORMAT
     private val authenticated get() = isAuthenticated()
     private val graph get() = currentGraph()
@@ -136,16 +137,23 @@ internal class SerializedLocalPreparations(
     }
 
     override suspend fun preparePersonal(intent: LocalEditIntent, timestamp: java.time.Instant,
-        admit: (CalendarScope) -> Boolean): PersonalEditPreparation? {
+        admit: (CalendarScope) -> Boolean): PersonalEditPreparation? = preparePersonalGuarded(intent, timestamp, admit, false)
+
+    override suspend fun prepareSeries(intent: LocalEditIntent, timestamp: java.time.Instant,
+        admit: (CalendarScope) -> Boolean): PersonalEditPreparation? = preparePersonalGuarded(intent, timestamp, admit, true)
+
+    private suspend fun preparePersonalGuarded(intent: LocalEditIntent, timestamp: java.time.Instant,
+        admit: (CalendarScope) -> Boolean, series: Boolean): PersonalEditPreparation? {
         val caller = currentCoroutineContext()
         caller.ensureActive()
         val closed = AtomicBoolean(false)
         return try {
-            val frozen = freezePersonalRequest(intent, timestamp)
-            val expectedFormat = personalFormat
+            val frozen = if (series) freezeSeriesRequest(intent, timestamp) else freezePersonalRequest(intent, timestamp)
+            val expectedFormat = if (series) seriesFormat else personalFormat
+            fun format(port: CalendarPersonalPreparationPort) = if (series) port.seriesFormat else port.personalFormat
             val lease = { scope: CalendarScope ->
                 if (scope != frozen.scope || closed.get()) false else {
-                    val allowed = personalFormat == expectedFormat && admit(scope)
+                    val allowed = format(this) == expectedFormat && admit(scope)
                     if (!allowed) closed.set(true)
                     allowed && !closed.get()
                 }
@@ -165,22 +173,23 @@ internal class SerializedLocalPreparations(
                         operation.ensureActive()
                         if (!authenticated || !active()) return@withLock null
                         val runtime = graph?.personals ?: return@withLock null
-                        if (runtime.personalFormat != expectedFormat) return@withLock null
+                        if (format(runtime) != expectedFormat) return@withLock null
                         val runtimeLease = { scope: CalendarScope ->
                             if (scope != frozen.scope || closed.get()) false else {
                                 operation.ensureActive()
-                                val allowed = authenticated && runtime.personalFormat == expectedFormat && lease(scope)
+                                val allowed = authenticated && format(runtime) == expectedFormat && lease(scope)
                                 if (!allowed) closed.set(true)
                                 operation.ensureActive()
                                 allowed && !closed.get()
                             }
                         }
                         // Guarded entry never falls back to the unrestricted preparation overload.
-                        val result = runtime.preparePersonal(frozen, timestamp, runtimeLease)
+                        val result = if (series) runtime.prepareSeries(frozen, timestamp, runtimeLease)
+                            else runtime.preparePersonal(frozen, timestamp, runtimeLease)
                         operation.ensureActive()
-                        if (!active() || !authenticated || runtime.personalFormat != expectedFormat) return@withLock null
-                        result?.takeIf { it.intent == frozen && it.timestamp == timestamp && it.format == expectedFormat }
-                            ?.let { PersonalEditPreparation(frozen, timestamp, expectedFormat, it.protectedPayload) }
+                        if (!active() || !authenticated || format(runtime) != expectedFormat) return@withLock null
+                        result?.takeIf { it.intent == frozen && it.timestamp == timestamp && it.format == expectedFormat && it.isSeries == series }
+                            ?.let { it.frozen() }
                     }
                 } catch (cancelled: CancellationException) { throw cancelled }
                   catch (failure: Exception) { operation.ensureActive(); throw failure }

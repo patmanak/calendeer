@@ -84,6 +84,7 @@ internal class SerializedAuthenticationPort(
     override val localTitleFormat = LOCAL_TITLE_PREPARATION_FORMAT
     override val localTextFormat = LOCAL_TEXT_PREPARATION_FORMAT
     override val personalFormat = PERSONAL_PREPARATION_FORMAT
+    override val seriesFormat = PERSONAL_SERIES_PREPARATION_FORMAT
     override val personalUpdateFormat = PERSONAL_UPDATE_REQUEST_FORMAT
     override val localTimeFormat = LOCAL_TIME_PREPARATION_FORMAT
     override val titleUpdateFormat = TITLE_UPDATE_SUBMISSION_FORMAT
@@ -106,6 +107,8 @@ internal class SerializedAuthenticationPort(
         localPreparations.preparePersonal(intent, timestamp)
     override suspend fun preparePersonal(intent: LocalEditIntent, timestamp: java.time.Instant,
         admit: (CalendarScope) -> Boolean): PersonalEditPreparation? = localPreparations.preparePersonal(intent, timestamp, admit)
+    override suspend fun prepareSeries(intent: LocalEditIntent, timestamp: java.time.Instant,
+        admit: (CalendarScope) -> Boolean): PersonalEditPreparation? = localPreparations.prepareSeries(intent, timestamp, admit)
 
     private var graph: ProtonAuthenticationGraph? = null
     private var authenticated = false
