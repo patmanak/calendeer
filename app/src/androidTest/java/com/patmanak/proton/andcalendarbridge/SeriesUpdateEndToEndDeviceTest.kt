@@ -28,6 +28,33 @@ import org.junit.runner.RunWith
 /** Real Provider, SQLite, native crypto and production adapters. Only the service is controlled. */
 @RunWith(AndroidJUnit4::class)
 class SeriesUpdateEndToEndDeviceTest {
+    @Test fun aNativeExceptionAfterCaptureKeepsTheSeriesIntentWithoutPreparingOrSending() = runBlocking {
+        journey {
+            val frozen = checkNotNull(localEdit())
+            val child = insertNativeException()
+            process(expectCurrentSource = false)
+            assertEquals(0, crypto.sendCount); assertNull(retained)
+            // The existing provenance-conflict route retains every frozen field and reports the hold.
+            assertEquals(frozen.copy(state = LocalEditState.CONFLICT), localEdit()); assertEquals("1", field(Events.DIRTY))
+            assertEquals("1", context.contentResolver.query(uri(Events.CONTENT_URI), arrayOf(Events.DIRTY),
+                "${Events._ID}=?", arrayOf(child.toString()), null)!!.use { assertTrue(it.moveToFirst()); it.getString(0) })
+        }
+    }
+
+    @Test fun aNativeExceptionDuringPreparationCannotBeRetainedClaimedOrSent() = runBlocking {
+        journey(detachDuringPreparation = true) {
+            val frozen = checkNotNull(localEdit())
+            process()
+            val child = checkNotNull(childDuringPreparation) { "Real preparation must finish and insert the exception" }
+            assertEquals("1", context.contentResolver.query(uri(Events.CONTENT_URI), arrayOf(Events.DIRTY),
+                "${Events._ID}=?", arrayOf(child.toString()), null)!!.use { assertTrue(it.moveToFirst()); it.getString(0) })
+            assertEquals(0, crypto.sendCount); assertNull(retained)
+            assertEquals(frozen, localEdit()); assertEquals("1", field(Events.DIRTY))
+            store.admitTransaction = allow
+            assertNull(store.personalEditPreparation(crypto.scope, crypto.base.eventId))
+        }
+    }
+
     @Test fun offPaletteSeriesEditKeepsItsRawNativeAndSqlIntentWithoutClaimOrSend() = runBlocking {
         journey(unsupportedColour = true) {
             val raw = checkNotNull(localEdit())
@@ -151,17 +178,18 @@ class SeriesUpdateEndToEndDeviceTest {
 
     private suspend fun journey(allDay: Boolean = false, loseNativeReply: Boolean = false,
         newerBeforeAck: Boolean = false, automatic: Boolean = false, unsupportedColour: Boolean = false,
+        detachDuringPreparation: Boolean = false,
         action: suspend Fixture.() -> Unit) {
         assumeTrue(InstrumentationRegistry.getArguments().getString("providerFixture") == "true")
         val result = ProtonSharedTitleCryptoProbe.runSeriesPipeline(allDay) { crypto ->
-            val fixture = Fixture(crypto, loseNativeReply, newerBeforeAck, automatic, unsupportedColour)
+            val fixture = Fixture(crypto, loseNativeReply, newerBeforeAck, automatic, unsupportedColour, detachDuringPreparation)
             try { fixture.seed(); fixture.action() } finally { fixture.close() }
         }
         assertEquals("RESULT=SUCCESS", result)
     }
 
     private class Fixture(val crypto: ProtonSeriesUpdatePipelineFixture, loseNativeReply: Boolean, newerBeforeAck: Boolean,
-        private val automatic: Boolean, private val unsupportedColour: Boolean) {
+        private val automatic: Boolean, private val unsupportedColour: Boolean, detachDuringPreparation: Boolean) {
         val context = ApplicationProvider.getApplicationContext<Context>()
         private val token = UUID.randomUUID().toString()
         private val name = "series-network-import-$token.db"
@@ -204,7 +232,17 @@ class SeriesUpdateEndToEndDeviceTest {
         }
         val coordinator = ImportCoordinator(context, store, remote, native, jobs, scheduler,
             systemCreatesEnabled = { true }, systemTitlesEnabled = { true }, systemTextsEnabled = { true }, systemTimesEnabled = { true })
-        val operations = CoordinatorSystemPersonalOperations(coordinator, journal, crypto.preparations, crypto.updates)
+        var childDuringPreparation: Long? = null
+            private set
+        private val preparations = object : CalendarPersonalPreparationPort by crypto.preparations {
+            override suspend fun prepareSeries(intent: LocalEditIntent, timestamp: Instant,
+                admit: (CalendarScope) -> Boolean): PersonalEditPreparation? {
+                val prepared = crypto.preparations.prepareSeries(intent, timestamp, admit)
+                if (detachDuringPreparation && prepared != null) childDuringPreparation = insertNativeException()
+                return prepared
+            }
+        }
+        val operations = CoordinatorSystemPersonalOperations(coordinator, journal, preparations, crypto.updates)
         var row = -1L
         private var createdAccount = false
         fun uri(source: Uri) = source.buildUpon().appendQueryParameter(CalendarContract.CALLER_IS_SYNCADAPTER, "true")
@@ -240,15 +278,25 @@ class SeriesUpdateEndToEndDeviceTest {
                 coordinator.captureSystemLocalEdit(crypto.scope, crypto.base.eventId) { rearmed++ }
                 else coordinator.captureLocalSeriesEdit(crypto.scope, crypto.base.eventId, MutationId("series-local-owner")))
         }
-        suspend fun process(): Boolean {
+        suspend fun process(expectCurrentSource: Boolean = true): Boolean {
             val reference = (coordinator.retainedLocalChanges(RetainedLocalChangeQuery(crypto.scope)) as RetainedLocalChangeListing.Available).page.entries.single()
             val admission = coordinator.systemPersonalRunAdmission(crypto.scope)
             assertTrue("Original scoped editing lease required", admission(crypto.scope))
-            assertNotNull("Full local source required before preparation", coordinator.personalOwners.observe(crypto.scope,
-                crypto.base.eventId, reference.mutationId, admission))
+            val source = coordinator.personalOwners.observe(crypto.scope, crypto.base.eventId, reference.mutationId, admission)
+            if (expectCurrentSource) assertNotNull("Full local source required before preparation", source) else assertNull(source)
             return operations.process(crypto.scope, reference, MutationId("unused-candidate"), crypto.timestamp,
                 coordinator.systemPersonalRunAdmission(crypto.scope)) { }
         }
+        fun insertNativeException(): Long = ContentUris.parseId(checkNotNull(context.contentResolver.insert(uri(Events.CONTENT_URI),
+            ContentValues().apply {
+                put(Events.CALENDAR_ID, context.contentResolver.query(uri(Events.CONTENT_URI), arrayOf(Events.CALENDAR_ID),
+                    "${Events._ID}=?", arrayOf(row.toString()), null)!!.use { assertTrue(it.moveToFirst()); it.getLong(0) })
+                put(Events.TITLE, "Synthetic retained occurrence"); put(Events.ORIGINAL_ID, row)
+                put(Events.ORIGINAL_INSTANCE_TIME, Instant.parse("2026-10-25T09:00:00Z").toEpochMilli())
+                put(Events.ORIGINAL_ALL_DAY, 0); put(Events.DTSTART, Instant.parse("2026-10-25T12:00:00Z").toEpochMilli())
+                put(Events.DTEND, Instant.parse("2026-10-25T13:00:00Z").toEpochMilli())
+                put(Events.EVENT_TIMEZONE, "UTC"); put(Events.DIRTY, 1)
+            })))
         suspend fun localEdit(): LocalEditIntent? {
             store.admitTransaction = allow
             return store.localEdit(crypto.scope, crypto.base.eventId)
