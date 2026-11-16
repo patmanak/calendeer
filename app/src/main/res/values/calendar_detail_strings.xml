@@ -4,6 +4,6 @@
     <string name="calendar_support_events">✓ Create, edit and delete simple events</string>
     <string name="calendar_support_personal">✓ Reminders and event colors</string>
     <string name="calendar_support_dates">✓ All-day events and time zones</string>
-    <string name="calendar_support_series">✓ Create finite daily series</string>
-    <string name="calendar_support_coming">Repeating-event edits and deletions stay saved on this phone, pending support. Other repeat rules and guests: coming later.</string>
+    <string name="calendar_support_series">✓ Create and edit finite daily series</string>
+    <string name="calendar_support_coming">Editing individual occurrences, series with exceptions or other repeat rules, recurring deletion and guest changes are not supported yet. Local changes stay saved on this phone.</string>
 </resources>

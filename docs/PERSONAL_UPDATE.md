@@ -1,4 +1,4 @@
-# Personal event edits, format 2
+# Personal event edits
 
 The personal-edit family combines supported title, text and date changes.
 It handles a combined edit in one protected request: title, description/location,
@@ -10,9 +10,9 @@ until the legacy families are retired; those gates are not separate user options
 
 Imported and transferred events support changes to display reminders and event color,
 including removal and calendar-color fallback. Before/at/after-start reminders use
-explicit minute offsets. Proton email reminders remain unchanged. Recurrence,
-organizers, attendees, invitations, unknown metadata and ambiguous DST endpoints
-remain held. Initial CREATE captures supported reminders/color using distinct
+explicit minute offsets. Proton email reminders remain unchanged. Outside the
+finite daily master profile below, recurrence remains held, as do organizers,
+attendees, invitations, unknown metadata and ambiguous DST endpoints. Initial CREATE captures supported reminders/color using distinct
 personal-v3 preparation and submission formats. The historical known-empty
 formats remain strict and inspectable; uncertain requests are never regenerated
 or resent. Shared signatures/encryption use the existing Proton primitives;
@@ -20,7 +20,7 @@ personal API siblings and the complete readback are checked separately.
 The calendar client provides the editor. Calendeer never delivers
 reminder notifications; the system calendar continues to own that behavior.
 
-## Finite daily series observations
+## Finite daily series, format 3
 
 An internal `SeriesEditCandidate` qualifies whole-master changes for canonical
 finite DAILY rules (COUNT 2–366, INTERVAL 1–365), with the same UID and no
@@ -46,12 +46,24 @@ masters against their current handoff frame, using the original CREATE dispatch,
 attachment and acknowledgement proofs. It retains profile 2 and the handoff wait
 atomically, including conflict variants. Retries reuse the retained observation
 and preserve newer native edits. Simple reconciliation still refuses changed series.
-Neither entry is invoked by a worker yet. Complete remote-family qualification,
-series preparation/submission and acknowledgement stay closed.
+The worker captures both paths automatically and rearms existing personal work
+only for a new owner. A previously unsupported transferred row is reconsidered
+only with complete immutable CREATE/binding/ACK/RELEASED proof; this never resends
+its CREATE. Complete scoped UID pagination and signed exact-base qualification
+precede series-v3 preparation and the fresh pre-dispatch check. The existing
+personal pipeline stages versioned requests, retains uncertain evidence, verifies
+the new signed content/metadata and completes native/SQL acknowledgement. Binary
+attempt and acknowledgement storage use explicit schema 3; old schemas stay strict.
+Native masters retain RRULE/DURATION and never receive DTEND. Historical ACK
+inspection preserves newer native edits. Display-only RDATE sources, detached
+exceptions, other rules and recurring deletion remain outside this profile.
+E3 qualifies the combined pipeline with real Provider/SQLite/crypto and a controlled
+service. Live GET metadata was observed for timed/all-day masters; actual service
+UPDATE and client journeys remain in grouped E4. See the [recurrence study](research/RECURRENCE_WRITES.md).
 
 ## Wire and local state
 
-`PersonalEditCandidate` freezes the full raw observation, including ordered
+For simple events, `PersonalEditCandidate` freezes the full raw observation, including ordered
 reminders and color. Preparation and request formats are version 2, with distinct
 identities, tags and fingerprints. Fresh eligible observations, including simple
 title/text/date edits, use personal-v2. Legacy writers are retired; retained work

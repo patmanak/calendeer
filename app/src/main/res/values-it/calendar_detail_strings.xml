@@ -4,6 +4,6 @@
     <string name="calendar_support_events">✓ Creare, modificare ed eliminare eventi semplici</string>
     <string name="calendar_support_personal">✓ Promemoria e colori degli eventi</string>
     <string name="calendar_support_dates">✓ Eventi di un giorno intero e fusi orari</string>
-    <string name="calendar_support_series">✓ Creare serie giornaliere con una fine</string>
-    <string name="calendar_support_coming">Modifiche ed eliminazioni degli eventi ricorrenti restano salvate su questo telefono, in attesa del supporto. Altre ripetizioni e invitati: prossimamente.</string>
+    <string name="calendar_support_series">✓ Creare e modificare serie giornaliere con una fine</string>
+    <string name="calendar_support_coming">Modificare una singola occorrenza, serie con eccezioni o altre regole, eliminare eventi ricorrenti e cambiare invitati non è ancora supportato. Le modifiche locali restano salvate su questo telefono.</string>
 </resources>

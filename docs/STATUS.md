@@ -56,7 +56,7 @@ Samsung/One UI is outside 0.1. Signature management remains deferred by the owne
 - Simple CREATE, personal-v2 combined title/text/date edits and DELETE use retained
   intent identity, guarded preparation/submission/readback and exact native/SQL
   acknowledgement. Timed/all-day events and qualified zone changes are supported.
-  Fresh eligible title/text/date edits use personal-v2. Legacy writers are retired;
+  Fresh eligible simple title/text/date edits use personal-v2. Legacy writers are retired;
   retained unsupported work is visible, while historical UNKNOWN inspection and
   proven acknowledgements keep their original identities and formats.
   [Personal edits](PERSONAL_UPDATE.md), [deletion](DELETE_SUBMISSION.md).
@@ -66,7 +66,7 @@ Samsung/One UI is outside 0.1. Signature management remains deferred by the owne
   A bounded signed calendar part preserves supported status/transparency and Web fragment framing.
   Initial CREATE captures reminders/color with personal-v3. Finite DAILY CREATE (COUNT 2–366, INTERVAL 1–365) uses
   capsule v4 and fingerprint v2, with a guarded native profile chosen before reservation.
-  Explicit ordinary/transferred series capture retains offline SQL snapshots; worker/send stay closed, and unsupported edits/deletions stay retained.
+  Whole finite DAILY personal masters without exceptions use series-v3 from ordinary/transferred capture through crypto, readback and native/SQL ACK.
 - UNKNOWN is inspect-only, never reset/resend. Unsupported local changes and
   conflicts retain their variants. Native permission/account/generation and consent
   are rechecked; a system sync request cannot lift a paused CREATE.
@@ -88,7 +88,7 @@ isolated fresh password login were tested. Remote CI, canonical release/update
 installation, other ABIs/OEMs and signing remain release gates.
 [Distribution](LICENSING.md), [build security](BUILD_SECURITY.md).
 
-Still required: remaining V05 series/occurrence/guest editing
+Still required: remaining V05 recurrence/occurrence/guest editing
 ([recurrence plan](research/RECURRENCE_WRITES.md)), milestone qualification,
 unresolved historical associations/conflicts, remote CI and signed packaging.
 Trustworthy comparable modification timestamps remain unavailable for general

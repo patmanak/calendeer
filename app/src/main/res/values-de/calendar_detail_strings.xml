@@ -4,6 +4,6 @@
     <string name="calendar_support_events">✓ Einfache Termine erstellen, bearbeiten und löschen</string>
     <string name="calendar_support_personal">✓ Erinnerungen und Terminfarben</string>
     <string name="calendar_support_dates">✓ Ganztägige Termine und Zeitzonen</string>
-    <string name="calendar_support_series">✓ Endliche tägliche Serien erstellen</string>
-    <string name="calendar_support_coming">Änderungen und Löschungen wiederkehrender Termine bleiben auf diesem Telefon gespeichert und warten auf Unterstützung. Andere Wiederholungen und Gäste: demnächst.</string>
+    <string name="calendar_support_series">✓ Endliche tägliche Serien erstellen und bearbeiten</string>
+    <string name="calendar_support_coming">Einzelne Vorkommen, Serien mit Ausnahmen und andere Wiederholungsregeln bearbeiten, wiederkehrende Termine löschen und Gäste ändern: noch nicht unterstützt. Lokale Änderungen bleiben auf diesem Telefon gespeichert.</string>
 </resources>

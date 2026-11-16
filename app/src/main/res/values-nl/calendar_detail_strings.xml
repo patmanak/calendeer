@@ -4,6 +4,6 @@
     <string name="calendar_support_events">✓ Eenvoudige afspraken maken, bewerken en verwijderen</string>
     <string name="calendar_support_personal">✓ Herinneringen en afspraakkleuren</string>
     <string name="calendar_support_dates">✓ Hele dagen en tijdzones</string>
-    <string name="calendar_support_series">✓ Eindige dagelijkse reeksen maken</string>
-    <string name="calendar_support_coming">Wijzigingen en verwijderingen van herhalende afspraken blijven op deze telefoon bewaard, in afwachting van ondersteuning. Andere herhalingen en gasten: binnenkort.</string>
+    <string name="calendar_support_series">✓ Eindige dagelijkse reeksen maken en wijzigen</string>
+    <string name="calendar_support_coming">Afzonderlijke herhalingen, reeksen met uitzonderingen of andere regels wijzigen, herhalingen verwijderen en gasten aanpassen worden nog niet ondersteund. Lokale wijzigingen blijven op deze telefoon bewaard.</string>
 </resources>

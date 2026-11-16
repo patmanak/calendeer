@@ -1,9 +1,9 @@
 # Recurring-event writes: Proton source study and implementation slices
 
-Inspected 2026-11-14. Requirement: V05; preservation outside qualified support:
-V06. This is published-source evidence and an implementation plan, **not an
-outgoing recurrence capability or live qualification**. Current simple-event
-formats and UNKNOWN recovery remain unchanged.
+Requirement: V05; preservation outside qualified support: V06. Published-source
+evidence and the remaining plan are separate from implemented finite DAILY
+CREATE and whole-master editing below. Historical formats and UNKNOWN recovery
+remain unchanged; grouped client/service E4 qualification is still pending.
 
 ## Reproducible source baseline
 
@@ -93,7 +93,8 @@ Extend the existing CREATE, personal-update and DELETE pipelines and their seale
 preparations/attempt stores. Do not add a separate recurring-event synchronization
 engine. New admitted profiles need versioned capture/preparation/request contracts;
 do not relax historical constructors/decoders or reinterpret saved requests.
-`LocalEditIntent` and personal-v2 preparation/readback still reject recurrence.
+Historical personal-v2 preparation/readback still reject recurrence. Explicit
+series profiles use the same intent, journals and ownership pipeline.
 CREATE now has a separate finite DAILY profile. A change to only the iCalendar
 serializer cannot complete this feature.
 
@@ -132,7 +133,9 @@ inspectable; unsupported transitions must not be normalized or silently shifted.
 
 PASS: current official refs resolved, complete trees checked, listed implementations
 and licenses read, existing Calendeer admission boundaries compared. No new upstream
-dependency was introduced. Live service/client journeys remain NOT RUN.
+dependency was introduced. Signed live GET metadata and complete UID-family
+qualification were observed for timed UTC and all-day finite masters. This does
+not qualify actual UPDATE behavior or calendar clients; those remain E4 gates.
 L9b's [finite daily CREATE](../LOCAL_CREATE_CAPTURE.md#finite-daily-series-create)
 now include strict rule admission, content snapshot schema 3, explicit native
 observation, shared signed/encrypted serialization, protected v4 capsules and their
@@ -144,5 +147,36 @@ restoration and ACK through an explicit internal series-staging route. Historica
 capsule profiles remain unchanged. Series handoff and historical recovery use that same source;
 contextual transfer checks preserve the simple-edit refusal and hold unsupported
 local changes. The Proton v4 capability and worker route now enable this subset;
-profile selection precedes reservation and UNKNOWN never resends. Next: L9c series
-editing, then occurrence changes and deletion. Group live-service/client journeys in E4.
+profile selection precedes reservation and UNKNOWN never resends. Whole finite
+DAILY masters without exceptions now use personal-series-v3; occurrence changes,
+other rules, detached exceptions, recurring deletion and guests remain held.
+Group live-service/client journeys in E4.
+
+
+## Implemented finite master edits
+
+The explicit series-v3 preparation/request/evidence profile extends the existing
+personal-update pipeline. It retains both the original signed parts and the full
+local intent, including UID, rule, text, dates, reminders, color and inherited
+email defaults. Old v2 capsules and their inspection paths remain strict.
+A complete UID family, current rights, session and exact signed revision are
+qualified before preparation and again before the single admitted dispatch.
+Any detached event, exclusion or unsupported shape blocks the write. Pagination
+is independent of displayed windows and requires a short terminal page; it is
+not an atomic server snapshot. Rule or UTC-bound changes set IsBreakingChange=1,
+following the official whole-series save path. The readback requires the exact
+raw metadata, new revision, signed content and complete supported family.
+Observed GET bounds describe the first instance; unsupported variants stay closed.
+
+Ordinary and transferred native masters preserve RRULE/DURATION and their series
+identity; ACK never writes DTEND. Native row/reminder/child assertions protect the
+frozen local edit, while historical receipts preserve newer edits. SQL intent,
+request, evidence, proof and completion reuse their existing stores. Uncertain
+outcomes remain inspect-only after interruption or revocation; no resend or
+format upgrade is inferred. Display-only RDATE materialization is never uploaded.
+
+E3 uses real Provider/SQLite/native cryptography and production adapters with a
+controlled service boundary, including timed/all-day edits, DST Instances, lost
+transport/native replies and newer phone edits. A live signed GET qualifies the
+current metadata shape only. E4 still groups actual UPDATE/client/OEM journeys;
+GET followed by PUT provides no atomic concurrency guarantee.

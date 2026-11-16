@@ -42,8 +42,9 @@ usual calendar app; Calendeer keeps them in sync in the background.
 - Delete an event.
 - Changes are sent to Proton automatically; **Synchronize** requests a sync now.
   Proton's email reminders are preserved when you edit an event.
-- Editing and deleting repeating events is not supported yet. Such local changes
-  stay on the phone, pending support; they are not sent or silently discarded.
+- Edit a whole finite daily personal series without individual exceptions, including
+  its rule, dates, reminders and color. Other recurrence edits, recurring deletion
+  and guest changes stay saved on the phone, pending support.
 
 **Stay in sync without thinking about it**
 - Automatic synchronization every 15 minutes up to every 6 hours (hourly by
