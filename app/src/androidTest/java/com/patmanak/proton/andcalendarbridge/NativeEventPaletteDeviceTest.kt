@@ -38,8 +38,8 @@ class NativeEventPaletteDeviceTest {
             listOf(EventPaletteColor("duplicated", 1), EventPaletteColor("duplicated", 2)))
         for (colors in variants) {
             val invalid = AndroidCalendarProjection(context, eventColors = EventColorPalette { colors })
-            try { invalid.ensureCalendar(scope, CalendarSummary(scope.calendar, "Palette fixture")); fail("Invalid palette") }
-            catch (failure: CalendarProjectionException) { assertEquals(CalendarProjectionFailure.IDENTITY_CONFLICT, failure.category) }
+            assertEquals(calendar, invalid.ensureCalendar(scope, CalendarSummary(scope.calendar, "Palette fixture")))
+            assertEquals(NativePaletteDiagnostic.CONFLICT, invalid.lastPaletteDiagnostic)
             assertTrue(palette().isEmpty())
         }
     }
@@ -84,8 +84,10 @@ class NativeEventPaletteDeviceTest {
             insertColor(offered.first().key, 0x123456, type)
             val row = create()
             val before = fields(row)
-            try { publish(); fail("A stable key cannot be reassigned") }
-            catch (failure: CalendarProjectionException) { assertEquals(CalendarProjectionFailure.IDENTITY_CONFLICT, failure.category) }
+            val existing = calendar
+            publish()
+            assertEquals(existing, calendar)
+            assertEquals(NativePaletteDiagnostic.CONFLICT, projection.lastPaletteDiagnostic)
             assertEquals(if (type == Colors.TYPE_EVENT) mapOf(offered.first().key to 0xff123456.toInt()) else emptyMap<String, Int>(), palette())
             assertEquals(before, fields(row))
         }
@@ -161,9 +163,69 @@ class NativeEventPaletteDeviceTest {
         val guarded = beforeBatch {
             if (once) { once = false; insertColor(collision.key, 0x123456) }
         }
-        try { guarded.ensureCalendar(scope, CalendarSummary(scope.calendar, "Palette fixture")); fail("Concurrent key collision") }
-        catch (_: CalendarProjectionException) { }
+        assertEquals(calendar, guarded.ensureCalendar(scope, CalendarSummary(scope.calendar, "Palette fixture")))
         assertEquals(mapOf(collision.key to 0xff123456.toInt()), palette())
+        assertEquals(NativePaletteDiagnostic.UNAVAILABLE, guarded.lastPaletteDiagnostic)
+    }
+
+    @Test fun unavailablePaletteDoesNotPreventCalendarConfigurationOrIncomingProjection() = fixture {
+        var unavailable = true
+        val guarded = beforeBatch(query = { uri, _, actual ->
+            if (uri.pathSegments.firstOrNull() == "colors" && unavailable) {
+                actual?.close(); throw IllegalArgumentException("Synthetic unavailable palette")
+            }
+            actual
+        }, change = { })
+        assertEquals(calendar, guarded.ensureCalendar(scope, CalendarSummary(scope.calendar, "Palette fixture")))
+        assertEquals(NativePaletteDiagnostic.UNAVAILABLE, guarded.lastPaletteDiagnostic)
+        val base = RemoteChange.Upsert(EventId("optional-palette"), Revision("palette-v1"), EventContent("Incoming survives",
+            EventTime.Timed(Instant.parse("2030-05-01T09:00:00Z"), Instant.parse("2030-05-01T10:00:00Z"), ZoneOffset.UTC),
+            details = EventDetails()))
+        guarded.apply(ProjectionIntent(scope, base))
+        val row = context.contentResolver.query(uri(Events.CONTENT_URI), arrayOf(Events._ID),
+            "${Events.CALENDAR_ID}=?", arrayOf(calendar.toString()), null)!!.use { assertTrue(it.moveToFirst()); it.getLong(0) }
+        assertEquals("Incoming survives", field(row, Events.TITLE)); assertEquals("0", field(row, Events.DIRTY))
+        assertTrue(palette().isEmpty())
+        unavailable = false
+        assertEquals(calendar, guarded.ensureCalendar(scope, CalendarSummary(scope.calendar, "Palette fixture")))
+        assertNull(guarded.lastPaletteDiagnostic); assertEquals(20, palette().size)
+        assertEquals("Incoming survives", field(row, Events.TITLE)); assertEquals("0", field(row, Events.DIRTY))
+    }
+
+    @Test fun cancelledPaletteQueryStillCancelsCalendarConfiguration() = fixture {
+        val guarded = beforeBatch(query = { uri, _, actual ->
+            if (uri.pathSegments.firstOrNull() == "colors") {
+                actual?.close(); throw kotlinx.coroutines.CancellationException("Synthetic palette cancellation")
+            }
+            actual
+        }, change = { fail("Cancelled palette cannot write") })
+        try { guarded.ensureCalendar(scope, CalendarSummary(scope.calendar, "Palette fixture")); fail("Cancellation") }
+        catch (_: kotlinx.coroutines.CancellationException) { }
+        assertTrue(palette().isEmpty())
+    }
+
+    @Test fun aPaletteFailureCannotReopenAdmissionRevokedDuringItsQuery() = fixture {
+        var allowed = true
+        val guarded = beforeBatch(query = { uri, _, actual ->
+            if (uri.pathSegments.firstOrNull() == "colors") {
+                allowed = false
+                actual?.close(); throw IllegalArgumentException("Synthetic palette failure after revocation")
+            }
+            actual
+        }, change = { fail("Revoked operation cannot write") })
+        guarded.admitOperation = { allowed }
+        try { guarded.ensureCalendar(scope, CalendarSummary(scope.calendar, "Palette fixture")); fail("Revocation") }
+        catch (_: kotlinx.coroutines.CancellationException) { }
+        assertTrue(palette().isEmpty())
+    }
+
+    @Test fun explicitPermissionFailureIsNotAnOptionalPaletteWarning() = fixture {
+        val denied = AndroidCalendarProjection(context, eventColors = EventColorPalette {
+            throw CalendarProjectionException(CalendarProjectionFailure.PERMISSION_REQUIRED)
+        })
+        try { denied.ensureCalendar(scope, CalendarSummary(scope.calendar, "Palette fixture")); fail("Permission failure") }
+        catch (failure: CalendarProjectionException) { assertEquals(CalendarProjectionFailure.PERMISSION_REQUIRED, failure.category) }
+        assertNull(denied.lastPaletteDiagnostic); assertTrue(palette().isEmpty())
     }
 
     @Test fun missingOrMismatchedKeyProofCannotStampOrDiscardAValidNativeRow() {

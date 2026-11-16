@@ -15,8 +15,11 @@ to Android/domain policy.
 Publication snapshots a bounded palette and inserts only missing entries.
 Existing keys must have exactly the same event type and opaque ARGB value;
 collisions stay untouched and are reported. Existing rows and absent keys are
-asserted in one transaction before insertion. No color is reassigned, updated or
-deleted, because a Provider color update can recolor referencing events without
+asserted in one transaction before insertion. A palette conflict or unavailable
+table emits only a closed diagnostic; calendar configuration and event import
+continue. Revoked access and cancellation still stop the operation. No color is
+reassigned, updated or deleted, because a Provider color update can recolor
+referencing events without
 marking them dirty. Unrelated entries and accounts are preserved.
 
 For a key-based local choice, the native reader requires exactly one matching

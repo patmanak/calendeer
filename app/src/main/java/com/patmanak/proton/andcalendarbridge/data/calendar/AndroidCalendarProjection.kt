@@ -116,6 +116,8 @@ class AndroidCalendarProjection(context: Context,
     internal val colorMode: () -> EventColorMode = { EventColorPreferences.read(context) }) : CalendarProjection {
     constructor(context: Context, colorMode: () -> EventColorMode) :
         this(context, EventColorPalette { emptyList() }, colorMode)
+    internal var lastPaletteDiagnostic: NativePaletteDiagnostic? = null
+        private set
     override suspend fun reprojectEventColors(scope: CalendarScope, afterRow: Long, limit: Int) =
         reprojectColorPage(scope, afterRow, limit)
     private val localCreateReader by lazy { NativeLocalCreateReader(resolver, ::accountFor, ::calendarRow,
@@ -325,7 +327,7 @@ class AndroidCalendarProjection(context: Context,
     private fun ensureCalendarInternal(scope: CalendarScope, summary: CalendarSummary, systemCreates: Boolean): EnsuredCalendar {
         if (scope.calendar != summary.id) fail(CalendarProjectionFailure.IDENTITY_CONFLICT)
         val account = ensureAccountInternal(scope.account)
-        ensureEventPalette(account)
+        lastPaletteDiagnostic = publishOptionalEventPalette(account)
         val uri = syncUri(Calendars.CONTENT_URI, account)
         val identity = calendarSelection(scope, account)
         val existing = calendarRow(scope, account)

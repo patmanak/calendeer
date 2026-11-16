@@ -5,7 +5,29 @@ import android.accounts.Account
 import android.content.*
 import android.provider.CalendarContract.Colors
 import android.provider.CalendarContract.Events
+import kotlinx.coroutines.CancellationException
 import com.patmanak.proton.andcalendarbridge.data.calendar.AndroidCalendarProjection.Companion.fail
+
+internal enum class NativePaletteDiagnostic { CONFLICT, UNAVAILABLE }
+
+/** Display metadata must not stop event synchronization; admission and cancellation still do. */
+internal fun AndroidCalendarProjection.publishOptionalEventPalette(account: Account): NativePaletteDiagnostic? = try {
+    ensureEventPalette(account)
+    null
+} catch (cancelled: CancellationException) {
+    throw cancelled
+} catch (failure: Exception) {
+    requirePermissions()
+    if (failure is CalendarProjectionException && failure.category !in setOf(
+            CalendarProjectionFailure.IDENTITY_CONFLICT, CalendarProjectionFailure.PROVIDER_UNAVAILABLE,
+            CalendarProjectionFailure.PROVIDER_REJECTED)) throw failure
+    val diagnostic = if (failure is CalendarProjectionException &&
+        failure.category == CalendarProjectionFailure.IDENTITY_CONFLICT) NativePaletteDiagnostic.CONFLICT
+        else NativePaletteDiagnostic.UNAVAILABLE
+    // Never include the provider exception, account or palette values.
+    android.util.Log.w("Calendeer", "Optional event palette: ${diagnostic.name}")
+    diagnostic
+}
 
 /** Inserting metadata cannot recolor events. Never repair a key by updating or deleting it. */
 internal fun AndroidCalendarProjection.ensureEventPalette(account: Account) {
