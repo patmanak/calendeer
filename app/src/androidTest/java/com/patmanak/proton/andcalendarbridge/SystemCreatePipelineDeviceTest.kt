@@ -34,6 +34,13 @@ import org.junit.runner.RunWith
 /** Real isolated Provider and durable journals with a controlled submission port; no Proton IO. */
 @RunWith(AndroidJUnit4::class)
 class SystemCreatePipelineDeviceTest {
+    @Test fun emptyColorKeyCreationKeepsCalendarInheritanceAndCompletesAcknowledgement() = fixture {
+        mutate(ContentValues().apply { put(Events.EVENT_COLOR_KEY, ""); put(Events.DIRTY, 1) })
+        assertEquals(ImportRunResult.COMPLETE, controller.run(network = true))
+        assertEquals(SystemCreateWorkStatus.COMPLETE, work.read(target, row)!!.status)
+        assertEquals(1, sends); assertEquals("0", field(Events.DIRTY))
+        assertNull(field(Events.EVENT_COLOR))
+    }
     @Test fun discoveryRequalifiesUnsupportedTransferredSeriesWithoutResendingItsCreate() = fixture {
         makeSeries()
         assertEquals(ImportRunResult.COMPLETE, controller.run(network = true))

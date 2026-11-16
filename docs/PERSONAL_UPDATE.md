@@ -26,6 +26,9 @@ context reads, preparation or dispatch. The complete local intent stays retained
 there is no automatic color approximation. Unchanged historical colors and old
 capsules remain readable. PREPARED requests requalify before claim; UNKNOWN
 inspection never invokes this fresh-write gate or rewrites its frozen request.
+The [Android event palette](ANDROID_EVENT_PALETTE.md) advertises these colors to
+compatible editors. A registered native color key is resolved and asserted with
+its account, type and exact RGB in the event's capture/acknowledgement batch.
 
 ## Finite daily series, format 3
 

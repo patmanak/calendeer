@@ -94,12 +94,14 @@ internal fun AndroidCalendarProjection.captureCapturedCurrent(baseline: Captured
         readSimpleTime(logical, placeholder)
     } ?: return CapturedNativeObservation.Unsupported else null
     val rawColor = values.getAsInteger(Events.EVENT_COLOR)
+    val colorKeyChecks = nativeEventColorKeyAssertions(resolver, account, values,
+        ::syncUri, ::requirePermissions, ::fail) ?: return CapturedNativeObservation.Unsupported
     val style = NativeColorStyle.read(values.getAsString(Events.SYNC_DATA3))
         ?: return CapturedNativeObservation.Unsupported
     if (!style.accepts(personalBase.content.colorRgb, rawColor)) return CapturedNativeObservation.Unsupported
     if (personal && rawColor != null && rawColor != 0 && rawColor.ushr(24) != 0xff)
         return CapturedNativeObservation.Unsupported
-    if (unsupported.any { values[it] != null && !(it == Events.EVENT_COLOR && (personal || rawColor == 0)) &&
+    if (unsupported.any { values[it] != null && !(it == Events.EVENT_COLOR_KEY && (personal || values.getAsString(it).isNullOrEmpty())) && !(it == Events.EVENT_COLOR && (personal || rawColor == 0)) &&
             !(seriesSnapshot != null && it in setOf(Events.RRULE, Events.DURATION)) &&
             !(it == Events.ORGANIZER && (localOwnerPlaceholder || personalOwner)) } ||
         (!localOwnerPlaceholder && emptyFlags.any { if (personal && it == Events.HAS_ALARM)
@@ -132,6 +134,7 @@ internal fun AndroidCalendarProjection.captureCapturedCurrent(baseline: Captured
         ContentProviderOperation.newAssertQuery(uri).withSelection(remote.sql, remote.args)
             .withValue(Events._ID, row).withExpectedCount(1).build())
     val expectedCounts = mutableListOf(1, 1, 1)
+    checks.addAll(colorKeyChecks); expectedCounts.addAll(colorKeyChecks.map { 1 })
     if (reminders != null) personalMetadata.assertReminders(reminders, checks, expectedCounts)
     if (series) {
         val children = "${Events.ORIGINAL_ID}=? OR (${Events.CALENDAR_ID}=? AND ${Events.ORIGINAL_SYNC_ID}=?)"

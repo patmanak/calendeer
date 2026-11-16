@@ -73,6 +73,7 @@ import com.patmanak.proton.andcalendarbridge.sync.EventPerson
 import com.patmanak.proton.andcalendarbridge.sync.AttendanceRole
 import com.patmanak.proton.andcalendarbridge.sync.AttendanceStatus
 import com.patmanak.proton.andcalendarbridge.sync.catalog.CalendarSummary
+import com.patmanak.proton.andcalendarbridge.sync.EventColorPalette
 import java.nio.ByteBuffer
 import java.nio.CharBuffer
 import java.nio.charset.CharacterCodingException
@@ -111,7 +112,10 @@ data class EnsuredCalendar(val id: Long, val created: Boolean)
  * order opaque revisions and never infers deletion from an absent event in a server page.
  */
 class AndroidCalendarProjection(context: Context,
+    internal val eventColors: EventColorPalette = EventColorPalette { emptyList() },
     internal val colorMode: () -> EventColorMode = { EventColorPreferences.read(context) }) : CalendarProjection {
+    constructor(context: Context, colorMode: () -> EventColorMode) :
+        this(context, EventColorPalette { emptyList() }, colorMode)
     override suspend fun reprojectEventColors(scope: CalendarScope, afterRow: Long, limit: Int) =
         reprojectColorPage(scope, afterRow, limit)
     private val localCreateReader by lazy { NativeLocalCreateReader(resolver, ::accountFor, ::calendarRow,
@@ -321,6 +325,7 @@ class AndroidCalendarProjection(context: Context,
     private fun ensureCalendarInternal(scope: CalendarScope, summary: CalendarSummary, systemCreates: Boolean): EnsuredCalendar {
         if (scope.calendar != summary.id) fail(CalendarProjectionFailure.IDENTITY_CONFLICT)
         val account = ensureAccountInternal(scope.account)
+        ensureEventPalette(account)
         val uri = syncUri(Calendars.CONTENT_URI, account)
         val identity = calendarSelection(scope, account)
         val existing = calendarRow(scope, account)

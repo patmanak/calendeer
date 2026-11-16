@@ -60,7 +60,8 @@ class BridgeApplication : Application() {
     private val authenticationScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val createAttempts by lazy { CreateAttemptStore(this) }
     private val localCreateCaptures by lazy { LocalCreateStore(this) }
-    private val nativeCalendar by lazy { AndroidCalendarProjection(this) }
+    private val nativeCalendar by lazy { AndroidCalendarProjection(this,
+        eventColors = com.patmanak.proton.andcalendarbridge.protonauth.ProtonCalendarEventColors) }
     private val systemCreateWork by lazy { SystemCreateWorkStore(this).apply { migrateCalendarModes() } }
     internal val signOutWorkCounter by lazy {
         com.patmanak.proton.andcalendarbridge.data.outgoing.SignOutWorkCounter(

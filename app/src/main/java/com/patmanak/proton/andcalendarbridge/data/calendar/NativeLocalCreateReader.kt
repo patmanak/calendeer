@@ -72,11 +72,12 @@ internal class NativeLocalCreateReader(
         val localOwnerPlaceholder = personal.knownLocalPlaceholder(values, account)
         val seriesSnapshot = if (seriesOnly) nativeCreateSeriesSnapshot(values, localOwnerPlaceholder, readSimpleTime) ?: return null else null
         val rawColor = values.getAsInteger(Events.EVENT_COLOR)
+        val colorKeyChecks = nativeEventColorKeyAssertions(resolver, account, values, syncUri, requirePermissions, fail) ?: return null
         if (rawColor != null && rawColor != 0 && rawColor.ushr(24) != 0xff) return null
         if (syncColumns.any { column ->
                 if (firstRow == null && column == Events.SYNC_DATA5) values.getAsString(column) != marker
                 else values[column] != null
-            } || unsupported.any { values[it] != null && !(it == Events.ORGANIZER && localOwnerPlaceholder) &&
+            } || unsupported.any { values[it] != null && it != Events.EVENT_COLOR_KEY && !(it == Events.ORGANIZER && localOwnerPlaceholder) &&
                 !(seriesSnapshot != null && it in setOf(Events.RRULE, Events.DURATION)) } ||
             (!localOwnerPlaceholder && emptyFlags.any { values.getAsInteger(it) != 0 }) ||
             values.getAsInteger(Events.STATUS) != Events.STATUS_CONFIRMED ||
@@ -95,6 +96,7 @@ internal class NativeLocalCreateReader(
             ContentProviderOperation.newAssertQuery(uri).withSelection(markerSelection.sql, markerSelection.args)
                 .withExpectedCount(if (firstRow == null) 1 else 0).build())
         val expected = mutableListOf(1, 1, if (firstRow == null) 1 else 0)
+        checks.addAll(colorKeyChecks); expected.addAll(colorKeyChecks.map { 1 })
         personal.assertReminders(reminders, checks, expected)
         if (seriesSnapshot != null) {
             val children = "${Events.ORIGINAL_ID}=?"

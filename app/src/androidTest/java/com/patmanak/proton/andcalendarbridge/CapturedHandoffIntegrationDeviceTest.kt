@@ -418,13 +418,34 @@ class CapturedHandoffIntegrationDeviceTest {
         assertEquals("0", field(Events.EVENT_COLOR)); assertEquals("0", field(Events.DIRTY))
         assertNull(role()!!.frame.base.content.colorRgb)
     }
-    @Test fun transferredMetadataUsesThePersonalOwnerAndAcknowledgesThroughRealSqlAndProvider() = fixture(safePersonal = true) {
+    @Test fun transferredMetadataUsesThePersonalOwnerAndAcknowledgesThroughRealSqlAndProvider() = transferredMetadata(false)
+    @Test fun registeredKeySurvivesTransferredCaptureAndAcknowledgementThroughSqlAndProvider() = transferredMetadata(true)
+    private fun transferredMetadata(keyBased: Boolean) = fixture(safePersonal = true) {
         transferred(); incoming(verifiedEvent); titleMode = true; personalMode = true
         val database = "personal-handoff-ack-${UUID.randomUUID()}.db"
         try {
             TitleUpdateAttemptStore(context, database).use { attempts ->
                 val origin = record()
-                addReminder(); mutate(ContentValues().apply { put(Events.DIRTY, 1); put(Events.EVENT_COLOR, 0xff123456.toInt()) })
+                addReminder()
+                if (keyBased) {
+                    val color = com.patmanak.proton.andcalendarbridge.protonauth.ProtonCalendarEventColors.colors().first()
+                    val account = projection.accountFor(target.account)
+                    val colorUri = CalendarContract.Colors.CONTENT_URI.buildUpon()
+                        .appendQueryParameter(CalendarContract.CALLER_IS_SYNCADAPTER, "true")
+                        .appendQueryParameter(CalendarContract.Colors.ACCOUNT_NAME, account.name)
+                        .appendQueryParameter(CalendarContract.Colors.ACCOUNT_TYPE, account.type).build()
+                    context.contentResolver.insert(colorUri, ContentValues().apply {
+                        put(CalendarContract.Colors.COLOR_KEY, color.key); put(CalendarContract.Colors.COLOR_TYPE, CalendarContract.Colors.TYPE_EVENT)
+                        put(CalendarContract.Colors.COLOR, color.rgb or 0xff000000.toInt())
+                    }) ?: error("Synthetic color insertion failed")
+                    insertedPalette = true
+                    mutate(ContentValues().apply { put(Events.DIRTY, 1); put(Events.EVENT_COLOR_KEY, color.key) })
+                } else mutate(ContentValues().apply { put(Events.DIRTY, 1); put(Events.EVENT_COLOR, 0xff123456.toInt()) })
+                if (keyBased) {
+                    projection.admitOperation = { true }
+                    assertTrue("Native registered-key handoff must be supported",
+                        projection.captureCapturedHandoffCurrent(role()!!.frame) is CapturedHandoffCurrentObservation.Supported)
+                }
                 assertEquals(CapturedCreateReconciliationResult.RETAINED, reconcileTransferred())
                 val local = checkNotNull(edit())
                 val admission = coordinator.systemPersonalRunAdmission(target)
@@ -441,15 +462,23 @@ class CapturedHandoffIntegrationDeviceTest {
                 assertTrue(coordinator.personalOwners.acknowledge(result, journal, coordinator.systemPersonalProofAdmission(target)))
                 assertTrue(coordinator.personalOwners.complete(result, journal) { true })
                 assertEquals("0", field(Events.DIRTY)); assertEquals(local.content, role()!!.frame.base.content)
+                if (keyBased) assertNotNull(field(Events.EVENT_COLOR_KEY))
                 assertEquals(origin, record()); assertEquals(1, sends)
                 reopen()
                 assertTrue(coordinator.personalOwners.acknowledge(result, journal, coordinator.systemPersonalProofAdmission(target)))
-                mutate(ContentValues().apply { put(Events.DIRTY, 1); put(Events.EVENT_COLOR, 0xff654321.toInt()) })
+                val nextColor = if (keyBased) 0x258723 else 0x654321
+                mutate(ContentValues().apply { put(Events.DIRTY, 1); put(Events.EVENT_COLOR, nextColor or 0xff000000.toInt()) })
+                if (keyBased) {
+                    assertEquals(CapturedCreateReconciliationResult.UNSUPPORTED, coordinator.reconcileHandoffLocalCreate(target,
+                        localId, id, attempt, MutationId("personal-second-owner")))
+                    assertNull(edit()); assertEquals("1", field(Events.DIRTY))
+                    mutate(ContentValues().apply { putNull(Events.EVENT_COLOR_KEY) })
+                }
                 assertEquals(CapturedCreateReconciliationResult.RETAINED, coordinator.reconcileHandoffLocalCreate(target,
                     localId, id, attempt, MutationId("personal-second-owner")))
                 val next = checkNotNull(edit())
                 assertEquals(local.content, next.base.content)
-                assertEquals(0x654321, next.content.colorRgb)
+                assertEquals(nextColor, next.content.colorRgb)
                 assertNotNull(coordinator.personalOwners.observe(target, verifiedEvent.eventId, next.id,
                     coordinator.systemPersonalRunAdmission(target)))
                 assertEquals(origin, record()); assertEquals(1, sends)
@@ -761,6 +790,7 @@ class CapturedHandoffIntegrationDeviceTest {
     private class Fixture(val context: Context, safePersonal: Boolean = false, val richOrigin: Boolean = false,
         val series: Boolean = false, val allDay: Boolean = false, colorMode: EventColorMode = EventColorMode.EVENT,
         val crypto: ProtonSeriesUpdatePipelineFixture? = null) {
+        var insertedPalette = false
         private val token = UUID.randomUUID().toString()
         private val importName = "dispatch-integration-import-$token.db"
         private val dispatchName = "captured-provider-dispatch-$token.db"
@@ -1096,6 +1126,15 @@ class CapturedHandoffIntegrationDeviceTest {
             coordinator.authenticationChanged(false); jobs.coroutineContext[Job]!!.cancelAndJoin()
             store.close(); journal.close(); creates.close(); context.deleteDatabase(dispatchName); context.deleteDatabase(importName); context.deleteDatabase(journalName)
             projection.admitOperation = { true }; projection.removeOwnedCalendar(target)
+            if (insertedPalette) {
+                val account = projection.accountFor(target.account)
+                val colors = CalendarContract.Colors.CONTENT_URI.buildUpon()
+                    .appendQueryParameter(CalendarContract.CALLER_IS_SYNCADAPTER, "true")
+                    .appendQueryParameter(CalendarContract.Colors.ACCOUNT_NAME, account.name)
+                    .appendQueryParameter(CalendarContract.Colors.ACCOUNT_TYPE, account.type).build()
+                context.contentResolver.delete(colors, "${CalendarContract.Colors.ACCOUNT_NAME}=? AND ${CalendarContract.Colors.ACCOUNT_TYPE}=?",
+                    arrayOf(account.name, account.type))
+            }
             AccountManager.get(context).removeAccountExplicitly(projection.accountFor(target.account))
         }
     }

@@ -45,6 +45,8 @@ usual calendar app; Calendeer keeps them in sync in the background.
 - New event colors must belong to Proton's 20-color palette. Creates or edits
   with another new color stay saved on the phone; Calendeer does not silently
   replace the chosen color or send a request that Proton is known to reject.
+  This palette is advertised to Android calendar apps that support account event
+  colors; each calendar app decides whether to offer it.
 - Edit a whole finite daily personal series without individual exceptions, including
   its rule, dates, reminders and color. Other recurrence edits, recurring deletion
   and guest changes stay saved on the phone, pending support.

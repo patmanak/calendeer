@@ -13,5 +13,6 @@ internal object ProtonEventColourPolicy {
         0x273eb2, 0x0a77a6, 0x0f735a, 0x258723, 0x807304)
 
     fun accepts(rgb: Int?): Boolean = rgb == null || rgb in palette
+    fun supportedColors(): List<Int> = palette.toList()
     fun acceptsChange(before: Int?, after: Int?): Boolean = before == after || accepts(after)
 }

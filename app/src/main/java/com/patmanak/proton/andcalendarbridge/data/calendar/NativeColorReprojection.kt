@@ -36,7 +36,9 @@ internal suspend fun AndroidCalendarProjection.reprojectColorPage(scope: Calenda
     for (row in rows) {
         requirePermissions()
         if (!knownColorOwner(row) || row.getAsInteger(Events.DIRTY) != 0 ||
-            row.getAsInteger(Events.DELETED) != 0 || row[Events.EVENT_COLOR_KEY] != null) continue
+            row.getAsInteger(Events.DELETED) != 0) continue
+        val colorKeyChecks = nativeEventColorKeyAssertions(resolver, account, row,
+            ::syncUri, ::requirePermissions, ::fail) ?: continue
         val rawMarker = row.getAsString(Events.SYNC_DATA3)
         val style = NativeColorStyle.read(rawMarker) ?: continue
         val next = style.forDisplay(mode, row.getAsInteger(Events.EVENT_COLOR)) ?: continue
@@ -62,6 +64,7 @@ internal suspend fun AndroidCalendarProjection.reprojectColorPage(scope: Calenda
             if (next.masked || next.colorRgb == null) putNull(Events.EVENT_COLOR)
             else put(Events.EVENT_COLOR, next.colorRgb or 0xff000000.toInt())
         }
+        operations.addAll(colorKeyChecks)
         operations += ContentProviderOperation.newUpdate(uri).withSelection(identity.sql, identity.args)
             .withValues(values).withExpectedCount(1).build()
         requirePermissions()

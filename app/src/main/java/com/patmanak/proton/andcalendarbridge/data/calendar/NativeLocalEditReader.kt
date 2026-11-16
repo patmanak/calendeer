@@ -87,12 +87,14 @@ internal fun AndroidCalendarProjection.captureSimpleSnapshot(scope: CalendarScop
     val unsupported = arrayOf(Events.RRULE, Events.RDATE, Events.EXRULE, Events.EXDATE, Events.DURATION,
         Events.ORIGINAL_ID, Events.ORIGINAL_SYNC_ID, Events.ORIGINAL_INSTANCE_TIME, Events.ORIGINAL_ALL_DAY,
         Events.ORGANIZER, Events.EVENT_COLOR_KEY, Events.CUSTOM_APP_PACKAGE, Events.CUSTOM_APP_URI)
+    val colorKeyChecks = nativeEventColorKeyAssertions(resolver, account, values,
+        ::syncUri, ::requirePermissions, ::fail) ?: return null
     val personalOwner = if (personal) knownPersonalOwner(values, account, personalBase)
         else simplePersonalOwner(values, account, base.content)
     val seriesSnapshot = if (series) nativeCreateSeriesSnapshot(values, false) { logical, _ ->
         readSimpleTime(logical, personalAllDayUtcAlias = true)
     } ?: return null else null
-    if (unsupported.any { values[it] != null && !(it == Events.ORGANIZER && personalOwner) &&
+    if (unsupported.any { values[it] != null && !(it == Events.EVENT_COLOR_KEY && (personal || values.getAsString(it).isNullOrEmpty())) && !(it == Events.ORGANIZER && personalOwner) &&
             !(seriesSnapshot != null && it in setOf(Events.RRULE, Events.DURATION)) }) return null
     val emptyFlags = arrayOf(Events.HAS_ATTENDEE_DATA, Events.IS_ORGANIZER, Events.GUESTS_CAN_MODIFY,
         Events.GUESTS_CAN_INVITE_OTHERS, Events.GUESTS_CAN_SEE_GUESTS, Events.HAS_ALARM,
@@ -134,6 +136,7 @@ internal fun AndroidCalendarProjection.captureSimpleSnapshot(scope: CalendarScop
         ContentProviderOperation.newAssertQuery(uri).withSelection(identity.sql, identity.args)
             .withValues(values).withExpectedCount(1).build())
     val expected = mutableListOf(1, 1, 1)
+    checks.addAll(colorKeyChecks); expected.addAll(colorKeyChecks.map { 1 })
     if (series) {
         val children = "${Events.ORIGINAL_ID}=? OR (${Events.CALENDAR_ID}=? AND ${Events.ORIGINAL_SYNC_ID}=?)"
         val args = arrayOf(row.toString(), calendar.toString(), syncId)
