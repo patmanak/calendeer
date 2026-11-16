@@ -85,6 +85,8 @@ internal class ProtonPersonalPreparationAdapter(private val sessions: CatalogSes
         try {
             currentCoroutineContext().ensureActive()
             val frozen = if (series) freezeSeriesRequest(intent, timestamp) else freezePersonalRequest(intent, timestamp)
+            if (!ProtonEventColourPolicy.acceptsChange(frozen.base.content.colorRgb, frozen.content.colorRgb))
+                localEditUnavailable(LocalEditPreparationFailure.UNSUPPORTED)
             val format = if (series) seriesFormat ?: throw AdmissionClosed() else personalFormat
             val crypto = if (series) seriesPreparation ?: throw AdmissionClosed() else prepare
             if (admit != null && guardedRefresh == null) throw AdmissionClosed()

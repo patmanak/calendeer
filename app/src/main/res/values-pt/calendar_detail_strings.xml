@@ -2,8 +2,8 @@
     <string name="calendar_display_on_device">Mostrar neste telefone</string>
     <string name="calendar_row_attention">Algumas alterações precisam de atenção. Abra os detalhes.</string>
     <string name="calendar_support_events">✓ Criar, editar e eliminar eventos simples</string>
-    <string name="calendar_support_personal">✓ Lembretes e cores dos eventos</string>
+    <string name="calendar_support_personal">✓ Lembretes e cores Proton dos eventos</string>
     <string name="calendar_support_dates">✓ Eventos de dia inteiro e fusos horários</string>
     <string name="calendar_support_series">✓ Criar e editar séries diárias com um fim</string>
-    <string name="calendar_support_coming">Editar uma ocorrência, séries com exceções ou outras regras, eliminar eventos recorrentes e alterar convidados ainda não é suportado. As alterações locais ficam guardadas neste telefone.</string>
+    <string name="calendar_support_coming">Editar uma ocorrência, séries com exceções ou outras regras, eliminar eventos recorrentes e alterar convidados ainda não é suportado. As alterações locais ficam guardadas neste telefone. As criações ou alterações com uma nova cor fora da paleta Proton ficam guardadas neste telefone.</string>
 </resources>

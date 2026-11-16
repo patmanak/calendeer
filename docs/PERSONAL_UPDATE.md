@@ -20,6 +20,13 @@ personal API siblings and the complete readback are checked separately.
 The calendar client provides the editor. Calendeer never delivers
 reminder notifications; the system calendar continues to own that behavior.
 
+Fresh CREATE and changed colors must use Proton's 20-color palette, or null for
+the calendar color. Other new colors are rejected locally as unsupported before
+context reads, preparation or dispatch. The complete local intent stays retained;
+there is no automatic color approximation. Unchanged historical colors and old
+capsules remain readable. PREPARED requests requalify before claim; UNKNOWN
+inspection never invokes this fresh-write gate or rewrites its frozen request.
+
 ## Finite daily series, format 3
 
 An internal `SeriesEditCandidate` qualifies whole-master changes for canonical

@@ -42,6 +42,9 @@ usual calendar app; Calendeer keeps them in sync in the background.
 - Delete an event.
 - Changes are sent to Proton automatically; **Synchronize** requests a sync now.
   Proton's email reminders are preserved when you edit an event.
+- New event colors must belong to Proton's 20-color palette. Creates or edits
+  with another new color stay saved on the phone; Calendeer does not silently
+  replace the chosen color or send a request that Proton is known to reject.
 - Edit a whole finite daily personal series without individual exceptions, including
   its rule, dates, reminders and color. Other recurrence edits, recurring deletion
   and guest changes stay saved on the phone, pending support.

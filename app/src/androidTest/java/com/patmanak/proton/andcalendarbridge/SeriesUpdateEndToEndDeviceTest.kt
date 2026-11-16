@@ -28,6 +28,16 @@ import org.junit.runner.RunWith
 /** Real Provider, SQLite, native crypto and production adapters. Only the service is controlled. */
 @RunWith(AndroidJUnit4::class)
 class SeriesUpdateEndToEndDeviceTest {
+    @Test fun offPaletteSeriesEditKeepsItsRawNativeAndSqlIntentWithoutClaimOrSend() = runBlocking {
+        journey(unsupportedColour = true) {
+            val raw = checkNotNull(localEdit())
+            assertEquals(0x7868e6, raw.content.colorRgb)
+            process()
+            assertEquals(0, crypto.sendCount); assertNull(retained)
+            assertEquals(raw, localEdit()); assertEquals("1", field(Events.DIRTY))
+            assertEquals(0xff7868e6.toInt().toString(), field(Events.EVENT_COLOR))
+        }
+    }
     @Test fun automaticOrdinarySeriesCaptureRearmsOnceAndReachesTheExistingPipeline() = runBlocking {
         for (allDay in listOf(false, true)) journey(allDay, automatic = true) {
             assertEquals(1, rearmed)
@@ -140,17 +150,18 @@ class SeriesUpdateEndToEndDeviceTest {
     }
 
     private suspend fun journey(allDay: Boolean = false, loseNativeReply: Boolean = false,
-        newerBeforeAck: Boolean = false, automatic: Boolean = false, action: suspend Fixture.() -> Unit) {
+        newerBeforeAck: Boolean = false, automatic: Boolean = false, unsupportedColour: Boolean = false,
+        action: suspend Fixture.() -> Unit) {
         assumeTrue(InstrumentationRegistry.getArguments().getString("providerFixture") == "true")
         val result = ProtonSharedTitleCryptoProbe.runSeriesPipeline(allDay) { crypto ->
-            val fixture = Fixture(crypto, loseNativeReply, newerBeforeAck, automatic)
+            val fixture = Fixture(crypto, loseNativeReply, newerBeforeAck, automatic, unsupportedColour)
             try { fixture.seed(); fixture.action() } finally { fixture.close() }
         }
         assertEquals("RESULT=SUCCESS", result)
     }
 
     private class Fixture(val crypto: ProtonSeriesUpdatePipelineFixture, loseNativeReply: Boolean, newerBeforeAck: Boolean,
-        private val automatic: Boolean) {
+        private val automatic: Boolean, private val unsupportedColour: Boolean) {
         val context = ApplicationProvider.getApplicationContext<Context>()
         private val token = UUID.randomUUID().toString()
         private val name = "series-network-import-$token.db"
@@ -216,7 +227,7 @@ class SeriesUpdateEndToEndDeviceTest {
                 checkpoint = PageCheckpoint(crypto.scope, crypto.format, traversalComplete = true)
             }
             assertEquals(1, store.acknowledge(ProjectionIntent(crypto.scope, crypto.base)))
-            mutate(seriesEditValues(crypto.replacement))
+            mutate(seriesEditValues(if (unsupportedColour) crypto.replacement.copy(colorRgb = 0x7868e6) else crypto.replacement))
             val reminderUri = uri(CalendarContract.Reminders.CONTENT_URI)
             context.contentResolver.delete(reminderUri, "${CalendarContract.Reminders.EVENT_ID}=?", arrayOf(row.toString()))
             for (reminder in crypto.replacement.details!!.reminders) context.contentResolver.insert(reminderUri, ContentValues().apply {

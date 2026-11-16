@@ -15,7 +15,8 @@ object ProtonCreateTransportProbe {
     suspend fun submit(context: Context, record: CreateAttemptRecord, draft: CalendarCreateDraft,
         journal: CreateAttemptJournal, identityHash: String, admit: () -> Boolean,
         retainCategory: (String) -> Unit): CreateSubmissionObservation = withContext(Dispatchers.IO) {
-        require(record.state == CreateAttemptState.PREPARED && record.format == SERIES_CREATE_SUBMISSION_FORMAT)
+        require(record.state == CreateAttemptState.PREPARED &&
+            record.format in setOf(SERIES_CREATE_SUBMISSION_FORMAT, PERSONAL_CREATE_SUBMISSION_FORMAT))
         val frozen = draft.frozen()
         require(frozen.scope == record.scope && frozen.correlation == record.id &&
             frozen.content.title.startsWith("Calendeer QA Series NET transport"))

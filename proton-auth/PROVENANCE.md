@@ -1084,3 +1084,13 @@ at `c9b5f2995744b6f7c8ff1301ca3d5ac4f7a18672`:
 This is a project-owned adaptation, not a new upstream dependency or copied crypto
 implementation. Backend metadata transformations and live compatibility require
 separate qualification; a source reference is not a service guarantee.
+
+## Fresh event color admission
+
+Inspected 2026-11-16: [ACCENT_COLORS_MAP](https://github.com/ProtonMail/WebClients/blob/c9b5f2995744b6f7c8ff1301ca3d5ac4f7a18672/packages/shared/lib/colors.ts#L7)
+provides the twenty official RGB values. Calendeer's original admission helper
+uses these factual palette values; it does not copy the nearest-color algorithm
+or introduce a dependency. Controlled live variants rejected an off-palette RGB
+for simple and recurring creates and accepted an official RGB for a series.
+Fresh writes refuse other colors locally while preserving raw intent. Historical
+decoders, frozen capsules and inspect-only recovery retain their existing contracts.

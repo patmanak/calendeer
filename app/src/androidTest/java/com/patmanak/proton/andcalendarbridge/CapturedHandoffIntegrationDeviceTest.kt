@@ -77,12 +77,15 @@ class CapturedHandoffIntegrationDeviceTest {
     @Test fun automaticTransferredSeriesCaptureRearmsOnceAndReachesTheExistingPipeline() = runBlocking {
         transferredPipeline(true)
     }
-    private suspend fun transferredPipeline(automatic: Boolean) {
+    @Test fun offPaletteTransferredSeriesKeepsItsRawOwnerAndNeverClaimsAnUpdate() = runBlocking {
+        transferredPipeline(true, unsupportedColour = true)
+    }
+    private suspend fun transferredPipeline(automatic: Boolean, unsupportedColour: Boolean = false) {
         for (allDay in listOf(false, true)) assertEquals("RESULT=SUCCESS", ProtonSharedTitleCryptoProbe.runSeriesPipeline(allDay) { service ->
             fixture(series = true, allDay = allDay, richOrigin = true, crypto = service) {
                 transferred(); incoming(verifiedEvent); drain(); titleMode = true; personalMode = true
                 val original = role()!!.frame.receipt
-                mutate(seriesEditValues(service.replacement))
+                mutate(seriesEditValues(if (unsupportedColour) service.replacement.copy(colorRgb = 0x7868e6) else service.replacement))
                 val reminderUri = CalendarContract.Reminders.CONTENT_URI.buildUpon()
                     .appendQueryParameter(CalendarContract.CALLER_IS_SYNCADAPTER, "true")
                     .appendQueryParameter(CalendarContract.Calendars.ACCOUNT_NAME, projection.accountFor(target.account).name)
@@ -115,6 +118,14 @@ class CapturedHandoffIntegrationDeviceTest {
                         verifiedEvent.eventId, reference.mutationId, admission))
                     operations.process(target, reference, MutationId("unused-series-candidate"), service.timestamp,
                         coordinator.systemPersonalRunAdmission(target)) { }
+                    if (unsupportedColour) {
+                        assertEquals(0, service.sendCount); assertNull(retained)
+                        val raw = edit()!!
+                        assertEquals(0x7868e6, raw.content.colorRgb); assertEquals("1", field(Events.DIRTY))
+                        assertTrue(role()!!.waiting); assertEquals(original, role()!!.frame.receipt)
+                        reopen(); assertEquals(raw, edit()); assertEquals(1, sends)
+                        return@fixture
+                    }
                     assertEquals(1, service.sendCount)
                     val work = checkNotNull(retained)
                     val proof = checkNotNull(journal.readVerified(target, work.id) { it == target })

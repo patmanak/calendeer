@@ -2,8 +2,8 @@
     <string name="calendar_display_on_device">Auf diesem Telefon anzeigen</string>
     <string name="calendar_row_attention">Änderungen müssen geprüft werden. Für Details öffnen.</string>
     <string name="calendar_support_events">✓ Einfache Termine erstellen, bearbeiten und löschen</string>
-    <string name="calendar_support_personal">✓ Erinnerungen und Terminfarben</string>
+    <string name="calendar_support_personal">✓ Erinnerungen und Proton-Terminfarben</string>
     <string name="calendar_support_dates">✓ Ganztägige Termine und Zeitzonen</string>
     <string name="calendar_support_series">✓ Endliche tägliche Serien erstellen und bearbeiten</string>
-    <string name="calendar_support_coming">Einzelne Vorkommen, Serien mit Ausnahmen und andere Wiederholungsregeln bearbeiten, wiederkehrende Termine löschen und Gäste ändern: noch nicht unterstützt. Lokale Änderungen bleiben auf diesem Telefon gespeichert.</string>
+    <string name="calendar_support_coming">Einzelne Vorkommen, Serien mit Ausnahmen und andere Wiederholungsregeln bearbeiten, wiederkehrende Termine löschen und Gäste ändern: noch nicht unterstützt. Lokale Änderungen bleiben auf diesem Telefon gespeichert. Erstellungen oder Änderungen mit einer neuen Farbe außerhalb der Proton-Palette bleiben auf diesem Telefon gespeichert.</string>
 </resources>

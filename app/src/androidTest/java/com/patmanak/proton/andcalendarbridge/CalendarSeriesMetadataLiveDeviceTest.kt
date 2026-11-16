@@ -50,10 +50,44 @@ class CalendarSeriesMetadataLiveDeviceTest {
     @Test fun seedTwoRetainedSyntheticSeriesAndInspectTheirSignedMetadata() = runBlocking { seed(false) }
     @Test fun diagnoseOneDistinctSyntheticTransportAdmissionWithoutResendingUnknownWork() = runBlocking { seed(true) }
     @Test fun inspectDistinctUncolouredSeriesWithoutReplayingEarlierUnknownWork() = runBlocking { seed(true, colourless = true) }
-
-    private suspend fun seed(transport: Boolean, colourless: Boolean = false) = withTimeout(240_000) {
+    @Test fun qualifySimpleOffPaletteColourWithOneNewIdentity() = runBlocking {
+        seed(true, colourCase = "simple-off-palette")
+    }
+    @Test fun qualifySeriesOfficialColourWithOneNewIdentity() = runBlocking {
+        seed(true, colourCase = "series-official")
+    }
+    @Test fun qualifySimpleOfficialColourWithOneNewIdentity() = runBlocking {
+        seed(true, colourCase = "simple-official")
+    }
+    @Test fun freshOffPaletteSimpleAndSeriesAreRefusedLocallyWithoutAnAttempt() = runBlocking {
         val args = InstrumentationRegistry.getArguments()
-        assumeTrue(args.getString(if (transport) "seriesTransportSeed" else "seriesMetadataSeed") == "true")
+        assumeTrue(args.getString("colourQualification") == "true")
+        val identityHash = args.getString("createAccountHash").orEmpty()
+        val app = compose.activity.application as BridgeApplication
+        compose.waitUntil(60_000) { app.imports.state.value.authenticated && app.imports.state.value.selections.any { it.available } }
+        val scope = app.imports.state.value.selections.first { it.available }.scope
+        assertTrue(ProtonCreateSubmissionProbe.matchesAccount(app, scope.account, identityHash))
+        val port = ProtonAuthentication.createSubmissions(app)
+        for (series in listOf(null, CreateSeriesRule(3))) {
+            val id = MutationId("local-colour-guard-" + UUID.randomUUID())
+            val draft = CalendarCreateDraft(scope, id, Instant.now().truncatedTo(ChronoUnit.SECONDS),
+                EventContent("Calendeer QA local colour guard", EventTime.AllDay(LocalDate.parse("2026-11-23"),
+                    LocalDate.parse("2026-11-24")), details = EventDetails(), colorRgb = 0x7868e6), series)
+            CreateAttemptStore(app, "series-metadata-qa-v1.db").use { journal ->
+                assertTrue(journal.read(scope, id) == null)
+                try { port.prepareSubmission(draft); org.junit.Assert.fail("Colour must fail before submission") }
+                catch (failure: CreatePreparationException) { assertTrue(failure.reason == CreatePreparationFailure.UNSUPPORTED) }
+                assertTrue(journal.read(scope, id) == null)
+                assertTrue(draft.content.colorRgb == 0x7868e6)
+            }
+        }
+        report(Bundle().apply { putBoolean("colour_local_refusal_without_attempt", true) })
+    }
+
+    private suspend fun seed(transport: Boolean, colourless: Boolean = false,
+        colourCase: String? = null) = withTimeout(240_000) {
+        val args = InstrumentationRegistry.getArguments()
+        assumeTrue(args.getString(if (colourCase != null) "colourQualification" else if (transport) "seriesTransportSeed" else "seriesMetadataSeed") == "true")
         val identityHash = args.getString("createAccountHash").orEmpty()
         assertTrue("Exact authorized account required", identityHash.matches(Regex("[a-f0-9]{64}")))
         val app = compose.activity.application as BridgeApplication
@@ -74,23 +108,25 @@ class CalendarSeriesMetadataLiveDeviceTest {
         val port = ProtonAuthentication.createSubmissions(app)
         assertTrue("Series CREATE profile must be available", port.seriesSubmissionFormat == AdapterFormat("proton-calendar-create-submission", 4))
         var unresolved = false
-        for (allDay in if (transport && !colourless) listOf(false) else listOf(false, true)) {
+        for (allDay in if (colourCase != null || transport && !colourless) listOf(false) else listOf(false, true)) {
             assertTrue("Current account and calendar required", lease())
             assertTrue("Authorize exact test account", ProtonCreateSubmissionProbe.matchesAccount(app, scope.account, identityHash))
-            val kind = if (colourless) "transport-uncoloured-${if (allDay) "all-day" else "timed"}"
+            val kind = colourCase?.let { "transport-colour-$it" } ?: if (colourless) "transport-uncoloured-${if (allDay) "all-day" else "timed"}"
                 else if (transport) "transport" else if (allDay) "all-day" else "timed"
             val time = if (allDay) EventTime.AllDay(LocalDate.parse("2026-11-23"), LocalDate.parse("2026-11-24"))
                 else EventTime.Timed(Instant.parse("2026-11-23T10:00:00Z"), Instant.parse("2026-11-23T11:00:00Z"), ZoneOffset.UTC)
             val id = MutationId("series-metadata-$kind-$token")
             val draft = CalendarCreateDraft(scope, id, stamp, EventContent("Calendeer QA Series NET $kind $token", time,
-                details = EventDetails(), colorRgb = if (colourless) null else 0x7868e6), CreateSeriesRule(3))
+                details = EventDetails(), colorRgb = if (colourCase?.endsWith("official") == true) 0x8080ff else if (colourless) null else 0x7868e6),
+                if (colourCase?.startsWith("simple-") == true) null else CreateSeriesRule(3))
+            val expectedFormat = if (draft.series == null) port.personalSubmissionFormat else port.seriesSubmissionFormat
             val observation = CreateAttemptStore(app, "series-metadata-qa-v1.db").use { journal ->
                 journal.admitDispatch = { it == scope && lease() }
                 val existing = journal.read(scope, id)
                 val record = existing ?: run {
                     assertTrue("A requested fixture must never be regenerated", !prefs.getBoolean("requested-$kind", false))
                     val receipt = port.prepareSubmission(draft)
-                    assertTrue("Exact series format required", receipt.format == port.seriesSubmissionFormat)
+                    assertTrue("Exact selected format required", receipt.format == expectedFormat)
                     CreateAttemptRecord(id, scope, receipt.format, receipt.protectedPayload).also { journal.remember(it) }
                 }
                 val result = if (record.state == CreateAttemptState.OUTCOME_UNKNOWN) port.inspectCaptured(record, draft)
@@ -112,6 +148,16 @@ class CalendarSeriesMetadataLiveDeviceTest {
                 result
             }
             report(Bundle().apply { putBoolean("series_seed_verified", observation is CreateSubmissionObservation.Verified) })
+            if (colourCase != null) {
+                val verified = observation as? CreateSubmissionObservation.Verified
+                report(Bundle().apply {
+                    putBoolean("colour_variant_verified", verified != null)
+                    putBoolean("colour_variant_exact", verified?.event?.content?.colorRgb == draft.content.colorRgb)
+                })
+                if (verified == null) unresolved = true
+                else assertTrue("Exact selected colour required", verified.event.content.colorRgb == draft.content.colorRgb)
+                continue
+            }
             val actual = (observation as? CreateSubmissionObservation.Verified)?.event ?: run {
                 unresolved = true
                 val retained = CreateAttemptStore(app, "series-metadata-qa-v1.db").use { requireNotNull(it.read(scope, id)) }

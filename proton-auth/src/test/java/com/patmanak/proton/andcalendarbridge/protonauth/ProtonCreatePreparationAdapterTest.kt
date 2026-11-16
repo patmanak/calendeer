@@ -12,6 +12,18 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class ProtonCreatePreparationAdapterTest {
+    @Test fun freshSimpleCreateRefusesOffPaletteColourBeforeReadingContext() = runTest {
+        val original = draft.copy(content = draft.content.copy(details = EventDetails(), colorRgb = 0x7868e6))
+        refused(CreatePreparationFailure.UNSUPPORTED) { adapter().prepareCreate(original) }
+        assertTrue(steps.isEmpty()); assertEquals(0, sessionReads); assertNull(sealed)
+        assertEquals(0x7868e6, original.content.colorRgb)
+    }
+    @Test fun freshSeriesCreateRefusesOffPaletteColourBeforeReadingContext() = runTest {
+        val original = draft.copy(content = draft.content.copy(details = EventDetails(), colorRgb = 0x7868e6), series = CreateSeriesRule(3))
+        refused(CreatePreparationFailure.UNSUPPORTED) { adapter().prepareCreate(original) }
+        assertTrue(steps.isEmpty()); assertEquals(0, sessionReads); assertNull(sealed)
+        assertEquals(0x7868e6, original.content.colorRgb)
+    }
     @Test fun seriesPreparationUsesItsOwnVersionAndPreservesRuleBeforeContextPreparation() = runTest {
         val value = draft.copy(content = draft.content.copy(details = EventDetails()), series = CreateSeriesRule(3))
         val port = adapter()
@@ -174,7 +186,7 @@ class ProtonCreatePreparationAdapterTest {
         assertEquals(0, sessionReads); assertTrue(steps.isEmpty()); assertNull(sealed)
     }
     @Test fun richPersonalCreateUsesNewFormatAndKeepsMetadataOutsideSharedCrypto() = runTest {
-        val content = draft.content.copy(details = EventDetails(listOf(EventReminder(10), EventReminder(0), EventReminder(-5))), colorRgb = 0x123456)
+        val content = draft.content.copy(details = EventDetails(listOf(EventReminder(10), EventReminder(0), EventReminder(-5))), colorRgb = 0x8080ff)
         val receipt = adapter().prepareCreate(draft.copy(content = content))
         assertEquals(AdapterFormat("proton-calendar-local-create-preparation", 3), receipt.format)
         assertEquals(EventDetails(), preparedDraft!!.content.details)
@@ -182,14 +194,14 @@ class ProtonCreatePreparationAdapterTest {
         assertEquals(content.title, preparedDraft!!.content.title)
         assertEquals("EXPLICIT_PERSONAL", sealed!!.string("notificationPolicy"))
         assertEquals(Json.parseToJsonElement("""[{"Type":1,"Trigger":"-PT10M"},{"Type":1,"Trigger":"PT0S"},{"Type":1,"Trigger":"PT5M"}]"""), sealed!!.obj("event")["Notifications"])
-        assertEquals(JsonPrimitive("#123456"), sealed!!.obj("event")["Color"])
+        assertEquals(JsonPrimitive("#8080ff"), sealed!!.obj("event")["Color"])
         assertFalse(sealed!!.containsKey("knownEmptyDetails"))
     }
     @Test fun colorOnlyCreateStillUsesPersonalVersionThreeAndExplicitEmptyReminders() = runTest {
-        val receipt = adapter().prepareCreate(draft.copy(content = draft.content.copy(details = EventDetails(), colorRgb = 0)))
+        val receipt = adapter().prepareCreate(draft.copy(content = draft.content.copy(details = EventDetails(), colorRgb = 0x258723)))
         assertEquals(3, receipt.format.version)
         assertEquals(JsonArray(emptyList()), sealed!!.obj("event")["Notifications"])
-        assertEquals(JsonPrimitive("#000000"), sealed!!.obj("event")["Color"])
+        assertEquals(JsonPrimitive("#258723"), sealed!!.obj("event")["Color"])
     }
     @Test fun callerReminderMutationDuringContextReadsCannotChangeTheFrozenPreparation() = runTest {
         val reminders = mutableListOf(EventReminder(10))
