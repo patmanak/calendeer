@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 package com.patmanak.proton.andcalendarbridge.protonauth
 
+import android.Manifest
 import android.content.Context
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
+import androidx.annotation.RequiresPermission
 import java.io.IOException
 import java.net.ConnectException
 import java.net.SocketTimeoutException
@@ -31,6 +33,7 @@ import me.proton.core.network.domain.TimeoutOverride
  * Results contain only closed categories, booleans and bounded protocol status numbers.
  */
 object ProtonConnectivityProbe {
+    @RequiresPermission(Manifest.permission.ACCESS_NETWORK_STATE)
     suspend fun run(context: Context): String = withContext(Dispatchers.IO) {
         val appContext = context.applicationContext
         val connectivity = appContext.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
