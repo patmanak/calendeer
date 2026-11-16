@@ -7,6 +7,19 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class ProtonSeriesEditPatchTest {
+    @Test fun signedCalendarStampBindsBothSeriesBodiesWithoutDroppingTheRule() {
+        val source = parts()
+        val after = before.copy(title = "Edited", recurrence = recurrence.copy(rule = "FREQ=DAILY;COUNT=8"))
+        val changed = patch(after)
+        val calendar = wrap("TRANSP:OPAQUE\r\nSTATUS:CONFIRMED\r\n")
+        assertEquals(calendar.replace("20261016T120000Z", "20261017T120000Z"),
+            ProtonSharedTextPatcher.calendarSeriesPart(calendar, "fixture-uid", source, changed, before, after))
+        refused { ProtonSharedTextPatcher.calendarSeriesPart(calendar, "fixture-uid", source, changed,
+            before.copy(description = "Foreign notes"), after) }
+        refused { ProtonSharedTextPatcher.calendarSeriesPart(calendar, "fixture-uid", source, changed, before,
+            after.copy(recurrence = recurrence)) }
+    }
+
     private val timestamp = Instant.parse("2026-10-17T12:00:00Z")
     private val time = EventTime.Timed(Instant.parse("2026-10-17T09:00:00Z"), Instant.parse("2026-10-17T10:00:00Z"), ZoneOffset.UTC)
     private val recurrence = EventRecurrence("fixture-uid", "FREQ=DAILY;COUNT=5")

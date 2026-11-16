@@ -42,6 +42,8 @@ object ProtonSharedTitleCryptoProbe {
     suspend fun runLocalTextText(): String = run(textSignatures = true, timestamped = true, localText = true)
     suspend fun runPersonalBinary(): String = run(textSignatures = false, timestamped = true, personal = true)
     suspend fun runPersonalText(): String = run(textSignatures = true, timestamped = true, personal = true)
+    suspend fun runSeriesBinary(): String = run(textSignatures = false, timestamped = true, seriesEdit = true)
+    suspend fun runSeriesText(): String = run(textSignatures = true, timestamped = true, seriesEdit = true)
     suspend fun runLocalTimeBinary(): String = run(textSignatures = false, timestamped = true, localTime = true)
     suspend fun runLocalTimeText(): String = run(textSignatures = true, timestamped = true, localTime = true)
     suspend fun runQualifiedBinary(): String = run(textSignatures = false, timestamped = true, protectPreparation = true, qualifyLocalBase = true)
@@ -56,7 +58,8 @@ object ProtonSharedTitleCryptoProbe {
         timestamped: Boolean = false, protectPreparation: Boolean = false,
         journal: (suspend (LocalEditPreparation) -> LocalEditPreparation)? = null,
         qualifyLocalBase: Boolean = false, authenticateLocal: Boolean = false,
-        sharedText: Boolean = false, localText: Boolean = false, localTime: Boolean = false, personal: Boolean = false): String = withContext(Dispatchers.IO) {
+        sharedText: Boolean = false, localText: Boolean = false, localTime: Boolean = false,
+        personal: Boolean = false, seriesEdit: Boolean = false): String = withContext(Dispatchers.IO) {
         var stage = "GENERATE"
         try {
             val crypto = AndroidCryptoContext()
@@ -143,6 +146,8 @@ object ProtonSharedTitleCryptoProbe {
                     putJsonObject("OpaqueMetadata") { put("Value", "untouched"); put("Null", JsonNull) }
                 } }
                 val decoder = ProtonEventDecryptor(crypto) { check(it == user); listOf(address) }
+                if (seriesEdit) return@withContext ProtonSeriesEditCryptoProbe.run(crypto, calendarSecret,
+                    calendarArmored, addressKey, address, scope, session, bootstrap, row, clear, secret, textSignatures)
                 if (personal) return@withContext ProtonPersonalCryptoProbe.run(crypto, calendarSecret,
                     calendarArmored, addressKey, address, scope, session, bootstrap, row, clear, secret, textSignatures)
                 if (localTime) return@withContext ProtonLocalTimeCryptoProbe.run(crypto, calendarSecret,

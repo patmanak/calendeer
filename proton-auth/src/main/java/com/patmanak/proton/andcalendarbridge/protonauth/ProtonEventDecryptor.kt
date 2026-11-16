@@ -261,6 +261,42 @@ internal class ProtonEventDecryptor(private val crypto: CryptoContext, private v
         return record
     }
 
+    /** Explicit series-only crypto profile. Complete remote-family admission belongs to the
+     * caller; this method authenticates the exact frozen base before patching and sealing.
+     * Historical personal/title/text entry points never select this path.
+     */
+    suspend fun prepareAndSealSeriesEdit(session: CatalogSession, intent: LocalEditIntent,
+        uid: String, timestamp: Instant, metadata: JsonObject, bootstrap: JsonObject, row: JsonObject,
+        protector: EventPayloadProtector): PersonalEditPreparation {
+        val context = currentCoroutineContext()
+        context.ensureActive()
+        val frozen = try { SeriesEditCandidate(intent).intent }
+            catch (_: IllegalArgumentException) { context.ensureActive(); unsupportedEvents() }
+            catch (_: java.nio.charset.CharacterCodingException) { context.ensureActive(); unsupportedEvents() }
+        if (frozen.format != EVENT_FORMAT || frozen.base.content.recurrence?.uid != uid) unsupportedEvents()
+        val frozenRow = snapshot(row)
+        val frozenBootstrap = snapshot(bootstrap)
+        ProtonSeriesEventUpdate.qualify(frozenRow, frozen.base.content)
+        val defaults = ProtonPersonalMetadataEdit.captureDefaults(frozenRow, frozenBootstrap,
+            frozen.base.content.copy(recurrence = null), frozen.content.copy(recurrence = null))
+        val prepared = prepareSharedTextFragments(session, frozen.scope, frozen.base.eventId, frozen.base.revision,
+            uid, frozen.base.content.title, metadata, frozenBootstrap, frozenRow, requireEmptyPersonal = true,
+            expectedBase = frozen.base, calendarSignedProfile = true,
+            seriesContent = frozen.base.content to frozen.content) { basis ->
+            ProtonSharedTextPatcher.patchSeriesAt(basis.originalPlaintext, uid, frozen.base.content,
+                frozen.content, timestamp)
+        }
+        context.ensureActive()
+        val record = try {
+            ProtonPersonalPreparationCodec(protector).sealSeries(frozen, uid, timestamp,
+                ProtonTimestampedSharedPersonal(prepared.originalRow, prepared.clearSharedPart,
+                    prepared.encryptedSharedPart, prepared.changed, defaults, prepared.calendarPart))
+        } catch (cancelled: CancellationException) { throw cancelled }
+          catch (failure: Exception) { context.ensureActive(); throw failure }
+        context.ensureActive()
+        return record
+    }
+
     private suspend fun prepareSharedTitleFragments(session: CatalogSession, scope: CalendarScope, expectedEventId: EventId,
         expectedRevision: Revision, expectedUid: String, expectedTitle: String, newTitle: String,
         metadata: JsonObject, bootstrap: JsonObject, row: JsonObject, timestamp: Instant?,
@@ -279,13 +315,15 @@ internal class ProtonEventDecryptor(private val crypto: CryptoContext, private v
         metadata: JsonObject, bootstrap: JsonObject, row: JsonObject, requireEmptyPersonal: Boolean,
         expectedBase: RemoteChange.Upsert? = null,
         calendarSignedProfile: Boolean = false,
+        seriesContent: Pair<EventContent, EventContent>? = null,
         patch: (ProtonSharedTitleBasis) -> ProtonEventTextParts): ProtonTimestampedSharedText {
         try {
             val context = currentCoroutineContext()
             context.ensureActive()
             val frozenMetadata = snapshot(metadata)
+            if (seriesContent != null && (!calendarSignedProfile || expectedBase?.content != seriesContent.first)) unsupportedEvents()
             return withSharedTitle(session, scope, expectedEventId, expectedRevision, expectedUid, expectedTitle,
-                bootstrap, row) { basis, keys, addresses, frozenBootstrap ->
+                bootstrap, row, seriesBase = seriesContent?.first) { basis, keys, addresses, frozenBootstrap ->
                 context.ensureActive()
                 val original = basis.originalRow
                 // Personal partitions can contain their own DTSTAMP; never silently retain stale dates.
@@ -335,8 +373,10 @@ internal class ProtonEventDecryptor(private val crypto: CryptoContext, private v
                 val calendarPart = if (!calendarSignedProfile) null else ProtonPersonalCalendarPart.original(original)?.let { part ->
                     if (!selected.address.email.equals(part.string("Author"), ignoreCase = true) ||
                         !verify(part, part.string("Data"), addresses)) unsupportedEvents()
-                    val next = ProtonSharedTextPatcher.calendarPart(part.string("Data"), expectedUid,
+                    val next = if (seriesContent == null) ProtonSharedTextPatcher.calendarPart(part.string("Data"), expectedUid,
                         basis.originalPlaintext.clearShared, patched.clearShared)
+                    else ProtonSharedTextPatcher.calendarSeriesPart(part.string("Data"), expectedUid,
+                        basis.originalPlaintext, patched, seriesContent.first, seriesContent.second)
                     if (next == part.string("Data")) part else JsonObject(part + mapOf("Data" to JsonPrimitive(next),
                         "Signature" to JsonPrimitive(selected.signingKey.signText(crypto, next))))
                 }
@@ -357,12 +397,15 @@ internal class ProtonEventDecryptor(private val crypto: CryptoContext, private v
     private suspend fun <T> withSharedTitle(session: CatalogSession, scope: CalendarScope, expectedEventId: EventId,
         expectedRevision: Revision, expectedUid: String, expectedTitle: String,
         bootstrap: JsonObject, row: JsonObject,
+        seriesBase: EventContent? = null,
         action: (ProtonSharedTitleBasis, KeyHolderContext, List<UserAddress>, JsonObject) -> T): T {
         try {
             if (scope.account.value != session.userId.id) unsupportedEvents()
             // Snapshot before the first suspension, including settings used in the revision.
             val frozenRow = snapshot(row)
             val frozenBootstrap = snapshot(bootstrap)
+            val frozenSeries = seriesBase?.let { SeriesEditProfile.freezeMaster(it) }
+            if (frozenSeries != null && frozenSeries.title != expectedTitle) unsupportedEvents()
             if (frozenBootstrap.obj("CalendarSettings").string("CalendarID") != scope.calendar.value) unsupportedEvents()
             if (frozenRow.string("CalendarID") != scope.calendar.value || frozenRow.string("ID") != expectedEventId.value ||
                 frozenRow.string("UID") != expectedUid || frozenRow.revision(frozenBootstrap) != expectedRevision ||
@@ -382,7 +425,8 @@ internal class ProtonEventDecryptor(private val crypto: CryptoContext, private v
                 if (!verify(clearPart, clear, addresses) || !verify(secretPart, secret, addresses)) unsupportedEvents()
                 val plain = ProtonEventTextParts(clear, secret)
                 // Bind both signed iCalendar UIDs, not merely the unsigned row UID.
-                ProtonSharedTitlePatcher.patch(plain, expectedTitle, expectedTitle, expectedUid)
+                if (frozenSeries == null) ProtonSharedTitlePatcher.patch(plain, expectedTitle, expectedTitle, expectedUid)
+                else ProtonSharedTextPatcher.assertSeriesBase(plain, expectedUid, frozenSeries)
                 val basis = ProtonSharedTitleBasis(scope, expectedEventId, expectedRevision, expectedUid, expectedTitle,
                     frozenRow.toString(), plain)
                 action(basis, keys, addresses, frozenBootstrap)

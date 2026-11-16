@@ -128,6 +128,16 @@ internal object ProtonSharedTextPatcher {
         }
     }
 
+    /** Series-only signed calendar stamp binding; historical calendar patch admission is unchanged. */
+    fun calendarSeriesPart(original: String, uid: String, sharedBefore: ProtonEventTextParts,
+        sharedAfter: ProtonEventTextParts, before: EventContent, after: EventContent): String {
+        assertSeriesBase(sharedBefore, uid, before)
+        assertSeriesBase(sharedAfter, uid, after)
+        val old = seriesSource(sharedBefore, CreateSeriesRule.parse(before.recurrence!!.rule!!)).first
+        val next = seriesSource(sharedAfter, CreateSeriesRule.parse(after.recurrence!!.rule!!)).first
+        return calendarPart(original, uid, old.clearShared, next.clearShared)
+    }
+
     fun patchSeriesAt(original: ProtonEventTextParts, expectedUid: String,
         before: EventContent, after: EventContent, timestamp: Instant): ProtonEventTextParts {
         try {
