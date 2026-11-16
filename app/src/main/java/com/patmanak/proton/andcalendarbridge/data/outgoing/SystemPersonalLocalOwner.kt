@@ -3,11 +3,13 @@ package com.patmanak.proton.andcalendarbridge.data.outgoing
 
 import com.patmanak.proton.andcalendarbridge.sync.*
 
-/** All supported fresh edits use personal-v2. Existing legacy capsules keep their frozen route. */
+/** Fresh complete personal edits keep explicit simple/series profiles. Legacy routes stay frozen. */
 object SystemPersonalEditProfile {
+    fun freeze(intent: LocalEditIntent): LocalEditIntent = if (intent.seriesProfile != null)
+        SeriesEditCandidate(intent).intent else PersonalEditCandidate(intent).intent
     fun accepts(intent: LocalEditIntent): Boolean = try {
-        val candidate = PersonalEditCandidate(intent)
-        !PersonalUpdateContentPolicy.sameSubmittedContent(candidate.intent.base.content, candidate.intent.content)
+        val frozen = freeze(intent)
+        !PersonalUpdateContentPolicy.sameSubmittedContent(frozen.base.content, frozen.content)
     } catch (_: Exception) { false }
 
     /** Preserve the historical native-source reader independently of new request routing. */
@@ -24,9 +26,10 @@ object SystemPersonalEditProfile {
 
 /** Historical source snapshot only. Current ownership must be observed again before any claim. */
 class PersonalLocalOwnerSnapshot(intent: LocalEditIntent, preparation: PersonalEditPreparation?) {
-    val intent = PersonalEditCandidate(intent).intent
-    val preparation = preparation?.let { PersonalEditPreparation(it.intent, it.timestamp, it.format, it.protectedPayload) }
-    init { require(this.preparation == null || this.preparation.intent == this.intent) }
+    val intent = SystemPersonalEditProfile.freeze(intent)
+    val preparation = preparation?.frozen()
+    init { require(this.preparation == null || this.preparation.intent == this.intent &&
+        this.preparation.isSeries == (this.intent.seriesProfile != null)) }
     override fun toString() = "PersonalLocalOwnerSnapshot(redacted)"
 }
 

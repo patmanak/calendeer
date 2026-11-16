@@ -62,13 +62,20 @@ class CoordinatorSystemPersonalOperations(
                 source.intent.base.eventId != reference.eventId || !SystemPersonalEditProfile.accepts(source.intent)) return false
             requiredIntent = source.intent
             if (!active()) return false
+            val series = source.intent.seriesProfile != null
             val prepared = source.preparation ?: run {
-                val fresh = checked { capsules.preparePersonal(source.intent, timestamp, lease) } ?: return false
-                if (!active() || fresh.intent != source.intent || fresh.timestamp != timestamp) return false
+                if (series && (capsules.seriesFormat == null || submissions.seriesUpdateFormat == null)) return false
+                val fresh = checked {
+                    if (series) capsules.prepareSeries(source.intent, timestamp, lease)
+                    else capsules.preparePersonal(source.intent, timestamp, lease)
+                } ?: return false
+                if (!active() || fresh.intent != source.intent || fresh.timestamp != timestamp || fresh.isSeries != series ||
+                    (series && fresh.format != capsules.seriesFormat)) return false
                 checked { owners.retain(fresh, lease) } ?: return false
             }
-            if (!active() || prepared.intent != source.intent || !checked { owners.qualify(prepared, lease) }) return false
-            val format = submissions.personalUpdateFormat ?: return false
+            if (!active() || prepared.intent != source.intent || prepared.isSeries != series ||
+                !checked { owners.qualify(prepared, lease) }) return false
+            val format = (if (prepared.isSeries) submissions.seriesUpdateFormat else submissions.personalUpdateFormat) ?: return false
             val id = PersonalUpdateAttemptIdentity.requestId(prepared, format)
             val existing = checked { journal.read(scope, id, lease) }
             if (!active()) return false
@@ -182,7 +189,8 @@ class CoordinatorSystemPersonalOperations(
         } finally { open = false; closed = true }
     }
     private fun samePreparation(a: PersonalEditPreparation, b: PersonalEditPreparation) =
-        a.intent == b.intent && a.timestamp == b.timestamp && a.format == b.format && a.protectedPayload == b.protectedPayload
+        a.intent == b.intent && a.timestamp == b.timestamp && a.format == b.format && a.isSeries == b.isSeries &&
+            a.protectedPayload == b.protectedPayload
 
     /** A dependency returning null/false after swallowing cancellation cannot authorize
      * a normal return, wakeup or another side effect. Exceptions are classified by callers.

@@ -31,7 +31,11 @@ internal class ImportCoordinatorEditAccess(
         val event = intent.base.eventId
         val hold = access.read { capturedRawHold(target) }
         if (hold.scopeBlocked || (role == null && hold.holds(event))) return false
-        val content = if (role == null) access.read { if (personal || SystemPersonalEditProfile.requiresExtendedSnapshot(intent)) projection.captureOwnedPersonalEdit(target, intent.base) else projection.captureOwnedSimpleEdit(target, intent.base) }?.content else {
+        val content = if (role == null) access.read {
+            if (personal && intent.seriesProfile != null) projection.captureOwnedSeriesEdit(target, intent.base)
+            else if (personal || SystemPersonalEditProfile.requiresExtendedSnapshot(intent)) projection.captureOwnedPersonalEdit(target, intent.base)
+            else projection.captureOwnedSimpleEdit(target, intent.base)
+        }?.content else {
             if (!access.read { currentSystemTitleHandoff(role, intent, access::active) }) return false
             val observed = access.read { projection.captureCapturedHandoffCurrent(role.frame) }
                 as? CapturedHandoffCurrentObservation.Supported

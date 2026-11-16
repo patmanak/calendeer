@@ -7,7 +7,9 @@ internal object PersonalEditConsent {
     fun allowed(intent: LocalEditIntent, titles: (CalendarScope) -> Boolean,
         texts: (CalendarScope) -> Boolean, times: (CalendarScope) -> Boolean,
         editable: (CalendarScope) -> Boolean): Boolean = try {
-        PersonalEditCandidate(intent).requiredConsent.all { field -> when (field) {
+        val required = if (intent.seriesProfile != null) SeriesEditCandidate(intent).changedFields.map { PersonalEditField.valueOf(it.name) }
+            else PersonalEditCandidate(intent).requiredConsent
+        required.all { field -> when (field) {
             PersonalEditField.TITLE -> titles(intent.scope)
             PersonalEditField.TEXT -> texts(intent.scope)
             PersonalEditField.TIME, PersonalEditField.RULE -> times(intent.scope)

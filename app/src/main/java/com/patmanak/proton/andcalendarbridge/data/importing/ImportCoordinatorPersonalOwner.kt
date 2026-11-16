@@ -25,7 +25,7 @@ internal class ImportCoordinatorPersonalOwner(
             withScopedPersonalOwner(scope, admit, consent = true, denied = null) { access ->
                 val intent = access.read { store.localEdit(scope, event) } ?: return@withScopedPersonalOwner null
                 if (intent.id != owner || !SystemPersonalEditProfile.accepts(intent)) return@withScopedPersonalOwner null
-                val frozen = PersonalEditCandidate(intent).intent
+                val frozen = SystemPersonalEditProfile.freeze(intent)
                 val preparation = access.read { store.personalEditPreparation(scope, event) }
                 if (!personalSource(frozen, preparation, access)) return@withScopedPersonalOwner null
                 PersonalLocalOwnerSnapshot(frozen, preparation)
@@ -67,14 +67,15 @@ internal class ImportCoordinatorPersonalOwner(
             val accountEvidence = systemPersonalEvidenceAdmission(target)
             val lease = EditSubmissionLease(target, operation, accountEvidence, admitEvidence)
             val evidence = lease.evidence
+            fun currentFormat() = if (frozen.preparation.isSeries) port.seriesUpdateFormat else port.personalUpdateFormat
             try {
                 if (frozen.state != PersonalUpdateAttemptState.PREPARED || frozen.protectedEvidence != null ||
-                    port.personalUpdateFormat != frozen.format ||
+                    currentFormat() != frozen.format ||
                     frozen.id != PersonalUpdateAttemptIdentity.requestId(frozen.preparation, frozen.format))
                     return PersonalUpdateSubmissionObservation.Unknown
                 return withScopedPersonalOwner(target, admit, consent = true, denied = PersonalUpdateSubmissionObservation.Unknown,
                     finalAccessRequired = false) { access ->
-                    val sending = lease.sending(access::active) { port.personalUpdateFormat == frozen.format }
+                    val sending = lease.sending(access::active) { currentFormat() == frozen.format }
                     suspend fun source(requested: CalendarScope): Boolean = lease.source(requested, sending) {
                         personalSource(frozen.preparation.intent, frozen.preparation, access)
                     }
@@ -122,12 +123,11 @@ internal class ImportCoordinatorPersonalOwner(
         action: suspend (ImportCoordinatorEditAccess.Access) -> T): T =
         editAccess.withScopedEditOwner(target, admit, consent, denied, finalAccessRequired, personalSendingEnabled, action)
 
-    private fun freezePersonalPreparation(value: PersonalEditPreparation) =
-        PersonalEditPreparation(value.intent, value.timestamp, value.format, value.protectedPayload)
+    private fun freezePersonalPreparation(value: PersonalEditPreparation) = value.frozen()
 
     private fun samePersonalPreparation(left: PersonalEditPreparation?, right: PersonalEditPreparation?): Boolean =
         if (left == null || right == null) left == null && right == null else
-            left.intent == right.intent && left.timestamp == right.timestamp && left.format == right.format &&
+            left.intent == right.intent && left.timestamp == right.timestamp && left.format == right.format && left.isSeries == right.isSeries &&
                 left.protectedPayload == right.protectedPayload
 
     /** Exact SQL and native source, including complete immutable origin for a handed-off CREATE. */
