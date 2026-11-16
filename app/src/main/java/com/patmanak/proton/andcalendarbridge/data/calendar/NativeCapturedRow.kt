@@ -26,7 +26,6 @@ import com.patmanak.proton.andcalendarbridge.data.calendar.AndroidCalendarProjec
 import com.patmanak.proton.andcalendarbridge.data.calendar.AndroidCalendarProjection.Companion.digest
 import com.patmanak.proton.andcalendarbridge.data.calendar.AndroidCalendarProjection.Companion.fail
 import com.patmanak.proton.andcalendarbridge.data.calendar.AndroidCalendarProjection.Companion.strictAttachmentDigest
-import com.patmanak.proton.andcalendarbridge.data.calendar.AndroidCalendarProjection.NativeEditAcknowledgement
 
 internal fun AndroidCalendarProjection.captureCapturedCurrent(baseline: CapturedCreateBaseline,
     expectedAck: CapturedCreateAcknowledgementReceipt? = null,

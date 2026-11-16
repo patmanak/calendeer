@@ -32,7 +32,6 @@ import com.patmanak.proton.andcalendarbridge.data.calendar.AndroidCalendarProjec
 import com.patmanak.proton.andcalendarbridge.data.calendar.AndroidCalendarProjection.Companion.digest
 import com.patmanak.proton.andcalendarbridge.data.calendar.AndroidCalendarProjection.Companion.fail
 import com.patmanak.proton.andcalendarbridge.data.calendar.AndroidCalendarProjection.Companion.ordinaryReceiptMarker
-import com.patmanak.proton.andcalendarbridge.data.calendar.AndroidCalendarProjection.NativeEditAcknowledgement
 
 internal fun AndroidCalendarProjection.captureSimpleSnapshot(scope: CalendarScope, base: RemoteChange.Upsert, deleted: Boolean,
     acknowledgement: NativeEditAcknowledgement? = null, deleteAcknowledgement: DeleteAcknowledgementReceipt? = null,
