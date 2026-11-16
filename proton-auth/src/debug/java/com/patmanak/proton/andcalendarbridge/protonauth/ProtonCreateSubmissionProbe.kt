@@ -16,6 +16,18 @@ import me.proton.core.key.domain.verifyData
 
 /** Opt-in qualification only; neither account names nor raw response content are returned. */
 object ProtonCreateSubmissionProbe {
+    /** Construct a permit locally; never enter it, exchange, claim or retry retained work. */
+    fun retainedPermitSummary(record: CreateAttemptRecord): String = try {
+        require(record.state == CreateAttemptState.OUTCOME_UNKNOWN)
+        val capsule = ProtonCreateSubmissionCodec.open(record,
+            ProtonEventPayloadProtector(AndroidCryptoContext().keyStoreCrypto))
+        val url = okhttp3.HttpUrl.Builder().scheme("https").host("calendar-api.proton.me")
+            .addPathSegment("calendar").addPathSegment("v1").addPathSegment(record.scope.calendar.value)
+            .addPathSegment("events").addPathSegment("sync").build()
+        ProtonSingleDispatchAttempt(url, capsule.request.toString())
+        "LOCAL_PERMIT_ACCEPTED"
+    } catch (_: Exception) { "LOCAL_PERMIT_REFUSED" }
+
     /** Local protected-envelope qualification only, never dispatch or a service claim. */
     fun knownEmptyPreparationSummary(record: CreateAttemptRecord): String = try {
         val decoded = ProtonCreateSubmissionCodec.open(record, ProtonEventPayloadProtector(AndroidCryptoContext().keyStoreCrypto))
