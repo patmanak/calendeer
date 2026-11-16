@@ -8,7 +8,8 @@ import com.patmanak.proton.andcalendarbridge.data.calendar.AndroidCalendarProjec
 
 internal class NativeEditAcknowledgement private constructor(val intent: LocalEditIntent,
     val projection: ProjectionReceipt, val handoff: CapturedCreateHandoffFrame?,
-    private val canonicalText: Boolean, val checkActive: () -> Unit, val personal: Boolean = false) {
+    private val canonicalText: Boolean, val checkActive: () -> Unit, val personal: Boolean = false,
+    val series: Boolean = false) {
     fun values(marker: String): ContentValues = ContentValues().apply {
         put(Events.DIRTY, 0)
         put(Events.SYNC_DATA2, digest("revision-v1", projection.change.revision.value))
@@ -32,7 +33,8 @@ internal class NativeEditAcknowledgement private constructor(val intent: LocalEd
         }
         fun personal(receipt: PersonalUpdateAcknowledgementReceipt, checkActive: () -> Unit): NativeEditAcknowledgement {
             require(PersonalUpdateContentPolicy.sameSubmittedContent(receipt.intent.content, receipt.projection.change.content))
-            return NativeEditAcknowledgement(receipt.intent, receipt.projection, receipt.handoff, true, checkActive, personal = true)
+            return NativeEditAcknowledgement(receipt.intent, receipt.projection, receipt.handoff, true, checkActive,
+                personal = true, series = receipt.isSeries)
         }
         fun time(receipt: TimeUpdateAcknowledgementReceipt, checkActive: () -> Unit): NativeEditAcknowledgement {
             require(TimeUpdateContentPolicy.sameSubmittedContent(receipt.intent.content, receipt.projection.change.content))

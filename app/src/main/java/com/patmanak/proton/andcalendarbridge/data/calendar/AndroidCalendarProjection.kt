@@ -264,7 +264,8 @@ class AndroidCalendarProjection(context: Context,
             return captureCapturedCurrent(original.baseline, expectedAck = original, handoff = frame,
                 editAcknowledgement = receipt) is CapturedNativeObservation.Supported
         }
-        return captureSimpleSnapshot(receipt.intent.scope, receipt.intent.base, deleted = false, acknowledgement = receipt, personal = receipt.personal) != null
+        return captureSimpleSnapshot(receipt.intent.scope, receipt.intent.base, deleted = false,
+            acknowledgement = receipt, personal = receipt.personal, series = receipt.series) != null
     }
 
     private fun inspectNativeEditAcknowledgement(receipt: NativeEditAcknowledgement): Boolean {
@@ -272,7 +273,8 @@ class AndroidCalendarProjection(context: Context,
             return inspectCapturedHistory(frame.receipt.acknowledgement, receipt.projection, receipt.checkActive)
         }
         return inspectOrdinaryAcknowledgement(receipt.intent.scope, receipt.intent.base.eventId,
-            receipt.projection.change.revision, receiptMarker(receipt.projection), receipt.checkActive)
+            receipt.projection.change.revision, receiptMarker(receipt.projection), receipt.checkActive,
+            seriesUid = if (receipt.series) receipt.projection.change.content.recurrence!!.uid else null)
     }
     @Volatile override var admitOperation: () -> Boolean = { true }
     private val context = context.applicationContext

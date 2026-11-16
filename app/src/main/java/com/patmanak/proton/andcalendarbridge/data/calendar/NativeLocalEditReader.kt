@@ -37,7 +37,8 @@ internal fun AndroidCalendarProjection.captureSimpleSnapshot(scope: CalendarScop
     acknowledgement: NativeEditAcknowledgement? = null, deleteAcknowledgement: DeleteAcknowledgementReceipt? = null,
     checkDeleteActive: () -> Unit = {}, personal: Boolean = false, series: Boolean = false): OwnedLocalEditSnapshot? {
     require(acknowledgement == null || deleteAcknowledgement == null)
-    require(!series || (personal && !deleted && acknowledgement == null && deleteAcknowledgement == null))
+    require(!series || (personal && !deleted && deleteAcknowledgement == null))
+    require(acknowledgement == null || acknowledgement.series == series)
     val acknowledging = acknowledgement != null || deleteAcknowledgement != null
     fun checkPermissions() {
         checkDeleteActive(); requireEditPermissions(acknowledgement); checkDeleteActive()

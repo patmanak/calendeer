@@ -27,6 +27,39 @@ import org.junit.runner.RunWith
 /** Isolated native snapshots only, no client UI, account session or service access. */
 @RunWith(AndroidJUnit4::class)
 class SeriesEditProviderDeviceTest {
+    @Test fun seriesAcknowledgementRefusesNewerEditsDetachedChildrenAndRevocation() {
+        for (variant in 0..4) fixture {
+            mutate(ContentValues().apply { put(Events.TITLE, "Edited series"); put(Events.RRULE, "FREQ=DAILY;COUNT=8") })
+            val receipt = acknowledgement()
+            when (variant) {
+                0 -> mutate(ContentValues().apply { put(Events.TITLE, "Newer series edit") })
+                1 -> child(false, false)
+                2 -> child(true, true)
+                3 -> projection.admitOperation = { false }
+            }
+            val before = snapshot()
+            val writer = if (variant == 4) intercepted(allowWrite = true) { child(true, true) } else projection
+            assertNull(runCatching { writer.acknowledgePersonalUpdate(receipt) }.getOrNull())
+            assertEquals(before, snapshot()); assertEquals("1", field(Events.DIRTY))
+        }
+    }
+
+    @Test fun verifiedSeriesAcknowledgementKeepsNativeRuleDurationAndProtectsNewerEdits() {
+        for (allDay in listOf(false, true)) fixture(allDay) {
+            mutate(ContentValues().apply { put(Events.TITLE, "Edited series"); put(Events.RRULE, "FREQ=DAILY;COUNT=8") })
+            val receipt = acknowledgement()
+            val duration = field(Events.DURATION); val syncId = field(Events._SYNC_ID)
+            assertNotNull(projection.acknowledgePersonalUpdate(receipt))
+            assertEquals("0", field(Events.DIRTY)); assertNull(field(Events.DTEND))
+            assertEquals("FREQ=DAILY;COUNT=8", field(Events.RRULE)); assertEquals(duration, field(Events.DURATION))
+            assertEquals(syncId, field(Events._SYNC_ID)); assertNotNull(projection.inspectPersonalUpdateAcknowledgement(receipt))
+            mutate(ContentValues().apply { put(Events.TITLE, "Newer series edit"); put(Events.DIRTY, 1) })
+            val newer = snapshot()
+            assertNotNull(projection.resumePersonalUpdateAcknowledgement(receipt))
+            assertEquals(newer, snapshot())
+        }
+    }
+
     @Test fun actualSeriesSnapshotSurvivesOfflineSqlCaptureAndReopeningWithoutCleaningTheProvider() {
         for (allDay in listOf(false, true)) fixture(allDay, EventColorMode.CALENDAR) {
             val name = "series-capture-integration-${UUID.randomUUID()}.db"
@@ -65,7 +98,7 @@ class SeriesEditProviderDeviceTest {
                     assertEquals(SeriesEditProfile(CreateSeriesRule(5), CreateSeriesRule(8)), intent.seriesProfile)
                     assertEquals(base.content.colorRgb, intent.content.colorRgb)
                     assertEquals(base.content.details, intent.content.details)
-                    assertEquals(PersonalPreparationAdmission.UNQUALIFIED, reopened.assessPersonalPreparation(intent))
+                    assertEquals(PersonalPreparationAdmission.ELIGIBLE, reopened.assessPersonalPreparation(intent))
                     reopened.requeueAll(scope); assertTrue(reopened.pending(scope).isEmpty())
                 }
                 assertEquals("1", field(Events.DIRTY)); assertEquals("FREQ=DAILY;COUNT=8", field(Events.RRULE))
@@ -202,7 +235,19 @@ class SeriesEditProviderDeviceTest {
                 put(Events.ORIGINAL_INSTANCE_TIME, Instant.parse("2030-04-02T10:00:00Z").toEpochMilli())
             })!!
         }
-        fun intercepted(beforeBatch: () -> Unit): AndroidCalendarProjection {
+        suspend fun acknowledgement(): PersonalUpdateAcknowledgementReceipt {
+            val content = projection.captureOwnedSeriesEdit(scope, base)!!.content
+            val local = LocalEditIntent(MutationId("series-ack"), scope, AdapterFormat("native-series-fixture", 1), base, content,
+                seriesProfile = SeriesEditProfile.of(base.content, content))
+            val prepared = PersonalEditPreparation.forSeries(local, Instant.parse("2030-04-01T12:00:00Z"),
+                AdapterFormat("series-fixture", 3), "protected-series")
+            val work = PersonalUpdateAttemptRecord(MutationId("series-ack-request"), prepared, AdapterFormat("series-wire-fixture", 3),
+                "protected-wire", PersonalUpdateAttemptState.OUTCOME_UNKNOWN)
+            val actual = base.copy(revision = Revision("series-ack-verified"), content = content)
+            val proof = PersonalUpdateVerifiedResult.of(work, PersonalUpdateSubmissionObservation.Verified(work, actual))
+            return PersonalUpdateAcknowledgementReceipt.of(proof, UUID.randomUUID().toString())
+        }
+        fun intercepted(allowWrite: Boolean = false, beforeBatch: () -> Unit): AndroidCalendarProjection {
             val real = context.contentResolver
             val provider = object : ContentProvider() {
                 override fun onCreate() = true
@@ -213,7 +258,8 @@ class SeriesEditProviderDeviceTest {
                 override fun query(uri: Uri, columns: Array<out String>?, selection: String?, args: Array<out String>?, order: String?): Cursor? =
                     real.query(uri, columns, selection, args, order)
                 override fun applyBatch(operations: ArrayList<ContentProviderOperation>): Array<ContentProviderResult> {
-                    assertTrue(operations.all { it.isAssertQuery }); beforeBatch()
+                    if (!allowWrite) assertTrue(operations.all { it.isAssertQuery })
+                    beforeBatch()
                     return real.applyBatch(CalendarContract.AUTHORITY, operations)
                 }
             }

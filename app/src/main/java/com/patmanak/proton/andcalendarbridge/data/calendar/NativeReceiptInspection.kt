@@ -96,10 +96,11 @@ internal fun AndroidCalendarProjection.inspectCapturedAttachmentInternal(receipt
 }
 
 internal fun AndroidCalendarProjection.inspectOrdinaryAcknowledgement(scope: CalendarScope, eventId: EventId, revision: Revision,
-    marker: String, checkActive: () -> Unit): Boolean {
+    marker: String, checkActive: () -> Unit, seriesUid: String? = null): Boolean {
     val account = accountFor(scope.account)
     val calendar = calendarRow(scope, account) ?: return false
     val remoteId = digest("event-v1", calendarSyncId(scope), eventId.value)
+    val syncId = if (seriesUid == null) remoteId else digest("series-v1", calendarSyncId(scope), seriesUid)
     val uri = syncUri(Events.CONTENT_URI, account)
     val identity = Selection("${Events.CALENDAR_ID}=? AND (${Events.SYNC_DATA4}=? OR " +
         "(${Events.SYNC_DATA4} IS NULL AND ${Events._SYNC_ID}=?))", arrayOf(calendar.toString(), remoteId, remoteId))
@@ -112,12 +113,12 @@ internal fun AndroidCalendarProjection.inspectOrdinaryAcknowledgement(scope: Cal
         ContentValues().apply { DatabaseUtils.cursorRowToContentValues(it, this) }
     } ?: fail(CalendarProjectionFailure.PROVIDER_UNAVAILABLE)
     if (metadata.getAsLong(Events._ID) != row || metadata.getAsLong(Events.CALENDAR_ID) != calendar ||
-        metadata.getAsString(Events._SYNC_ID) != remoteId || metadata.getAsString(Events.SYNC_DATA4) != remoteId ||
+        metadata.getAsString(Events._SYNC_ID) != syncId || metadata.getAsString(Events.SYNC_DATA4) != remoteId ||
         metadata.getAsString(Events.SYNC_DATA1) != OWNER_MARKER ||
         metadata.getAsString(Events.SYNC_DATA2) != digest("revision-v1", revision.value) ||
         NativeColorStyle.read(metadata.getAsString(Events.SYNC_DATA3))?.proof != marker ||
         ORDINARY_RESERVED_COLUMNS.any { metadata[it] != null }) return false
-    val syncIdentity = Selection("${Events.CALENDAR_ID}=? AND ${Events._SYNC_ID}=?", arrayOf(calendar.toString(), remoteId))
+    val syncIdentity = Selection("${Events.CALENDAR_ID}=? AND ${Events._SYNC_ID}=?", arrayOf(calendar.toString(), syncId))
     if (ownedRow(uri, syncIdentity, Events.SYNC_DATA1) != row) return false
     checkActive(); requirePermissions(); checkActive()
     capturedBatch(arrayListOf(

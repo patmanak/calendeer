@@ -41,7 +41,7 @@ internal fun AndroidCalendarProjection.captureCapturedCurrent(baseline: Captured
     val personal = handoff != null || !supportsCapturedHandoff(baseline.change)
     val personalBase = handoff?.base ?: baseline.change
     val series = baseline.receipt.binding.identity.fingerprintVersion == 2
-    if (series && editAcknowledgement != null) return CapturedNativeObservation.Unsupported
+    if (editAcknowledgement != null && editAcknowledgement.series != series) return CapturedNativeObservation.Unsupported
     val ackMarker = (expectedAck ?: writeAck)?.let(::capturedAcknowledgementMarker)
     val receipt = baseline.receipt
     val expected = capturedAttachmentValues(receipt) // Strict canonical identity before Provider IO.
