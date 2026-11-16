@@ -10,6 +10,7 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.serialization.json.*
 
 internal val PERSONAL_UPDATE_REQUEST_FORMAT = AdapterFormat("proton-calendar-personal-edit-request", 2)
+internal val PERSONAL_SERIES_UPDATE_REQUEST_FORMAT = AdapterFormat("proton-calendar-personal-edit-request", 3)
 internal enum class ProtonPersonalUpdateRequestFailure { UNSUPPORTED, STORAGE }
 internal class ProtonPersonalUpdateRequestException(val reason: ProtonPersonalUpdateRequestFailure) :
     Exception("PERSONAL_UPDATE_REQUEST_${reason.name}")
@@ -17,9 +18,9 @@ internal class ProtonPersonalUpdateRequestException(val reason: ProtonPersonalUp
 /** Protected offline personal-v2 request only; no journal state, transport or sending authority. */
 internal class ProtonProtectedPersonalUpdateRequest(val id: MutationId, preparation: PersonalEditPreparation,
     val format: AdapterFormat, val protectedPayload: String) {
-    private val frozen = PersonalEditPreparation(preparation.intent, preparation.timestamp, preparation.format, preparation.protectedPayload)
+    private val frozen = preparation.frozen()
     val preparation: PersonalEditPreparation get() =
-        PersonalEditPreparation(frozen.intent, frozen.timestamp, frozen.format, frozen.protectedPayload)
+        frozen.frozen()
     override fun toString() = "ProtonProtectedPersonalUpdateRequest(redacted)"
 }
 
@@ -47,13 +48,14 @@ internal class ProtonPersonalUpdateRequestCodec(private val protector: EventPayl
         val protected = storage { protector.seal(plain) }
         return structure {
             bounded(protected)
-            ProtonProtectedPersonalUpdateRequest(id, frozen, PERSONAL_UPDATE_REQUEST_FORMAT, protected)
+            ProtonProtectedPersonalUpdateRequest(id, frozen,
+                if (frozen.isSeries) PERSONAL_SERIES_UPDATE_REQUEST_FORMAT else PERSONAL_UPDATE_REQUEST_FORMAT, protected)
         }
     }
 
     suspend fun open(record: ProtonProtectedPersonalUpdateRequest): ProtonPersonalUpdateRequest {
         val frozen = structure {
-            require(record.format == PERSONAL_UPDATE_REQUEST_FORMAT)
+            require(record.format == if (record.preparation.isSeries) PERSONAL_SERIES_UPDATE_REQUEST_FORMAT else PERSONAL_UPDATE_REQUEST_FORMAT)
             bounded(record.id.value, ID_BYTES); bounded(record.protectedPayload)
             freeze(record.preparation)
         }
@@ -72,15 +74,17 @@ internal class ProtonPersonalUpdateRequestCodec(private val protector: EventPayl
     }
 
     private fun freeze(preparation: PersonalEditPreparation): PersonalEditPreparation {
-        require(preparation.format == PERSONAL_PREPARATION_FORMAT)
-        val frozen = PersonalEditPreparation(preparation.intent, preparation.timestamp, preparation.format, preparation.protectedPayload)
+        require(preparation.format == if (preparation.isSeries) PERSONAL_SERIES_PREPARATION_FORMAT else PERSONAL_PREPARATION_FORMAT)
+        val frozen = preparation.frozen()
         require(frozen.intent.format == EVENT_FORMAT)
         return frozen
     }
 
     private fun request(preparation: PersonalEditPreparation, fragments: ProtonTimestampedSharedPersonal,
-        context: JsonObject): JsonObject = ProtonPersonalEventUpdate.request(fragments.originalRow, fragments.clearSharedPart,
+        context: JsonObject): JsonObject = if (preparation.isSeries) ProtonSeriesEventUpdate.request(fragments.originalRow, fragments.clearSharedPart,
         fragments.encryptedSharedPart, fragments.changed, context, preparation.intent.base.content, preparation.intent.content, fragments.defaults, fragments.calendarPart)
+        else ProtonPersonalEventUpdate.request(fragments.originalRow, fragments.clearSharedPart,
+            fragments.encryptedSharedPart, fragments.changed, context, preparation.intent.base.content, preparation.intent.content, fragments.defaults, fragments.calendarPart)
 
     private fun snapshot(value: JsonObject): JsonObject = Json.parseToJsonElement(value.encoded()) as JsonObject
 
@@ -94,7 +98,8 @@ internal class ProtonPersonalUpdateRequestCodec(private val protector: EventPayl
 
     private fun envelope(id: MutationId, preparation: PersonalEditPreparation, context: JsonObject, request: JsonObject) =
         buildJsonObject {
-            put("kind", "personal-edit-v2-request"); put("version", 2); put("requestId", id.value)
+            put("kind", if (preparation.isSeries) "personal-series-v3-request" else "personal-edit-v2-request")
+            put("version", if (preparation.isSeries) 3 else 2); put("requestId", id.value)
             put("preparation", preparationIdentity(preparation)); put("context", context); put("request", request)
         }
 
@@ -107,6 +112,9 @@ internal class ProtonPersonalUpdateRequestCodec(private val protector: EventPayl
         }
         putJsonObject("observationFormat") { put("id", intent.format.id); put("version", intent.format.version) }
         put("state", intent.state.name)
+        intent.seriesProfile?.let { put("seriesProfile", buildJsonObject {
+            put("kind", "finite-daily-v1"); put("baseRule", it.baseRule.rule); put("replacementRule", it.replacementRule.rule)
+        }) }
         put("event", intent.base.eventId.value); put("revision", intent.base.revision.value)
         put("base", contentIdentity(intent.base.content)); put("replacement", contentIdentity(intent.content))
         put("timestamp", preparation.timestamp.toString())
@@ -117,7 +125,9 @@ internal class ProtonPersonalUpdateRequestCodec(private val protector: EventPayl
     private fun contentIdentity(content: EventContent) = buildJsonObject {
         put("title", content.title); put("description", content.description); put("location", content.location)
         // The domain candidate freezes personal details/color and forbids recurrence.
-        put("color", content.colorRgb?.let(::JsonPrimitive) ?: JsonNull); put("recurrence", JsonNull); put("details", buildJsonObject { put("reminders", JsonArray(content.details!!.reminders.map { JsonPrimitive(it.minutesBefore) })); put("organizer", JsonNull); put("attendees", JsonArray(emptyList())) })
+        put("color", content.colorRgb?.let(::JsonPrimitive) ?: JsonNull)
+        put("recurrence", content.recurrence?.let { buildJsonObject { put("uid", it.uid); put("rule", it.rule) } } ?: JsonNull)
+        put("details", buildJsonObject { put("reminders", JsonArray(content.details!!.reminders.map { JsonPrimitive(it.minutesBefore) })); put("organizer", JsonNull); put("attendees", JsonArray(emptyList())) })
         putJsonObject("time") {
             when (val time = content.time) {
                 is EventTime.AllDay -> {

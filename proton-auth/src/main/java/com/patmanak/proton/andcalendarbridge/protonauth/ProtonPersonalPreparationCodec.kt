@@ -12,14 +12,22 @@ internal enum class ProtonPersonalPreparationFailure { UNSUPPORTED, STORAGE }
 internal class ProtonPersonalPreparationException(val reason: ProtonPersonalPreparationFailure) :
     Exception("PERSONAL_PREPARATION_${reason.name}")
 internal val PERSONAL_PREPARATION_FORMAT = AdapterFormat("proton-calendar-offline-personal-edit-preparation", 2)
+internal val PERSONAL_SERIES_PREPARATION_FORMAT = AdapterFormat("proton-calendar-offline-personal-edit-preparation", 3)
 
 /** Disjoint offline personal-v2 history. Reopening checks retained structure; it does not
  * verify signatures, decrypt replacement data or establish current access/send authority.
  */
 internal class ProtonPersonalPreparationCodec(private val protector: EventPayloadProtector) {
+    fun sealSeries(intent: LocalEditIntent, uid: String, timestamp: Instant,
+        fragments: ProtonTimestampedSharedPersonal): PersonalEditPreparation = seal(intent, uid, timestamp, fragments, series = true)
+
     fun sealLocal(intent: LocalEditIntent, uid: String, timestamp: Instant,
-        fragments: ProtonTimestampedSharedPersonal): PersonalEditPreparation {
-        val frozen = structure { PersonalEditCandidate(intent).intent }
+        fragments: ProtonTimestampedSharedPersonal): PersonalEditPreparation = seal(intent, uid, timestamp, fragments, series = false)
+
+    private fun seal(intent: LocalEditIntent, uid: String, timestamp: Instant,
+        fragments: ProtonTimestampedSharedPersonal, series: Boolean): PersonalEditPreparation {
+        val format = if (series) PERSONAL_SERIES_PREPARATION_FORMAT else PERSONAL_PREPARATION_FORMAT
+        val frozen = structure { if (series) SeriesEditCandidate(intent).intent else PersonalEditCandidate(intent).intent }
         val plain = structure {
             validateBinding(uid, timestamp)
             val original = fragments.originalRow
@@ -28,7 +36,7 @@ internal class ProtonPersonalPreparationCodec(private val protector: EventPayloa
             validateFragments(frozen, uid, original, clear, encrypted, fragments.changed, fragments.calendarPart)
             validateDefaults(frozen, original, fragments.defaults)
             buildJsonObject {
-                put("kind", KIND); put("version", 2); put("format", PERSONAL_PREPARATION_FORMAT.json())
+                put("kind", if (series) SERIES_KIND else KIND); put("version", format.version); put("format", format.json())
                 put("localIntent", frozen.json()); put("binding", binding(uid, timestamp))
                 put("originalRow", original); put("clearSharedPart", clear); put("encryptedSharedPart", encrypted)
                 put("changed", fragments.changed)
@@ -39,22 +47,24 @@ internal class ProtonPersonalPreparationCodec(private val protector: EventPayloa
         val protected = storage { protector.seal(plain) }
         return structure {
             bounded(protected); require(protected.isNotBlank())
-            PersonalEditPreparation(frozen, timestamp, PERSONAL_PREPARATION_FORMAT, protected)
+            if (series) PersonalEditPreparation.forSeries(frozen, timestamp, format, protected)
+                else PersonalEditPreparation(frozen, timestamp, format, protected)
         }
     }
 
     fun openLocal(record: PersonalEditPreparation): ProtonTimestampedSharedPersonal {
         val frozen = structure {
-            require(record.format == PERSONAL_PREPARATION_FORMAT)
+            require(record.format == if (record.isSeries) PERSONAL_SERIES_PREPARATION_FORMAT else PERSONAL_PREPARATION_FORMAT)
             bounded(record.protectedPayload); require(record.protectedPayload.isNotBlank())
-            PersonalEditCandidate(record.intent).intent
+            record.frozen().intent
         }
         val plain = storage { protector.open(record.protectedPayload) }
         return structure {
             bounded(plain); require(UniqueJsonKeys(plain).validate())
             val root = Json.parseToJsonElement(plain) as? JsonObject ?: refuse()
             validateJson(root)
-            require(root.keys - setOf("notificationDefaults", "calendarSignedProfile") == ROOT_KEYS && root.strictString("kind") == KIND && root.strictNumber("version") == 2L)
+            require(root.keys - setOf("notificationDefaults", "calendarSignedProfile") == ROOT_KEYS &&
+                root.strictString("kind") == (if (record.isSeries) SERIES_KIND else KIND) && root.strictNumber("version") == record.format.version.toLong())
             require(root.strictObject("format") == record.format.json())
             require(root.strictObject("localIntent") == frozen.json())
             val bound = root.strictObject("binding")
@@ -95,6 +105,9 @@ internal class ProtonPersonalPreparationCodec(private val protector: EventPayloa
             put("account", scope.account.value); put("calendar", scope.calendar.value); put("generation", scope.generation)
         })
         put("format", format.json()); put("state", state.name)
+        seriesProfile?.let { put("seriesProfile", buildJsonObject {
+            put("kind", "finite-daily-v1"); put("baseRule", it.baseRule.rule); put("replacementRule", it.replacementRule.rule)
+        }) }
         put("base", buildJsonObject {
             put("eventId", base.eventId.value); put("revision", base.revision.value); put("content", base.content.json())
         })
@@ -107,7 +120,8 @@ internal class ProtonPersonalPreparationCodec(private val protector: EventPayloa
         put("title", title); put("description", description); put("location", location)
         put("color", colorRgb?.let(::JsonPrimitive) ?: JsonNull)
         // PersonalEditCandidate has already required unchanged known personal details and absent recurrence.
-        put("details", buildJsonObject { put("reminders", JsonArray(details!!.reminders.map { JsonPrimitive(it.minutesBefore) })); put("organizer", JsonNull); put("attendees", JsonArray(emptyList())) }); put("recurrence", JsonNull)
+        put("details", buildJsonObject { put("reminders", JsonArray(details!!.reminders.map { JsonPrimitive(it.minutesBefore) })); put("organizer", JsonNull); put("attendees", JsonArray(emptyList())) })
+        put("recurrence", recurrence?.let { buildJsonObject { put("uid", it.uid); put("rule", it.rule) } } ?: JsonNull)
         put("time", buildJsonObject {
             when (val value = time) {
                 is EventTime.AllDay -> {
@@ -122,6 +136,10 @@ internal class ProtonPersonalPreparationCodec(private val protector: EventPayloa
 
     private fun validateFragments(intent: LocalEditIntent, uid: String, original: JsonObject,
         clear: JsonObject, encrypted: JsonObject, changed: Boolean, calendarPart: JsonObject?) {
+        if (intent.seriesProfile != null) {
+            require(uid == intent.base.content.recurrence!!.uid)
+            ProtonSeriesEventUpdate.qualify(original, intent.base.content)
+        }
         require(original.strictString("ID") == intent.base.eventId.value &&
             original.strictString("CalendarID") == intent.scope.calendar.value && original.strictString("UID") == uid)
         require(original.strictString("SharedKeyPacket").isNotBlank())
@@ -186,6 +204,7 @@ internal class ProtonPersonalPreparationCodec(private val protector: EventPayloa
 
     private companion object {
         const val KIND = "offline-personal-edit-v2-preparation"
+        const val SERIES_KIND = "offline-personal-series-v3-preparation"
         val LAST_TIMESTAMP: Instant = Instant.parse("9999-12-31T23:59:59Z")
         val RENEWED_KEYS = setOf("Data", "Signature")
         val ROOT_KEYS = setOf("kind", "version", "format", "localIntent", "binding", "originalRow",

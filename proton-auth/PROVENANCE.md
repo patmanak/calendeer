@@ -1066,3 +1066,21 @@ copyright headers. Equal per-class API, 16 KiB layout and reproducible native
 bytes are distinct from application/runtime and vulnerability qualification.
 The F-Droid recipe and listing remain disabled pending their distribution gates;
 signature selection is deferred.
+
+## Finite personal series update profile
+
+The separate series preparation/request v3 and one-shot permit reuse Calendeer's
+existing Proton crypto and personal-update machinery. The historical v2 wire and
+capsules remain strict. Protocol references, inspected 2026-11-16, are WebClients
+at `c9b5f2995744b6f7c8ff1301ca3d5ac4f7a18672`:
+
+- [Calendar event metadata](https://github.com/ProtonMail/WebClients/blob/c9b5f2995744b6f7c8ff1301ca3d5ac4f7a18672/packages/shared/lib/interfaces/calendar/Event.ts):
+  `RRule` is a nullable string; signed iCalendar remains the content authority.
+- [Save actions](https://github.com/ProtonMail/WebClients/blob/c9b5f2995744b6f7c8ff1301ca3d5ac4f7a18672/applications/calendar/src/app/containers/calendar/eventActions/getSaveEventActions.ts)
+  and [sync payload](https://github.com/ProtonMail/WebClients/blob/c9b5f2995744b6f7c8ff1301ca3d5ac4f7a18672/applications/calendar/src/app/containers/calendar/getSyncMultipleEventsPayload.ts):
+  whole-series rule or UTC-bound changes set `IsBreakingChange`, including personal
+  events. The new profile computes and seals that bit; the old permit still rejects 1.
+
+This is a project-owned adaptation, not a new upstream dependency or copied crypto
+implementation. Backend metadata transformations and live compatibility require
+separate qualification; a source reference is not a service guarantee.
