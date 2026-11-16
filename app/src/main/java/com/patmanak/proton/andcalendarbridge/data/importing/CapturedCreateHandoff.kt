@@ -218,7 +218,7 @@ internal class CapturedCreateHandoff(
 
     /** Explicit retention against the current transferred frame. No recovery, ACK or dispatch. */
     suspend fun captureSeriesEdit(localId: LocalEventId, id: MutationId, attempt: MutationId,
-        mutation: MutationId): CapturedCreateReconciliationResult {
+        mutation: MutationId?, beforeNewOwner: suspend () -> Unit = {}): CapturedCreateReconciliationResult {
         return try {
             if (!available()) return CapturedCreateReconciliationResult.INACTIVE
             installAdmission()
@@ -226,21 +226,26 @@ internal class CapturedCreateHandoff(
             val capture = submission.reservation.intent.reservation
             if (capture.scope != target || capture.localId != localId || capture.id != id ||
                 capture.format != currentFormat() || submission.reservation.attempt != attempt ||
-                mutation == id || mutation == attempt || mutation.value == localId.value)
+                mutation == id || mutation == attempt || mutation?.value == localId.value)
                 return CapturedCreateReconciliationResult.UNRESOLVED
             val identity = CapturedCreateDispatchIdentity.of(submission)
             if (identity.fingerprintVersion != 2) return CapturedCreateReconciliationResult.UNSUPPORTED
             val binding = journal.capturedBinding(identity) ?: return CapturedCreateReconciliationResult.UNRESOLVED
             val role = store.capturedHandoff(target, binding.eventId) ?: return CapturedCreateReconciliationResult.UNRESOLVED
             val frame = role.frame
+            // The handoff reader validates the immutable PROVEN ACK and its fingerprint.
+            // The pre-transfer ACK reader intentionally no longer admits this authority.
             if (frame.receipt.acknowledgement.baseline.receipt.binding != binding ||
                 role.state != CapturedCreateHandoffState.RELEASED || !source(frame) ||
                 store.capturedHandoffProjection(frame) != null) return CapturedCreateReconciliationResult.UNRESOLVED
             if (!available()) return CapturedCreateReconciliationResult.INACTIVE
             if (store.localDelete(target, binding.eventId) != null) return CapturedCreateReconciliationResult.UNRESOLVED
             val retained = store.localEdit(target, binding.eventId)
+            val owner = mutation ?: retained?.id ?: MutationId(java.util.UUID.randomUUID().toString())
+            if (owner == id || owner == attempt || owner.value == localId.value)
+                return CapturedCreateReconciliationResult.UNRESOLVED
             if (retained != null) {
-                if (retained.id != mutation || retained.base != frame.base || retained.format != frame.format ||
+                if (retained.id != owner || retained.base != frame.base || retained.format != frame.format ||
                     retained.seriesProfile == null) return CapturedCreateReconciliationResult.UNRESOLVED
                 if (!source(frame) || store.capturedHandoff(target, binding.eventId) != role)
                     return CapturedCreateReconciliationResult.UNRESOLVED
@@ -258,9 +263,46 @@ internal class CapturedCreateHandoff(
                     CapturedCreateReconciliationResult.UNSUPPORTED else CapturedCreateReconciliationResult.UNRESOLVED
             if (snapshot.frame != frame) return CapturedCreateReconciliationResult.UNRESOLVED
             if (snapshot.deleted) return CapturedCreateReconciliationResult.UNSUPPORTED
-            if (snapshot.unchanged) return CapturedCreateReconciliationResult.UNCHANGED
-            val state = store.retainCapturedHandoffSeriesEdit(snapshot, mutation)
+            if (snapshot.unchanged) {
+                if (mutation != null) return CapturedCreateReconciliationResult.UNCHANGED
+                val clean = projection.inspectCapturedHandoffBase(frame)
+                if (!available()) return CapturedCreateReconciliationResult.INACTIVE
+                if (clean?.frame != frame || !source(frame) || store.capturedHandoff(target, binding.eventId) != role ||
+                    store.capturedHandoffProjection(frame) != null || !store.resumeCapturedHandoff(clean))
+                    return CapturedCreateReconciliationResult.UNRESOLVED
+                val after = projection.inspectCapturedHandoffBase(frame)
+                if (!available()) return CapturedCreateReconciliationResult.INACTIVE
+                val qualified = source(frame)
+                val current = store.capturedHandoff(target, binding.eventId)
+                if (!available()) return CapturedCreateReconciliationResult.INACTIVE
+                return if (after?.frame == frame && qualified && current?.frame == frame &&
+                    current.state == CapturedCreateHandoffState.RELEASED && !current.waiting &&
+                    store.capturedHandoffProjection(frame) == null) CapturedCreateReconciliationResult.UNCHANGED
+                    else CapturedCreateReconciliationResult.UNRESOLVED
+            }
+            if (mutation == null) {
+                beforeNewOwner()
+                if (!available()) return CapturedCreateReconciliationResult.INACTIVE
+                if (!source(frame) || store.capturedHandoff(target, binding.eventId) != role ||
+                    store.capturedHandoffProjection(frame) != null || store.localEdit(target, binding.eventId) != null ||
+                    store.localDelete(target, binding.eventId) != null) return CapturedCreateReconciliationResult.UNRESOLVED
+                if (!available()) return CapturedCreateReconciliationResult.INACTIVE
+                val second = projection.captureCapturedHandoffCurrent(frame) as? CapturedHandoffCurrentObservation.Supported
+                if (!available()) return CapturedCreateReconciliationResult.INACTIVE
+                if (second?.snapshot != snapshot || !source(frame) || store.capturedHandoff(target, binding.eventId) != role)
+                    return CapturedCreateReconciliationResult.UNRESOLVED
+                if (!available()) return CapturedCreateReconciliationResult.INACTIVE
+            }
+            val state = store.retainCapturedHandoffSeriesEdit(snapshot, owner)
             if (!available()) return CapturedCreateReconciliationResult.INACTIVE
+            if (mutation == null) {
+                val after = projection.captureCapturedHandoffCurrent(frame) as? CapturedHandoffCurrentObservation.Supported
+                if (!available()) return CapturedCreateReconciliationResult.INACTIVE
+                if (after?.snapshot != snapshot || !source(frame) || store.capturedHandoff(target, binding.eventId) != role.copy(waiting = true) ||
+                    store.capturedHandoffProjection(frame) != null)
+                    return CapturedCreateReconciliationResult.UNRESOLVED
+                if (!available()) return CapturedCreateReconciliationResult.INACTIVE
+            }
             if (state == LocalEditState.CONFLICT) CapturedCreateReconciliationResult.CONFLICT
                 else CapturedCreateReconciliationResult.RETAINED
         } catch (cancelled: CancellationException) {

@@ -44,6 +44,9 @@ object ProtonSharedTitleCryptoProbe {
     suspend fun runPersonalText(): String = run(textSignatures = true, timestamped = true, personal = true)
     suspend fun runSeriesBinary(): String = run(textSignatures = false, timestamped = true, seriesEdit = true)
     suspend fun runSeriesText(): String = run(textSignatures = true, timestamped = true, seriesEdit = true)
+    suspend fun runSeriesPipeline(allDay: Boolean = false,
+        exercise: suspend (ProtonSeriesUpdatePipelineFixture) -> Unit): String =
+        run(textSignatures = true, timestamped = true, pipelineExercise = exercise, pipelineAllDay = allDay)
     suspend fun runLocalTimeBinary(): String = run(textSignatures = false, timestamped = true, localTime = true)
     suspend fun runLocalTimeText(): String = run(textSignatures = true, timestamped = true, localTime = true)
     suspend fun runQualifiedBinary(): String = run(textSignatures = false, timestamped = true, protectPreparation = true, qualifyLocalBase = true)
@@ -59,8 +62,11 @@ object ProtonSharedTitleCryptoProbe {
         journal: (suspend (LocalEditPreparation) -> LocalEditPreparation)? = null,
         qualifyLocalBase: Boolean = false, authenticateLocal: Boolean = false,
         sharedText: Boolean = false, localText: Boolean = false, localTime: Boolean = false,
-        personal: Boolean = false, seriesEdit: Boolean = false): String = withContext(Dispatchers.IO) {
+        personal: Boolean = false, seriesEdit: Boolean = false,
+        pipelineExercise: (suspend (ProtonSeriesUpdatePipelineFixture) -> Unit)? = null,
+        pipelineAllDay: Boolean = false): String = withContext(Dispatchers.IO) {
         var stage = "GENERATE"
+        var pipelineCallbackStarted = false
         try {
             val crypto = AndroidCryptoContext()
             val pgp = crypto.pgpCrypto
@@ -82,7 +88,7 @@ object ProtonSharedTitleCryptoProbe {
                 val uid = "synthetic-title@calendeer.invalid"
                 val eventId = EventId("synthetic-title-event")
                 // ImportStore catalog fixtures start at generation zero; legacy crypto fixtures retain one.
-                val scope = CalendarScope(AccountId(user.id), CalendarId(calendar), if (journal != null) 0 else 1)
+                val scope = CalendarScope(AccountId(user.id), CalendarId(calendar), if (journal != null || pipelineExercise != null) 0 else 1)
                 val session = CatalogSession(user, SessionId("synthetic-title-session"))
                 val passphraseText = String(calendarSecret, Charsets.UTF_8)
                 val memberPacket = address.useKeys(crypto) { buildJsonObject {
@@ -146,6 +152,14 @@ object ProtonSharedTitleCryptoProbe {
                     putJsonObject("OpaqueMetadata") { put("Value", "untouched"); put("Null", JsonNull) }
                 } }
                 val decoder = ProtonEventDecryptor(crypto) { check(it == user); listOf(address) }
+                if (pipelineExercise != null) {
+                    stage = "SERIES_PIPELINE_FIXTURE"
+                    val fixture = ProtonSeriesUpdatePipelineFixture.create(crypto, calendarSecret, calendarArmored,
+                        addressKey, address, scope, session, bootstrap, row, clear, secret, pipelineAllDay)
+                    pipelineCallbackStarted = true
+                    try { pipelineExercise(fixture) } finally { fixture.revoke() }
+                    return@withContext "RESULT=SUCCESS"
+                }
                 if (seriesEdit) return@withContext ProtonSeriesEditCryptoProbe.run(crypto, calendarSecret,
                     calendarArmored, addressKey, address, scope, session, bootstrap, row, clear, secret, textSignatures)
                 if (personal) return@withContext ProtonPersonalCryptoProbe.run(crypto, calendarSecret,
@@ -416,7 +430,10 @@ object ProtonSharedTitleCryptoProbe {
                 "RESULT=SUCCESS"
             } finally { addressSecret.fill(0); calendarSecret.fill(0) }
         } catch (cancelled: CancellationException) { throw cancelled }
-          catch (_: Exception) { "RESULT=FAILURE STAGE=$stage" }
+          catch (failure: Exception) {
+              if (pipelineCallbackStarted) throw failure
+              "RESULT=FAILURE STAGE=$stage"
+          }
     }
 
     /** Separate synthetic branch: historical title scenarios above retain their original assertions. */

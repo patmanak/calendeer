@@ -62,10 +62,11 @@ internal class ImportCoordinatorLocalChanges(
             }
         }
 
-    private fun localChangeCapture(target: CalendarScope, expected: Long, active: () -> Boolean) =
+    private fun localChangeCapture(target: CalendarScope, expected: Long, active: () -> Boolean,
+        denied: java.util.concurrent.atomic.AtomicBoolean? = null) =
         LocalChangeCapture(target, store, projection,
             currentFormat = { remote.format }, active = active,
-            currentAccount = { isCurrent(expected, target.account) },
+            currentAccount = { isCurrent(expected, target.account).also { if (!it) denied?.set(true) } && denied?.get() != true },
             requireUnheld = { event -> if (capturedRawHold(target).holds(event)) throw ImportCoordinatorProjection.Pending() },
             baseline = { event -> projectionWork.captureBaseline(expected, target, event) })
 
@@ -93,10 +94,21 @@ internal class ImportCoordinatorLocalChanges(
     private suspend fun captureLocalEditLocked(target: CalendarScope, eventId: EventId, id: MutationId?,
         expected: Long, policy: Long, requireSystemMode: Boolean = false,
         beforeNewOwner: suspend () -> Unit = {}): LocalEditCaptureResult {
-        val active = { authenticated() && generation() == expected && policyRevision() == policy && hasCalendarPermissions() &&
-            (!requireSystemMode || systemCreatesEnabled(target)) }
+        val denied = java.util.concurrent.atomic.AtomicBoolean(false)
+        val active = {
+            val admitted = authenticated() && generation() == expected && policyRevision() == policy && hasCalendarPermissions() &&
+                (!requireSystemMode || systemCreatesEnabled(target))
+            if (!admitted && requireSystemMode) denied.set(true)
+            admitted && !denied.get()
+        }
         if (!isCurrent(expected, target.account) || !active()) return LocalEditCaptureResult.INACTIVE
-        return localChangeCapture(target, expected, active).edit(eventId, id, beforeNewOwner)
+        val capture = localChangeCapture(target, expected, active, if (requireSystemMode) denied else null)
+        val result = capture.edit(eventId, id, beforeNewOwner)
+        if (requireSystemMode && id == null && result == LocalEditCaptureResult.UNQUALIFIED) {
+            if (!isCurrent(expected, target.account) || !active()) return LocalEditCaptureResult.INACTIVE
+            return capture.edit(eventId, null, beforeNewOwner, series = true)
+        }
+        return result
     }
 
     private fun localChangeHistory(target: CalendarScope, expected: Long, policy: Long) =

@@ -717,8 +717,8 @@ class ImportCoordinator(
         capturedCreates.reconcileHandoffLocalCreate(target, localId, id, attempt, mutation, beforeNewOwner)
 
     suspend fun captureHandoffSeriesEdit(target: CalendarScope, localId: LocalEventId, id: MutationId,
-        attempt: MutationId, mutation: MutationId): CapturedCreateReconciliationResult =
-        capturedCreates.captureHandoffSeriesEdit(target, localId, id, attempt, mutation)
+        attempt: MutationId, mutation: MutationId? = null, beforeNewOwner: suspend () -> Unit = {}): CapturedCreateReconciliationResult =
+        capturedCreates.captureHandoffSeriesEdit(target, localId, id, attempt, mutation, beforeNewOwner)
 
     private suspend fun handoffSource(frame: CapturedCreateHandoffFrame, active: () -> Boolean): Boolean =
         capturedCreates.handoffSource(frame, active)

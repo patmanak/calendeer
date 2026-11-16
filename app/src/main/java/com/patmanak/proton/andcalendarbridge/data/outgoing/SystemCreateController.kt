@@ -360,6 +360,18 @@ class SystemCreateController(
                                 if (result != CapturedCreateReconciliationResult.UNCHANGED)
                                     work.status(retained, if (result == CapturedCreateReconciliationResult.UNSUPPORTED)
                                         SystemCreateWorkStatus.UNSUPPORTED else SystemCreateWorkStatus.WAITING)
+                            } else if (retained?.status == SystemCreateWorkStatus.UNSUPPORTED) {
+                                // Discovery alone may revisit a proven transferred series; CREATE stays closed.
+                                val result = imports.captureHandoffSeriesEdit(target, retained.localId,
+                                    retained.captureId, retained.attempt, null,
+                                    beforeNewOwner = { rearmLocalOwnerDiscovery(target) })
+                                if (!active(target, epoch)) break
+                                when (result) {
+                                    CapturedCreateReconciliationResult.RETAINED, CapturedCreateReconciliationResult.CONFLICT ->
+                                        work.status(retained, SystemCreateWorkStatus.WAITING)
+                                    CapturedCreateReconciliationResult.UNCHANGED -> work.status(retained, SystemCreateWorkStatus.COMPLETE)
+                                    else -> Unit
+                                }
                             }
                         }
                     }

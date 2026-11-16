@@ -368,10 +368,11 @@ internal class ImportCoordinatorCapturedCreates(
 
     /** The caller supplies its original epoch and phase-specific consent predicate. */
     private fun capturedCreateHandoff(target: CalendarScope, captures: LocalCreateStore,
-        journal: CreateAttemptStore, expected: Long, active: () -> Boolean) =
+        journal: CreateAttemptStore, expected: Long, active: () -> Boolean,
+        denied: java.util.concurrent.atomic.AtomicBoolean? = null) =
         CapturedCreateHandoff(target, store, projection, captures, journal, scheduler,
             currentFormat = { remote.format }, active = active,
-            currentAccount = { account -> isCurrent(expected, account) },
+            currentAccount = { account -> isCurrent(expected, account).also { if (!it) denied?.set(true) } && denied?.get() != true },
             source = { frame -> handoffSource(frame, active) }, expectations = remote as? CalendarCreateSubmissionPort)
 
     /** Explicit transfer; never submit again or adopt an original through ordinary projection. */
@@ -418,13 +419,21 @@ internal class ImportCoordinatorCapturedCreates(
 
     /** Explicit offline series capture only. It grants no preparation or sending capability. */
     suspend fun captureHandoffSeriesEdit(target: CalendarScope, localId: LocalEventId, id: MutationId,
-        attempt: MutationId, mutation: MutationId): CapturedCreateReconciliationResult = mutex.withLock {
+        attempt: MutationId, mutation: MutationId? = null,
+        beforeNewOwner: suspend () -> Unit = {}): CapturedCreateReconciliationResult = mutex.withLock {
         val captures = localCreates ?: return@withLock CapturedCreateReconciliationResult.UNRESOLVED
         val journal = creates ?: return@withLock CapturedCreateReconciliationResult.UNRESOLVED
         ensureCreateLifecycle()
         val expected = generation(); val policy = policyRevision()
-        val active = { authenticated() && generation() == expected && policyRevision() == policy && hasCalendarPermissions() }
-        capturedCreateHandoff(target, captures, journal, expected, active).captureSeriesEdit(localId, id, attempt, mutation)
+        val denied = java.util.concurrent.atomic.AtomicBoolean(false)
+        val active = {
+            val admitted = authenticated() && generation() == expected && policyRevision() == policy && hasCalendarPermissions() &&
+                (mutation != null || systemCreatesEnabled(target))
+            if (!admitted && mutation == null) denied.set(true)
+            admitted && !denied.get()
+        }
+        capturedCreateHandoff(target, captures, journal, expected, active, if (mutation == null) denied else null)
+            .captureSeriesEdit(localId, id, attempt, mutation, beforeNewOwner)
     }
 
     /** Retain a later dirty intention against the current reference, never the original sent base.
@@ -439,9 +448,17 @@ internal class ImportCoordinatorCapturedCreates(
         ensureCreateLifecycle()
         val expected = generation()
         val policy = policyRevision()
-        val active = { authenticated() && generation() == expected && policyRevision() == policy && hasCalendarPermissions() &&
-            (mutation != null || systemCreatesEnabled(target)) }
-        capturedCreateHandoff(target, captures, journal, expected, active).reconcile(localId, id, attempt, mutation, beforeNewOwner)
+        val denied = java.util.concurrent.atomic.AtomicBoolean(false)
+        val active = {
+            val admitted = authenticated() && generation() == expected && policyRevision() == policy && hasCalendarPermissions() &&
+                (mutation != null || systemCreatesEnabled(target))
+            if (!admitted && mutation == null) denied.set(true)
+            admitted && !denied.get()
+        }
+        val handoff = capturedCreateHandoff(target, captures, journal, expected, active, if (mutation == null) denied else null)
+        val result = handoff.reconcile(localId, id, attempt, mutation, beforeNewOwner)
+        if (mutation == null && result == CapturedCreateReconciliationResult.UNSUPPORTED)
+            handoff.captureSeriesEdit(localId, id, attempt, null, beforeNewOwner) else result
     }
 
 }

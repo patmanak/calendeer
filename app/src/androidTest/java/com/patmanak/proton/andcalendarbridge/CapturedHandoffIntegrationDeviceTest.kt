@@ -17,6 +17,9 @@ import com.patmanak.proton.andcalendarbridge.data.calendar.EventColorMode
 import com.patmanak.proton.andcalendarbridge.data.importing.*
 import com.patmanak.proton.andcalendarbridge.data.outgoing.LocalCreateStore
 import com.patmanak.proton.andcalendarbridge.data.outgoing.CreateAttemptStore
+import com.patmanak.proton.andcalendarbridge.data.outgoing.CoordinatorSystemPersonalOperations
+import com.patmanak.proton.andcalendarbridge.protonauth.ProtonSharedTitleCryptoProbe
+import com.patmanak.proton.andcalendarbridge.protonauth.ProtonSeriesUpdatePipelineFixture
 import com.patmanak.proton.andcalendarbridge.data.outgoing.TitleUpdateAttemptStore
 import com.patmanak.proton.andcalendarbridge.sync.*
 import com.patmanak.proton.andcalendarbridge.sync.catalog.CalendarSummary
@@ -37,6 +40,130 @@ import org.junit.runner.RunWith
 /** Native Provider and three real journals; controlled incoming data, no network upload. */
 @RunWith(AndroidJUnit4::class)
 class CapturedHandoffIntegrationDeviceTest {
+    @Test fun automaticSeriesEntryRetainsFromNonWaitingFrameAndReusesItsOwner() = fixture(series = true) {
+        transferred(); incoming(verifiedEvent); drain(); titleMode = true
+        assertFalse(role()!!.waiting)
+        mutate(ContentValues().apply { put(Events.TITLE, "Automatic series backlog"); put(Events.RRULE, "FREQ=DAILY;COUNT=8"); put(Events.DIRTY, 1) })
+        var rearmed = 0
+        suspend fun capture() = coordinator.captureHandoffSeriesEdit(target, localId, id, attempt, null,
+            beforeNewOwner = { rearmed++ })
+        assertEquals(CapturedCreateReconciliationResult.RETAINED, capture())
+        val owner = edit()!!
+        assertTrue(role()!!.waiting); assertEquals(1, rearmed)
+        assertEquals(CapturedCreateReconciliationResult.RETAINED, capture())
+        assertEquals(owner, edit()); assertEquals(1, rearmed); assertEquals(1, sends)
+    }
+    @Test fun automaticSeriesEntryCannotRearmAnUnknownCreateWithoutHandoffProof() = fixture(series = true) {
+        prepare(); submit(); titleMode = true
+        val unknown = record()!!
+        assertEquals(CreateAttemptState.OUTCOME_UNKNOWN, unknown.state)
+        var rearmed = 0
+        assertEquals(CapturedCreateReconciliationResult.UNRESOLVED,
+            coordinator.captureHandoffSeriesEdit(target, localId, id, attempt, null, beforeNewOwner = { rearmed++ }))
+        assertEquals(unknown, record()); assertNull(edit()); assertEquals(0, rearmed); assertEquals(1, sends)
+    }
+    @Test fun automaticSeriesEntryRefusesRevocationDuringDiscoveryRearming() = fixture(series = true) {
+        transferred(); incoming(verifiedEvent); drain(); titleMode = true
+        mutate(ContentValues().apply { put(Events.TITLE, "Revoked automatic series"); put(Events.DIRTY, 1) })
+        assertEquals(CapturedCreateReconciliationResult.INACTIVE,
+            coordinator.captureHandoffSeriesEdit(target, localId, id, attempt, null, beforeNewOwner = { permitted = false }))
+        permitted = true
+        assertNull(edit()); assertEquals("1", field(Events.DIRTY)); assertEquals(1, sends)
+    }
+
+    @Test fun transferredTimedAndAllDaySeriesReachRealCryptoDispatchReadbackAndAcknowledgement() = runBlocking {
+        transferredPipeline(false)
+    }
+    @Test fun automaticTransferredSeriesCaptureRearmsOnceAndReachesTheExistingPipeline() = runBlocking {
+        transferredPipeline(true)
+    }
+    private suspend fun transferredPipeline(automatic: Boolean) {
+        for (allDay in listOf(false, true)) assertEquals("RESULT=SUCCESS", ProtonSharedTitleCryptoProbe.runSeriesPipeline(allDay) { service ->
+            fixture(series = true, allDay = allDay, richOrigin = true, crypto = service) {
+                transferred(); incoming(verifiedEvent); drain(); titleMode = true; personalMode = true
+                val original = role()!!.frame.receipt
+                mutate(seriesEditValues(service.replacement))
+                val reminderUri = CalendarContract.Reminders.CONTENT_URI.buildUpon()
+                    .appendQueryParameter(CalendarContract.CALLER_IS_SYNCADAPTER, "true")
+                    .appendQueryParameter(CalendarContract.Calendars.ACCOUNT_NAME, projection.accountFor(target.account).name)
+                    .appendQueryParameter(CalendarContract.Calendars.ACCOUNT_TYPE, projection.accountFor(target.account).type).build()
+                context.contentResolver.delete(reminderUri, "${CalendarContract.Reminders.EVENT_ID}=?", arrayOf(row.toString()))
+                service.replacement.details!!.reminders.forEach { addReminder(it.minutesBefore) }
+                var rearmed = 0
+                suspend fun capture() = if (automatic) coordinator.reconcileHandoffLocalCreate(target, localId, id, attempt,
+                    beforeNewOwner = { rearmed++ }) else captureSeriesEdit()
+                assertEquals(CapturedCreateReconciliationResult.RETAINED, capture())
+                if (automatic) {
+                    assertEquals(1, rearmed)
+                    assertEquals(CapturedCreateReconciliationResult.RETAINED, capture())
+                    assertEquals(1, rearmed)
+                }
+                val database = "transferred-series-update-${UUID.randomUUID()}.db"
+                try { TitleUpdateAttemptStore(context, database).use { shared ->
+                    var retained: PersonalUpdateAttemptRecord? = null
+                    val journal = object : PersonalUpdateRecoveryJournal by shared.personalJournal {
+                        override suspend fun remember(record: PersonalUpdateAttemptRecord, admit: (CalendarScope) -> Boolean): Boolean {
+                            retained = record.frozen(); return shared.personalJournal.remember(record, admit)
+                        }
+                    }
+                    val operations = CoordinatorSystemPersonalOperations(coordinator, journal, service.preparations, service.updates)
+                    val reference = (coordinator.retainedLocalChanges(RetainedLocalChangeQuery(target)) as RetainedLocalChangeListing.Available).page.entries.single()
+                    val admission = coordinator.systemPersonalRunAdmission(target)
+                    assertTrue("Original scoped editing lease required", admission(target))
+                    allowStore(); assertEquals(PersonalPreparationAdmission.ELIGIBLE, store.assessPersonalPreparation(edit()!!))
+                    assertNotNull("Full transferred source required", coordinator.personalOwners.observe(target,
+                        verifiedEvent.eventId, reference.mutationId, admission))
+                    operations.process(target, reference, MutationId("unused-series-candidate"), service.timestamp,
+                        coordinator.systemPersonalRunAdmission(target)) { }
+                    assertEquals(1, service.sendCount)
+                    val work = checkNotNull(retained)
+                    val proof = checkNotNull(journal.readVerified(target, work.id) { it == target })
+                    assertNotNull(journal.readCompletion(target, work.id) { it == target })
+                    assertEquals(service.replacement, proof.event.content); assertNull(edit())
+                    assertEquals(original, role()!!.frame.receipt); assertEquals(proof.event, role()!!.frame.base)
+                    assertEquals("0", field(Events.DIRTY)); assertNull(field(Events.DTEND))
+                    assertEquals(service.replacement.recurrence!!.rule, field(Events.RRULE))
+                    assertEquals(duration(service.replacement.time), field(Events.DURATION))
+                    reopen()
+                    assertEquals(original, role()!!.frame.receipt)
+                    assertNotNull(journal.readCompletion(target, work.id) { it == target }); assertEquals(1, service.sendCount)
+                } } finally { context.deleteDatabase(database) }
+            }
+        })
+    }
+
+    @Test fun transferredSeriesPersonalAcknowledgementAdvancesTheFrameAndKeepsItsImmutableOrigin() = runBlocking {
+        for (allDay in listOf(false, true)) fixture(series = true, allDay = allDay, richOrigin = true) {
+            transferred(); incoming(verifiedEvent); drain()
+            val original = role()!!.frame
+            mutate(ContentValues().apply { put(Events.TITLE, "Transferred series edit"); put(Events.RRULE, "FREQ=DAILY;COUNT=8"); put(Events.DIRTY, 1) })
+            assertEquals(CapturedCreateReconciliationResult.RETAINED, captureSeriesEdit())
+            val local = edit()!!
+            val preparation = PersonalEditPreparation.forSeries(local, timestamp, AdapterFormat("series-ack-preparation", 3), "protected-series")
+            allowStore()
+            assertEquals(PersonalPreparationAdmission.STORED, store.retainCurrentPersonalPreparation(preparation))
+            val work = PersonalUpdateAttemptRecord(MutationId("series-personal-ack"), preparation, AdapterFormat("series-ack-wire", 3),
+                "protected-wire", PersonalUpdateAttemptState.OUTCOME_UNKNOWN)
+            val actual = local.base.copy(revision = Revision("verified-series-edit"), content = local.content)
+            val proof = PersonalUpdateVerifiedResult.of(work, PersonalUpdateSubmissionObservation.Verified(work, actual))
+            val reserved = checkNotNull(store.preparePersonalUpdateAcknowledgement(proof, original))
+            val receipt = reserved.record.receipt
+            val rawRule = field(Events.RRULE); val rawDuration = field(Events.DURATION); val syncId = field(Events._SYNC_ID)
+            projection.admitOperation = { true }
+            val applied = checkNotNull(projection.acknowledgePersonalUpdate(receipt))
+            assertEquals("0", field(Events.DIRTY)); assertNull(field(Events.DTEND))
+            assertEquals(rawRule, field(Events.RRULE)); assertEquals(rawDuration, field(Events.DURATION)); assertEquals(syncId, field(Events._SYNC_ID))
+            assertTrue(store.restorePersonalUpdateAcknowledgement(applied))
+            assertEquals(original.receipt, role()!!.frame.receipt); assertEquals(actual, role()!!.frame.base)
+            reopen()
+            mutate(ContentValues().apply { put(Events.TITLE, "Newer transferred series edit"); put(Events.DIRTY, 1) })
+            val newer = providerSnapshot()
+            projection.admitOperation = { true }
+            assertNotNull(projection.resumePersonalUpdateAcknowledgement(receipt))
+            assertEquals(newer, providerSnapshot()); assertEquals(original.receipt, role()!!.frame.receipt)
+        }
+    }
+
     @Test fun explicitTransferredSeriesEditKeepsCurrentFrameMetadataAndNewerNativeChangesAcrossReopen() = runBlocking {
         for (allDay in listOf(false, true)) for (mode in EventColorMode.entries) fixture(series = true, allDay = allDay,
             richOrigin = true, colorMode = mode) {
@@ -621,26 +748,27 @@ class CapturedHandoffIntegrationDeviceTest {
         assertEquals(ImportRunResult.COMPLETE, drain()); assertEquals(runs - 1, continuations.get())
     }
     private class Fixture(val context: Context, safePersonal: Boolean = false, val richOrigin: Boolean = false,
-        val series: Boolean = false, val allDay: Boolean = false, colorMode: EventColorMode = EventColorMode.EVENT) {
+        val series: Boolean = false, val allDay: Boolean = false, colorMode: EventColorMode = EventColorMode.EVENT,
+        val crypto: ProtonSeriesUpdatePipelineFixture? = null) {
         private val token = UUID.randomUUID().toString()
         private val importName = "dispatch-integration-import-$token.db"
         private val dispatchName = "captured-provider-dispatch-$token.db"
         private val journalName = "dispatch-integration-capture-$token.db"
-        val target = CalendarScope(AccountId("dispatch-integration-$token"), CalendarId("fixture"), 0)
-        val format = AdapterFormat("dispatch-integration-import", 1)
+        val target = crypto?.scope ?: CalendarScope(AccountId("dispatch-integration-$token"), CalendarId("fixture"), 0)
+        val format = crypto?.format ?: AdapterFormat("dispatch-integration-import", 1)
         var currentFormat = format
         val preparationFormat = AdapterFormat("controlled-known-empty-submission", if (series) 4 else if (richOrigin) 3 else 2)
         val localId = LocalEventId(UUID.randomUUID().toString())
         val id = MutationId(UUID.randomUUID().toString())
         val attempt = MutationId(UUID.randomUUID().toString())
-        val timestamp = Instant.parse("2030-10-01T12:00:00Z")
-        val content = EventContent("Preparation integration fixture",
+        val timestamp = crypto?.timestamp ?: Instant.parse("2030-10-01T12:00:00Z")
+        val content = crypto?.base?.content?.copy(recurrence = null) ?: EventContent("Preparation integration fixture",
             if (allDay) EventTime.AllDay(LocalDate.parse("2030-03-29"), LocalDate.parse("2030-03-31")) else
             if (series || safePersonal) EventTime.Timed(Instant.parse("2030-05-01T09:00:00Z"), Instant.parse("2030-05-01T10:00:00Z"), ZoneId.of("Europe/Paris")) else
                 EventTime.Timed(Instant.parse("2030-10-27T00:30:00Z"), Instant.parse("2030-10-27T02:30:00Z"), ZoneId.of("Europe/Paris")),
             details = EventDetails(if (richOrigin) listOf(EventReminder(10)) else emptyList()),
             colorRgb = if (richOrigin) 0x123456 else null)
-        val intent = LocalCreateIntent(LocalCreateReservation(id, localId, target, format, timestamp), content, if (series) CreateSeriesRule(5) else null)
+        val intent = LocalCreateIntent(LocalCreateReservation(id, localId, target, format, timestamp), content, if (series) crypto?.base?.content?.recurrence?.rule?.let(CreateSeriesRule::parse) ?: CreateSeriesRule(5) else null)
         val projection = AndroidCalendarProjection(context) { colorMode }
         var handoffWrites = 0
         var handoffInspections = 0
@@ -729,7 +857,7 @@ class CapturedHandoffIntegrationDeviceTest {
         var sends = 0
         var inspections = 0
         var beforeClaim: suspend () -> Unit = { }
-        val verifiedEvent get() = RemoteChange.Upsert(EventId("synthetic-remote"), Revision("synthetic-revision"),
+        val verifiedEvent get() = crypto?.base ?: RemoteChange.Upsert(EventId("synthetic-remote"), Revision("synthetic-revision"),
             if (series) content.copy(recurrence = EventRecurrence("synthetic-series@calendeer.invalid", "FREQ=DAILY;COUNT=5")) else content)
         var expectationAvailable = true
         var beforeExpectation: suspend () -> Unit = {}
@@ -743,7 +871,7 @@ class CapturedHandoffIntegrationDeviceTest {
             override suspend fun readCapturedExpectation(record: CreateAttemptRecord, expected: CalendarCreateDraft): EventContent? {
                 assertEquals(target, record.scope); assertEquals(attempt, record.id)
                 beforeExpectation()
-                return if (expectationAvailable) expected.canonicalContent("synthetic-series@calendeer.invalid") else null
+                return if (expectationAvailable) expected.canonicalContent(crypto?.base?.content?.recurrence?.uid ?: "synthetic-series@calendeer.invalid") else null
             }
             override suspend fun prepareSubmission(draft: CalendarCreateDraft): PreparedCalendarCreate {
                 assertEquals(CalendarCreateDraft(target, attempt, timestamp, content, intent.series), draft)
@@ -785,7 +913,9 @@ class CapturedHandoffIntegrationDeviceTest {
         var personalMode = false
         var coordinator = ImportCoordinator(context, store, remote, attachmentProjection, jobs, scheduler,
             creates = creates, localCreates = journal, systemCreatesEnabled = { titleMode },
-            systemTitlesEnabled = { personalMode && titleMode })
+            systemTitlesEnabled = { personalMode && titleMode },
+            systemTextsEnabled = { crypto != null && personalMode && titleMode },
+            systemTimesEnabled = { crypto != null && personalMode && titleMode })
         suspend fun seed() {
             val summary = CalendarSummary(target.calendar, "Calendeer preparation integration fixture")
             store.remember(target.account, listOf(summary)); store.setEnabled(target, true)
@@ -807,7 +937,7 @@ class CapturedHandoffIntegrationDeviceTest {
             putNull(Events.ORGANIZER); put(Events.IS_ORGANIZER, 0); put(Events.GUESTS_CAN_MODIFY, 0)
             put(Events.GUESTS_CAN_INVITE_OTHERS, 0); put(Events.GUESTS_CAN_SEE_GUESTS, 0)
             put(Events.ACCESS_LEVEL, Events.ACCESS_DEFAULT); put(Events.AVAILABILITY, Events.AVAILABILITY_BUSY)
-            if (richOrigin) put(Events.EVENT_COLOR, 0xff123456.toInt()) else putNull(Events.EVENT_COLOR)
+            if (richOrigin) put(Events.EVENT_COLOR, content.colorRgb!!.or(0xff000000.toInt())) else putNull(Events.EVENT_COLOR)
             putNull(Events.EVENT_COLOR_KEY)
             when (val time = content.time) {
                 is EventTime.Timed -> {
@@ -820,7 +950,7 @@ class CapturedHandoffIntegrationDeviceTest {
                     put(Events.ALL_DAY, 1); put(Events.EVENT_TIMEZONE, "UTC"); put(Events.EVENT_END_TIMEZONE, "UTC")
                 }
             }
-            if (series) { put(Events.RRULE, "FREQ=DAILY;COUNT=5"); put(Events.DURATION, if (allDay) "P2D" else "PT3600S"); putNull(Events.DTEND) }
+            if (series) { put(Events.RRULE, intent.series!!.rule); put(Events.DURATION, duration(content.time)); putNull(Events.DTEND) }
         }
         fun exception() {
             context.contentResolver.insert(uri, candidateValues().apply {
@@ -947,7 +1077,9 @@ class CapturedHandoffIntegrationDeviceTest {
             journal = LocalCreateStore(context, journalName); jobs = CoroutineScope(SupervisorJob() + Dispatchers.Default)
             coordinator = ImportCoordinator(context, store, remote, attachmentProjection, jobs, scheduler,
                 creates = creates, localCreates = journal, systemCreatesEnabled = { titleMode },
-                systemTitlesEnabled = { personalMode && titleMode }); start()
+                systemTitlesEnabled = { personalMode && titleMode },
+            systemTextsEnabled = { crypto != null && personalMode && titleMode },
+            systemTimesEnabled = { crypto != null && personalMode && titleMode }); start()
         }
         suspend fun close() {
             coordinator.authenticationChanged(false); jobs.coroutineContext[Job]!!.cancelAndJoin()
@@ -957,10 +1089,10 @@ class CapturedHandoffIntegrationDeviceTest {
         }
     }
     private fun fixture(safePersonal: Boolean = false, richOrigin: Boolean = false, series: Boolean = false, allDay: Boolean = false,
-        colorMode: EventColorMode = EventColorMode.EVENT,
+        colorMode: EventColorMode = EventColorMode.EVENT, crypto: ProtonSeriesUpdatePipelineFixture? = null,
         block: suspend Fixture.() -> Unit) = runBlocking {
         assumeTrue(InstrumentationRegistry.getArguments().getString("providerFixture") == "true")
-        val fixture = Fixture(ApplicationProvider.getApplicationContext(), safePersonal, richOrigin, series, allDay, colorMode)
+        val fixture = Fixture(ApplicationProvider.getApplicationContext(), safePersonal, richOrigin, series, allDay, colorMode, crypto)
         assumeTrue(fixture.projection.hasPermissions())
         try { fixture.seed(); fixture.block() } finally { fixture.close() }
     }

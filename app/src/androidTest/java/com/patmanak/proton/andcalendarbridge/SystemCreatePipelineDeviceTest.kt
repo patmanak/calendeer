@@ -34,6 +34,29 @@ import org.junit.runner.RunWith
 /** Real isolated Provider and durable journals with a controlled submission port; no Proton IO. */
 @RunWith(AndroidJUnit4::class)
 class SystemCreatePipelineDeviceTest {
+    @Test fun discoveryRequalifiesUnsupportedTransferredSeriesWithoutResendingItsCreate() = fixture {
+        makeSeries()
+        assertEquals(ImportRunResult.COMPLETE, controller.run(network = true))
+        val completed = work.read(target, row)!!
+        assertEquals(SystemCreateWorkStatus.COMPLETE, completed.status)
+        val original = attempts.read(target, completed.attempt)
+        store.admitTransaction = { it == target }
+        store.transaction(target) { putRemote(remoteEvent) }
+        mutate(ContentValues().apply {
+            put(Events.TITLE, "Previously unsupported series edit"); put(Events.RRULE, "FREQ=DAILY;COUNT=5;INTERVAL=2")
+            put(Events.DIRTY, 1)
+        })
+        work.status(completed, SystemCreateWorkStatus.UNSUPPORTED)
+        assertEquals(ImportRunResult.COMPLETE, controller.run(network = false, providerWake = true))
+        assertEquals(SystemCreateWorkStatus.WAITING, work.read(target, row)!!.status)
+        val owner = localEdit()!!
+        assertNotNull(owner.seriesProfile); assertEquals("Previously unsupported series edit", owner.content.title)
+        assertEquals("1", field(Events.DIRTY)); assertEquals(1, sends); assertEquals(1, preparations)
+        assertEquals(original, attempts.read(target, completed.attempt))
+        assertEquals(ImportRunResult.COMPLETE, controller.run(network = false, providerWake = true))
+        assertEquals(owner, localEdit()); assertEquals(1, sends); assertEquals(original, attempts.read(target, completed.attempt))
+    }
+
     @Test fun dailySeriesTraversesProviderSqlCryptoSyntheticHttpAndNativeAcknowledgement() = runBlocking {
         var current: Fixture? = null
         try {
