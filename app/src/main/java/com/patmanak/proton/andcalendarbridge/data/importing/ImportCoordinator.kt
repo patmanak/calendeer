@@ -279,6 +279,9 @@ class ImportCoordinator(
         com.patmanak.proton.andcalendarbridge.data.calendar.SystemCalendarChangePage? =
         localChanges.discoverSystemChanges(target, afterRow, limit)
 
+    internal suspend fun outgoingChangesDrained(target: CalendarScope): Boolean =
+        localChanges.outgoingChangesDrained(target)
+
     private suspend fun ensureCreateLifecycle() {
         val journal = creates ?: return
         journal.admitDispatch = { false }
@@ -636,8 +639,8 @@ class ImportCoordinator(
         capturedCreates.resumePreparedLocalCreate(target, localId, id, attempt, port, allowPaused)
 
     suspend fun submitLocalCreate(target: CalendarScope, localId: LocalEventId, id: MutationId,
-        attempt: MutationId, port: CalendarCreateSubmissionPort): CreateSubmissionObservation =
-        capturedCreates.submitLocalCreate(target, localId, id, attempt, port)
+        attempt: MutationId, port: CalendarCreateSubmissionPort, pushAllowed: () -> Boolean = { true }): CreateSubmissionObservation =
+        capturedCreates.submitLocalCreate(target, localId, id, attempt, port, pushAllowed)
 
     suspend fun recoverHistoricalSystemCreate(target: CalendarScope, row: Long, marker: String?, after: String?):
         com.patmanak.proton.andcalendarbridge.data.outgoing.HistoricalCreateRecovery =
@@ -734,7 +737,10 @@ class ImportCoordinator(
 
     /** Successful continuation and transient retry are distinct; the store owns pending work. */
     suspend fun run(network: Boolean, fresh: Boolean = true, expectedAccount: AccountId? = null): ImportRunResult =
-        incoming.run(network, fresh, expectedAccount)
+        incoming.run(network, fresh, expectedAccount).work
+
+    internal suspend fun runPass(network: Boolean, fresh: Boolean, expectedAccount: AccountId,
+        pollOnRetry: Boolean = false): CalendarPassResult = incoming.run(network, fresh, expectedAccount, pollOnRetry)
 
     private suspend fun isCurrent(expected: Long, account: AccountId) =
         authenticated && generation == expected && currentObservedAccount() == account

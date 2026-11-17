@@ -110,12 +110,20 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
     suspend fun selections(account: AccountId): List<Selection> = access { db ->
         calendar.selections(db, account)
     }
+    internal suspend fun selection(scope: CalendarScope): Selection? = access { db ->
+        calendar.selections(db, scope.account, scope).singleOrNull()
+    }
     suspend fun deferNetwork(scope: CalendarScope, milliseconds: Long) = access { db ->
         calendar.deferNetwork(db, scope, milliseconds)
     }
 
     suspend fun setEnabled(scope: CalendarScope, enabled: Boolean) = access { db ->
-        calendar.setEnabled(db, scope, enabled)
+        db.beginTransaction()
+        try {
+            val updated = calendar.setEnabled(db, scope, enabled)
+            db.setTransactionSuccessful()
+            updated
+        } finally { db.endTransaction() }
     }
     suspend fun status(scope: CalendarScope, status: String, completedAt: Long? = null) = access { db ->
         calendar.status(db, scope, status, completedAt)

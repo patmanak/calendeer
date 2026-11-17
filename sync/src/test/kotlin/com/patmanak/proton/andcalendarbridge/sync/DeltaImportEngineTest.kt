@@ -31,6 +31,7 @@ class DeltaImportEngineTest {
         var missing = false
         var stopDecode = false
         var receives = 0
+        val feedReads = mutableListOf<OpaqueCursor>()
         var contexts = 0
         var next = end
         var beforeChangesDecode: () -> Unit = {}
@@ -42,7 +43,10 @@ class DeltaImportEngineTest {
         override suspend fun decode(received: ReceivedCalendarPage): DecodedCalendarPage = error("Unused")
         override suspend fun retryDeferred(scope: CalendarScope, event: DeferredCalendarEvent): RemoteChange.Upsert? = null
         override suspend fun latestChanges(scope: CalendarScope) = start
-        override suspend fun receiveChanges(scope: CalendarScope, after: OpaqueCursor) = ReceivedChangePage(scope, after, "sealed")
+        override suspend fun receiveChanges(scope: CalendarScope, after: OpaqueCursor): ReceivedChangePage {
+            feedReads += after
+            return ReceivedChangePage(scope, after, "sealed")
+        }
         override suspend fun decodeChanges(received: ReceivedChangePage): DecodedChangePage {
             beforeChangesDecode()
             return DecodedChangePage(scope, received.after, next, false, reset, notices)
@@ -246,9 +250,36 @@ class DeltaImportEngineTest {
         val engine = DeltaImportEngine(store, remote, AccountSerialExecutor())
         assertTrue(engine.run(scope, false).needsNetwork)
         assertEquals(0, remote.receives)
+        // This historical receipt still has its poll bit. The next cursor has no new changes.
+        remote.notices = emptyList()
         remote.beforeDecode = { assertEquals(1, remote.contexts) }
         assertFalse(engine.run(scope, true).workRemaining)
+        assertEquals(listOf(end), remote.feedReads)
     }
+    @Test fun interruptedFinalReceiptKeepsOnlyASeparatelyRequestedPoll() = runBlocking {
+        for (rearm in listOf(true, false)) {
+            val store = store()
+            val remote = Remote().apply {
+                notices = emptyList()
+                beforeChangesDecode = { error("Interrupted before decode") }
+            }
+            val interrupted = DeltaImportEngine(store, remote, AccountSerialExecutor())
+            try { interrupted.run(scope, true); fail() } catch (_: IllegalStateException) { }
+            assertNotNull(store.snapshot(scope).deltaReceived)
+            if (rearm) store.transaction(scope) { (this as DeltaSyncTransaction).deltaMore = true }
+            remote.beforeChangesDecode = {}
+            val restarted = DeltaImportEngine(store, remote, AccountSerialExecutor())
+            val offline = restarted.run(scope, false)
+            assertNull(store.snapshot(scope).deltaReceived)
+            assertEquals(end, store.snapshot(scope).deltaCursor)
+            assertEquals(rearm, offline.needsNetwork)
+            assertEquals(rearm, offline.workRemaining)
+            assertEquals(listOf(start), remote.feedReads)
+            assertFalse(restarted.run(scope, true).workRemaining)
+            assertEquals(if (rearm) listOf(start, end) else listOf(start), remote.feedReads)
+        }
+    }
+
     @Test fun cursorAndObligationsCommitAtomically() = runBlocking {
         val store = store(); val remote = Remote()
         store.beforeCommit = { if (it.deltaCursor == end) error("Storage failure") }

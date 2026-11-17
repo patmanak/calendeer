@@ -5,6 +5,7 @@ import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import com.patmanak.proton.andcalendarbridge.BridgeApplication
 import com.patmanak.proton.andcalendarbridge.auth.AuthenticationDestination
+import com.patmanak.proton.andcalendarbridge.data.calendar.AndroidCalendarProjection
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
@@ -34,8 +35,23 @@ class CalendarImportWorker(context: Context, parameters: WorkerParameters) : Cor
             }
         } }, run = {
             val fresh = runAttemptCount == 0 && !inputData.getBoolean("resume", false)
-            runPass(app, network, fresh, fresh, false, false, requireNotNull(normalAccount))
-        }, continueWork = { WorkManagerImportScheduler(app, manual = manual).continueWork(network) })
+            val account = requireNotNull(normalAccount)
+            val native = AndroidCalendarProjection(app).accountFor(account)
+            runPass(app, network, fresh, fresh, false, false, account, manual, pollOnRetry = runAttemptCount > 0) {
+                SystemSyncWork.automaticAllowed(native)
+            }
+        }, continueWork = { failed -> WorkManagerImportScheduler(app, manual = manual).continueWork(network, failed) },
+            previousOutgoingFailure = inputData.getBoolean(WorkManagerImportScheduler.PREVIOUS_OUTGOING_FAILURE, false),
+            recordNetworkSuccess = {
+                val projection = AndroidCalendarProjection(app)
+                val expected = projection.accountFor(requireNotNull(normalAccount))
+                val current = SystemSyncWork.currentAccount(app)
+                val auth = app.authentication.state.value
+                if (current == expected && auth.destination == AuthenticationDestination.AUTHENTICATED &&
+                    !auth.isSubmitting && !auth.isCleanupRequired && !auth.isCleanupInProgress &&
+                    projection.hasPermissions() && SystemSyncWork.installed(app, expected) &&
+                    (manual || SystemSyncWork.automaticAllowed(expected))) SystemSyncWork.recordSuccess(app, expected)
+            })
         return when (result) {
             ImportRunResult.RETRY -> Result.retry()
             ImportRunResult.CONTINUE -> error("Continuation must be scheduled before completion")
@@ -73,7 +89,7 @@ class CalendarImportWorker(context: Context, parameters: WorkerParameters) : Cor
         val outcome = try {
             executeSystemSync(::admit, { first -> runPass(app, true,
                 first && runAttemptCount == 0, false, true, inputData.getBoolean(SystemSyncWork.UPLOAD, false),
-                requireNotNull(accountId), pullOnly = pull && !SystemSyncWork.automaticAllowed(expected)) })
+                requireNotNull(accountId), manual, pollOnRetry = first && runAttemptCount > 0) { SystemSyncWork.automaticAllowed(expected) } })
         } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
           catch (_: Exception) { SystemSyncOutcome.RETRY }
         if (outcome == SystemSyncOutcome.SUCCESS) SystemSyncWork.recordSuccess(app, expected)
@@ -83,14 +99,22 @@ class CalendarImportWorker(context: Context, parameters: WorkerParameters) : Cor
 
     private suspend fun runPass(app: BridgeApplication, network: Boolean, incomingFresh: Boolean,
         outgoingFresh: Boolean, providerWake: Boolean, uploadOnly: Boolean,
-        expectedAccount: com.patmanak.proton.andcalendarbridge.sync.AccountId? = null,
-        pullOnly: Boolean = false): ImportRunResult = executeCalendarPass(pullOnly, incoming = {
-        if (uploadOnly) ImportRunResult.COMPLETE else try {
-            app.imports.run(network, fresh = incomingFresh, expectedAccount = expectedAccount)
-        } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
-          catch (_: Exception) { ImportRunResult.RETRY }
-    }, outgoing = {
-        app.systemCreates.run(network, fresh = outgoingFresh, providerWake = providerWake,
-            expectedAccount = expectedAccount)
-    })
+        expectedAccount: com.patmanak.proton.andcalendarbridge.sync.AccountId, manual: Boolean,
+        pollOnRetry: Boolean, automaticAllowed: () -> Boolean): CalendarPassResult {
+        var received = false
+        var outgoingFailed = false
+        val work = executeCalendarPass(manual, automaticAllowed, incoming = {
+            if (uploadOnly) ImportRunResult.COMPLETE else try {
+                val result = app.imports.runPass(network, fresh = incomingFresh, expectedAccount = expectedAccount,
+                    pollOnRetry = pollOnRetry)
+                received = result.networkSynchronized
+                result.work
+            } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+              catch (_: Exception) { ImportRunResult.RETRY }
+        }, outgoing = { pushAllowed ->
+            app.systemCreates.run(network, fresh = outgoingFresh, providerWake = providerWake,
+                expectedAccount = expectedAccount, onFailure = { outgoingFailed = true }, pushAllowed = pushAllowed)
+        })
+        return CalendarPassResult(work, networkSynchronized = received, outgoingFailed = outgoingFailed)
+    }
 }

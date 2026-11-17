@@ -24,8 +24,13 @@ internal class ImportStoreCalendarSql(
 ) {
     fun remember(db: SQLiteDatabase, account: AccountId, calendars: List<CalendarSummary>): Unit = run {
         val present = calendars.map { it.id.value }.toSet()
-        db.query("calendars", arrayOf("scope", "calendar", "generation"), "account=?", arrayOf(account.value), null, null, null).use { cursor ->
-            while (cursor.moveToNext()) if (cursor.getString(1) !in present) {
+        db.query("calendars", arrayOf("scope", "calendar", "generation", "enabled", "available"),
+            "account=?", arrayOf(account.value), null, null, null).use { cursor ->
+            while (cursor.moveToNext()) {
+                if (cursor.getString(1) in present) {
+                    if (cursor.getInt(3) != 0 && cursor.getInt(4) == 0) rearmDeltaPoll(db, cursor.getString(0))
+                    continue
+                }
                 val scope = CalendarScope(account, CalendarId(cursor.getString(1)), cursor.getLong(2))
                 val coverage = readCoverage(db, scope)
                 val invalidated = coverage.copy(observed = null,
@@ -76,11 +81,13 @@ internal class ImportStoreCalendarSql(
             "scope=? AND native_removal_pending=1", arrayOf(key(scope)))
     }
 
-    fun selections(db: SQLiteDatabase, account: AccountId): List<ImportStore.Selection> = run {
+    fun selections(db: SQLiteDatabase, account: AccountId, scope: CalendarScope? = null): List<ImportStore.Selection> = run {
         // One metadata-only statement keeps retained/conflicted counts coherent, including inactive scopes.
+        val filter = if (scope == null) "c.account=?" else "c.scope=?"
+        val argument = scope?.let(::key) ?: account.value
         db.rawQuery("SELECT c.*, (SELECT COUNT(*) FROM local_edits l WHERE l.scope=c.scope) AS retained_local_changes, " +
             "(SELECT COUNT(*) FROM local_edits l WHERE l.scope=c.scope AND l.state='CONFLICT') AS local_conflicts " +
-            "FROM calendars c WHERE c.account=? ORDER BY c.rowid", arrayOf(account.value)).use { cursor ->
+            "FROM calendars c WHERE $filter ORDER BY c.rowid", arrayOf(argument)).use { cursor ->
             buildList {
                 while (cursor.moveToNext()) {
                     fun string(name: String) = cursor.getString(cursor.getColumnIndexOrThrow(name))
@@ -112,11 +119,22 @@ internal class ImportStoreCalendarSql(
     }
 
     fun setEnabled(db: SQLiteDatabase, scope: CalendarScope, enabled: Boolean) = run {
-        requireKnown(db, scope)
+        val scopeKey = key(scope)
+        val available = db.rawQuery("SELECT enabled, available FROM calendars WHERE scope=?", arrayOf(scopeKey)).use { cursor ->
+            check(cursor.moveToFirst()) { "Unknown import scope" }
+            val available = cursor.getInt(1) != 0
+            if (enabled && available && cursor.getInt(0) == 0) rearmDeltaPoll(db, scopeKey)
+            available
+        }
         db.update("calendars", ContentValues().apply {
             put("enabled", if (enabled) 1 else 0)
-            put("status", if (!localMutations.isAvailable(db, scope)) "UNAVAILABLE" else if (enabled) "PENDING" else "PAUSED")
-        }, "scope=?", arrayOf(key(scope)))
+            put("status", if (!available) "UNAVAILABLE" else if (enabled) "PENDING" else "PAUSED")
+        }, "scope=?", arrayOf(scopeKey))
+    }
+
+    /** Resume an established feed once when the calendar becomes both enabled and available. */
+    private fun rearmDeltaPoll(db: SQLiteDatabase, scopeKey: String) {
+        db.execSQL("UPDATE delta_state SET more=1 WHERE scope=? AND cursor_value IS NOT NULL", arrayOf(scopeKey))
     }
 
     fun status(db: SQLiteDatabase, scope: CalendarScope, status: String, completedAt: Long?) = run {

@@ -158,7 +158,7 @@ internal class ImportCoordinatorCapturedCreates(
 
     /** Explicit internal dispatch; original Provider acknowledgement and association remain separate. */
     suspend fun submitLocalCreate(target: CalendarScope, localId: LocalEventId, id: MutationId,
-        attempt: MutationId, port: CalendarCreateSubmissionPort): CreateSubmissionObservation = mutex.withLock {
+        attempt: MutationId, port: CalendarCreateSubmissionPort, pushAllowed: () -> Boolean = { true }): CreateSubmissionObservation = mutex.withLock {
         val captures = localCreates ?: return@withLock CreateSubmissionObservation.Unknown
         val journal = creates ?: return@withLock CreateSubmissionObservation.Unknown
         ensureCreateLifecycle()
@@ -172,7 +172,7 @@ internal class ImportCoordinatorCapturedCreates(
             projection.admitOperation = active
             val submission = captures.readSubmission(target, localId) ?: return@withLock CreateSubmissionObservation.Unknown
             val reserved = submission.reservation
-            fun currentAdmission() = active() && (!reserved.isOccurrence || systemCreatesEnabled(target))
+            fun currentAdmission() = active() && pushAllowed() && (!reserved.isOccurrence || systemCreatesEnabled(target))
             val captured = reserved.intent.reservation
             if (captured.scope != target || captured.localId != localId || captured.id != id || reserved.attempt != attempt ||
                 !port.supportsCapturedSubmission(reserved.format)) return@withLock CreateSubmissionObservation.Unknown
@@ -224,6 +224,9 @@ internal class ImportCoordinatorCapturedCreates(
             val actual = checkNotNull(journal.read(target, attempt))
             if (actual != prepared || !qualifyLocal()) return@withLock CreateSubmissionObservation.Unknown
             val guarded = object : CreateAttemptJournal by journal {
+                override fun allowsTransport(scope: CalendarScope) =
+                    scope == target && currentAdmission() && journal.allowsTransport(scope)
+
                 override suspend fun claim(expectedWork: CreateAttemptRecord): Boolean {
                     if (expectedWork != actual || journal.capturedIdentity(target, attempt) != wanted || !qualifyLocal()) return false
                     // Consume after the last qualification but before the independent SQLite commit.

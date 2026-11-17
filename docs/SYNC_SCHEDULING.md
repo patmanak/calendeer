@@ -26,8 +26,13 @@ A scheduling hint never grants account ownership, permissions or write consent.
 
 The executor drains up to sixteen passes inside the same work item. More pages
 or transient failures use WorkManager retry; a hidden successor is not counted
-as completed work. Only an admitted completed cycle records its local success
-time. Unsupported and held events keep their own existing status.
+as completed work. The last-success time advances after a completed network
+cycle for the current account when every selected calendar is available and
+reports a completed import. This includes network work requested on app open.
+Local-only work, upload hints without a pull, empty selections, held imports
+and terminal errors preserve the previous time. A later page cannot hide an earlier
+upload failure. A retry after a failed calendar listing polls the change feed
+from the saved cursor before recording success.
 
 ## Periodic pull
 
@@ -36,8 +41,11 @@ item at 15, 30, 60 (default), 120 or 360 minutes. UPDATE preserves the existing
 periodic identity and an active executor when configuration changes. Its input
 binds it to the selected native account; restoration must still validate the real
 session, permissions and account. Each periodic pass checks the native push
-switches: when allowed it sends retained local work before receiving; otherwise
-it only receives. This also catches missed native change hints and resumes
+switches before sending retained local work and again during write admission
+and at the first HTTP exchange. Disabling push during preparation keeps the
+incoming refresh available. A CREATE already claimed at revocation stays
+inspect-only, including when no request left the phone. This periodic cycle
+also catches missed native change hints and resumes
 inspection of uncertain work, without granting authority to resend it.
 
 All native Android periodic schedules for Calendeer are removed at startup;

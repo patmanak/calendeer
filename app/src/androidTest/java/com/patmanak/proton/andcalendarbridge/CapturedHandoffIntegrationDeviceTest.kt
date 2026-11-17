@@ -1007,7 +1007,7 @@ class CapturedHandoffIntegrationDeviceTest {
         suspend fun prepared(): ProjectionReceipt? { allowStore(); return store.projectionReceipt(target, verifiedEvent.eventId) }
         suspend fun drain(): ImportRunResult {
             val result = coordinator.run(network = false)
-            executeImportWork({ true }, { result }, { scheduler.continueWork(false) })
+            executeImportWork({ true }, { CalendarPassResult(result) }, { scheduler.continueWork(false) })
             return result
         }
         suspend fun interruptedDrain() {

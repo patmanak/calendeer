@@ -92,8 +92,8 @@ internal class ImportCoordinatorIncoming(
     }
 
     /** Successful continuation and transient retry are distinct; the store owns pending work. */
-    suspend fun run(network: Boolean, fresh: Boolean = true, expectedAccount: AccountId? = null): ImportRunResult =
-        mutex.withLock { runLocked(network, fresh, expectedAccount) }
+    suspend fun run(network: Boolean, fresh: Boolean, expectedAccount: AccountId?, pollOnRetry: Boolean = false): CalendarPassResult =
+        mutex.withLock { runLocked(network, fresh, expectedAccount, pollOnRetry) }
 
     private suspend fun refreshAccess(account: AccountId, expected: Long): ImportRunResult? =
         refreshImportAccess(remote, store, account, { isCurrent(expected, account) }, rememberAccessibleCatalog)
@@ -105,29 +105,35 @@ internal class ImportCoordinatorIncoming(
         return engine.run(target, allowNetwork = allowNetwork, maxPages = 1)
     }
 
-    private suspend fun runLocked(network: Boolean, fresh: Boolean, expectedAccount: AccountId?): ImportRunResult {
+    private suspend fun runLocked(network: Boolean, fresh: Boolean, expectedAccount: AccountId?, pollOnRetry: Boolean): CalendarPassResult {
         val expected = generation()
-        val account = currentObservedAccount() ?: return ImportRunResult.COMPLETE
-        if (expectedAccount != null && account != expectedAccount) return ImportRunResult.COMPLETE
-        if (!isCurrent(expected, account)) return ImportRunResult.COMPLETE
+        val skipped = CalendarPassResult(ImportRunResult.COMPLETE)
+        val account = currentObservedAccount() ?: return skipped
+        if (expectedAccount != null && account != expectedAccount) return skipped
+        if (!isCurrent(expected, account)) return skipped
         store.admitTransaction = { it.account == account && authenticated() && generation() == expected }
         projection.admitOperation = { authenticated() && generation() == expected }
         mutableState.value = state.value.copy(busy = true)
         var retry = false
         var continuation = false
+        var networkSynchronized: Boolean
         var runFailure: Exception? = null
         try {
             // Re-establish access on retries too; WorkManager retries are not fresh runs.
-            if (network) refreshAccess(account, expected)?.let { return it }
-            for (selection in store.selections(account).filter { it.enabled && it.available }) {
-                if (!isCurrent(expected, account)) return ImportRunResult.COMPLETE
+            if (network) refreshAccess(account, expected)?.let { return CalendarPassResult(it) }
+            val selected = store.selections(account).filter { it.enabled }
+            networkSynchronized = network && selected.isNotEmpty() && selected.all { it.available }
+            for (selection in selected.filter { it.available }) {
+                if (!isCurrent(expected, account)) return skipped
                 val calendarScope = selection.scope
                 if (!hasCalendarPermissions()) {
                     store.status(calendarScope, "PERMISSION")
+                    networkSynchronized = false
                     continue
                 }
-                when (runCalendar(selection, calendarScope, account, expected, network, fresh)) {
-                    null -> return ImportRunResult.COMPLETE
+                val result = runCalendar(selection, calendarScope, account, expected, network, fresh, pollOnRetry) ?: return skipped
+                networkSynchronized = networkSynchronized && result.networkSynchronized
+                when (result.work) {
                     ImportRunResult.RETRY -> retry = true
                     ImportRunResult.CONTINUE -> continuation = true
                     ImportRunResult.COMPLETE -> Unit
@@ -139,19 +145,21 @@ internal class ImportCoordinatorIncoming(
         } finally {
             finishImportRun(network, runFailure)
         }
-        return when { retry -> ImportRunResult.RETRY; continuation -> ImportRunResult.CONTINUE; else -> ImportRunResult.COMPLETE }
+        val work = when { retry -> ImportRunResult.RETRY; continuation -> ImportRunResult.CONTINUE; else -> ImportRunResult.COMPLETE }
+        return CalendarPassResult(work, networkSynchronized && work == ImportRunResult.COMPLETE && isCurrent(expected, account))
     }
 
     /** One calendar pass; null preserves an inactive epoch's early exit from the entire run.
      * Keep its suspensions and status handlers outside the run's diagnostic finally. */
     private suspend fun runCalendar(selection: ImportStore.Selection, calendarScope: CalendarScope,
-        account: AccountId, expected: Long, network: Boolean, fresh: Boolean): ImportRunResult? {
+        account: AccountId, expected: Long, network: Boolean, fresh: Boolean, pollOnRetry: Boolean): CalendarPassResult? {
         var retry = false
         var continuation = false
+        var networkSynchronized = false
         try {
             store.status(calendarScope, "RUNNING")
             if (!isCurrent(expected, account)) return null
-            if (!beforeNativeCreation()) return if (isCurrent(expected, account)) ImportRunResult.RETRY else null
+            if (!beforeNativeCreation()) return if (isCurrent(expected, account)) CalendarPassResult(ImportRunResult.RETRY) else null
             if (!isCurrent(expected, account)) return null
             val createsMode = systemCreatesEnabled(calendarScope)
             val accessPolicy = policyRevision()
@@ -180,7 +188,7 @@ internal class ImportCoordinatorIncoming(
             // Admit an extension before prepare rearms deltaMore. Both the planned
             // checkpoint and the post-scan feed check survive a crash at this boundary.
             val rolling = allowNetwork && fresh && !mappingPending && tryRollingRefresh(selection)
-            val deltaReady = deltaEngine?.prepare(calendarScope, allowNetwork, fresh || mappingPending) ?: true
+            val deltaReady = deltaEngine?.prepare(calendarScope, allowNetwork, fresh || mappingPending, pollOnRetry) ?: true
             if (allowNetwork && remote is CalendarDeltaRemote) remote.refreshContext(calendarScope)
             if (allowNetwork && (fresh || mappingPending)) {
                 serial.run(account) {
@@ -193,6 +201,8 @@ internal class ImportCoordinatorIncoming(
             // Commit its first staged page before draining: a DIRTY row may reject
             // projection, and capture needs a confirmed observation format to proceed.
             // Offline this only decodes an already retained page; it never invents one.
+            val retainedPage = allowNetwork && stagedEngine != null && deltaEngine == null &&
+                store.transaction(calendarScope) { (this as StagedSyncTransaction).received != null }
             val bootstrap = bootstrapInitialPage(calendarScope, allowNetwork, deltaReady)
             if (!isCurrent(expected, account)) return null
             suspend fun drain(): Boolean {
@@ -245,12 +255,14 @@ internal class ImportCoordinatorIncoming(
                     else -> "IMPORTED"
                 }
                 if (!isCurrent(expected, account)) return null
-                projectionWork.publishImportProgress(calendarScope, status,
+                val published = projectionWork.publishImportProgress(calendarScope, status,
                     if (!blocked && progress.traversalComplete && !remaining && deltaProgress?.blocked != true &&
                         deltaProgress?.workRemaining != true &&
                         !historyGap && !missingSeries && !mappingRemaining &&
                         (localProgress || selection.completedAt == null || selection.status !in setOf("IMPORTED", "PARTIAL")))
                         System.currentTimeMillis() else null)
+                val readCalendarData = deltaEngine != null || bootstrap.pagesCommitted + progress.pagesCommitted > (if (retainedPage) 1 else 0)
+                networkSynchronized = allowNetwork && published == "IMPORTED" && readCalendarData
                 retry = retry || deferredNetwork
                 remaining = remaining || incompleteNetwork || (allowNetwork && mappingRemaining)
             } else if (network && selection.nextAttempt > System.currentTimeMillis()) {
@@ -261,10 +273,11 @@ internal class ImportCoordinatorIncoming(
                 remaining = drain() || !progress.traversalComplete || store.mappingRescanPending(calendarScope)
                 val missingSeries = store.blockedSeriesCount(calendarScope) > 0
                 if (!isCurrent(expected, account)) return null
-                projectionWork.publishImportProgress(calendarScope, if (remaining) "PENDING" else if (missingSeries) "SERIES_PENDING"
+                val published = projectionWork.publishImportProgress(calendarScope, if (remaining) "PENDING" else if (missingSeries) "SERIES_PENDING"
                     else if (selection.historyGap) "HISTORY_GAP" else "IMPORTED",
                     if (remaining || selection.historyGap || missingSeries)
                         null else System.currentTimeMillis())
+                networkSynchronized = published == "IMPORTED" && progress.pagesCommitted > 0
             } else {
                 // Local work must not overwrite the reason the last network run was blocked.
                 val blocked = selection.status in setOf("NETWORK", "UNSUPPORTED", "ERROR", "AUTH", "CAPACITY", "LOCAL_KEYS")
@@ -313,7 +326,8 @@ internal class ImportCoordinatorIncoming(
             if (retryableImportFailure(failure)) throw failure
             store.status(calendarScope, if (failure is ImportCoordinatorProjection.Pending) "CREATE_PENDING" else "ERROR")
         }
-        return when { retry -> ImportRunResult.RETRY; continuation -> ImportRunResult.CONTINUE; else -> ImportRunResult.COMPLETE }
+        val work = when { retry -> ImportRunResult.RETRY; continuation -> ImportRunResult.CONTINUE; else -> ImportRunResult.COMPLETE }
+        return CalendarPassResult(work, networkSynchronized)
     }
 
     // Keep suspending diagnostic cleanup outside the main import coroutine's state machine.

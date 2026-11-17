@@ -30,7 +30,10 @@ class DeltaImportCoordinatorDeviceTest {
         var networkAvailable = true
         var localKeysAvailable = true
         var catalogFailure = false
+        var calendarAvailable = true
         var contextFailure = false
+        var unsupportedContext = false
+        var failDeltaDecode = false
         var contextReady = true
         var missingEvent = false
         var afterBaselineReceived: (() -> Unit)? = null
@@ -71,7 +74,8 @@ class DeltaImportCoordinatorDeviceTest {
         suspend fun loadCatalog(): CalendarCatalogResult {
             network("catalog")
             return if (catalogFailure) CalendarCatalogResult.Failure(CalendarCatalogFailure.UNREACHABLE)
-            else CalendarCatalogResult.Success(target.account, listOf(CalendarSummary(target.calendar, "Calendar Bridge delta fixture")))
+            else CalendarCatalogResult.Success(target.account, if (calendarAvailable)
+                listOf(CalendarSummary(target.calendar, "Calendar Bridge delta fixture")) else emptyList())
         }
         override suspend fun currentAccount() = target.account
         override suspend fun dispatch(mutation: Mutation) = DispatchResult.Rejected
@@ -103,7 +107,10 @@ class DeltaImportCoordinatorDeviceTest {
                 else notices.filter { it.first > after.value.toInt() }.map { it.second })
             return ReceivedChangePage(target, after, payload)
         }
-        override suspend fun decodeChanges(received: ReceivedChangePage) = changeReceipts.getValue(received.protectedPayload)
+        override suspend fun decodeChanges(received: ReceivedChangePage): DecodedChangePage {
+            if (failDeltaDecode) throw RemoteImportException(RemoteImportFailure.LOCAL_KEYS)
+            return changeReceipts.getValue(received.protectedPayload)
+        }
         override suspend fun receiveEvent(scope: CalendarScope, eventId: EventId): ReceivedCalendarEvent {
             network("event")
             if (missingEvent) throw RemoteImportException(RemoteImportFailure.NOT_FOUND)
@@ -120,6 +127,7 @@ class DeltaImportCoordinatorDeviceTest {
         }
         override suspend fun refreshContext(scope: CalendarScope) {
             network("context")
+            if (unsupportedContext) throw RemoteImportException(RemoteImportFailure.UNSUPPORTED)
             if (contextFailure) throw RemoteImportException(RemoteImportFailure.NETWORK)
             contextReady = true
         }
@@ -184,6 +192,42 @@ class DeltaImportCoordinatorDeviceTest {
                 .remove(projection.accountFor(target.account).name + ":" + target.calendar.value).commit()
             store.close(); context.deleteDatabase(name)
         }
+    }
+
+    @Test fun terminalFailureForTheOnlyCalendarCannotReportASuccessfulSystemCycle() = fixture {
+        remote.unsupportedContext = true
+        val outcome = executeSystemSync({ null }, { coordinator.runPass(true, true, target.account) })
+        assertEquals("UNSUPPORTED", selection().status)
+        assertNotEquals(SystemSyncOutcome.SUCCESS, outcome)
+        assertNotEquals(SystemSyncOutcome.RETRY, outcome)
+    }
+
+    @Test fun manualNetworkCompletionRecordsTheAccountTimeAndSkippedWorkPreservesIt() = fixture(withCatalog = true) {
+        val account = projection.accountFor(target.account)
+        val preferences = context.getSharedPreferences(SystemSyncWork.PREFS, Context.MODE_PRIVATE)
+        val key = "success:${account.name}"
+        suspend fun manual(network: Boolean, expected: AccountId = target.account) = executeImportWork(
+            { true }, { coordinator.runPass(network, true, expected) }, { error("Unexpected continuation") },
+            { SystemSyncWork.recordSuccess(context, account) })
+        try {
+            assertEquals(ImportRunResult.COMPLETE, manual(true))
+            assertEquals("IMPORTED", selection().status)
+            assertTrue(remote.calls.contains("changes"))
+            assertTrue(preferences.getLong(key, 0) > 0)
+            // Set a known previous value so an unexpected rewrite cannot pass in the same millisecond.
+            assertTrue(preferences.edit().putLong(key, 17L).commit())
+            assertEquals(ImportRunResult.COMPLETE, manual(false))
+            assertEquals(17L, preferences.getLong(key, 0))
+            assertEquals(ImportRunResult.COMPLETE, manual(true, AccountId("other-fixture")))
+            assertEquals(17L, preferences.getLong(key, 0))
+            remote.unsupportedContext = true
+            assertEquals(ImportRunResult.COMPLETE, manual(true))
+            assertEquals("UNSUPPORTED", selection().status)
+            assertEquals(17L, preferences.getLong(key, 0))
+            store.setEnabled(target, false)
+            assertEquals(ImportRunResult.COMPLETE, manual(true))
+            assertEquals(17L, preferences.getLong(key, 0))
+        } finally { preferences.edit().remove(key).commit() }
     }
 
     @Test fun baselineAnchorThenRemoteUpdateAndExplicitDeleteReachTheSameOwnedMirror() = fixture {
@@ -261,6 +305,68 @@ class DeltaImportCoordinatorDeviceTest {
         assertTrue(delta { deltaJobs(blocked = true) }.isEmpty())
         assertEquals("IMPORTED", selection().status)
         assertEquals(originalId, rows().single().first)
+        assertEquals("Calendar Bridge fixture updated", rows().single().second)
+    }
+
+    @Test fun reenabledCalendarAppliesSealedPageOfflineThenPollsForLaterRemoteChange() = fixture(withCatalog = true) {
+        assertTrue(coordinator.runPass(true, true, target.account).networkSynchronized)
+        remote.failDeltaDecode = true
+        assertFalse(coordinator.runPass(true, true, target.account).networkSynchronized)
+        assertNotNull(delta { deltaReceived })
+        store.setEnabled(target, false)
+        remote.publishUpdate()
+        store.setEnabled(target, true)
+        remote.failDeltaDecode = false
+        remote.calls.clear()
+        assertFalse(coordinator.runPass(false, false, target.account).networkSynchronized)
+        assertNull(delta { deltaReceived })
+        assertTrue(remote.calls.isEmpty())
+        verifyEligibilityPoll()
+    }
+
+    @Test fun resumedPassPollsWhenTheCalendarReturnsToTheCatalog() = fixture(withCatalog = true) {
+        assertTrue(coordinator.runPass(true, true, target.account).networkSynchronized)
+        remote.calendarAvailable = false
+        assertFalse(coordinator.runPass(true, true, target.account).networkSynchronized)
+        remote.publishUpdate()
+        remote.calendarAvailable = true
+        verifyEligibilityPoll()
+    }
+
+    @Test fun resumedPassPollsWhenSelectionIsEnabledAgain() = fixture(withCatalog = true) {
+        assertTrue(coordinator.runPass(true, true, target.account).networkSynchronized)
+        store.setEnabled(target, false)
+        assertFalse(coordinator.runPass(true, true, target.account).networkSynchronized)
+        remote.publishUpdate()
+        store.setEnabled(target, true)
+        verifyEligibilityPoll()
+        store.setEnabled(target, true)
+        assertFalse(delta { deltaMore })
+    }
+
+    private suspend fun Fixture.verifyEligibilityPoll() {
+        remote.calls.clear()
+        val resumed = coordinator.runPass(true, false, target.account)
+        assertEquals(ImportRunResult.COMPLETE, resumed.work)
+        assertTrue(resumed.networkSynchronized)
+        assertEquals(1, remote.calls.count { it == "changes" })
+        assertEquals("Calendar Bridge fixture updated", rows().single().second)
+        assertFalse(delta { deltaMore })
+        store.remember(target.account, listOf(summary))
+        assertFalse(delta { deltaMore })
+    }
+
+    @Test fun failedCatalogOnCompletedMirrorStillReadsFreshChangesWhenWorkerRetries() = fixture(withCatalog = true) {
+        assertTrue(coordinator.runPass(true, true, target.account).networkSynchronized)
+        assertFalse(delta { deltaMore })
+        remote.publishUpdate()
+        remote.catalogFailure = true
+        assertEquals(ImportRunResult.RETRY, coordinator.runPass(true, true, target.account).work)
+        remote.catalogFailure = false
+        remote.calls.clear()
+        val retried = coordinator.runPass(true, false, target.account, pollOnRetry = true)
+        assertTrue(retried.networkSynchronized)
+        assertTrue("The previous cycle's checkpoint is insufficient", remote.calls.contains("changes"))
         assertEquals("Calendar Bridge fixture updated", rows().single().second)
     }
 

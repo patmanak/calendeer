@@ -36,19 +36,23 @@ class WorkManagerImportScheduler(context: Context, private val manual: Boolean =
                 .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
                 .addTag(WORK_TAG).also { if (!manual) it.addTag(SystemSyncWork.AUTOMATIC_TAG) }.build())
     }
-    override fun continueWork(network: Boolean) {
+    override fun continueWork(network: Boolean) = continueWork(network, outgoingFailed = false)
+
+    internal fun continueWork(network: Boolean, outgoingFailed: Boolean) {
         if (!normalAllowed) return
         val request = OneTimeWorkRequestBuilder<CalendarImportWorker>()
-            .setInputData(workDataOf("network" to network, "resume" to true, SystemSyncWork.MANUAL to manual)).addTag(WORK_TAG)
+            .setInputData(workDataOf("network" to network, "resume" to true, SystemSyncWork.MANUAL to manual,
+                PREVIOUS_OUTGOING_FAILURE to outgoingFailed)).addTag(WORK_TAG)
             .also { if (!manual) it.addTag(SystemSyncWork.AUTOMATIC_TAG) }
         if (network) request.setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
         manager.enqueueUniqueWork(if (network) networkName() else localName(), ExistingWorkPolicy.APPEND_OR_REPLACE, request.build())
     }
     private fun localName() = if (manual) "$LOCAL_WORK-manual" else LOCAL_WORK
     private fun networkName() = if (manual) "$NETWORK_WORK-manual" else NETWORK_WORK
-    private companion object {
-        const val WORK_TAG = "calendar-import"
-        const val LOCAL_WORK = "calendar-import-local"
-        const val NETWORK_WORK = "calendar-import-network"
+    internal companion object {
+        const val PREVIOUS_OUTGOING_FAILURE = "previous_outgoing_failure"
+        private const val WORK_TAG = "calendar-import"
+        private const val LOCAL_WORK = "calendar-import-local"
+        private const val NETWORK_WORK = "calendar-import-network"
     }
 }

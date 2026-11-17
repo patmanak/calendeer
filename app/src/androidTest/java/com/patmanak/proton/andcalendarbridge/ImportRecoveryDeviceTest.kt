@@ -72,7 +72,7 @@ class ImportRecoveryDeviceTest {
         for (failure in listOf(SQLiteFullException(), SQLiteDiskIOException(), SQLiteCantOpenDatabaseException(),
             SQLiteDatabaseLockedException(), SQLiteTableLockedException())) {
             assertEquals(ImportRunResult.RETRY, executeImportWork({ true }, { throw failure }, { fail() }))
-            assertEquals(ImportRunResult.RETRY, executeImportWork({ throw failure }, { fail(); ImportRunResult.COMPLETE }, { fail() }))
+            assertEquals(ImportRunResult.RETRY, executeImportWork({ throw failure }, { error("No import") }, { fail() }))
         }
         val corrupt = SQLiteDatabaseCorruptException()
         try {

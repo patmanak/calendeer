@@ -255,22 +255,40 @@ class SystemCreatePipelineDeviceTest {
 
     @Test fun lostResponseAndRestartInspectUnknownWithoutAnotherSendOrNewIdentity() = fixture {
         loseResponse = true
-        assertEquals(ImportRunResult.COMPLETE, controller.run(network = true))
+        var unresolved = false
+        assertEquals(ImportRunResult.COMPLETE, controller.run(network = true, onFailure = { unresolved = true }))
         val unknown = work.read(target, row)!!
         assertEquals(SystemCreateWorkStatus.UNKNOWN, unknown.status)
         assertEquals(CreateAttemptState.OUTCOME_UNKNOWN, attempts.read(target, unknown.attempt)!!.state)
+        assertTrue("The completed pass still has an unresolved CREATE", unresolved)
         assertEquals(1, sends); assertEquals("1", field(Events.DIRTY))
         val before = providerSnapshot()
         reopen()
         assertSameIdentity(unknown, work.read(target, row)!!)
         assertEquals(before, providerSnapshot())
         loseResponse = false
-        assertEquals(ImportRunResult.COMPLETE, controller.run(network = true))
+        unresolved = false
+        assertEquals(ImportRunResult.COMPLETE, controller.run(network = true, onFailure = { unresolved = true }))
+        assertFalse(unresolved)
         assertEquals(1, preparations); assertEquals(1, sends); assertTrue(inspections > 0)
         val completed = work.read(target, row)!!
         assertSameIdentity(unknown, completed)
         assertEquals(SystemCreateWorkStatus.COMPLETE, completed.status)
         assertEquals(1, rows()); assertEquals("0", field(Events.DIRTY))
+    }
+
+    @Test fun resumedScanCannotReportSuccessWithAnUnresolvedRowBeforeItsCursor() = fixture {
+        assertEquals(ImportRunResult.COMPLETE, controller.run(network = true))
+        assertEquals(0, work.count(target))
+        mutate(ContentValues().apply { put(Events.DIRTY, 1); put(Events.TITLE, "Earlier dirty fixture") })
+        val cursors = context.getSharedPreferences("system-create-cursors", Context.MODE_PRIVATE)
+        val scan = cursors.all.keys.single { it.startsWith("v1-scan-") }
+        assertTrue(cursors.edit().putLong(scan, row).commit())
+        var unresolved = false
+        assertEquals(ImportRunResult.COMPLETE, controller.run(network = true, fresh = false, onFailure = { unresolved = true }))
+        assertTrue(unresolved)
+        assertEquals("1", field(Events.DIRTY))
+        assertEquals(1, sends)
     }
 
     @Test fun exactSystemSelfOrganizerProfileCompletesOfflineAndOnlineWithoutNormalizingTheRow() = fixture {
@@ -459,7 +477,7 @@ class SystemCreatePipelineDeviceTest {
         assertEquals(0, preparations); assertEquals(0, sends)
     }
 
-    private class Fixture(base: Context, targetOverride: CalendarScope? = null) {
+    internal class Fixture(base: Context, targetOverride: CalendarScope? = null) {
         private val token = UUID.randomUUID().toString()
         private val names = listOf("system-pipeline-import-$token.db", "system-pipeline-capture-$token.db",
             "system-pipeline-attempt-$token.db", "system-pipeline-work-$token.db")
@@ -496,6 +514,7 @@ class SystemCreatePipelineDeviceTest {
         var inspections = 0
         var loseResponse = false
         var beforeClaim: suspend () -> Unit = {}
+        var beforeTransport: suspend () -> Unit = {}
         var afterClaim: suspend () -> Unit = {}
         private var created = false
         private val schedules = AtomicInteger()
@@ -538,6 +557,8 @@ class SystemCreatePipelineDeviceTest {
                 assertEquals(expected.correlation, record.id)
                 beforeClaim()
                 if (!journal.claim(record)) return CreateSubmissionObservation.Unknown
+                beforeTransport()
+                if (!journal.allowsTransport(record.scope)) return CreateSubmissionObservation.Unknown
                 sends++; created = true
                 assertEquals(CreateAttemptState.OUTCOME_UNKNOWN, attempts.read(target, record.id)!!.state)
                 afterClaim()
@@ -784,7 +805,7 @@ class SystemCreatePipelineDeviceTest {
         }
     }
 
-    private fun fixture(block: suspend Fixture.() -> Unit) = runBlocking {
+    internal fun fixture(block: suspend Fixture.() -> Unit) = runBlocking {
         assumeTrue(InstrumentationRegistry.getArguments().getString("providerFixture") == "true")
         val fixture = Fixture(ApplicationProvider.getApplicationContext())
         assumeTrue(fixture.projection.hasPermissions())

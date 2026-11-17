@@ -8,7 +8,8 @@ class DeltaImportEngine(private val store: SyncStore, private val remote: Calend
     private val serial: AccountSerialExecutor) {
 
     /** Capture before any baseline read. Existing obligations and cursors survive refreshes. */
-    suspend fun prepare(scope: CalendarScope, allowNetwork: Boolean, fresh: Boolean): Boolean = serial.run(scope.account) {
+    suspend fun prepare(scope: CalendarScope, allowNetwork: Boolean, fresh: Boolean,
+        pollOnRetry: Boolean = false): Boolean = serial.run(scope.account) {
         validateReconciliation(scope)
         val cursor = tx(scope) { deltaCursor }
         if (cursor == null) {
@@ -25,7 +26,11 @@ class DeltaImportEngine(private val store: SyncStore, private val remote: Calend
                 coverage = coverage.restart()
             }
         } else validateCursor(cursor)
-        if (fresh && allowNetwork) tx(scope) { retryBlockedJobs(); deltaMore = true }
+        if (allowNetwork && (fresh || pollOnRetry)) tx(scope) {
+            if (fresh) retryBlockedJobs()
+            // A retry can follow a catalogue failure that preceded the original feed poll.
+            deltaMore = true
+        }
         true
     }
 
@@ -114,6 +119,8 @@ class DeltaImportEngine(private val store: SyncStore, private val remote: Calend
                 tx(scope) {
                     if (deltaCursor != cursor || deltaReceived != null) fail("Changed delta acquisition")
                     deltaReceived = it
+                    // The receipt now owns this read. A later poll request remains independent.
+                    deltaMore = false
                 }
             }
             validateReceipt(scope, cursor, saved)
@@ -147,7 +154,7 @@ class DeltaImportEngine(private val store: SyncStore, private val remote: Calend
                     putDeltaJob(CalendarChangeJob(it))
                 }
                 deltaCursor = page.next
-                deltaMore = page.more
+                deltaMore = deltaMore || page.more
                 deltaReceived = null
             }
             pages++

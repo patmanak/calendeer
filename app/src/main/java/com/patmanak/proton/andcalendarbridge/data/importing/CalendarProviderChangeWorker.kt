@@ -52,7 +52,8 @@ class CalendarProviderChangeWorker(context: Context, parameters: WorkerParameter
             if (network) {
                 // No incoming sync, no fresh recovery reset. UNKNOWN stays inspect-only;
                 // durable CREATE pauses cannot be lifted by this origin.
-                val outgoing = app.systemCreates.run(true, fresh = false, providerWake = true, expectedAccount = account)
+                val outgoing = app.systemCreates.run(true, fresh = false, providerWake = true, expectedAccount = account,
+                    pushAllowed = { SystemSyncWork.automaticAllowed(nativeAccount) })
                 if (outgoing == ImportRunResult.COMPLETE) trace("PROVIDER_NETWORK_COMPLETE")
                 return finish(outgoing) {
                     wake.enqueueNetwork()
