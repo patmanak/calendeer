@@ -10,6 +10,7 @@ import me.proton.core.crypto.common.keystore.PlainByteArray
 import me.proton.core.crypto.common.keystore.encrypt
 import me.proton.core.key.domain.*
 import me.proton.core.key.domain.entity.key.PrivateKey
+import me.proton.core.key.domain.entity.key.PublicKey
 import me.proton.core.user.domain.entity.UserAddress
 
 internal fun createUnavailable(reason: CreatePreparationFailure): Nothing = throw CreatePreparationException(reason)
@@ -63,6 +64,21 @@ internal class ProtonCreateContextResolver(private val crypto: CryptoContext) {
     fun prepare(scope: CalendarScope, metadata: JsonObject, bootstrap: JsonObject, addresses: List<UserAddress>, uid: String,
         draft: CalendarCreateDraft): ProtonPreparedCreateEvent {
         if (draft.scope != scope) createUnavailable(CreatePreparationFailure.CONTEXT)
+        return resolve(scope, metadata, bootstrap, addresses) { encryptor, selected, publicKey ->
+            val series = draft.series
+            if (series == null) encryptor.prepare(uid, draft.timestamp, draft.content, selected.signingKey, publicKey)
+            else encryptor.prepareSeries(uid, draft.timestamp, draft.content, series, selected.signingKey, publicKey)
+        }
+    }
+
+    fun prepareOccurrence(scope: CalendarScope, metadata: JsonObject, bootstrap: JsonObject, addresses: List<UserAddress>,
+        parts: ProtonEventTextParts, calendarText: String?): ProtonPreparedCreateEvent =
+        resolve(scope, metadata, bootstrap, addresses) { encryptor, selected, publicKey ->
+            encryptor.prepareParts(parts, selected.signingKey, publicKey, calendarText)
+        }
+
+    private fun resolve(scope: CalendarScope, metadata: JsonObject, bootstrap: JsonObject, addresses: List<UserAddress>,
+        prepare: (ProtonSimpleEventEncryptor, ProtonCreateSelection, PublicKey) -> ProtonPreparedCreateEvent): ProtonPreparedCreateEvent {
         val selected = ProtonCreateContextPolicy.select(scope, metadata, bootstrap, addresses)
         try {
             GateCProtectedStorageGuard.requireAvailable(crypto.keyStoreCrypto)
@@ -79,10 +95,7 @@ internal class ProtonCreateContextResolver(private val crypto: CryptoContext) {
                 finally { bytes.fill(0) }
             val calendarKey = PrivateKey(selected.calendarKey.string("PrivateKey"), isPrimary = true, passphrase = protected)
             if (calendarKey.unlockOrNull(crypto)?.use { true } != true) createUnavailable(CreatePreparationFailure.LOCAL_KEYS)
-            val encryptor = ProtonSimpleEventEncryptor(crypto)
-            val series = draft.series
-            return if (series == null) encryptor.prepare(uid, draft.timestamp, draft.content, selected.signingKey, calendarKey.publicKey(crypto))
-            else encryptor.prepareSeries(uid, draft.timestamp, draft.content, series, selected.signingKey, calendarKey.publicKey(crypto))
+            return prepare(ProtonSimpleEventEncryptor(crypto), selected, calendarKey.publicKey(crypto))
         } catch (cancelled: CancellationException) { throw cancelled }
           catch (failure: CreatePreparationException) { throw failure }
           catch (failure: ProtonEventPreparationException) {

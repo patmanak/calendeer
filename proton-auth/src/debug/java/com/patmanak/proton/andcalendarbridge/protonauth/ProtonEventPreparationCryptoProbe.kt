@@ -304,7 +304,7 @@ object ProtonEventPreparationCryptoProbe {
                         "Lieu de test", details = EventDetails(if (!personal) emptyList() else if (nativeJourney != null)
                             listOf(EventReminder(-10), EventReminder(0), EventReminder(10))
                             else listOf(EventReminder(10), EventReminder(0), EventReminder(-10))),
-                        colorRgb = if (personal) 0x123456 else null)
+                        colorRgb = if (personal) 0x415df0 else null)
                     if (foldedWhitespace) {
                         stage = "FOLDED_WHITESPACE_FIXTURE"
                         check(ProtonSimpleEventSerializer.serialize("synthetic@calendeer.invalid", stamp, content)

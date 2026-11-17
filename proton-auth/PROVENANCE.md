@@ -1094,3 +1094,25 @@ or introduce a dependency. Controlled live variants rejected an off-palette RGB
 for simple and recurring creates and accepted an official RGB for a series.
 Fresh writes refuse other colors locally while preserving raw intent. Historical
 decoders, frozen capsules and inspect-only recovery retain their existing contracts.
+
+## Inactive first-occurrence preparation
+
+Inspected again from pinned source on 2026-11-17, WebClients
+`c9b5f2995744b6f7c8ff1301ca3d5ac4f7a18672` (GPLv3):
+[createSingleRecurrence](https://github.com/ProtonMail/WebClients/blob/c9b5f2995744b6f7c8ff1301ca3d5ac4f7a18672/applications/calendar/src/app/containers/calendar/recurrence/createSingleRecurrence.ts),
+[sequence](https://github.com/ProtonMail/WebClients/blob/c9b5f2995744b6f7c8ff1301ca3d5ac4f7a18672/applications/calendar/src/app/containers/calendar/eventActions/sequence.ts),
+and [invite comparison](https://github.com/ProtonMail/WebClients/blob/c9b5f2995744b6f7c8ff1301ca3d5ac4f7a18672/packages/shared/lib/calendar/mailIntegration/invite.ts).
+The [date comparator](https://github.com/ProtonMail/WebClients/blob/c9b5f2995744b6f7c8ff1301ca3d5ac4f7a18672/packages/shared/lib/calendar/vcalConverter.ts)
+compares UTC bounds independently of zone labels. The text comparator uses
+unescape, browser sanitization and trim. This profile supports plain-text trim
+and holds changed HTML/entity-sensitive titles rather than emulating DOM
+sanitization; unchanged rich titles can still carry personal metadata edits.
+The original adaptation extends the bounded raw patcher: retain UID and qualified
+opaque properties, remove RRULE, add the exact original RECURRENCE-ID using the
+master's kind/zone, retain SEQUENCE for unchanged occurrence geometry and advance
+it for changed geometry. A missing signed SEQUENCE remains unsupported.
+The existing Proton Core signing, fresh session-key generation and calendar-key
+wrapping primitives encrypt the new child; the master's event key is not reused.
+Known signed status/transparency and personal notification/color JSON are
+preserved through their existing policies. This inactive preparation is neither
+complete-family admission nor independent readback or service compatibility proof.

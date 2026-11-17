@@ -13,6 +13,7 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.JsonNull
 import me.proton.core.crypto.common.context.CryptoContext
 import me.proton.core.crypto.common.keystore.encrypt
 import me.proton.core.crypto.common.keystore.PlainByteArray
@@ -295,6 +296,59 @@ internal class ProtonEventDecryptor(private val crypto: CryptoContext, private v
           catch (failure: Exception) { context.ensureActive(); throw failure }
         context.ensureActive()
         return record
+    }
+
+    /** Inactive child CREATE preparation. Full remote-family admission and current-session
+     * requalification belong to the caller; no work is persisted, claimed or dispatched here. */
+    suspend fun prepareOccurrenceCreate(session: CatalogSession, intent: LocalCreateIntent, id: MutationId,
+        metadata: JsonObject, bootstrap: JsonObject, row: JsonObject, protector: EventPayloadProtector): CreateAttemptRecord {
+        val context = currentCoroutineContext()
+        context.ensureActive()
+        val frozen = intent.copy()
+        require(frozen.reservation.format == EVENT_FORMAT)
+        val candidate = requireNotNull(frozen.occurrence)
+        val scope = frozen.reservation.scope
+        val master = candidate.master
+        val uid = requireNotNull(master.content.recurrence).uid
+        val frozenMetadata = snapshot(metadata)
+        try {
+            return withSharedTitle(session, scope, master.eventId, master.revision, uid, master.content.title,
+                bootstrap, row, seriesBase = master.content) { basis, keys, addresses, observedBootstrap ->
+                context.ensureActive()
+                val original = basis.originalRow
+                ProtonSeriesEventUpdate.qualify(original, master.content)
+                val decoded = decodeRows(scope.calendar.value, observedBootstrap, listOf(original), uid, keys, addresses)
+                require(decoded.deferred.isEmpty() && decoded.changes.singleOrNull() == master)
+                require(ProtonEventColourPolicy.accepts(candidate.content.colorRgb))
+                val selected = ProtonCreateContextPolicy.select(scope, frozenMetadata, observedBootstrap, addresses)
+                require(original.array("SharedEvents").all {
+                    selected.address.email.equals((it as JsonObject).string("Author"), ignoreCase = true)
+                })
+                val before = master.content.copy(recurrence = null)
+                val after = candidate.content.copy(recurrence = null)
+                val personalSingle = ProtonSharedTextPatcher.isPersonalSingleOccurrence(candidate)
+                val defaults = ProtonPersonalMetadataEdit.captureDefaults(original, observedBootstrap, before, after)
+                val personal = ProtonPersonalMetadataEdit.apply(original, before, after, defaults)
+                val patched = ProtonSharedTextPatcher.patchOccurrenceAt(basis.originalPlaintext, candidate, frozen.reservation.timestamp)
+                val calendarText = ProtonPersonalCalendarPart.original(original)?.let { part ->
+                    require(selected.address.email.equals(part.string("Author"), ignoreCase = true) &&
+                        verify(part, part.string("Data"), addresses))
+                    ProtonSharedTextPatcher.calendarPart(part.string("Data"), uid, basis.originalPlaintext.clearShared, patched.clearShared)
+                }
+                context.ensureActive()
+                val prepared = ProtonCreateContextResolver(crypto).prepareOccurrence(scope, frozenMetadata, observedBootstrap,
+                    addresses, patched, calendarText)
+                val event = JsonObject(prepared.event + mapOf("Notifications" to requireNotNull(personal["Notifications"]),
+                    "Color" to requireNotNull(personal["Color"]), "IsPersonalSingleEdit" to
+                        JsonPrimitive(personalSingle)))
+                context.ensureActive()
+                val payload = ProtonOccurrenceSubmissionCodec(protector).seal(id, frozen, ProtonCreateSubmissionCodec.context(selected),
+                    original, ProtonCreateSubmissionCodec.request(selected.member.string("ID"), event), defaults?.get("Notifications") ?: JsonNull)
+                context.ensureActive()
+                CreateAttemptRecord(id, scope, OCCURRENCE_CREATE_SUBMISSION_FORMAT, payload)
+            }
+        } catch (cancelled: CancellationException) { throw cancelled }
+          catch (failure: Exception) { context.ensureActive(); throw failure }
     }
 
     private suspend fun prepareSharedTitleFragments(session: CatalogSession, scope: CalendarScope, expectedEventId: EventId,

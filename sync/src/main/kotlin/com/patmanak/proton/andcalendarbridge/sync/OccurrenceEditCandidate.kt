@@ -9,6 +9,7 @@ class OccurrenceEditCandidate(master: RemoteChange.Upsert, val original: Recurre
     val master = freezeMaster(master)
     private val personal = freezePersonalEditContent(replacement)
     val content: EventContent
+    val originalContent: EventContent
     init {
         require(personal.recurrence == null)
         require(personal.description == this.master.content.description && personal.location == this.master.content.location)
@@ -30,7 +31,8 @@ class OccurrenceEditCandidate(master: RemoteChange.Upsert, val original: Recurre
                 EventTime.Timed(start, start.plus(Duration.between(time.start, time.end)), time.zone)
             }
         }
-        require(personal != this.master.content.copy(time = generatedTime, recurrence = null))
+        originalContent = this.master.content.copy(time = generatedTime, recurrence = null)
+        require(personal != originalContent)
         content = personal.copy(recurrence = EventRecurrence(recurrence.uid, original = original))
     }
     override fun toString() = "OccurrenceEditCandidate(REDACTED)"

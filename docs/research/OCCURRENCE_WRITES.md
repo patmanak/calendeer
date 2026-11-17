@@ -172,3 +172,30 @@ The existing dispatch and import tables accept fingerprint v3 through explicit
 transactional migrations; prior payloads, evidence and acknowledgement states
 are copied unchanged. No occurrence preparation, worker, readback or native/SQL
 acknowledgement route is activated by this storage contract.
+
+## Inactive source-preserving cryptographic preparation
+
+The explicit decryptor entry point verifies the captured master's shared
+signatures and exact full decoded base, then applies the existing closed series
+wire profile and writer/key policy. Its bounded raw patcher preserves admitted
+opaque properties, keeps the master's UID, removes RRULE and adds RECURRENCE-ID
+using the original slot and master timezone. A moved child or kind transition
+does not change that original identity. A signed existing SEQUENCE is mandatory;
+unchanged generated geometry keeps it, while changed geometry increments it.
+
+Maintained Proton primitives generate a fresh shared session key for the child,
+wrap it to the selected calendar key and sign both shared parts. A qualified
+signed calendar status/transparency part is verified, timestamped and signed
+again. Existing metadata policy preserves unchanged null inheritance or explicit
+notifications; changed reminders retain default emails, and colors require the
+Proton palette. IsPersonalSingleEdit compares generated shared content with the
+replacement, independently of personal reminder/color changes.
+Plain-text titles use the upstream trim behavior. Changed titles containing
+HTML/entity-sensitive characters remain unsupported until the browser's
+sanitization semantics are qualified; unchanged rich titles can keep personal
+reminder/color edits. Their retained source is never sanitized or discarded.
+
+The result is an inactive v5 capsule. This operation has no HTTP, persistence,
+claim or sending path. Its caller must still obtain fresh authenticated context,
+qualify the complete remote/native family and recheck admission before dispatch.
+Independent family readback and native/SQL acknowledgement remain separate gates.

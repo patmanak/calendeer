@@ -11,6 +11,8 @@ import com.patmanak.proton.andcalendarbridge.sync.EventDetails
 import com.patmanak.proton.andcalendarbridge.sync.EventTime
 import com.patmanak.proton.andcalendarbridge.sync.SeriesEditProfile
 import com.patmanak.proton.andcalendarbridge.sync.CreateSeriesRule
+import com.patmanak.proton.andcalendarbridge.sync.OccurrenceEditCandidate
+import com.patmanak.proton.andcalendarbridge.sync.RecurrencePoint
 import java.io.StringWriter
 import java.nio.CharBuffer
 import java.nio.charset.CodingErrorAction
@@ -38,6 +40,58 @@ internal class ProtonTimePatchException : IllegalStateException("Shared time pat
  * Framing, identity and selected text checks do not certify other properties as safe to upload.
  */
 internal object ProtonSharedTextPatcher {
+    /** Plain-text subset of Web's invite-data comparison; rich-title transformations stay held. */
+    fun isPersonalSingleOccurrence(candidate: OccurrenceEditCandidate): Boolean {
+        val before = candidate.originalContent
+        val after = candidate.content
+        fun plain(value: String) = value.replace("\r\n", "\n")
+        val oldTitle = plain(before.title); val newTitle = plain(after.title)
+        if (oldTitle != newTitle && listOf(oldTitle, newTitle).any { title -> title.any { it in "<>&" } })
+            throw ProtonPersonalPatchException()
+        fun trim(value: String) = value.trim { it in '\u0009'..'\u000d' || it in '\u2000'..'\u200a' ||
+            it in " \u00a0\u1680\u2028\u2029\u202f\u205f\u3000\ufeff" }
+        return trim(oldTitle) == trim(newTitle) && occurrenceBounds(before.time) == occurrenceBounds(after.time)
+    }
+
+    private fun occurrenceBounds(time: EventTime): Pair<Instant, Instant> = when (time) {
+        is EventTime.AllDay -> time.start.atStartOfDay(ZoneOffset.UTC).toInstant() to time.endExclusive.atStartOfDay(ZoneOffset.UTC).toInstant()
+        is EventTime.Timed -> time.start to time.end
+    }
+
+    fun patchOccurrenceAt(original: ProtonEventTextParts, candidate: OccurrenceEditCandidate,
+        timestamp: Instant): ProtonEventTextParts {
+        try {
+            isPersonalSingleOccurrence(candidate)
+            val before = candidate.master.content
+            val uid = requireNotNull(before.recurrence).uid
+            assertSeriesBase(original, uid, before)
+            val plain = seriesSource(original, CreateSeriesRule.parse(before.recurrence!!.rule!!)).first
+            val sequence = value(metadata(plain.clearShared, true, optionalModificationDates = true).getValue("SEQUENCE"))
+            require(sequence.matches(Regex("[0-9]+")))
+            val number = requireNotNull(sequence.trimStart('0').ifEmpty { "0" }.toIntOrNull())
+            require(number < Int.MAX_VALUE)
+            val changed = patchPersonal(plain, uid, before.copy(recurrence = null),
+                candidate.content.copy(recurrence = null), timestamp, allowUnchanged = true)
+            val oldTime = candidate.originalContent.time
+            val nextTime = candidate.content.time
+            val preserved = (oldTime is EventTime.AllDay) == (nextTime is EventTime.AllDay) &&
+                occurrenceBounds(oldTime) == occurrenceBounds(nextTime)
+            val nextSequence = number + if (preserved) 0 else 1
+            val sequenceBlock = metadata(changed.clearShared, true, optionalModificationDates = true).getValue("SEQUENCE")
+            val clear = changed.clearShared.replaceRange(sequenceBlock.start, sequenceBlock.end,
+                property(sequenceBlock.logical).second + ":" + nextSequence + "\r\n")
+            val originalTime = when (val point = candidate.original) {
+                is RecurrencePoint.AllDay -> EventTime.AllDay(point.date, point.date.plusDays(1))
+                is RecurrencePoint.Timed -> EventTime.Timed(point.instant,
+                    point.instant.plusSeconds(1), (before.time as EventTime.Timed).zone)
+            }
+            val recurrenceId = serializeTime(originalTime, timestamp).getValue("DTSTART").replaceFirst("DTSTART", "RECURRENCE-ID")
+            val insertion = blocks(clear).single { it.logical.equals("END:VEVENT", ignoreCase = true) }.start
+            val result = clear.substring(0, insertion) + recurrenceId + clear.substring(insertion)
+            budget(result, changed.encryptedShared)
+            return ProtonEventTextParts(result, changed.encryptedShared)
+        } catch (_: Exception) { throw ProtonPersonalPatchException() }
+    }
     /** Narrow signed calendar partition, preserving every byte except its bound DTSTAMP. */
     fun calendarPart(original: String, uid: String, sharedBefore: String? = null, sharedAfter: String? = null): String {
         try {

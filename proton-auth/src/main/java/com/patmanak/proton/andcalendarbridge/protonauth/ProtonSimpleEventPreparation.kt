@@ -134,7 +134,12 @@ internal class ProtonSimpleEventEncryptor(private val crypto: CryptoContext) {
         memberSigningKey: PrivateKey, calendarEncryptionKey: PublicKey): ProtonPreparedCreateEvent =
         encrypt(ProtonSimpleEventSerializer.serializeSeries(uid, timestamp, content, series), memberSigningKey, calendarEncryptionKey)
 
-    private fun encrypt(parts: ProtonEventTextParts, memberSigningKey: PrivateKey, calendarEncryptionKey: PublicKey): ProtonPreparedCreateEvent {
+    /** Source-preserving CREATE primitive; the caller must authenticate and qualify every input part. */
+    fun prepareParts(parts: ProtonEventTextParts, memberSigningKey: PrivateKey, calendarEncryptionKey: PublicKey,
+        calendarText: String? = null): ProtonPreparedCreateEvent = encrypt(parts, memberSigningKey, calendarEncryptionKey, calendarText)
+
+    private fun encrypt(parts: ProtonEventTextParts, memberSigningKey: PrivateKey, calendarEncryptionKey: PublicKey,
+        calendarText: String? = null): ProtonPreparedCreateEvent {
         if (!memberSigningKey.isActive || !memberSigningKey.isPrimary || !memberSigningKey.canVerify ||
             !calendarEncryptionKey.isActive || !calendarEncryptionKey.isPrimary || !calendarEncryptionKey.canEncrypt)
             throw ProtonEventPreparationException(ProtonEventPreparationFailure.KEYS)
@@ -153,6 +158,7 @@ internal class ProtonSimpleEventEncryptor(private val crypto: CryptoContext) {
                     put("SharedKeyPacket", Base64.getEncoder().encodeToString(calendarEncryptionKey.encryptSessionKey(crypto, sessionKey)))
                     put("SharedEventContent", JsonArray(listOf(part(2, parts.clearShared, parts.clearShared),
                         part(3, encrypted, parts.encryptedShared))))
+                    if (calendarText != null) put("CalendarEventContent", JsonArray(listOf(part(2, calendarText, calendarText))))
                 })
             }
         } catch (cancelled: CancellationException) { throw cancelled }
