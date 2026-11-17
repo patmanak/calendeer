@@ -18,7 +18,8 @@ import me.proton.core.user.domain.entity.*
 
 /** Real PGP/Keystore on fabricated data only. No account or transport is available. */
 object ProtonOccurrenceCreateCryptoProbe {
-    suspend fun run(timed: Boolean = false, personalOnly: Boolean = false, changeKind: Boolean = false): String {
+    suspend fun runSubmission(): String = run(submission = true)
+    suspend fun run(timed: Boolean = false, personalOnly: Boolean = false, changeKind: Boolean = false, submission: Boolean = false): String {
         val crypto = AndroidCryptoContext()
         val addressSecret = crypto.pgpCrypto.generateNewToken()
         val calendarSecret = crypto.pgpCrypto.generateNewToken()
@@ -82,6 +83,10 @@ object ProtonOccurrenceCreateCryptoProbe {
             val id = MutationId("22222222-3333-4444-5555-666666666666")
             stage = "PREPARE"
             val record = decoder.prepareOccurrenceCreate(session, intent, id, metadata, bootstrap, row, protector)
+            if (submission) {
+                ProtonOccurrenceSubmissionProbe.verify(record, intent, session, metadata, bootstrap, row, decoder, protector)
+                return "RESULT=SUCCESS"
+            }
             val opened = ProtonOccurrenceSubmissionCodec(protector).open(record, intent)
             val event = (opened.request.array("Events").single() as JsonObject).obj("Event")
             check(opened.source == row && event["IsPersonalSingleEdit"] == JsonPrimitive(personalOnly))

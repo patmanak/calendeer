@@ -2,6 +2,8 @@
 package com.patmanak.proton.andcalendarbridge.protonauth
 
 import java.io.IOException
+import java.nio.CharBuffer
+import java.nio.charset.CodingErrorAction
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.serialization.json.*
 import okhttp3.*
@@ -11,8 +13,11 @@ import okio.BufferedSink
 /** A process-local permit for one already durably admitted CREATE, not a retry/idempotency key.
  * The shared sync endpoint also accepts UPDATE/DELETE: a permit must not authorize those shapes.
  */
-internal class ProtonSingleDispatchAttempt(private val url: HttpUrl, payload: String) {
-    private val body = SingleDispatchBody(createOnlyBytes(payload))
+internal class ProtonSingleDispatchAttempt private constructor(private val url: HttpUrl, private val body: SingleDispatchBody) {
+    constructor(url: HttpUrl, payload: String) : this(url, SingleDispatchBody(createOnlyBytes(payload)))
+    companion object {
+        fun occurrence(url: HttpUrl, payload: String) = ProtonSingleDispatchAttempt(url, SingleDispatchBody(occurrenceCreateOnlyBytes(payload)))
+    }
     private val entered = AtomicBoolean()
     private val exchanged = AtomicBoolean()
 
@@ -107,6 +112,33 @@ private fun createOnlyBytes(payload: String): ByteArray {
     if (bytes.size > limit) { bytes.fill(0); throw ProtonSingleDispatchDenied() }
     return bytes
 }
+
+/** Explicit v5 validation view only; transport always retains the original bytes and personal metadata. */
+private fun occurrenceCreateOnlyBytes(payload: String): ByteArray = try {
+    require(payload.length <= 4_194_304 && UniqueJsonKeys(payload).validate())
+    val root = Json.parseToJsonElement(payload) as JsonObject
+    val operation = root.array("Events").single() as JsonObject
+    val event = operation.obj("Event")
+    val fields = setOf("Permissions", "IsOrganizer", "SharedKeyPacket", "SharedEventContent", "Notifications", "Color", "IsPersonalSingleEdit")
+    require(event.keys == fields || event.keys == fields + "CalendarEventContent")
+    require(event["IsPersonalSingleEdit"] in listOf(JsonPrimitive(true), JsonPrimitive(false)))
+    require(ProtonPersonalMetadata.valid(event["Notifications"], event["Color"]))
+    event["CalendarEventContent"]?.let { value ->
+        val part = (value as JsonArray).single() as JsonObject
+        require(part.keys == setOf("Type", "Data", "Signature", "Author") && part["Type"] == JsonPrimitive(2) && part["Author"] == JsonPrimitive(""))
+        require(part.string("Data").isNotBlank() && part.string("Signature").isNotBlank())
+    }
+    val parts = event.array("SharedEventContent").map { it as JsonObject }
+    require(parts.map { it.number("Type") }.sorted() == listOf(2L, 3L))
+    parts.forEach { require(it.keys == setOf("Type", "Data", "Signature", "Author") && it["Author"] == JsonPrimitive("") &&
+        it.string("Data").isNotBlank() && it.string("Signature").isNotBlank()) }
+    val view = JsonObject(event - setOf("IsPersonalSingleEdit", "CalendarEventContent") + ("Notifications" to JsonArray(emptyList())))
+    createOnlyBytes(JsonObject(root + ("Events" to JsonArray(listOf(JsonObject(operation + ("Event" to view)))))).toString()).fill(0)
+    val encoded = Charsets.UTF_8.newEncoder().onMalformedInput(CodingErrorAction.REPORT)
+        .onUnmappableCharacter(CodingErrorAction.REPORT).encode(CharBuffer.wrap(payload))
+    require(encoded.remaining() <= 4_194_304)
+    ByteArray(encoded.remaining()).also { encoded.get(it) }
+} catch (_: Exception) { throw ProtonSingleDispatchDenied() }
 
 private class SingleDispatchBody(private val bytes: ByteArray) : RequestBody() {
     private val written = AtomicBoolean()

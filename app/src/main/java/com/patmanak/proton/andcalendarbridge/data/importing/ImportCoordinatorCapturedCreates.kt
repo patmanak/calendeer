@@ -123,9 +123,10 @@ internal class ImportCoordinatorCapturedCreates(
                 if (selected?.enabled != true || !selected.available ||
                     store.transaction(target) { checkpoint?.format } != captured.format ||
                     captures.readSubmission(target, localId) != submission ||
+                    (submission.reservation.isOccurrence && captures.readOccurrenceContext(target, localId) != submission.reservation.intent) ||
                     !port.supportsCapturedSubmission(submission.reservation.format)) return false
-                val row = projection.inspectCapturedIntent(submission.reservation.intent)
-                return row.matches(submission.reservation.intent) && active() &&
+                val matches = projection.matchesCapturedIntent(submission.reservation.intent) && store.matchesOccurrenceSource(submission.reservation.intent)
+                return matches && active() &&
                     captures.readSubmission(target, localId) == submission &&
                     store.transaction(target) { checkpoint?.format } == captured.format
             }
@@ -171,6 +172,7 @@ internal class ImportCoordinatorCapturedCreates(
             projection.admitOperation = active
             val submission = captures.readSubmission(target, localId) ?: return@withLock CreateSubmissionObservation.Unknown
             val reserved = submission.reservation
+            fun currentAdmission() = active() && (!reserved.isOccurrence || systemCreatesEnabled(target))
             val captured = reserved.intent.reservation
             if (captured.scope != target || captured.localId != localId || captured.id != id || reserved.attempt != attempt ||
                 !port.supportsCapturedSubmission(reserved.format)) return@withLock CreateSubmissionObservation.Unknown
@@ -197,21 +199,23 @@ internal class ImportCoordinatorCapturedCreates(
             }
             val key = target to attempt
             val lease = freshCapturedSubmissions[key] ?: return@withLock CreateSubmissionObservation.Unknown
-            fun hasLease() = active() && lease.identity == wanted && lease.generation == expected && lease.policy == policy &&
+            fun hasLease() = currentAdmission() && lease.identity == wanted && lease.generation == expected && lease.policy == policy &&
                 freshCapturedSubmissions[key] == lease
             // Called from inside Proton's authentication mutex at final claim. Never call
             // currentAccount/isCurrent/qualifyCreate here; the adapter owns fresh session checks.
             suspend fun qualifyLocal(): Boolean {
+                if (reserved.isOccurrence && !systemCreatesEnabled(target)) return false
                 if (!hasLease() || !port.supportsCapturedSubmission(reserved.format) || remote.format != captured.format) return false
                 suspend fun localStateMatches(): Boolean {
                     val selected = store.selections(target.account).singleOrNull { it.scope == target }
                     return selected?.enabled == true && selected.available &&
                         store.transaction(target) { checkpoint?.format } == captured.format &&
-                        captures.readSubmission(target, localId) == submission
+                        captures.readSubmission(target, localId) == submission &&
+                        (!reserved.isOccurrence || captures.readOccurrenceContext(target, localId) == reserved.intent)
                 }
                 if (!localStateMatches()) return false
-                val row = projection.inspectCapturedIntent(reserved.intent)
-                return row.matches(reserved.intent) && localStateMatches() && hasLease() &&
+                val matches = projection.matchesCapturedIntent(reserved.intent) && store.matchesOccurrenceSource(reserved.intent)
+                return matches && localStateMatches() && hasLease() &&
                     port.supportsCapturedSubmission(reserved.format) && remote.format == captured.format
             }
             if (!qualifyLocal() || journal.pauseReason(target, attempt) != null) return@withLock CreateSubmissionObservation.Unknown
@@ -225,7 +229,7 @@ internal class ImportCoordinatorCapturedCreates(
                     // Consume after the last qualification but before the independent SQLite commit.
                     // A failed/cancelled claim cannot recover this right from a cache or a new owner.
                     if (!freshCapturedSubmissions.remove(key, lease)) return false
-                    journal.admitDispatch = { it == target && active() }
+                    journal.admitDispatch = { it == target && currentAdmission() }
                     return journal.claimCaptured(expectedWork, wanted)
                 }
             }

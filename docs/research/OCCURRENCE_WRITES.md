@@ -199,3 +199,31 @@ The result is an inactive v5 capsule. This operation has no HTTP, persistence,
 claim or sending path. Its caller must still obtain fresh authenticated context,
 qualify the complete remote/native family and recheck admission before dispatch.
 Independent family readback and native/SQL acknowledgement remain separate gates.
+
+## Inactive submission qualification
+
+An explicit occurrence reservation carries the complete retained intent through
+the existing submission store and a context-bound draft. Historical constructors,
+preparers, codecs and the original transport-permit constructor keep their strict
+refusals. Production assembly does not install the new adapter capability.
+
+Staging and final claim compare the original durable capture context, stamped
+native child and complete native family, projected/current master and absence of
+local or deferred master work. Current account, mapping, permission, editable
+consent and lease guards remain live across awaits and the independent claim
+transaction, including after its process-local right has been consumed.
+
+Authenticated preparation reuses the bounded complete UID-family verifier before
+and after crypto. Submission repeats those reads and compares source, key context
+and notification defaults, then sends the retained request through an explicit
+v5 single-use permit. Its validation view preserves the actual null notifications,
+emails and signed calendar part in the original transport bytes. The request is
+never replaced by its freshly generated comparison payload. These reads provide
+no atomic server lock against a concurrent external edit.
+
+Claim commits UNKNOWN before any transport call. Responses are protected evidence;
+both success and lost replies remain UNKNOWN at this stage. Replaying that work
+does not prepare, read fresh remote context or send again. A reservation with no
+retained payload cannot regenerate one; a retained unclaimed payload may use the
+existing explicit qualified resume policy. Independent readback, native/SQL ACK
+and worker activation remain closed pending the next steps.

@@ -31,6 +31,7 @@ internal object ProtonCreateSubmissionCodec {
     }
     fun expected(content: EventContent) = expectedContent(content, false)
     fun expected(draft: CalendarCreateDraft): JsonObject {
+        require(draft.occurrence == null) { "Occurrence requires its distinct capsule" }
         val series = draft.series ?: return expected(draft.content)
         return JsonObject(expectedContent(draft.content, true) + ("seriesRule" to JsonPrimitive(series.rule)))
     }

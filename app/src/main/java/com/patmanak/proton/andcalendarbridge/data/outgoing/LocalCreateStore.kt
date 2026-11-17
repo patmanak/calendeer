@@ -179,8 +179,10 @@ class LocalCreateStore(context: Context, name: String = "calendar-local-create-v
                 val captured = checkNotNull(read(db, scope, localId)) { "Submission capture missing" }
                 check(captured.content != null && captured.content == string("captured_content")) { "Submission snapshot differs" }
                 val intent = LocalCreateContentCodec.decodeIntent(captured.content, captured.reservation)
-                val reservation = LocalCreateSubmissionReservation(intent, MutationId(string("attempt")),
-                    AdapterFormat(string("adapter"), cursor.getInt(cursor.getColumnIndexOrThrow("version"))))
+                val attempt = MutationId(string("attempt"))
+                val format = AdapterFormat(string("adapter"), cursor.getInt(cursor.getColumnIndexOrThrow("version")))
+                val reservation = if (intent.occurrence == null) LocalCreateSubmissionReservation(intent, attempt, format)
+                    else LocalCreateSubmissionReservation.forOccurrence(intent, attempt, format)
                 val payloadIndex = cursor.getColumnIndexOrThrow("payload")
                 val payload = if (cursor.isNull(payloadIndex)) null else string("payload").also { check(it.isNotBlank()) }
                 LocalSubmissionRow(reservation, payload)

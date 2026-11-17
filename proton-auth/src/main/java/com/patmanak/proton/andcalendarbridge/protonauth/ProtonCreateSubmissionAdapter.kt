@@ -12,22 +12,30 @@ import retrofit2.http.*
 
 internal interface CreateSubmissionRemote : CreateReadbackRemote {
     suspend fun send(session: CatalogSession, calendar: String, request: JsonObject): String
+    suspend fun sendOccurrence(session: CatalogSession, calendar: String, request: JsonObject): String = throw ProtonSingleDispatchDenied()
 }
 
 internal class ProtonCreateSubmissionAdapter(private val preparations: CalendarCreatePreparationPort,
     private val protector: EventPayloadProtector, private val sessions: CatalogSessionSource,
     private val remote: CreateSubmissionRemote, private val events: EventImportRemote,
-    verifier: CreateEventVerifier) : CalendarCreateSubmissionPort {
+    verifier: CreateEventVerifier, private val occurrences: ProtonOccurrenceCreateAdapter? = null) : CalendarCreateSubmissionPort {
     override val knownEmptySubmissionFormat = KNOWN_EMPTY_SUBMISSION_FORMAT
     override val personalSubmissionFormat = PERSONAL_CREATE_SUBMISSION_FORMAT
     override val seriesSubmissionFormat = SERIES_CREATE_SUBMISSION_FORMAT
+    override val occurrenceSubmissionFormat get() = occurrences?.let { OCCURRENCE_CREATE_SUBMISSION_FORMAT }
     private val readback = ProtonCreatedEventReadback(sessions, remote, events, verifier)
-    override suspend fun prepareSubmission(draft: CalendarCreateDraft) = preparations.prepareCreate(draft)
+    override suspend fun prepareSubmission(draft: CalendarCreateDraft) = if (draft.occurrence == null) preparations.prepareCreate(draft)
+        else occurrences?.prepare(draft) ?: createUnavailable(CreatePreparationFailure.UNSUPPORTED)
     override suspend fun readCapturedExpectation(record: CreateAttemptRecord, expected: CalendarCreateDraft): EventContent? = try {
         val frozen = expected.frozen()
+        if (record.format == OCCURRENCE_CREATE_SUBMISSION_FORMAT) {
+            require(record.id == frozen.correlation && record.scope == frozen.scope)
+            ProtonOccurrenceSubmissionCodec(protector).open(record, requireNotNull(frozen.occurrence)).intent.occurrence!!.content
+        } else {
         val submission = ProtonCreateSubmissionCodec.open(record, protector)
         qualifyCaptured(record, submission, frozen)
         frozen.canonicalContent(submission.uid)
+        }
     } catch (cancelled: CancellationException) { throw cancelled }
       catch (_: Exception) { null }
 
@@ -42,6 +50,10 @@ internal class ProtonCreateSubmissionAdapter(private val preparations: CalendarC
         val stored = journal.read(record.scope, record.id) ?: createUnavailable(CreatePreparationFailure.CONTEXT)
         if (stored.format != record.format || stored.protectedPayload != record.protectedPayload)
             createUnavailable(CreatePreparationFailure.CONTEXT)
+        if (stored.format == OCCURRENCE_CREATE_SUBMISSION_FORMAT) {
+            if (stored.state == CreateAttemptState.OUTCOME_UNKNOWN) return@guarded CreateSubmissionObservation.Unknown
+            return@guarded occurrences?.submit(stored, requireNotNull(expected), journal) ?: CreateSubmissionObservation.Unknown
+        }
         if (stored.state == CreateAttemptState.OUTCOME_UNKNOWN) return@guarded inspectWithExpectation(stored, expected)
         val submission = ProtonCreateSubmissionCodec.open(stored, protector)
         qualifyCaptured(stored, submission, expected)
@@ -131,10 +143,13 @@ internal interface ProtonCreateSubmissionApi : BaseRetrofitApi {
     suspend fun event(@Path("calendar") calendar: String, @Path("event") id: String): ResponseBody
 }
 internal class ProtonCreateSubmissionRemote(private val provider: ApiProvider) : CreateSubmissionRemote {
-    override suspend fun send(session: CatalogSession, calendar: String, request: JsonObject): String {
+    override suspend fun send(session: CatalogSession, calendar: String, request: JsonObject): String = send(session, calendar, request, false)
+    override suspend fun sendOccurrence(session: CatalogSession, calendar: String, request: JsonObject): String = send(session, calendar, request, true)
+    private suspend fun send(session: CatalogSession, calendar: String, request: JsonObject, occurrence: Boolean): String {
         val url = "https://calendar-api.proton.me/".toHttpUrl().newBuilder()
             .addPathSegment("calendar").addPathSegment("v1").addPathSegment(calendar).addPathSegment("events").addPathSegment("sync").build()
-        val attempt = ProtonSingleDispatchAttempt(url, request.toString()) // Outside every Core callback.
+        val attempt = if (occurrence) ProtonSingleDispatchAttempt.occurrence(url, request.toString())
+            else ProtonSingleDispatchAttempt(url, request.toString()) // Outside every Core callback.
         return provider.get<ProtonCreateSubmissionApi>(sessionId = session.sessionId).invoke(forceNoRetryOnConnectionErrors = true) {
             create(calendar, attempt.requestBody, attempt).use(CalendarCatalogBodyReader::read)
         }.valueOrThrow

@@ -4,8 +4,14 @@ import java.time.Instant
 
 /** Stable correlation and frozen timestamp must come from a future durable outgoing intent. */
 data class CalendarCreateDraft(val scope: CalendarScope, val correlation: MutationId,
-    val timestamp: Instant, val content: EventContent, val series: CreateSeriesRule? = null) {
-    init { require(series == null || (content.recurrence == null && content.details != null && series.supports(content.time))) }
+    val timestamp: Instant, val content: EventContent, val series: CreateSeriesRule? = null,
+    val occurrence: LocalCreateIntent? = null) {
+    init {
+        require(series == null || (content.recurrence == null && content.details != null && series.supports(content.time)))
+        require(occurrence == null || (occurrence.occurrence != null && series == null &&
+            occurrence.reservation.scope == scope && occurrence.reservation.timestamp == timestamp && occurrence.content == content &&
+            correlation != occurrence.reservation.id && correlation.value != occurrence.reservation.localId.value))
+    }
     /** Own lists before the first suspension, including unsupported fields kept for validation. */
     fun frozen(): CalendarCreateDraft = copy(content = content.copy(details = content.details?.let {
         it.copy(reminders = java.util.Collections.unmodifiableList(it.reminders.toList()),
@@ -13,9 +19,12 @@ data class CalendarCreateDraft(val scope: CalendarScope, val correlation: Mutati
     }))
     override fun toString() = "CalendarCreateDraft(redacted)"
     /** Comparison reference only; the adapter binds the canonical UID before verification. */
-    fun canonicalContent(uid: String): EventContent = series?.let {
+    fun canonicalContent(uid: String): EventContent {
+        occurrence?.occurrence?.let { require(it.master.content.recurrence!!.uid == uid); return it.content }
+        return series?.let {
         content.copy(recurrence = EventRecurrence(uid, it.rule))
-    } ?: content
+        } ?: content
+    }
 }
 
 /** Opaque protected preparation, not admission to dispatch or a remote acknowledgement. */

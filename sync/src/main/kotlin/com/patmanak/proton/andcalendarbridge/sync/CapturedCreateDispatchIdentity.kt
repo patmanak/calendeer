@@ -50,7 +50,7 @@ data class CapturedCreateDispatchIdentity(
             val reserved = submission.reservation
             val captured = reserved.intent.reservation
             val record = CreateAttemptRecord(reserved.attempt, captured.scope, reserved.format, submission.protectedPayload)
-            return of(record, reserved.intent)
+            return if (reserved.isOccurrence) ofOccurrence(record, reserved.intent) else of(record, reserved.intent)
         }
 
         /** A retained link only. Does not prepare, reserve or admit a submission. */

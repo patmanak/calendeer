@@ -10,6 +10,9 @@ import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class OccurrenceCreateCryptoDeviceTest {
+    @Test fun submissionRequalifiesRealCryptoAndNeverRepeatsAnUnknownInterceptedHttpAttempt() = runBlocking {
+        assertEquals("RESULT=SUCCESS", ProtonOccurrenceCreateCryptoProbe.runSubmission())
+    }
     @Test fun titleOnlyAllDayChildPreservesItsSourceAndSequence() = runBlocking {
         assertEquals("RESULT=SUCCESS", ProtonOccurrenceCreateCryptoProbe.run())
     }

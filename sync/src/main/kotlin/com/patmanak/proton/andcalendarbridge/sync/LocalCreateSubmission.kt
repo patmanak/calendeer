@@ -11,15 +11,20 @@ data class LocalCreateSubmissionReservation(
     val intent: LocalCreateIntent,
     val attempt: MutationId,
     val format: AdapterFormat,
+    val isOccurrence: Boolean = false,
 ) {
     init {
-        require(intent.occurrence == null) { "Occurrence submission profile is not available" }
+        require(isOccurrence == (intent.occurrence != null)) { "Explicit occurrence submission profile required" }
         require(UUID.fromString(attempt.value).toString() == attempt.value)
         require(attempt != intent.reservation.id && attempt.value != intent.reservation.localId.value)
     }
     val draft: CalendarCreateDraft get() = CalendarCreateDraft(intent.reservation.scope, attempt,
-        intent.reservation.timestamp, intent.content, intent.series)
+        intent.reservation.timestamp, intent.content, intent.series, intent.takeIf { isOccurrence })
     override fun toString() = "LocalCreateSubmissionReservation(REDACTED)"
+    companion object {
+        fun forOccurrence(intent: LocalCreateIntent, attempt: MutationId, format: AdapterFormat): LocalCreateSubmissionReservation =
+            LocalCreateSubmissionReservation(intent, attempt, format, isOccurrence = true)
+    }
 }
 
 /** A separately prepared, immutable opaque submission. Still paused, with no dispatch record. */

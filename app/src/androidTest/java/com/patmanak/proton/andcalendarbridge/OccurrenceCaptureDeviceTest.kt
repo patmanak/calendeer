@@ -170,6 +170,129 @@ class OccurrenceCaptureDeviceTest {
             })) assertThrows(IllegalArgumentException::class.java) { LocalCreateContentCodec.decodeIntent(variant.toString(), reservation) }
     }
 
+    @Test fun occurrenceSubmissionReopensWithoutRearmingAndClaimsExactlyOnce() = fixture {
+        assertEquals(LocalEditCaptureResult.RETAINED, capture())
+        val intent = checkNotNull(retained())
+        val port = SubmissionPort()
+        val coordinator = coordinator()
+        val attempt = MutationId(UUID.randomUUID().toString())
+        assertEquals(LocalCreateSubmissionResult.RETAINED, coordinator.stageLocalCreateSubmission(scope, localId, id, attempt, port))
+        journal.admitCapture = { true }
+        val reopened = checkNotNull(journal.readSubmission(scope, localId))
+        assertTrue(reopened.reservation.isOccurrence); assertEquals(intent, reopened.reservation.intent)
+        // A new owner cannot borrow the staging right from the first owner.
+        assertSame(CreateSubmissionObservation.Unknown, coordinator().submitLocalCreate(scope, localId, id, attempt, port))
+        assertNull(attempts.read(scope, attempt)); assertEquals(0, port.sends)
+        val owner = coordinator()
+        val resumed = owner.resumePreparedLocalCreate(scope, localId, id, attempt, port)
+        assertEquals(LocalCreateSubmissionResult.RETAINED, resumed)
+        assertEquals(1, port.prepares); assertEquals(0, port.sends)
+        // Use the first owner with its existing fresh lease and the same database handle.
+        assertSame(CreateSubmissionObservation.Unknown, coordinator.submitLocalCreate(scope, localId, id, attempt, port))
+        assertEquals(1, port.sends)
+        assertEquals(CreateAttemptState.OUTCOME_UNKNOWN, attempts.read(scope, attempt)!!.state)
+        assertEquals(3, attempts.capturedIdentity(scope, attempt)!!.fingerprintVersion)
+        coordinator.submitLocalCreate(scope, localId, id, attempt, port)
+        assertEquals(1, port.sends); assertEquals(1, port.prepares)
+        journal.close(); journal = LocalCreateStore(context, name)
+        coordinator().submitLocalCreate(scope, localId, id, attempt, port)
+        assertEquals(1, port.sends)
+        assertEquals("1", native.rows().getValue(native.child)[Events.DIRTY])
+    }
+
+    @Test fun finalClaimRefusesNewerChildOrExtraFamilyMemberAndKeepsCapturedIntent() = fixture {
+        assertEquals(LocalEditCaptureResult.RETAINED, capture())
+        val captured = checkNotNull(retained())
+        val port = SubmissionPort(); val owner = coordinator(); val attempt = MutationId(UUID.randomUUID().toString())
+        assertEquals(LocalCreateSubmissionResult.RETAINED, owner.stageLocalCreateSubmission(scope, localId, id, attempt, port))
+        port.beforeClaim = { native.change(native.child, Events.TITLE, "Newer native edit") }
+        owner.submitLocalCreate(scope, localId, id, attempt, port)
+        assertEquals(0, port.sends); assertEquals(CreateAttemptState.PREPARED, attempts.read(scope, attempt)!!.state)
+        assertEquals(captured, retained())
+        native.change(native.child, Events.TITLE, captured.content.title)
+        native.insertChild()
+        port.beforeClaim = {}
+        owner.submitLocalCreate(scope, localId, id, attempt, port)
+        assertEquals(0, port.sends); assertEquals(CreateAttemptState.PREPARED, attempts.read(scope, attempt)!!.state)
+    }
+
+    @Test fun finalClaimRechecksRemoteMasterCacheAndEditableConsentWithoutAnEpochChange() = fixture {
+        assertEquals(LocalEditCaptureResult.RETAINED, capture())
+        val port = SubmissionPort(); val owner = coordinator(); val attempt = MutationId(UUID.randomUUID().toString())
+        assertEquals(LocalCreateSubmissionResult.RETAINED, owner.stageLocalCreateSubmission(scope, localId, id, attempt, port))
+        port.beforeClaim = { store.transaction(scope) { putRemote(native.base.copy(revision = Revision("newer"))) } }
+        owner.submitLocalCreate(scope, localId, id, attempt, port)
+        assertEquals(0, port.sends); assertEquals(CreateAttemptState.PREPARED, attempts.read(scope, attempt)!!.state)
+        store.admitTransaction = { true }; store.transaction(scope) { putRemote(native.base) }
+        port.beforeClaim = { editable = false }
+        owner.submitLocalCreate(scope, localId, id, attempt, port)
+        assertEquals(0, port.sends); assertEquals(CreateAttemptState.PREPARED, attempts.read(scope, attempt)!!.state)
+    }
+
+    @Test fun interruptedOccurrenceSubmissionReservationNeverRegeneratesAfterReopen() = fixture {
+        assertEquals(LocalEditCaptureResult.RETAINED, capture())
+        val port = SubmissionPort(); val owner = coordinator(); val attempt = MutationId(UUID.randomUUID().toString())
+        port.onPrepare = { throw java.io.IOException("Synthetic preparation interruption") }
+        assertEquals(LocalCreateSubmissionResult.UNAVAILABLE, owner.stageLocalCreateSubmission(scope, localId, id, attempt, port))
+        journal.close(); journal = LocalCreateStore(context, name)
+        port.onPrepare = {}
+        assertEquals(LocalCreateSubmissionResult.UNRESOLVED, coordinator().stageLocalCreateSubmission(scope, localId, id, attempt, port))
+        assertEquals(1, port.prepares); assertEquals(0, port.sends)
+        journal.admitCapture = { true }
+        assertTrue(journal.readSubmissionReservation(scope, localId)!!.isOccurrence)
+        assertNull(journal.readSubmission(scope, localId))
+    }
+
+    @Test fun consentRevokedDuringTheLastNativeInspectionCannotReachTheClaim() = fixture {
+        var revoke = false
+        projection = object : CalendarProjection by native.projection {
+            override suspend fun inspectStampedOccurrence(intent: LocalCreateIntent): OwnedOccurrenceEditSnapshot? {
+                val observed = native.projection.inspectStampedOccurrence(intent)
+                if (revoke) editable = false
+                return observed
+            }
+        }
+        assertEquals(LocalEditCaptureResult.RETAINED, capture())
+        val port = SubmissionPort(); val owner = coordinator(); val attempt = MutationId(UUID.randomUUID().toString())
+        assertEquals(LocalCreateSubmissionResult.RETAINED, owner.stageLocalCreateSubmission(scope, localId, id, attempt, port))
+        port.beforeClaim = { revoke = true }
+        owner.submitLocalCreate(scope, localId, id, attempt, port)
+        assertEquals(0, port.sends)
+        assertEquals(CreateAttemptState.PREPARED, attempts.read(scope, attempt)!!.state)
+    }
+
+    @Test fun missingOriginalCaptureContextCannotBeAdoptedAtTheFinalClaim() = fixture {
+        assertEquals(LocalEditCaptureResult.RETAINED, capture())
+        val port = SubmissionPort(); val owner = coordinator(); val attempt = MutationId(UUID.randomUUID().toString())
+        assertEquals(LocalCreateSubmissionResult.RETAINED, owner.stageLocalCreateSubmission(scope, localId, id, attempt, port))
+        port.beforeClaim = { journal.writableDatabase.execSQL("UPDATE local_creates SET occurrence_capture=NULL,occurrence_slot=NULL") }
+        owner.submitLocalCreate(scope, localId, id, attempt, port)
+        assertEquals(0, port.sends)
+        assertEquals(CreateAttemptState.PREPARED, attempts.read(scope, attempt)!!.state)
+    }
+
+    private class SubmissionPort : CalendarCreateSubmissionPort {
+        override val occurrenceSubmissionFormat = AdapterFormat("synthetic-occurrence-submission", 5)
+        var prepares = 0; var sends = 0
+        var onPrepare: suspend () -> Unit = {}; var beforeClaim: suspend () -> Unit = {}
+        private var frozen: CalendarCreateDraft? = null
+        override suspend fun prepareSubmission(draft: CalendarCreateDraft): PreparedCalendarCreate {
+            prepares++; frozen = draft.frozen(); onPrepare()
+            return PreparedCalendarCreate(draft.scope, occurrenceSubmissionFormat, "synthetic-retained-occurrence")
+        }
+        override suspend fun readCapturedExpectation(record: CreateAttemptRecord, expected: CalendarCreateDraft): EventContent? =
+            expected.occurrence?.occurrence?.content?.takeIf { expected == frozen && record.id == expected.correlation &&
+                record.format == occurrenceSubmissionFormat && record.protectedPayload == "synthetic-retained-occurrence" }
+        override suspend fun submit(record: CreateAttemptRecord, journal: CreateAttemptJournal): CreateSubmissionObservation = error("No generic sends")
+        override suspend fun inspect(record: CreateAttemptRecord): CreateSubmissionObservation = CreateSubmissionObservation.Unknown
+        override suspend fun submitCaptured(record: CreateAttemptRecord, expected: CalendarCreateDraft, journal: CreateAttemptJournal): CreateSubmissionObservation {
+            beforeClaim()
+            if (journal.claim(record)) sends++
+            return CreateSubmissionObservation.Unknown
+        }
+        override suspend fun inspectCaptured(record: CreateAttemptRecord, expected: CalendarCreateDraft) = CreateSubmissionObservation.Unknown
+    }
+
     private class Fixture(val context: Context, allDay: Boolean) {
         val native = OccurrenceEditProviderDeviceTest.Fixture(context, allDay)
         val scope get() = native.scope
@@ -180,11 +303,21 @@ class OccurrenceCaptureDeviceTest {
         var projection: CalendarProjection = native.projection
         var allowed = true
         val store = ImportStore(context, importName)
+        val attempts = CreateAttemptStore(context, "occurrence-dispatch-$token.db")
+        var editable = true
         private val format = AdapterFormat("occurrence-fixture", 1)
         val timestamp = Instant.parse("2030-04-01T12:00:00Z")
         val localId = LocalEventId(UUID.randomUUID().toString())
         val id = MutationId("capture-$token")
         val reservation get() = LocalCreateReservation(id, localId, scope, format, timestamp)
+        fun coordinator() = ImportCoordinatorCapturedCreates(store, object : ReadOnlyCalendarRemote {
+            override val format get() = this@Fixture.format
+            override suspend fun currentAccount() = scope.account
+            override suspend fun fetch(request: PageRequest): RemotePage = error("No import network")
+            override suspend fun dispatch(mutation: Mutation): DispatchResult = error("No generic dispatch")
+        }, projection, kotlinx.coroutines.sync.Mutex(), object : ImportScheduler {
+            override fun cancel() {}; override fun requestLocal() {}; override fun requestNetwork() {}; override fun continueWork(network: Boolean) {}
+        }, attempts, journal, { 0 }, { 0 }, { allowed }, { editable }, { allowed }, { _, _ -> allowed }, {}, { _, _, _ -> check(allowed) })
         private fun staging() = LocalCreateStaging(scope, store, projection, journal, { format }, { allowed }, { allowed }, { _, _ -> error("No outgoing lease") })
         suspend fun seed() {
             native.seed()
@@ -205,7 +338,8 @@ class OccurrenceCaptureDeviceTest {
         suspend fun retained(): LocalCreateIntent? { journal.admitCapture = { it == scope }; return journal.readIntent(scope, localId) }
         suspend fun context(): LocalCreateIntent? { journal.admitCapture = { it == scope }; return journal.readOccurrenceContext(scope, localId) }
         suspend fun close() {
-            native.close(); journal.close(); store.close(); context.deleteDatabase(name); context.deleteDatabase(importName)
+            native.close(); journal.close(); attempts.close(); store.close(); context.deleteDatabase(name); context.deleteDatabase(importName)
+            context.deleteDatabase("occurrence-dispatch-$token.db")
         }
     }
     private fun fixture(allDay: Boolean = false, block: suspend Fixture.() -> Unit) = runBlocking {

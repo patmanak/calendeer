@@ -184,22 +184,23 @@ internal class LocalCreateStaging(
             val importFormat = store.transaction(target) { checkpoint?.format }
             if (importFormat != currentFormat()) return LocalCreateSubmissionResult.UNQUALIFIED
             val intent = journal.readIntent(target, localId) ?: return LocalCreateSubmissionResult.UNQUALIFIED
-            if (intent.occurrence != null) return LocalCreateSubmissionResult.UNSUPPORTED
             val captured = intent.reservation
             if (captured.scope != target || captured.localId != localId || captured.id != id ||
                 captured.format != importFormat || captured.markerProtocol != 1) return LocalCreateSubmissionResult.UNQUALIFIED
-            val submissionFormat = port.capturedSubmissionFormat(intent.content, intent.series) ?: return LocalCreateSubmissionResult.UNSUPPORTED
-            val reservation = try { LocalCreateSubmissionReservation(intent, attempt, submissionFormat) }
+            val submissionFormat = port.capturedSubmissionFormat(intent) ?: return LocalCreateSubmissionResult.UNSUPPORTED
+            val reservation = try { if (intent.occurrence == null) LocalCreateSubmissionReservation(intent, attempt, submissionFormat)
+                else LocalCreateSubmissionReservation.forOccurrence(intent, attempt, submissionFormat) }
                 catch (_: IllegalArgumentException) { return LocalCreateSubmissionResult.UNQUALIFIED }
 
             suspend fun qualify(): LocalCreateSubmissionResult? {
                 admission()?.let { return it }
-                if (port.capturedSubmissionFormat(intent.content, intent.series) != submissionFormat || currentFormat() != importFormat ||
+                if (port.capturedSubmissionFormat(intent) != submissionFormat || currentFormat() != importFormat ||
                     store.transaction(target) { checkpoint?.format } != importFormat) return LocalCreateSubmissionResult.UNQUALIFIED
-                if (!projection.inspectCapturedIntent(intent).matches(intent)) return LocalCreateSubmissionResult.UNQUALIFIED
+                if (intent.occurrence != null && journal.readOccurrenceContext(target, localId) != intent) return LocalCreateSubmissionResult.UNQUALIFIED
+                if (!projection.matchesCapturedIntent(intent) || !store.matchesOccurrenceSource(intent)) return LocalCreateSubmissionResult.UNQUALIFIED
                 // Provider inspection and SQLite are separate. Recheck app state after every external await.
                 admission()?.let { return it }
-                if (port.capturedSubmissionFormat(intent.content, intent.series) != submissionFormat || currentFormat() != importFormat ||
+                if (port.capturedSubmissionFormat(intent) != submissionFormat || currentFormat() != importFormat ||
                     store.transaction(target) { checkpoint?.format } != importFormat) return LocalCreateSubmissionResult.UNQUALIFIED
                 if (!active()) return LocalCreateSubmissionResult.INACTIVE
                 return null

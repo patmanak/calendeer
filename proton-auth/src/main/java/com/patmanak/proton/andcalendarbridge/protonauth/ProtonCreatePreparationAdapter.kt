@@ -38,6 +38,7 @@ internal class ProtonCreatePreparationAdapter(private val sessions: CatalogSessi
       catch (_: Exception) { createUnavailable(CreatePreparationFailure.CONTEXT) }
 
     private suspend fun prepareFrozen(draft: CalendarCreateDraft): PreparedCalendarCreate = try {
+        if (draft.occurrence != null) createUnavailable(CreatePreparationFailure.UNSUPPORTED)
         if (!ProtonEventColourPolicy.accepts(draft.content.colorRgb))
             createUnavailable(CreatePreparationFailure.UNSUPPORTED)
         val series = draft.series

@@ -12,6 +12,17 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class ProtonCreatePreparationAdapterTest {
+    @Test fun historicalPreparerRefusesOccurrenceContextBeforeAnyRead() = runTest {
+        val content = EventContent("Master", EventTime.AllDay(LocalDate.parse("2030-04-01"), LocalDate.parse("2030-04-02")), details = EventDetails())
+        val master = RemoteChange.Upsert(EventId("master"), Revision("revision"), content.copy(recurrence = EventRecurrence("master@calendeer.invalid", "FREQ=DAILY;COUNT=5")))
+        val child = content.copy(title = "Edited")
+        val intent = LocalCreateIntent(LocalCreateReservation(MutationId("capture"), LocalEventId("11111111-2222-3333-4444-555555555555"),
+            draft.scope, EVENT_FORMAT, draft.timestamp), child,
+            occurrence = OccurrenceEditCandidate(master, RecurrencePoint.AllDay(LocalDate.parse("2030-04-02")), child))
+        val occurrence = draft.copy(content = child, occurrence = intent)
+        refused(CreatePreparationFailure.UNSUPPORTED) { adapter().prepareCreate(occurrence) }
+        assertTrue(steps.isEmpty()); assertEquals(0, sessionReads); assertNull(sealed)
+    }
     @Test fun freshSimpleCreateRefusesOffPaletteColourBeforeReadingContext() = runTest {
         val original = draft.copy(content = draft.content.copy(details = EventDetails(), colorRgb = 0x7868e6))
         refused(CreatePreparationFailure.UNSUPPORTED) { adapter().prepareCreate(original) }
