@@ -117,8 +117,8 @@ internal class ProtonPersonalUpdateSubmissionAdapter(
             var response: String? = null
             try {
                 response = if (frozen.preparation.isSeries)
-                    (remote as SeriesUpdateSubmissionRemote).sendSeries(session, frozen.scope.calendar.value, request.request)
-                else remote.send(session, frozen.scope.calendar.value, request.request)
+                    (remote as SeriesUpdateSubmissionRemote).sendSeries(session, frozen.scope.calendar.value, request.request) { lease.allows(frozen.scope) }
+                else remote.send(session, frozen.scope.calendar.value, request.request) { lease.allows(frozen.scope) }
             }
             catch (cancelled: CancellationException) { throw cancelled }
             catch (_: Exception) { operation.ensureActive() }

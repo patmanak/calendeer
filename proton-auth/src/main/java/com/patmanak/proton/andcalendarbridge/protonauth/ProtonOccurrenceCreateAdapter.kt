@@ -61,9 +61,11 @@ internal class ProtonOccurrenceCreateAdapter(private val sessions: CatalogSessio
         require(original.context == fresh.context && original.source == fresh.source && original.notificationDefaults == fresh.notificationDefaults)
         checkSession(session)
         var response: String? = null
+        val allowsTransport = currentCreateTransportGuard(journal, record.scope)
         val admitted = CreateAttemptAdmission(journal).dispatch(stored) {
             checkSession(session)
-            response = remote.sendOccurrence(session, record.scope.calendar.value, original.request)
+            if (!allowsTransport()) throw ProtonSingleDispatchDenied()
+            response = remote.sendOccurrence(session, record.scope.calendar.value, original.request, allowsTransport)
         }
         if (!admitted) return@guarded CreateSubmissionObservation.Unknown
         response?.let { body ->

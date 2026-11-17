@@ -394,7 +394,7 @@ object ProtonEventPreparationCryptoProbe {
                     val dispatch = if (dispatchSeries || nativeJourney != null) ProtonSeriesCreateDispatchProbe(
                         CreateAttemptRecord(draft.correlation, scope, prepared.format, prepared.protectedPayload), lostResponse = index == 1) else null
                     val readRemote = object : CreateSubmissionRemote {
-                        override suspend fun send(actual: CatalogSession, actualCalendar: String, request: JsonObject): String {
+                        override suspend fun send(actual: CatalogSession, actualCalendar: String, request: JsonObject, allowsTransport: () -> Boolean): String {
                             check(actual == session && actualCalendar == calendar)
                             if (nativeJourney != null) {
                                 nativeJourney.beforeSend(draft)
@@ -405,7 +405,7 @@ object ProtonEventPreparationCryptoProbe {
                                     "Notifications" to sent.getValue("Notifications"), "Color" to sent.getValue("Color")))
                                 readRow = row
                             }
-                            return (dispatch ?: error("Native UNKNOWN readback must never dispatch")).send(request, callerClaimed = nativeJourney != null)
+                            return (dispatch ?: error("Native UNKNOWN readback must never dispatch")).send(request, nativeJourney != null, allowsTransport)
                         }
                         override suspend fun byUid(actual: CatalogSession, actualCalendar: String, expectedUid: String, page: Int): List<JsonObject> {
                             check(actual == session && actualCalendar == calendar && expectedUid == uid && page == 0)

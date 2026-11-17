@@ -168,7 +168,7 @@ class ProtonOwnerQualifiedTitleSubmissionTest {
                 f.contextStages.forEach { checkpoint(); f.step(it); checkpoint() }
                 f.freshContext
             }, object : TitleUpdateSubmissionRemote {
-                override suspend fun send(session: CatalogSession, calendar: String, request: JsonObject): String {
+                override suspend fun send(session: CatalogSession, calendar: String, request: JsonObject, allowsTransport: () -> Boolean): String {
                     assertEquals(TitleUpdateAttemptState.OUTCOME_UNKNOWN, f.journal.stored.state)
                     f.sends++; f.step("send"); f.sendFailure?.let { throw it }
                     return "{\"Code\":1001}"

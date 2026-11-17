@@ -51,6 +51,7 @@ class CreateAttemptStore(context: Context, name: String = "calendar-create-attem
     private val lock = Mutex()
     @Volatile var admitAssociation: (CalendarScope) -> Boolean = { true }
     @Volatile var admitDispatch: (CalendarScope) -> Boolean = { true }
+    override fun allowsTransport(scope: CalendarScope) = admitDispatch(scope)
 
     override fun onConfigure(db: SQLiteDatabase) {
         // Admission must return only after SQLite has durably recorded uncertainty.

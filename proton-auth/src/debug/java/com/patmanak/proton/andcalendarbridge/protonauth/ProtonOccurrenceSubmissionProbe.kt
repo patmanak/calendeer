@@ -30,9 +30,9 @@ internal object ProtonOccurrenceSubmissionProbe {
                 val remote = object : CreateSubmissionRemote {
                     override suspend fun event(session: CatalogSession, calendar: String, id: String): JsonObject { reads++; check(id == intent.occurrence!!.master.eventId.value); return row }
                     override suspend fun byUid(session: CatalogSession, calendar: String, uid: String, page: Int): List<JsonObject> { reads++; check(page == 0 && uid == row.string("UID")); return listOf(row) }
-                    override suspend fun send(session: CatalogSession, calendar: String, request: JsonObject): String = error("No historical sender")
-                    override suspend fun sendOccurrence(session: CatalogSession, calendar: String, request: JsonObject): String {
-                        val permit = ProtonSingleDispatchAttempt.occurrence("https://calendeer.invalid/calendar/v1/synthetic/events/sync".toHttpUrl(), request.toString())
+                    override suspend fun send(session: CatalogSession, calendar: String, request: JsonObject, allowsTransport: () -> Boolean): String = error("No historical sender")
+                    override suspend fun sendOccurrence(session: CatalogSession, calendar: String, request: JsonObject, allowsTransport: () -> Boolean): String {
+                        val permit = ProtonSingleDispatchAttempt.occurrence("https://calendeer.invalid/calendar/v1/synthetic/events/sync".toHttpUrl(), request.toString(), allowsTransport)
                         return client.newCall(permit.request()).execute().use { it.body!!.string() }
                     }
                 }
@@ -48,6 +48,7 @@ internal object ProtonOccurrenceSubmissionProbe {
                 val journal = object : CreateAttemptJournal {
                     override suspend fun remember(record: CreateAttemptRecord) { check(stored == record) }
                     override suspend fun read(scope: CalendarScope, id: MutationId) = stored.takeIf { it.scope == scope && it.id == id }
+                    override fun allowsTransport(scope: CalendarScope) = scope == stored.scope
                     override suspend fun claim(expected: CreateAttemptRecord): Boolean {
                         if (stored != expected || stored.state != CreateAttemptState.PREPARED) return false
                         stored = stored.copy(state = CreateAttemptState.OUTCOME_UNKNOWN); return true

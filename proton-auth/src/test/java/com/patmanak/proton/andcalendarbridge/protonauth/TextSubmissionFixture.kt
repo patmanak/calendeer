@@ -76,7 +76,7 @@ internal class TextSubmissionFixture(timed: Boolean = false) {
         assertEquals(initial, session); assertEquals(scope, actualScope)
         retainedCheckpoint = checkpoint; checkpoint(); step("context"); checkpoint(); freshContext
     }, object : TitleUpdateSubmissionRemote {
-        override suspend fun send(session: CatalogSession, calendar: String, request: JsonObject): String {
+        override suspend fun send(session: CatalogSession, calendar: String, request: JsonObject, allowsTransport: () -> Boolean): String {
             assertEquals(initial, session); assertEquals(scope.calendar.value, calendar)
             assertEquals(TextUpdateAttemptState.OUTCOME_UNKNOWN, journal.stored?.state)
             val saved = requireNotNull(journal.stored)

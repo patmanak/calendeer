@@ -22,6 +22,22 @@ class ProtonSingleDispatchTest {
         assertEquals(2, server.requestCount)
     }
 
+    @Test fun revokingEditAccessAfterEntryStopsTheFirstHttpRequest() = server { server ->
+        server.enqueue(MockResponse().setBody("unexpected"))
+        var editable = true
+        val client = guarded().newBuilder().addInterceptor { chain ->
+            editable = false
+            chain.proceed(chain.request())
+        }.build()
+        val attempt = ProtonSingleDispatchAttempt(server.url("/calendar/v1/synthetic/events/sync"), singleCreateFixture) { editable }
+        denied { client.newCall(attempt.request()).execute().close() }
+        assertFalse(editable)
+        assertEquals(0, server.requestCount)
+        editable = true
+        denied { guarded().newCall(attempt.request()).execute().close() }
+        assertEquals(0, server.requestCount)
+    }
+
     @Test fun create503IsNeverRepeated() = server { server ->
         server.enqueue(MockResponse().setResponseCode(503).addHeader("Retry-After", "0"))
         server.enqueue(MockResponse().setBody("must not be reached"))

@@ -111,6 +111,27 @@ class ProtonCreateSubmissionAdapterTest {
         }
     }
 
+    @Test fun readOnlyDuringPostClaimSessionCheckPreventsCreateWithoutRearming() = runTest {
+        val f = CreateSubmissionFixture()
+        var editable = true
+        val journal = object : CreateAttemptJournal by f.journal {
+            override fun allowsTransport(scope: CalendarScope) = editable && scope == f.scope
+        }
+        f.onSessionRead = {
+            if (f.journal.stored?.state == CreateAttemptState.OUTCOME_UNKNOWN) editable = false
+        }
+        f.adapter.submit(f.record, journal)
+        assertFalse(editable)
+        assertEquals(0, f.sends)
+        assertEquals(f.initial, f.current)
+        assertEquals(f.record.copy(state = CreateAttemptState.OUTCOME_UNKNOWN), f.journal.stored)
+        f.onSessionRead = {}
+        editable = true
+        f.adapter.submit(f.record, journal)
+        assertEquals(0, f.sends)
+        assertEquals(1, f.prepares)
+    }
+
     @Test fun sessionReplacementDuringDurableClaimPreservesUnknownWithoutSending() = runTest {
         val f = CreateSubmissionFixture()
         f.after = { if (it == "claim") f.current = f.initial.copy(sessionId = SessionId("replacement-session")) }
@@ -239,6 +260,7 @@ internal class CreateSubmissionFixture(content: EventContent? = null, val series
     val journal = MemoryCreateJournal(record, ::step)
     val initial = CatalogSession(UserId(scope.account.value), SessionId("synthetic-session"))
     var current: CatalogSession? = initial
+    var onSessionRead: () -> Unit = {}
     var sends = 0
     var prepares = 0
     var sendFailure: Exception? = null
@@ -253,8 +275,8 @@ internal class CreateSubmissionFixture(content: EventContent? = null, val series
     val adapter = ProtonCreateSubmissionAdapter(CalendarCreatePreparationPort { requestedDraft ->
         assertEquals(draft, requestedDraft); prepares++; step("prepare")
         PreparedCalendarCreate(scope, freshFormat, protector.seal(envelope(freshContext, expectedDraft = freshDraft, envelopeFormat = freshFormat).toString()))
-    }, protector, CatalogSessionSource { current }, object : CreateSubmissionRemote {
-        override suspend fun send(session: CatalogSession, calendar: String, request: JsonObject): String {
+    }, protector, CatalogSessionSource { onSessionRead(); current }, object : CreateSubmissionRemote {
+        override suspend fun send(session: CatalogSession, calendar: String, request: JsonObject, allowsTransport: () -> Boolean): String {
             assertEquals(CreateAttemptState.OUTCOME_UNKNOWN, journal.stored!!.state)
             assertEquals(initial, session); assertEquals(scope.calendar.value, calendar)
             assertEquals(ProtonCreateSubmissionCodec.request(context.string("member"), fragment), request)
@@ -279,6 +301,7 @@ internal class CreateSubmissionFixture(content: EventContent? = null, val series
 internal class MemoryCreateJournal(initial: CreateAttemptRecord, private val step: (String) -> Unit) : CreateAttemptJournal {
     var stored: CreateAttemptRecord? = initial
     var claimFailure: Exception? = null
+    override fun allowsTransport(scope: CalendarScope) = stored?.scope == scope
     override suspend fun remember(record: CreateAttemptRecord) {
         require(record.state == CreateAttemptState.PREPARED && record.protectedEvidence == null)
         val previous = stored

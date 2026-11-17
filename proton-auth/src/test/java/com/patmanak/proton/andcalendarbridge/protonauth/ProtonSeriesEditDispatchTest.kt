@@ -20,6 +20,31 @@ class ProtonSeriesEditDispatchTest {
         return JsonObject(root + ("Events" to JsonArray(listOf(JsonObject(operation +
             ("Event" to JsonObject(operation.obj("Event") + ("IsBreakingChange" to bit)))))))).toString()
     }
+    @Test fun revokingPushBeforeExchangePreventsPersonalSeriesAndDeleteRequests() = server { server ->
+        val url = server.url("/calendar/v1/synthetic/events/sync")
+        var automatic = true
+        val allowed = { automatic }
+        val requests = listOf(
+            ProtonPersonalEditV2DispatchAttempt(url, payload(JsonPrimitive(0)), allowed).request(),
+            ProtonSeriesEditV3DispatchAttempt(url, payload(), allowed).request(),
+            ProtonDeleteDispatchAttempt(url, """{"MemberID":"member","Events":[{"ID":"event","DeletionReason":0}]}""", allowed).request(),
+        )
+        val client = OkHttpClient.Builder().withSingleDispatchGuards().addInterceptor { chain ->
+            automatic = false
+            chain.proceed(chain.request())
+        }.build()
+        for (request in requests) {
+            automatic = true
+            server.enqueue(MockResponse().setBody("unexpected"))
+            try {
+                client.newCall(request).execute().close()
+                fail("Write reached the server after revocation")
+            } catch (_: ProtonSingleDispatchDenied) { }
+            assertFalse(automatic)
+            assertEquals(0, server.requestCount)
+        }
+    }
+
     @Test fun acceptsBothIntegerBitsAndPreservesOriginalUtf8Bytes() {
         for (bit in 0..1) {
             val original = " \n" + payload(JsonPrimitive(bit)) + "\t "

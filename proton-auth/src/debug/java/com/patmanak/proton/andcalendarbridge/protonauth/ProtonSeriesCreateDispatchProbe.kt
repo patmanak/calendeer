@@ -37,9 +37,9 @@ internal class ProtonSeriesCreateDispatchProbe(initial: CreateAttemptRecord, pri
     }.build()
 
     fun expose() { visible = true }
-    fun send(request: JsonObject, callerClaimed: Boolean = false): String {
+    fun send(request: JsonObject, callerClaimed: Boolean, allowsTransport: () -> Boolean): String {
         check(callerClaimed || stored.state == CreateAttemptState.OUTCOME_UNKNOWN)
-        val attempt = ProtonSingleDispatchAttempt("https://calendeer.invalid/calendar/v1/synthetic/events/sync".toHttpUrl(), request.toString())
+        val attempt = ProtonSingleDispatchAttempt("https://calendeer.invalid/calendar/v1/synthetic/events/sync".toHttpUrl(), request.toString(), allowsTransport)
         return client.newCall(attempt.request()).execute().use { it.body!!.string() }
     }
     suspend fun qualify(adapter: CalendarCreateSubmissionPort, draft: CalendarCreateDraft) {
@@ -53,6 +53,7 @@ internal class ProtonSeriesCreateDispatchProbe(initial: CreateAttemptRecord, pri
         check(sends == 1)
     }
     override suspend fun remember(record: CreateAttemptRecord) { check(record == stored) }
+    override fun allowsTransport(scope: CalendarScope) = scope == stored.scope
     override suspend fun read(scope: CalendarScope, id: MutationId) = stored.takeIf { it.scope == scope && it.id == id }
     override suspend fun claim(expected: CreateAttemptRecord): Boolean {
         if (stored != expected || stored.state != CreateAttemptState.PREPARED) return false

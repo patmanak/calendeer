@@ -83,7 +83,7 @@ internal class ProtonDeleteSubmissionAdapter(
             checkpoint()
             val unknown = frozen.copy(state = DeleteAttemptState.OUTCOME_UNKNOWN)
             var response: String? = null
-            try { response = remote.send(session, frozen.scope.calendar.value, request.request) }
+            try { response = remote.send(session, frozen.scope.calendar.value, request.request) { lease.allows(frozen.scope) } }
             catch (cancelled: CancellationException) { throw cancelled }
             catch (_: Exception) { operation.ensureActive() }
             operation.ensureActive(); evidenceLease.check()

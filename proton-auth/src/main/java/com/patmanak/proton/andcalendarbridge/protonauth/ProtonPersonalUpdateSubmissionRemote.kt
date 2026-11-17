@@ -11,7 +11,7 @@ import retrofit2.http.*
 
 /** Typed series transport; an ordinary personal-v2 sender cannot admit series requests. */
 internal interface SeriesUpdateSubmissionRemote : TitleUpdateSubmissionRemote {
-    suspend fun sendSeries(session: CatalogSession, calendar: String, request: JsonObject): String
+    suspend fun sendSeries(session: CatalogSession, calendar: String, request: JsonObject, allowsTransport: () -> Boolean): String
 }
 
 internal interface ProtonPersonalUpdateSubmissionApi : BaseRetrofitApi {
@@ -23,19 +23,19 @@ internal interface ProtonPersonalUpdateSubmissionApi : BaseRetrofitApi {
     suspend fun event(@Path("calendar") calendar: String, @Path("event") event: String): ResponseBody
 }
 internal class ProtonPersonalUpdateSubmissionRemote(private val provider: ApiProvider) : SeriesUpdateSubmissionRemote {
-    override suspend fun send(session: CatalogSession, calendar: String, request: JsonObject): String {
+    override suspend fun send(session: CatalogSession, calendar: String, request: JsonObject, allowsTransport: () -> Boolean): String {
         val url = "https://calendar-api.proton.me/".toHttpUrl().newBuilder().addPathSegment("calendar").addPathSegment("v1")
             .addPathSegment(calendar).addPathSegment("events").addPathSegment("sync").build()
-        val attempt = ProtonPersonalEditV2DispatchAttempt(url, request.toString())
+        val attempt = ProtonPersonalEditV2DispatchAttempt(url, request.toString(), allowsTransport)
         return provider.get<ProtonPersonalUpdateSubmissionApi>(sessionId = session.sessionId).invoke(forceNoRetryOnConnectionErrors = true) {
             val response = update(calendar, attempt.requestBody, attempt)
             (response.body() ?: response.errorBody())?.use(CalendarCatalogBodyReader::read) ?: ""
         }.valueOrThrow
     }
-    override suspend fun sendSeries(session: CatalogSession, calendar: String, request: JsonObject): String {
+    override suspend fun sendSeries(session: CatalogSession, calendar: String, request: JsonObject, allowsTransport: () -> Boolean): String {
         val url = "https://calendar-api.proton.me/".toHttpUrl().newBuilder().addPathSegment("calendar").addPathSegment("v1")
             .addPathSegment(calendar).addPathSegment("events").addPathSegment("sync").build()
-        val attempt = ProtonSeriesEditV3DispatchAttempt(url, request.toString())
+        val attempt = ProtonSeriesEditV3DispatchAttempt(url, request.toString(), allowsTransport)
         return provider.get<ProtonPersonalUpdateSubmissionApi>(sessionId = session.sessionId).invoke(forceNoRetryOnConnectionErrors = true) {
             val response = updateSeries(calendar, attempt.requestBody, attempt)
             (response.body() ?: response.errorBody())?.use(CalendarCatalogBodyReader::read) ?: ""

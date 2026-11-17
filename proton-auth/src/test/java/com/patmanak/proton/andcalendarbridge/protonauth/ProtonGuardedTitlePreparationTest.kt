@@ -157,7 +157,7 @@ class ProtonGuardedTitlePreparationTest {
                 stages.forEach { checkpoint(); f.step(it); checkpoint() }
                 f.freshContext
             }, object : TitleUpdateSubmissionRemote {
-                override suspend fun send(session: CatalogSession, calendar: String, request: JsonObject): String = error("No dispatch")
+                override suspend fun send(session: CatalogSession, calendar: String, request: JsonObject, allowsTransport: () -> Boolean): String = error("No dispatch")
                 override suspend fun event(session: CatalogSession, calendar: String, id: String): JsonObject = error("No readback")
             }, object : EventImportRemote {
                 override suspend fun page(session: CatalogSession, calendar: String, window: EventWindow): EncryptedEventPage = error("No search")

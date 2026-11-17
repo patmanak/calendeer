@@ -151,10 +151,10 @@ class ProtonSeriesUpdateSubmissionTest {
             }
         }
         val typed = object : SeriesUpdateSubmissionRemote {
-            override suspend fun send(session: CatalogSession, calendar: String, request: JsonObject): String {
+            override suspend fun send(session: CatalogSession, calendar: String, request: JsonObject, allowsTransport: () -> Boolean): String {
                 step("sendPersonal"); error("Wrong transport")
             }
-            override suspend fun sendSeries(session: CatalogSession, calendar: String, request: JsonObject): String {
+            override suspend fun sendSeries(session: CatalogSession, calendar: String, request: JsonObject, allowsTransport: () -> Boolean): String {
                 step("sendSeries"); check(retained!!.state == PersonalUpdateAttemptState.OUTCOME_UNKNOWN)
                 if (loseResponse) throw java.io.IOException("synthetic")
                 return "{\"Code\":1001}"
@@ -162,7 +162,7 @@ class ProtonSeriesUpdateSubmissionTest {
             override suspend fun event(session: CatalogSession, calendar: String, id: String): JsonObject { step("get"); return row }
         }
         val remote: TitleUpdateSubmissionRemote = if (typedRemote) typed else object : TitleUpdateSubmissionRemote {
-            override suspend fun send(session: CatalogSession, calendar: String, request: JsonObject): String = typed.send(session, calendar, request)
+            override suspend fun send(session: CatalogSession, calendar: String, request: JsonObject, allowsTransport: () -> Boolean): String = typed.send(session, calendar, request, allowsTransport)
             override suspend fun event(session: CatalogSession, calendar: String, id: String): JsonObject = typed.event(session, calendar, id)
         }
         val adapter = ProtonPersonalUpdateSubmissionAdapter(preparations, p.protector, { p.initial },

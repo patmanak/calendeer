@@ -10,13 +10,18 @@ import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaType
 import okio.BufferedSink
 
+internal fun transportAllowed(check: () -> Boolean): Boolean = try { check() } catch (_: Exception) { false }
+
 /** A process-local permit for one already durably admitted CREATE, not a retry/idempotency key.
  * The shared sync endpoint also accepts UPDATE/DELETE: a permit must not authorize those shapes.
  */
-internal class ProtonSingleDispatchAttempt private constructor(private val url: HttpUrl, private val body: SingleDispatchBody) {
-    constructor(url: HttpUrl, payload: String) : this(url, SingleDispatchBody(createOnlyBytes(payload)))
+internal class ProtonSingleDispatchAttempt private constructor(private val url: HttpUrl, private val body: SingleDispatchBody,
+    private val allowsTransport: () -> Boolean) {
+    constructor(url: HttpUrl, payload: String, allowsTransport: () -> Boolean = { true }) :
+        this(url, SingleDispatchBody(createOnlyBytes(payload)), allowsTransport)
     companion object {
-        fun occurrence(url: HttpUrl, payload: String) = ProtonSingleDispatchAttempt(url, SingleDispatchBody(occurrenceCreateOnlyBytes(payload)))
+        fun occurrence(url: HttpUrl, payload: String, allowsTransport: () -> Boolean = { true }) =
+            ProtonSingleDispatchAttempt(url, SingleDispatchBody(occurrenceCreateOnlyBytes(payload)), allowsTransport)
     }
     private val entered = AtomicBoolean()
     private val exchanged = AtomicBoolean()
@@ -25,14 +30,15 @@ internal class ProtonSingleDispatchAttempt private constructor(private val url: 
     val requestBody: RequestBody get() = body
     fun request(): Request = Request.Builder().url(url).put(body)
         .tag(ProtonSingleDispatchAttempt::class.java, this).build()
-    internal fun enter(request: Request): Boolean = matches(request) && entered.compareAndSet(false, true)
-    internal fun exchange(request: Request): Boolean = matches(request) && entered.get() && exchanged.compareAndSet(false, true)
+    internal fun enter(request: Request): Boolean = matches(request) && entered.compareAndSet(false, true) && transportAllowed(allowsTransport)
+    internal fun exchange(request: Request): Boolean = matches(request) && entered.get() && exchanged.compareAndSet(false, true) && transportAllowed(allowsTransport)
     private fun matches(request: Request) = request.method == "PUT" && request.url == url && request.body === body && body.isOneShot()
     override fun toString() = "ProtonSingleDispatchAttempt(redacted)"
 }
 
 /** Distinct permit: a CREATE tag can never authorize an existing-event UPDATE (or vice versa). */
-internal class ProtonTitleUpdateDispatchAttempt(private val url: HttpUrl, payload: String) {
+internal class ProtonTitleUpdateDispatchAttempt(private val url: HttpUrl, payload: String,
+    private val allowsTransport: () -> Boolean = { true }) {
     private val body = SingleDispatchBody(titleUpdateOnlyBytes(payload))
     private val entered = AtomicBoolean()
     private val exchanged = AtomicBoolean()
@@ -40,13 +46,14 @@ internal class ProtonTitleUpdateDispatchAttempt(private val url: HttpUrl, payloa
     val requestBody: RequestBody get() = body
     fun request(): Request = Request.Builder().url(url).put(body)
         .tag(ProtonTitleUpdateDispatchAttempt::class.java, this).build()
-    internal fun enter(request: Request) = matches(request) && entered.compareAndSet(false, true)
-    internal fun exchange(request: Request) = matches(request) && entered.get() && exchanged.compareAndSet(false, true)
+    internal fun enter(request: Request) = matches(request) && entered.compareAndSet(false, true) && transportAllowed(allowsTransport)
+    internal fun exchange(request: Request) = matches(request) && entered.get() && exchanged.compareAndSet(false, true) && transportAllowed(allowsTransport)
     private fun matches(request: Request) = request.method == "PUT" && request.url == url && request.body === body && body.isOneShot()
     override fun toString() = "ProtonTitleUpdateDispatchAttempt(redacted)"
 }
 
-internal class ProtonPersonalEditV2DispatchAttempt(private val url: HttpUrl, payload: String) {
+internal class ProtonPersonalEditV2DispatchAttempt(private val url: HttpUrl, payload: String,
+    private val allowsTransport: () -> Boolean = { true }) {
     private val body = SingleDispatchBody(personalEventUpdateOnlyBytes(payload))
     private val entered = AtomicBoolean()
     private val exchanged = AtomicBoolean()
@@ -54,14 +61,15 @@ internal class ProtonPersonalEditV2DispatchAttempt(private val url: HttpUrl, pay
     val requestBody: RequestBody get() = body
     fun request(): Request = Request.Builder().url(url).put(body)
         .tag(ProtonPersonalEditV2DispatchAttempt::class.java, this).build()
-    internal fun enter(request: Request) = matches(request) && entered.compareAndSet(false, true)
-    internal fun exchange(request: Request) = matches(request) && entered.get() && exchanged.compareAndSet(false, true)
+    internal fun enter(request: Request) = matches(request) && entered.compareAndSet(false, true) && transportAllowed(allowsTransport)
+    internal fun exchange(request: Request) = matches(request) && entered.get() && exchanged.compareAndSet(false, true) && transportAllowed(allowsTransport)
     private fun matches(request: Request) = request.method == "PUT" && request.url == url && request.body === body && body.isOneShot()
     override fun toString() = "ProtonPersonalEditV2DispatchAttempt(redacted)"
 }
 
 /** Separate permit for a durably admitted series edit; never interchangeable with v2. */
-internal class ProtonSeriesEditV3DispatchAttempt(private val url: HttpUrl, payload: String) {
+internal class ProtonSeriesEditV3DispatchAttempt(private val url: HttpUrl, payload: String,
+    private val allowsTransport: () -> Boolean = { true }) {
     private val body = SingleDispatchBody(seriesEventUpdateOnlyBytes(payload))
     private val entered = AtomicBoolean()
     private val exchanged = AtomicBoolean()
@@ -69,8 +77,8 @@ internal class ProtonSeriesEditV3DispatchAttempt(private val url: HttpUrl, paylo
     val requestBody: RequestBody get() = body
     fun request(): Request = Request.Builder().url(url).put(body)
         .tag(ProtonSeriesEditV3DispatchAttempt::class.java, this).build()
-    internal fun enter(request: Request) = matches(request) && entered.compareAndSet(false, true)
-    internal fun exchange(request: Request) = matches(request) && entered.get() && exchanged.compareAndSet(false, true)
+    internal fun enter(request: Request) = matches(request) && entered.compareAndSet(false, true) && transportAllowed(allowsTransport)
+    internal fun exchange(request: Request) = matches(request) && entered.get() && exchanged.compareAndSet(false, true) && transportAllowed(allowsTransport)
     private fun matches(request: Request) = request.method == "PUT" && request.url == url && request.body === body && body.isOneShot()
     override fun toString() = "ProtonSeriesEditV3DispatchAttempt(redacted)"
 }

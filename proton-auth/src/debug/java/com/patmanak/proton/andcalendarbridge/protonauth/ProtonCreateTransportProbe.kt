@@ -40,10 +40,10 @@ object ProtonCreateTransportProbe {
             check()
             val remote = field(adapter, "remote") as CreateSubmissionRemote
             val observed = object : CreateSubmissionRemote by remote {
-                override suspend fun send(session: CatalogSession, calendar: String, request: JsonObject): String {
+                override suspend fun send(session: CatalogSession, calendar: String, request: JsonObject, allowsTransport: () -> Boolean): String {
                     check()
                     return try {
-                        remote.send(session, calendar, request).also { retainCategory("COMPLETE_RESPONSE") }
+                        remote.send(session, calendar, request) { allowsTransport() && admit() }.also { retainCategory("COMPLETE_RESPONSE") }
                     } catch (cancelled: CancellationException) { retainCategory("CANCELLED"); throw cancelled }
                       catch (failure: Exception) { retainCategory(category(failure)); throw failure }
                 }

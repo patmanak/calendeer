@@ -3,6 +3,9 @@ package com.patmanak.proton.andcalendarbridge.protonauth
 
 import com.patmanak.proton.andcalendarbridge.sync.*
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.isActive
 import kotlinx.serialization.json.*
 import me.proton.core.network.data.ApiProvider
 import me.proton.core.network.data.protonApi.BaseRetrofitApi
@@ -11,8 +14,8 @@ import okhttp3.HttpUrl.Companion.toHttpUrl
 import retrofit2.http.*
 
 internal interface CreateSubmissionRemote : CreateReadbackRemote {
-    suspend fun send(session: CatalogSession, calendar: String, request: JsonObject): String
-    suspend fun sendOccurrence(session: CatalogSession, calendar: String, request: JsonObject): String = throw ProtonSingleDispatchDenied()
+    suspend fun send(session: CatalogSession, calendar: String, request: JsonObject, allowsTransport: () -> Boolean): String
+    suspend fun sendOccurrence(session: CatalogSession, calendar: String, request: JsonObject, allowsTransport: () -> Boolean): String = throw ProtonSingleDispatchDenied()
 }
 
 internal class ProtonCreateSubmissionAdapter(private val preparations: CalendarCreatePreparationPort,
@@ -68,11 +71,17 @@ internal class ProtonCreateSubmissionAdapter(private val preparations: CalendarC
             fresh.draft != submission.draft) createUnavailable(CreatePreparationFailure.CONTEXT)
         checkSession(session)
         var body: String? = null
+        val allowsTransport = currentCreateTransportGuard(journal, record.scope)
         val admitted = CreateAttemptAdmission(journal).dispatch(stored) { unknown ->
             checkSession(session)
-            try { body = remote.send(session, record.scope.calendar.value, submission.request) }
+            if (!allowsTransport()) throw ProtonSingleDispatchDenied()
+            try { body = remote.send(session, record.scope.calendar.value, submission.request, allowsTransport) }
             catch (cancelled: CancellationException) { throw cancelled }
-            catch (_: Exception) { /* Every transport failure remains unknown, never resendable. */ }
+            catch (denied: ProtonSingleDispatchDenied) { throw denied }
+            catch (_: Exception) {
+                if (!allowsTransport()) throw ProtonSingleDispatchDenied()
+                // An admitted exchange with a lost response remains unknown.
+            }
             val evidence = buildJsonObject {
                 put("version", 1); put("account", record.scope.account.value); put("calendar", record.scope.calendar.value)
                 put("generation", record.scope.generation); put("correlation", record.id.value)
@@ -131,7 +140,12 @@ internal class ProtonCreateSubmissionAdapter(private val preparations: CalendarC
     }
     private suspend fun guarded(block: suspend () -> CreateSubmissionObservation): CreateSubmissionObservation = try { block() }
         catch (cancelled: CancellationException) { throw cancelled }
-        catch (_: Exception) { CreateSubmissionObservation.Unknown }
+        catch (_: Exception) { currentCoroutineContext().ensureActive(); CreateSubmissionObservation.Unknown }
+}
+
+internal suspend fun currentCreateTransportGuard(journal: CreateAttemptJournal, scope: CalendarScope): () -> Boolean {
+    val operation = currentCoroutineContext()
+    return { operation.isActive && journal.allowsTransport(scope) }
 }
 
 internal interface ProtonCreateSubmissionApi : BaseRetrofitApi {
@@ -143,13 +157,15 @@ internal interface ProtonCreateSubmissionApi : BaseRetrofitApi {
     suspend fun event(@Path("calendar") calendar: String, @Path("event") id: String): ResponseBody
 }
 internal class ProtonCreateSubmissionRemote(private val provider: ApiProvider) : CreateSubmissionRemote {
-    override suspend fun send(session: CatalogSession, calendar: String, request: JsonObject): String = send(session, calendar, request, false)
-    override suspend fun sendOccurrence(session: CatalogSession, calendar: String, request: JsonObject): String = send(session, calendar, request, true)
-    private suspend fun send(session: CatalogSession, calendar: String, request: JsonObject, occurrence: Boolean): String {
+    override suspend fun send(session: CatalogSession, calendar: String, request: JsonObject, allowsTransport: () -> Boolean) =
+        send(session, calendar, request, false, allowsTransport)
+    override suspend fun sendOccurrence(session: CatalogSession, calendar: String, request: JsonObject, allowsTransport: () -> Boolean) =
+        send(session, calendar, request, true, allowsTransport)
+    private suspend fun send(session: CatalogSession, calendar: String, request: JsonObject, occurrence: Boolean, allowsTransport: () -> Boolean): String {
         val url = "https://calendar-api.proton.me/".toHttpUrl().newBuilder()
             .addPathSegment("calendar").addPathSegment("v1").addPathSegment(calendar).addPathSegment("events").addPathSegment("sync").build()
-        val attempt = if (occurrence) ProtonSingleDispatchAttempt.occurrence(url, request.toString())
-            else ProtonSingleDispatchAttempt(url, request.toString()) // Outside every Core callback.
+        val attempt = if (occurrence) ProtonSingleDispatchAttempt.occurrence(url, request.toString(), allowsTransport)
+            else ProtonSingleDispatchAttempt(url, request.toString(), allowsTransport) // Outside every Core callback.
         return provider.get<ProtonCreateSubmissionApi>(sessionId = session.sessionId).invoke(forceNoRetryOnConnectionErrors = true) {
             create(calendar, attempt.requestBody, attempt).use(CalendarCatalogBodyReader::read)
         }.valueOrThrow

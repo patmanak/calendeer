@@ -8,7 +8,8 @@ import okhttp3.MediaType.Companion.toMediaType
 import okio.BufferedSink
 
 /** Distinct one-exchange permit, never an idempotency key or a CREATE/UPDATE permit. */
-internal class ProtonDeleteDispatchAttempt(private val url: HttpUrl, payload: String) {
+internal class ProtonDeleteDispatchAttempt(private val url: HttpUrl, payload: String,
+    private val allowsTransport: () -> Boolean = { true }) {
     private val body = DeleteBody(deleteOnlyBytes(payload))
     private val entered = AtomicBoolean()
     private val exchanged = AtomicBoolean()
@@ -19,8 +20,8 @@ internal class ProtonDeleteDispatchAttempt(private val url: HttpUrl, payload: St
     }
     val requestBody: RequestBody get() = body
     fun request(): Request = Request.Builder().url(url).put(body).tag(ProtonDeleteDispatchAttempt::class.java, this).build()
-    internal fun enter(request: Request) = matches(request) && entered.compareAndSet(false, true)
-    internal fun exchange(request: Request) = matches(request) && entered.get() && exchanged.compareAndSet(false, true)
+    internal fun enter(request: Request) = matches(request) && entered.compareAndSet(false, true) && transportAllowed(allowsTransport)
+    internal fun exchange(request: Request) = matches(request) && entered.get() && exchanged.compareAndSet(false, true) && transportAllowed(allowsTransport)
     private fun matches(request: Request) = request.method == "PUT" && request.url == url && request.body === body && body.isOneShot()
     override fun toString() = "ProtonDeleteDispatchAttempt(redacted)"
 }

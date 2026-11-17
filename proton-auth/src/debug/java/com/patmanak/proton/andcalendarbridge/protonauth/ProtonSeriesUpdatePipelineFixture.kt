@@ -141,12 +141,12 @@ class ProtonSeriesUpdatePipelineFixture private constructor(val scope: CalendarS
                     return if (!state.detachedChild) listOf(state.row) else listOf(state.row,
                         JsonObject(state.row + mapOf("ID" to JsonPrimitive("synthetic-detached-child"), "RecurrenceID" to JsonPrimitive(1))))
                 }
-                override suspend fun send(session: CatalogSession, calendar: String, request: JsonObject): String = error("No personal-v2 dispatch")
-                override suspend fun sendSeries(session: CatalogSession, calendar: String, request: JsonObject): String {
+                override suspend fun send(session: CatalogSession, calendar: String, request: JsonObject, allowsTransport: () -> Boolean): String = error("No personal-v2 dispatch")
+                override suspend fun sendSeries(session: CatalogSession, calendar: String, request: JsonObject, allowsTransport: () -> Boolean): String {
                     active(session); check(calendar == scope.calendar.value)
                     val url = "https://calendar-api.proton.me/".toHttpUrl().newBuilder().addPathSegment("calendar").addPathSegment("v1")
                         .addPathSegment(calendar).addPathSegment("events").addPathSegment("sync").build()
-                    val permit = ProtonSeriesEditV3DispatchAttempt(url, request.toString())
+                    val permit = ProtonSeriesEditV3DispatchAttempt(url, request.toString(), allowsTransport)
                     val call = permit.request(); check(permit.enter(call) && permit.exchange(call))
                     val bytes = Buffer(); permit.requestBody.writeTo(bytes); check(bytes.readUtf8() == request.toString())
                     check(state.dispatched.compareAndSet(false, true))

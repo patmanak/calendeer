@@ -5,6 +5,7 @@ import com.patmanak.proton.andcalendarbridge.sync.*
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.isActive
 import kotlinx.serialization.json.*
 import me.proton.core.network.data.ApiProvider
 import me.proton.core.network.data.protonApi.BaseRetrofitApi
@@ -19,7 +20,7 @@ internal fun interface TitleUpdateContextQualification {
     suspend fun qualify(session: CatalogSession, scope: CalendarScope, checkpoint: suspend () -> Unit): JsonObject
 }
 internal interface TitleUpdateSubmissionRemote {
-    suspend fun send(session: CatalogSession, calendar: String, request: JsonObject): String
+    suspend fun send(session: CatalogSession, calendar: String, request: JsonObject, allowsTransport: () -> Boolean): String
     suspend fun event(session: CatalogSession, calendar: String, id: String): JsonObject
 }
 
@@ -164,7 +165,7 @@ internal class ProtonTitleUpdateSubmissionAdapter(private val preparations: Cale
                 // A committed UNKNOWN may remain without any transport after revocation.
                 checkpoint()
                 var response: String? = null
-                try { response = remote.send(session, frozen.scope.calendar.value, submission.request) }
+                try { response = remote.send(session, frozen.scope.calendar.value, submission.request) { lease(frozen.scope) } }
                 catch (cancelled: CancellationException) { throw cancelled }
                 catch (_: Exception) { currentCoroutineContext().ensureActive() }
                 currentCoroutineContext().ensureActive()
@@ -217,10 +218,11 @@ internal class ProtonTitleUpdateSubmissionAdapter(private val preparations: Cale
             if (currentContext != submission.context) return@guarded TitleUpdateSubmissionObservation.Unknown
             checkSession(session)
             // The journal is the final durable admission boundary, immediately before one send.
+            val operation = currentCoroutineContext()
             val admitted = TitleUpdateAttemptAdmission(journal).dispatch(stored) { unknown ->
                 checkSession(session)
                 var response: String? = null
-                try { response = remote.send(session, stored.scope.calendar.value, submission.request) }
+                try { response = remote.send(session, stored.scope.calendar.value, submission.request) { operation.isActive } }
                 catch (cancelled: CancellationException) { throw cancelled }
                 catch (_: Exception) { /* UNKNOWN is inspection-only, including no response. */ }
                 val evidence = buildJsonObject {
@@ -332,10 +334,10 @@ internal interface ProtonTitleUpdateSubmissionApi : BaseRetrofitApi {
     suspend fun event(@Path("calendar") calendar: String, @Path("event") event: String): ResponseBody
 }
 internal class ProtonTitleUpdateSubmissionRemote(private val provider: ApiProvider) : TitleUpdateSubmissionRemote {
-    override suspend fun send(session: CatalogSession, calendar: String, request: JsonObject): String {
+    override suspend fun send(session: CatalogSession, calendar: String, request: JsonObject, allowsTransport: () -> Boolean): String {
         val url = "https://calendar-api.proton.me/".toHttpUrl().newBuilder().addPathSegment("calendar").addPathSegment("v1")
             .addPathSegment(calendar).addPathSegment("events").addPathSegment("sync").build()
-        val attempt = ProtonTitleUpdateDispatchAttempt(url, request.toString())
+        val attempt = ProtonTitleUpdateDispatchAttempt(url, request.toString(), allowsTransport)
         return provider.get<ProtonTitleUpdateSubmissionApi>(sessionId = session.sessionId).invoke(forceNoRetryOnConnectionErrors = true) {
             val response = update(calendar, attempt.requestBody, attempt)
             (response.body() ?: response.errorBody())?.use(CalendarCatalogBodyReader::read) ?: ""

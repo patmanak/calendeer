@@ -44,8 +44,8 @@ class ProtonOccurrenceCreateAdapterTest {
                 return if (extraChild) listOf(row, JsonObject(row + ("ID" to JsonPrimitive("child")))) else listOf(row)
             }
             override suspend fun event(session: CatalogSession, calendar: String, id: String): JsonObject { reads++; onRead(); return row }
-            override suspend fun send(session: CatalogSession, calendar: String, request: JsonObject): String = error("Historical sender must refuse")
-            override suspend fun sendOccurrence(session: CatalogSession, calendar: String, request: JsonObject): String {
+            override suspend fun send(session: CatalogSession, calendar: String, request: JsonObject, allowsTransport: () -> Boolean): String = error("Historical sender must refuse")
+            override suspend fun sendOccurrence(session: CatalogSession, calendar: String, request: JsonObject, allowsTransport: () -> Boolean): String {
                 sends++; sent = request
                 if (loseResponse) throw IOException("Synthetic lost response")
                 return "{\"Code\":1000}"
@@ -76,6 +76,7 @@ class ProtonOccurrenceCreateAdapterTest {
         var claims = 0
         var allow = true
         var onClaim: () -> Unit = {}
+        override fun allowsTransport(scope: CalendarScope) = allow && value.scope == scope
         override suspend fun remember(record: CreateAttemptRecord) { check(value == record) }
         override suspend fun read(scope: CalendarScope, id: MutationId) = value.takeIf { it.scope == scope && it.id == id }
         override suspend fun claim(expected: CreateAttemptRecord): Boolean {
@@ -115,6 +116,24 @@ class ProtonOccurrenceCreateAdapterTest {
             assertEquals(0, journal.claims); assertEquals(0, f.sends); assertEquals(record, journal.value)
         }
     }
+    @Test fun editAccessRevokedAfterOccurrenceClaimCannotAuthorizeTransportOrReplay() = runTest {
+        val f = Fixture()
+        val record = f.prepared()
+        val retained = f.journal(record)
+        var editable = true
+        retained.onClaim = { editable = false }
+        val journal = object : CreateAttemptJournal by retained {
+            override fun allowsTransport(scope: CalendarScope) = editable && scope == f.scope
+        }
+        assertTrue(runCatching { f.adapter.submit(record, f.reserved.draft, journal) }.isFailure)
+        assertEquals(record.copy(state = CreateAttemptState.OUTCOME_UNKNOWN), retained.value)
+        assertEquals(0, f.sends)
+        editable = true
+        assertSame(CreateSubmissionObservation.Unknown, f.adapter.submit(record, f.reserved.draft, journal))
+        assertEquals(0, f.sends)
+        assertEquals(1, retained.claims)
+    }
+
     @Test fun finalLocalClaimVetoAndSessionRevocationNeverSend() = runTest {
         val f = Fixture(); val record = f.prepared(); val journal = f.journal(record)
         journal.allow = false

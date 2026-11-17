@@ -246,7 +246,7 @@ internal class TitleSubmissionFixture {
         contextStages.forEach { name -> checkpoint(); step(name); checkpoint() }
         freshContext
     }, object : TitleUpdateSubmissionRemote {
-        override suspend fun send(session: CatalogSession, calendar: String, request: JsonObject): String {
+        override suspend fun send(session: CatalogSession, calendar: String, request: JsonObject, allowsTransport: () -> Boolean): String {
             assertEquals(TitleUpdateAttemptState.OUTCOME_UNKNOWN, journal.stored.state)
             sends++; step("send"); sendFailure?.let { throw it }; return "{\"Code\":1001}"
         }

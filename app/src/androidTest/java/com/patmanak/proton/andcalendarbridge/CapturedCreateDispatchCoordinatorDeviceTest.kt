@@ -92,6 +92,22 @@ class CapturedCreateDispatchCoordinatorDeviceTest {
         assertEquals(CreateAttemptState.PREPARED, checkNotNull(record()).state); assertEquals(0, sends)
     }
 
+    @Test fun switchingToReadOnlyAfterSqlClaimStopsTransportAndReopenCannotResend() = fixture {
+        assertEquals(LocalCreateSubmissionResult.RETAINED, staged())
+        beforeTransport = {
+            systemEnabled = false
+            coordinator.systemCreatePolicyChanged(target, false)
+        }
+        assertEquals(CreateSubmissionObservation.Unknown, submit())
+        assertEquals(0, sends)
+        assertEquals(CreateAttemptState.OUTCOME_UNKNOWN, record()!!.state)
+        systemEnabled = true
+        reopenOwner()
+        submit()
+        assertEquals(1, submitCalls)
+        assertEquals(0, sends)
+    }
+
     @Test fun cancellationAfterClaimRetainsUnknownAcrossRestartWithoutResend() = fixture {
         assertEquals(LocalCreateSubmissionResult.RETAINED, staged())
         afterClaim = { throw CancellationException("Synthetic captured response loss") }
@@ -232,6 +248,7 @@ class CapturedCreateDispatchCoordinatorDeviceTest {
         var sends = 0
         var beforeClaim: suspend () -> Unit = { }
         var afterClaim: suspend () -> Unit = { }
+        var beforeTransport: () -> Unit = { }
         var observedContent: EventContent? = null
         var observedAttempt: MutationId? = null
         var repeatClaim = false
@@ -261,6 +278,8 @@ class CapturedCreateDispatchCoordinatorDeviceTest {
                     submitCalls++; beforeClaim()
                     if (!journal.claim(record)) return CreateSubmissionObservation.Unknown
                     if (repeatClaim) secondClaim = journal.claim(record)
+                    beforeTransport()
+                    if (!journal.allowsTransport(target)) return CreateSubmissionObservation.Unknown
                     sends++; afterClaim()
                     return verified(record)
                 } finally { authHeld = false }

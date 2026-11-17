@@ -98,7 +98,7 @@ internal class ProtonTimeUpdateSubmissionAdapter(
             checkpoint()
             val unknown = frozen.copy(state = TimeUpdateAttemptState.OUTCOME_UNKNOWN)
             var response: String? = null
-            try { response = remote.send(session, frozen.scope.calendar.value, request.request) }
+            try { response = remote.send(session, frozen.scope.calendar.value, request.request) { lease.allows(frozen.scope) } }
             catch (cancelled: CancellationException) { throw cancelled }
             catch (_: Exception) { operation.ensureActive() }
             operation.ensureActive()

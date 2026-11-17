@@ -170,7 +170,7 @@ internal class DeleteSubmissionFixture {
     val adapter = ProtonDeleteSubmissionAdapter(protector, { step("session"); current }, { _, actualScope, checkpoint ->
         assertEquals(scope, actualScope); checkpoint(); step("context"); checkpoint(); freshContext
     }, object : DeleteSubmissionRemote {
-        override suspend fun send(session: CatalogSession, calendar: String, request: JsonObject): String {
+        override suspend fun send(session: CatalogSession, calendar: String, request: JsonObject, allowsTransport: () -> Boolean): String {
             assertEquals(initial, session); assertEquals(scope.calendar.value, calendar)
             assertEquals(DeleteAttemptState.OUTCOME_UNKNOWN, journal.stored?.state)
             step("send"); if (disappearAfterSend) read = absent(); return response

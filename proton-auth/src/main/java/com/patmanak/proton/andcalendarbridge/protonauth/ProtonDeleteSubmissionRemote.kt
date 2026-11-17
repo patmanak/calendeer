@@ -27,7 +27,7 @@ internal sealed interface ProtonDeleteEventRead {
 }
 
 internal interface DeleteSubmissionRemote {
-    suspend fun send(session: CatalogSession, calendar: String, request: JsonObject): String
+    suspend fun send(session: CatalogSession, calendar: String, request: JsonObject, allowsTransport: () -> Boolean): String
     suspend fun event(session: CatalogSession, calendar: String, id: String): ProtonDeleteEventRead
 }
 
@@ -93,9 +93,9 @@ internal interface ProtonDeleteSubmissionApi : BaseRetrofitApi {
 }
 
 internal class ProtonDeleteSubmissionRemote(private val provider: ApiProvider) : DeleteSubmissionRemote {
-    override suspend fun send(session: CatalogSession, calendar: String, request: JsonObject): String {
+    override suspend fun send(session: CatalogSession, calendar: String, request: JsonObject, allowsTransport: () -> Boolean): String {
         val url = endpoint(calendar, "sync")
-        val attempt = ProtonDeleteDispatchAttempt(url, request.toString())
+        val attempt = ProtonDeleteDispatchAttempt(url, request.toString(), allowsTransport)
         return provider.get<ProtonDeleteSubmissionApi>(sessionId = session.sessionId).invoke(forceNoRetryOnConnectionErrors = true) {
             val response = delete(calendar, attempt.requestBody, attempt)
             (response.body() ?: response.errorBody())?.use(CalendarCatalogBodyReader::read) ?: ""

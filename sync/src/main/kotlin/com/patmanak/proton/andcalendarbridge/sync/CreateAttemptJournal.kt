@@ -31,6 +31,8 @@ interface CreateAttemptJournal {
     suspend fun remember(record: CreateAttemptRecord)
     suspend fun read(scope: CalendarScope, id: MutationId): CreateAttemptRecord?
     suspend fun claim(expected: CreateAttemptRecord): Boolean
+    /** The claim is one-shot. Current policy can still veto its first transport exchange. */
+    fun allowsTransport(scope: CalendarScope): Boolean
     suspend fun retainEvidence(expectedUnknown: CreateAttemptRecord, protectedEvidence: String)
 }
 
