@@ -33,6 +33,45 @@ internal class LocalCreateStaging(
         projection.admitOperation = { false }
         journal.admitCapture = { false }
     }
+    suspend fun captureOccurrence(master: RemoteChange.Upsert, eventRow: Long, localId: LocalEventId,
+        id: MutationId, timestamp: Instant): LocalEditCaptureResult {
+        val frozen = try { OccurrenceEditCandidate.freezeMaster(master) }
+            catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { currentCoroutineContext().ensureActive(); return LocalEditCaptureResult.UNQUALIFIED }
+        installAdmission()
+        return try {
+            val format = currentFormat()
+            suspend fun qualified(): Boolean {
+                if (!currentAccount() || !active() || currentFormat() != format) return false
+                val selected = store.selections(target.account).singleOrNull { it.scope == target }
+                return selected?.enabled == true && selected.available &&
+                    store.transaction(target) { checkpoint?.format } == format &&
+                    store.projectedBaseline(target, frozen.eventId) == frozen && store.localEdit(target, frozen.eventId) == null && active()
+            }
+            if (!qualified()) return LocalEditCaptureResult.UNQUALIFIED
+            val previous = journal.readReservation(target, localId)
+            val retainedContext = journal.readOccurrenceContext(target, localId)
+            if (previous != null && (retainedContext == null || previous.id != id || previous.format != format ||
+                    retainedContext.occurrence?.master != frozen)) return LocalEditCaptureResult.UNQUALIFIED
+            val retained = journal.readIntent(target, localId)
+            if (retained != null) return if (retained == retainedContext && qualified()) LocalEditCaptureResult.RETAINED else LocalEditCaptureResult.UNQUALIFIED
+            val intent = retainedContext ?: run {
+                if (eventRow <= 0 || timestamp.nano != 0) return LocalEditCaptureResult.UNQUALIFIED
+                val snapshot = projection.captureOwnedOccurrenceEdit(target, frozen, eventRow) ?: return LocalEditCaptureResult.UNQUALIFIED
+                LocalCreateIntent(LocalCreateReservation(id, localId, target, format, timestamp),
+                    snapshot.candidate.content.copy(recurrence = null), occurrence = snapshot.candidate)
+            }
+            if (!qualified()) return LocalEditCaptureResult.UNQUALIFIED
+            val first = journal.reserveOccurrence(intent)
+            if (!qualified()) return LocalEditCaptureResult.UNQUALIFIED
+            val snapshot = if (first) projection.captureAndStampOccurrence(intent, eventRow) else projection.inspectStampedOccurrence(intent)
+            if (snapshot?.candidate != intent.occurrence || !qualified()) return LocalEditCaptureResult.UNQUALIFIED
+            journal.retain(intent)
+            LocalEditCaptureResult.RETAINED
+        } catch (cancelled: CancellationException) { throw cancelled }
+          catch (_: Exception) { LocalEditCaptureResult.UNAVAILABLE }
+          finally { clearAdmission() }
+    }
 
     suspend fun capture(eventRow: Long, localId: LocalEventId, id: MutationId, timestamp: Instant,
         series: Boolean = false, autoProfile: Boolean = false): LocalEditCaptureResult {
@@ -48,6 +87,7 @@ internal class LocalCreateStaging(
             // A retained intention is historical work, not a witness of the current Android row.
             val retained = journal.readIntent(target, localId)
             if (retained != null) {
+                if (retained.occurrence != null) return LocalEditCaptureResult.UNQUALIFIED
                 val identity = retained.reservation
                 if (identity.id != id || identity.localId != localId || identity.scope != target ||
                     identity.format != format || identity.markerProtocol != 1 ||
@@ -94,6 +134,7 @@ internal class LocalCreateStaging(
             val format = store.transaction(target) { checkpoint?.format }
             if (format != currentFormat()) return LocalCreatePreparationResult.UNQUALIFIED
             val intent = journal.readIntent(target, localId) ?: return LocalCreatePreparationResult.UNQUALIFIED
+            if (intent.occurrence != null) return LocalCreatePreparationResult.UNSUPPORTED
             val reservation = intent.reservation
             if (reservation.scope != target || reservation.localId != localId || reservation.id != id ||
                 reservation.format != format || reservation.markerProtocol != 1) return LocalCreatePreparationResult.UNQUALIFIED
@@ -143,6 +184,7 @@ internal class LocalCreateStaging(
             val importFormat = store.transaction(target) { checkpoint?.format }
             if (importFormat != currentFormat()) return LocalCreateSubmissionResult.UNQUALIFIED
             val intent = journal.readIntent(target, localId) ?: return LocalCreateSubmissionResult.UNQUALIFIED
+            if (intent.occurrence != null) return LocalCreateSubmissionResult.UNSUPPORTED
             val captured = intent.reservation
             if (captured.scope != target || captured.localId != localId || captured.id != id ||
                 captured.format != importFormat || captured.markerProtocol != 1) return LocalCreateSubmissionResult.UNQUALIFIED

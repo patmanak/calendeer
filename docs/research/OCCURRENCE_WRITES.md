@@ -130,3 +130,23 @@ unwitnessed null color in calendar-color mode remain held. This native profile
 does not prove a signed parent SEQUENCE or complete remote membership. It has no
 durable request, preparation or worker route; those need independently versioned
 extensions of the existing stores and the remaining adapter/recovery gates.
+
+## Inactive durable local capture
+
+The explicit `captureLocalOccurrence` entry point extends the existing capture
+journal. Local snapshot schema 4 wraps an unchanged historical flat-content
+encoding with the exact bounded master and original slot. The journal commits
+that context together with its one-shot reservation before any native stamp.
+A scoped unique index reserves the master/UID/slot across local identities.
+Existing reservations and payloads receive no inferred occurrence context.
+
+Only a fresh reservation may stamp the child with a `local-occurrence-v1` identity
+in the same native assertion batch. The master and DIRTY flags stay unchanged.
+After interruption, recovery looks up that exact marker and frozen context;
+it never reuses a row hint, restamps a consumed reservation or adopts newer edits.
+Caller cancellation is checked before the batch and after its return. A lost
+reply can leave a committed marker; recovery inspects it rather than writing again.
+
+This is not request capsule v4 or dispatch fingerprint v2: those historical
+contracts remain frozen. Existing preparation, submission and fingerprint paths
+reject occurrence captures. No worker route, network preparation or ACK is enabled.

@@ -14,6 +14,8 @@ import com.patmanak.proton.andcalendarbridge.data.calendar.AndroidCalendarProjec
 import com.patmanak.proton.andcalendarbridge.sync.*
 import java.time.Instant
 import java.time.ZoneOffset
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 
 /** Android locators never enter the candidate's domain identity. No stamping or write admission. */
 data class OwnedOccurrenceEditSnapshot(val masterRow: Long, val eventRow: Long, val candidate: OccurrenceEditCandidate) {
@@ -31,7 +33,7 @@ internal suspend fun AndroidCalendarProjection.readOccurrenceEdit(scope: Calenda
 }
 
 private fun AndroidCalendarProjection.observeOccurrence(scope: CalendarScope, master: RemoteChange.Upsert,
-    childRow: Long): OwnedOccurrenceEditSnapshot? {
+    childRow: Long, intent: LocalCreateIntent? = null, first: Boolean = false, checkActive: () -> Unit = {}): OwnedOccurrenceEditSnapshot? {
     if (childRow <= 0) return null
     val account = accountFor(scope.account)
     val calendar = calendarRow(scope, account) ?: return null
@@ -66,11 +68,12 @@ private fun AndroidCalendarProjection.observeOccurrence(scope: CalendarScope, ma
     val childWhere = "${Events.CALENDAR_ID}=? AND ${Events._ID}=?"
     val childArgs = arrayOf(calendar.toString(), childRow.toString())
     val child = row(childWhere, childArgs) ?: return null
+    val marker = intent?.let { occurrenceMarker(it) }
     if (child.getAsLong(Events.ORIGINAL_ID) != parentId ||
         (child[Events.ORIGINAL_SYNC_ID] != null && child.getAsString(Events.ORIGINAL_SYNC_ID) != series) ||
         child.getAsInteger(Events.DIRTY) != 1 || child.getAsInteger(Events.DELETED) != 0 ||
         child.getAsInteger(Events.STATUS) != Events.STATUS_CONFIRMED ||
-        ATTACHMENT_SYNC_COLUMNS.any { child[it] != null } ||
+        ATTACHMENT_SYNC_COLUMNS.any { if (it == Events.SYNC_DATA5 && marker != null && !first) child.getAsString(it) != marker else child[it] != null } ||
         listOf(Events.RRULE, Events.RDATE, Events.EXRULE, Events.EXDATE, Events.DURATION,
             Events.CUSTOM_APP_PACKAGE, Events.CUSTOM_APP_URI).any { child[it] != null }) return null
     val rawOriginal = child.getAsLong(Events.ORIGINAL_INSTANCE_TIME) ?: return null
@@ -106,6 +109,7 @@ private fun AndroidCalendarProjection.observeOccurrence(scope: CalendarScope, ma
     if (child.getAsInteger(Events.HAS_ALARM) != if (childAlerts.reminders.isEmpty()) 0 else 1) return null
     val candidate = try { OccurrenceEditCandidate(master, original, personal.copy(details = EventDetails(childAlerts.reminders))) }
         catch (_: IllegalArgumentException) { return null }
+    if (intent != null && candidate != intent.occurrence) return null
     val familyWhere = "${Events.ORIGINAL_ID}=? OR (${Events.CALENDAR_ID}=? AND ${Events.ORIGINAL_SYNC_ID}=?)"
     val familyArgs = arrayOf(parentId.toString(), calendar.toString(), series)
     val family = row(familyWhere, familyArgs) ?: return null
@@ -115,6 +119,11 @@ private fun AndroidCalendarProjection.observeOccurrence(scope: CalendarScope, ma
         ContentProviderOperation.newAssertQuery(uri).withSelection(childWhere, childArgs).withValues(child).withExpectedCount(1).build(),
         ContentProviderOperation.newAssertQuery(uri).withSelection(familyWhere, familyArgs).withValue(Events._ID, childRow).withExpectedCount(1).build())
     val expected = mutableListOf(1, 1, 1, 1)
+    if (marker != null) {
+        checks += ContentProviderOperation.newAssertQuery(uri).withSelection("${Events.CALENDAR_ID}=? AND ${Events.SYNC_DATA5}=?",
+            arrayOf(calendar.toString(), marker)).withExpectedCount(if (first) 0 else 1).build()
+        expected += if (first) 0 else 1
+    }
     for (values in listOf(parent, child)) {
         val color = nativeEventColorKeyAssertions(resolver, account, values, ::syncUri, ::requirePermissions, ::fail) ?: return null
         checks.addAll(color); expected.addAll(color.map { 1 })
@@ -132,8 +141,34 @@ private fun AndroidCalendarProjection.observeOccurrence(scope: CalendarScope, ma
         checks += ContentProviderOperation.newAssertQuery(childUri).withSelection("$column=?", args).withExpectedCount(0).build()
         expected += 0
     }
-    requirePermissions(); capturedBatch(checks, expected.toIntArray()); requirePermissions()
+    if (marker != null && first) {
+        checks += ContentProviderOperation.newUpdate(uri).withSelection(childWhere, childArgs)
+            .withValue(Events.SYNC_DATA5, marker).withExpectedCount(1).build()
+        expected += 1
+    }
+    checkActive(); requirePermissions(); capturedBatch(checks, expected.toIntArray()); checkActive(); requirePermissions()
     return OwnedOccurrenceEditSnapshot(parentId, childRow, candidate)
+}
+
+private fun AndroidCalendarProjection.occurrenceMarker(intent: LocalCreateIntent) =
+    digest("local-occurrence-v1", calendarSyncId(intent.reservation.scope), intent.reservation.localId.value)
+
+/** A previously consumed reservation can inspect only the exact marker, never a row hint. */
+internal suspend fun AndroidCalendarProjection.stampOccurrenceIdentity(intent: LocalCreateIntent, firstRow: Long?): OwnedOccurrenceEditSnapshot? {
+    val caller = currentCoroutineContext()
+    caller.ensureActive()
+    val candidate = intent.occurrence ?: return null
+    return operation {
+        val scope = intent.reservation.scope
+        val account = accountFor(scope.account)
+        val calendar = calendarRow(scope, account) ?: return@operation null
+        val row = firstRow ?: resolver.query(syncUri(Events.CONTENT_URI, account), arrayOf(Events._ID),
+            "${Events.CALENDAR_ID}=? AND ${Events.SYNC_DATA5}=?", arrayOf(calendar.toString(), occurrenceMarker(intent)), null)?.use {
+            if (it.count != 1 || !it.moveToFirst()) return@operation null
+            it.getLong(0)
+        } ?: fail(CalendarProjectionFailure.PROVIDER_UNAVAILABLE)
+        observeOccurrence(scope, candidate.master, row, intent, firstRow != null, caller::ensureActive)
+    }
 }
 
 private val OCCURRENCE_FLAGS = arrayOf(Events.HAS_ATTENDEE_DATA, Events.IS_ORGANIZER, Events.GUESTS_CAN_MODIFY,

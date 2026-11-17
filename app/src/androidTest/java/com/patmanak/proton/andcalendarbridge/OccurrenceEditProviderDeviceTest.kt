@@ -100,7 +100,7 @@ class OccurrenceEditProviderDeviceTest {
         assertEquals(raw, rows())
     }
 
-    private class Fixture(val context: Context, val allDay: Boolean) {
+    internal class Fixture(val context: Context, val allDay: Boolean) {
         val scope = CalendarScope(AccountId("occurrence-${UUID.randomUUID()}"), CalendarId("fixture"), 0)
         val projection = AndroidCalendarProjection(context)
         val start = Instant.parse("2030-04-01T09:00:00Z")

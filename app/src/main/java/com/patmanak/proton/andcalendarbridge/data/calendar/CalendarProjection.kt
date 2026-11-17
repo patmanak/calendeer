@@ -13,6 +13,7 @@ import com.patmanak.proton.andcalendarbridge.sync.EventContent
 import com.patmanak.proton.andcalendarbridge.sync.ProjectionReceipt
 import com.patmanak.proton.andcalendarbridge.sync.AppliedProjectionWitness
 import com.patmanak.proton.andcalendarbridge.sync.LocalEventId
+import com.patmanak.proton.andcalendarbridge.sync.LocalCreateIntent
 import com.patmanak.proton.andcalendarbridge.sync.CapturedCreateAttachmentReceipt
 import com.patmanak.proton.andcalendarbridge.sync.AppliedCapturedCreateAttachment
 import com.patmanak.proton.andcalendarbridge.sync.CapturedCreateBaseline
@@ -140,6 +141,8 @@ interface CalendarProjection {
     /** Inactive first-occurrence observation only; no durable claim, preparation, upload or ACK. */
     suspend fun captureOwnedOccurrenceEdit(scope: CalendarScope, master: RemoteChange.Upsert,
         childRow: Long): OwnedOccurrenceEditSnapshot? = null
+    suspend fun captureAndStampOccurrence(intent: LocalCreateIntent, childRow: Long): OwnedOccurrenceEditSnapshot? = null
+    suspend fun inspectStampedOccurrence(intent: LocalCreateIntent): OwnedOccurrenceEditSnapshot? = null
     /** Present, dirty local tombstone only; absence never establishes deletion intent. No ACK. */
     suspend fun captureOwnedSimpleDelete(scope: CalendarScope, base: RemoteChange.Upsert): OwnedLocalEditSnapshot? = null
     /** One-shot identity stamp after a durable claim; preserves DIRTY and never assigns remote IDs. */

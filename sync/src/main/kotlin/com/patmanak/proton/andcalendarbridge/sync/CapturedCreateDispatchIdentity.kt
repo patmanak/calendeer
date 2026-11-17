@@ -49,6 +49,7 @@ data class CapturedCreateDispatchIdentity(
         }
 
         private fun contentFingerprint(intent: LocalCreateIntent): String {
+            require(intent.occurrence == null) { "Occurrence requires a distinct fingerprint version" }
             val digest = MessageDigest.getInstance("SHA-256")
             fun field(value: String) {
                 val bytes = try {

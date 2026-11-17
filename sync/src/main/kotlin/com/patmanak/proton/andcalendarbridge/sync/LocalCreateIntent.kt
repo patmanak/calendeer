@@ -25,20 +25,24 @@ data class LocalCreateReservation(
 
 /** First committed supported snapshot, permanently paused. No dispatch or remote association. */
 class LocalCreateIntent(val reservation: LocalCreateReservation, content: EventContent,
-    val series: CreateSeriesRule? = null) {
+    val series: CreateSeriesRule? = null, val occurrence: OccurrenceEditCandidate? = null) {
     val content: EventContent = freezeCapturedCreateContent(content)
     init {
+        require(occurrence == null || (series == null && this.content == occurrence.content.copy(recurrence = null)))
         require(series?.supports(this.content.time) != false) { "Unsupported series time" }
         val time = content.time
         if (time is EventTime.Timed) require(time.start.nano == 0 && time.end.nano == 0)
     }
     fun copy(reservation: LocalCreateReservation = this.reservation, content: EventContent = this.content,
-        series: CreateSeriesRule? = this.series) = LocalCreateIntent(reservation, content, series)
+        series: CreateSeriesRule? = this.series, occurrence: OccurrenceEditCandidate? = this.occurrence) =
+        LocalCreateIntent(reservation, content, series, occurrence)
     operator fun component1() = reservation
     operator fun component2() = content
-    override fun equals(other: Any?) = other is LocalCreateIntent && reservation == other.reservation && content == other.content && series == other.series
+    override fun equals(other: Any?) = other is LocalCreateIntent && reservation == other.reservation &&
+        content == other.content && series == other.series && occurrence == other.occurrence
     override fun hashCode(): Int = (31 * reservation.hashCode() + content.hashCode()).let {
-        if (series == null) it else 31 * it + series.hashCode()
+        val legacy = if (series == null) it else 31 * it + series.hashCode()
+        if (occurrence == null) legacy else 31 * legacy + occurrence.hashCode()
     }
     override fun toString() = "LocalCreateIntent(REDACTED)"
 }
@@ -55,6 +59,6 @@ internal fun freezeCapturedCreateContent(content: EventContent): EventContent {
 
 /** Immutable adapter-protected preparation of one captured snapshot, never dispatch admission. */
 data class LocalCreatePreparation(val intent: LocalCreateIntent, val format: AdapterFormat, val protectedPayload: String) {
-    init { require(protectedPayload.isNotBlank()) }
+    init { require(protectedPayload.isNotBlank() && intent.occurrence == null) }
     override fun toString() = "LocalCreatePreparation(REDACTED)"
 }

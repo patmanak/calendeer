@@ -37,7 +37,7 @@ class LocalCreateSubmissionPermit internal constructor(private val owner: Any,
  * inspect-only; no erase, resume, dispatch, row-ID fallback or automatic intent replacement exists.
  */
 class LocalCreateStore(context: Context, name: String = "calendar-local-create-v1.db") :
-    SQLiteOpenHelper(context, name, null, 3) {
+    SQLiteOpenHelper(context, name, null, 4) {
     private val lock = Mutex()
     private val submissionPermitOwner = Any()
     @Volatile var admitCapture: (CalendarScope) -> Boolean = { true }
@@ -54,7 +54,7 @@ class LocalCreateStore(context: Context, name: String = "calendar-local-create-v
                 local_event TEXT NOT NULL, mutation TEXT NOT NULL,
                 adapter TEXT NOT NULL, version INTEGER NOT NULL CHECK(version > 0),
                 created_at TEXT NOT NULL, marker_protocol INTEGER NOT NULL CHECK(marker_protocol=1),
-                content TEXT,
+                content TEXT, occurrence_capture TEXT, occurrence_slot TEXT,
                 prep_adapter TEXT, prep_version INTEGER, prep_payload TEXT,
                 PRIMARY KEY(account, calendar, generation, local_event),
                 UNIQUE(account, calendar, generation, mutation),
@@ -63,9 +63,10 @@ class LocalCreateStore(context: Context, name: String = "calendar-local-create-v
             )
         """.trimIndent())
         createSubmissions(db)
+        occurrenceIndex(db)
     }
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        check(oldVersion in 1..2 && newVersion == 3) { "Explicit local create journal migration required" }
+        check(oldVersion in 1..3 && newVersion == 4) { "Explicit local create journal migration required" }
         if (oldVersion == 1) {
             db.execSQL("ALTER TABLE local_creates ADD COLUMN prep_adapter TEXT")
             db.execSQL("ALTER TABLE local_creates ADD COLUMN prep_version INTEGER")
@@ -73,8 +74,12 @@ class LocalCreateStore(context: Context, name: String = "calendar-local-create-v
                 (prep_adapter IS NULL AND prep_version IS NULL AND prep_payload IS NULL)
                 OR (prep_adapter IS NOT NULL AND prep_version IS NOT NULL AND prep_payload IS NOT NULL AND prep_version > 0))""".trimIndent())
         }
-        createSubmissions(db)
+        if (oldVersion < 3) createSubmissions(db)
+        db.execSQL("ALTER TABLE local_creates ADD COLUMN occurrence_capture TEXT")
+        db.execSQL("ALTER TABLE local_creates ADD COLUMN occurrence_slot TEXT")
+        occurrenceIndex(db)
     }
+    private fun occurrenceIndex(db: SQLiteDatabase) = db.execSQL("CREATE UNIQUE INDEX local_occurrence_slot ON local_creates(account,calendar,generation,occurrence_slot)")
     private fun createSubmissions(db: SQLiteDatabase) {
         db.execSQL("""
             CREATE TABLE local_create_submissions (
@@ -91,9 +96,10 @@ class LocalCreateStore(context: Context, name: String = "calendar-local-create-v
     }
 
     /** Returns true only for the first durable reservation. A lost return can never reopen it. */
-    suspend fun reserve(reservation: LocalCreateReservation): Boolean = mutation(reservation.scope) { db ->
+    suspend fun reserve(reservation: LocalCreateReservation): Boolean = mutation(reservation.scope) { db -> reserve(db, reservation) }
+    private fun reserve(db: SQLiteDatabase, reservation: LocalCreateReservation): Boolean {
         val existing = read(db, reservation.scope, reservation.localId)
-        if (existing != null) {
+        return if (existing != null) {
             check(existing.reservation == reservation) { "Local create reservation is immutable" }
             false
         } else {
@@ -209,12 +215,35 @@ class LocalCreateStore(context: Context, name: String = "calendar-local-create-v
         guardedRead(scope) { db -> read(db, scope, localId)?.let { (reservation, payload) ->
             payload?.let { LocalCreateContentCodec.decodeIntent(it, reservation) }
         } }
+    suspend fun reserveOccurrence(intent: LocalCreateIntent): Boolean = mutation(intent.reservation.scope) { db ->
+        require(intent.occurrence != null)
+        val first = reserve(db, intent.reservation)
+        if (first) db.update("local_creates", ContentValues().apply {
+            put("occurrence_capture", LocalCreateContentCodec.encodeContent(intent)); put("occurrence_slot", OccurrenceCaptureCodec.slotKey(intent))
+        }, IDENTITY, identity(intent.reservation.scope, intent.reservation.localId)).also { check(it == 1) }
+        else check(occurrenceContext(db, intent.reservation.scope, intent.reservation.localId) == intent) { "Occurrence capture context is immutable" }
+        first
+    }
+    suspend fun readOccurrenceContext(scope: CalendarScope, localId: LocalEventId): LocalCreateIntent? =
+        guardedRead(scope) { occurrenceContext(it, scope, localId) }
+    private fun occurrenceContext(db: SQLiteDatabase, scope: CalendarScope, localId: LocalEventId): LocalCreateIntent? {
+        val reservation = read(db, scope, localId)?.reservation ?: return null
+        return db.query("local_creates", arrayOf("occurrence_capture", "occurrence_slot"), IDENTITY, identity(scope, localId), null, null, null).use {
+            check(it.moveToFirst())
+            if (it.isNull(0)) { check(it.isNull(1)); null }
+            else LocalCreateContentCodec.decodeIntent(it.getString(0), reservation).also { captured ->
+                check(captured.occurrence != null && it.getString(1) == OccurrenceCaptureCodec.slotKey(captured))
+            }
+        }
+    }
 
     /** Retain only after qualified stamp/inspection. The first exact content is immutable. */
     suspend fun retain(intent: LocalCreateIntent): LocalCreateIntent = mutation(intent.reservation.scope) { db ->
         val reservation = intent.reservation
         val row = read(db, reservation.scope, reservation.localId)
         check(row != null && row.reservation == reservation) { "Local create requires its exact reservation" }
+        val context = occurrenceContext(db, reservation.scope, reservation.localId)
+        if (context != null || intent.occurrence != null) check(context == intent) { "Occurrence capture requires its original context" }
         val payload = row.content
         if (payload != null) {
             val existing = LocalCreateContentCodec.decodeIntent(payload, reservation)
@@ -327,7 +356,7 @@ class LocalCreateStore(context: Context, name: String = "calendar-local-create-v
 
 /** Versioned captured content only; historical schema 1 remains the known-empty encoding. */
 internal object LocalCreateContentCodec {
-    fun encodeContent(intent: LocalCreateIntent): String = JSONObject().apply {
+    fun encodeContent(intent: LocalCreateIntent): String = if (intent.occurrence != null) OccurrenceCaptureCodec.encode(intent) else JSONObject().apply {
         val knownEmpty = intent.content.details == EventDetails() && intent.content.colorRgb == null
         val series = intent.series
         put("schema", if (series != null) 3 else if (knownEmpty) 1 else 2); put("reservation", encodeReservation(intent.reservation))
@@ -350,10 +379,14 @@ internal object LocalCreateContentCodec {
     }
     /** Old consumers cannot accidentally strip a newly captured rule. */
     fun decodeContent(payload: String, reservation: LocalCreateReservation): EventContent = decodeIntent(payload, reservation).let {
-        require(it.series == null) { "Series requires a complete snapshot reader" }
+        require(it.series == null && it.occurrence == null) { "Recurring capture requires a complete snapshot reader" }
         it.content
     }
     fun decodeIntent(payload: String, reservation: LocalCreateReservation): LocalCreateIntent = JSONObject(payload).let { json ->
+        if (json.optInt("schema") == 4) { require(payload.length <= 1_048_576); OccurrenceCaptureCodec.decode(json, reservation) }
+        else decodeHistorical(json, reservation)
+    }
+    private fun decodeHistorical(json: JSONObject, reservation: LocalCreateReservation): LocalCreateIntent = json.let { json ->
         val schema = json.getInt("schema")
         require(schema == 1 && json.getBoolean("knownEmptyDetails") || schema in 2..3) { "Unsupported local create content" }
         val fields = setOf("schema", "reservation", "title", "description", "location", "allDay", "start", "end") +

@@ -13,6 +13,7 @@ data class LocalCreateSubmissionReservation(
     val format: AdapterFormat,
 ) {
     init {
+        require(intent.occurrence == null) { "Occurrence submission profile is not available" }
         require(UUID.fromString(attempt.value).toString() == attempt.value)
         require(attempt != intent.reservation.id && attempt.value != intent.reservation.localId.value)
     }

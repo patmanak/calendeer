@@ -81,7 +81,7 @@ class LocalCreateSubmissionStoreDeviceTest {
         assertEquals(reservation, store.readSubmissionReservation(scope, capture.localId)); assertNull(store.readSubmission(scope, capture.localId))
         store.close()
         LocalCreateStore(context, name).use { reopened ->
-            assertEquals(3, reopened.readableDatabase.version)
+            assertEquals(4, reopened.readableDatabase.version)
             assertEquals(reservation, reopened.readSubmissionReservation(scope, capture.localId))
             assertNull(reopened.reserveSubmission(reservation)); assertNull(reopened.readSubmission(scope, capture.localId))
             assertEquals(original, contentPayload(reopened)); assertEquals(intent, reopened.readIntent(scope, capture.localId))
@@ -350,7 +350,7 @@ class LocalCreateSubmissionStoreDeviceTest {
                 db.version = 2
             }
             LocalCreateStore(context, name).use { store ->
-                assertEquals(3, store.readableDatabase.version)
+                assertEquals(4, store.readableDatabase.version)
                 for (record in records) {
                     assertEquals(record, store.readIntent(scope, record.reservation.localId))
                     assertEquals(raw.getValue(record.reservation.localId), contentPayload(store, record.reservation.localId))

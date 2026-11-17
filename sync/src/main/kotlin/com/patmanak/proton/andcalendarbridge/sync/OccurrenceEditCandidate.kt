@@ -34,6 +34,9 @@ class OccurrenceEditCandidate(master: RemoteChange.Upsert, val original: Recurre
         content = personal.copy(recurrence = EventRecurrence(recurrence.uid, original = original))
     }
     override fun toString() = "OccurrenceEditCandidate(REDACTED)"
+    override fun equals(other: Any?) = other is OccurrenceEditCandidate && master == other.master &&
+        original == other.original && content == other.content
+    override fun hashCode() = 31 * (31 * master.hashCode() + original.hashCode()) + content.hashCode()
     companion object {
         /** Snapshot inputs before a native or adapter suspension; identifiers remain opaque. */
         fun freezeMaster(master: RemoteChange.Upsert): RemoteChange.Upsert {

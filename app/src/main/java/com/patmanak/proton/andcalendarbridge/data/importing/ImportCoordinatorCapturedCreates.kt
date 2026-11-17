@@ -58,6 +58,15 @@ internal class ImportCoordinatorCapturedCreates(
         localCreateStaging(target, journal, expected, policy).capture(eventRow, localId, id, timestamp, series, autoProfile)
     }
 
+    /** Explicit inactive occurrence capture; no preparation, dispatch or Provider acknowledgement. */
+    suspend fun captureLocalOccurrence(target: CalendarScope, master: RemoteChange.Upsert, eventRow: Long,
+        localId: LocalEventId, id: MutationId, timestamp: java.time.Instant): LocalEditCaptureResult = mutex.withLock {
+        val journal = localCreates ?: return@withLock LocalEditCaptureResult.UNAVAILABLE
+        val expected = generation(); val policy = policyRevision()
+        if (!isCurrent(expected, target.account) || !hasCalendarPermissions()) return@withLock LocalEditCaptureResult.INACTIVE
+        localCreateStaging(target, journal, expected, policy).captureOccurrence(master, eventRow, localId, id, timestamp)
+    }
+
     /** Explicit read-only preparation; no outgoing journal, dispatch, or Provider acknowledgement. */
     suspend fun prepareLocalCreate(target: CalendarScope, localId: LocalEventId, id: MutationId,
         port: CalendarCreatePreparationPort): LocalCreatePreparationResult = mutex.withLock {

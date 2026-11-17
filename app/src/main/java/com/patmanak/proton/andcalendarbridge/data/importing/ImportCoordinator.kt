@@ -665,6 +665,9 @@ class ImportCoordinator(
     suspend fun prepareLocalCreate(target: CalendarScope, localId: LocalEventId, id: MutationId,
         port: CalendarCreatePreparationPort): LocalCreatePreparationResult =
         capturedCreates.prepareLocalCreate(target, localId, id, port)
+    suspend fun captureLocalOccurrence(target: CalendarScope, master: RemoteChange.Upsert, eventRow: Long,
+        localId: LocalEventId, id: MutationId, timestamp: java.time.Instant): LocalEditCaptureResult =
+        capturedCreates.captureLocalOccurrence(target, master, eventRow, localId, id, timestamp)
 
     suspend fun stageLocalCreateSubmission(target: CalendarScope, localId: LocalEventId, id: MutationId,
         attempt: MutationId, port: CalendarCreateSubmissionPort): LocalCreateSubmissionResult =

@@ -39,7 +39,7 @@ class LocalCreateStoreDeviceTest {
             assertNull(reopened.readPreparation(scope, seriesReservation.localId))
             assertNull(reopened.readSubmission(scope, seriesReservation.localId))
             assertEquals(frozen, payload(reopened, seriesReservation.localId))
-            assertEquals(3, reopened.readableDatabase.version)
+            assertEquals(4, reopened.readableDatabase.version)
         }
     }
     @Test fun personalCaptureSchemaKeepsRemindersAndColorAcrossReopenWithoutChangingOldRows() = fixture { context, name, store ->
@@ -57,7 +57,7 @@ class LocalCreateStoreDeviceTest {
             assertEquals(personal, payload(reopened, richReservation.localId)); assertFalse(reopened.reserve(richReservation))
             refused { reopened.retain(rich.copy(content = rich.content.copy(colorRgb = 1))) }
             assertEquals(personal, payload(reopened, richReservation.localId))
-            assertEquals(3, reopened.readableDatabase.version)
+            assertEquals(4, reopened.readableDatabase.version)
         }
     }
     private val scope = CalendarScope(AccountId("local-create-fixture"), CalendarId("calendar"), 0)
@@ -94,7 +94,7 @@ class LocalCreateStoreDeviceTest {
         LocalCreateStore(context, name).use { reopened ->
             assertEquals(reservation, reopened.readReservation(scope, reservation.localId))
             assertFalse(reopened.reserve(reservation)); assertNull(reopened.readIntent(scope, reservation.localId))
-            assertEquals(3, reopened.readableDatabase.version)
+            assertEquals(4, reopened.readableDatabase.version)
         }
     }
     @Test fun firstCapturedIntentSurvivesReopenAndExactReplayDoesNotReplaceContent() = fixture { context, name, store ->

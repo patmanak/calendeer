@@ -1,5 +1,6 @@
 package com.patmanak.proton.andcalendarbridge.data.calendar
 import com.patmanak.proton.andcalendarbridge.sync.supportsCapturedHandoff
+import com.patmanak.proton.andcalendarbridge.sync.LocalCreateIntent
 
 import com.patmanak.proton.andcalendarbridge.data.calendar.NativeCalendarSelection as Selection
 
@@ -497,6 +498,8 @@ class AndroidCalendarProjection(context: Context,
     }
     override suspend fun captureOwnedOccurrenceEdit(scope: CalendarScope, master: RemoteChange.Upsert,
         childRow: Long): OwnedOccurrenceEditSnapshot? = readOccurrenceEdit(scope, master, childRow)
+    override suspend fun captureAndStampOccurrence(intent: LocalCreateIntent, childRow: Long) = stampOccurrenceIdentity(intent, childRow)
+    override suspend fun inspectStampedOccurrence(intent: LocalCreateIntent) = stampOccurrenceIdentity(intent, null)
 
     override suspend fun captureOwnedSimpleDelete(scope: CalendarScope, base: RemoteChange.Upsert): OwnedLocalEditSnapshot? = operation {
         captureSimpleSnapshot(scope, base, deleted = true)
