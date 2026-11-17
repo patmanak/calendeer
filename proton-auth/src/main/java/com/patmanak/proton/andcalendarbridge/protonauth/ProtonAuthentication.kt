@@ -452,6 +452,7 @@ internal class SerializedAuthenticationPort(
         } catch (cancelled: CancellationException) { throw cancelled }
           catch (failure: Exception) {
               caller.ensureActive()
+              if (failure is OutgoingReadUnavailableException) throw failure
               if (preparation && failure is LocalEditPreparationException) throw failure
               return denied
           } finally { lease.close(); evidence.close() }

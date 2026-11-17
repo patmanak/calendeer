@@ -130,6 +130,7 @@ internal class ImportCoordinatorEditAccess(
                 if (finalAccessRequired) access.requireAvailable()
                 result
             } catch (cancelled: CancellationException) { throw cancelled }
+              catch (failure: OutgoingReadUnavailableException) { currentCoroutineContext().ensureActive(); throw failure }
               catch (_: ScopedEditOwnerDenied) { currentCoroutineContext().ensureActive(); denied }
               catch (_: Exception) { currentCoroutineContext().ensureActive(); denied }
               finally {

@@ -28,11 +28,14 @@ The executor drains up to sixteen passes inside the same work item. More pages
 or transient failures use WorkManager retry; a hidden successor is not counted
 as completed work. The last-success time advances after a completed network
 cycle for the current account when every selected calendar is available and
-reports a completed import. This includes network work requested on app open.
-Local-only work, upload hints without a pull, empty selections, held imports
-and terminal errors preserve the previous time. A later page cannot hide an earlier
-upload failure. A retry after a failed calendar listing polls the change feed
-from the saved cursor before recording success.
+completes its import, including any outstanding incoming projections. This also
+applies to a refresh requested on app open. Local-only work, upload hints without
+a pull, empty selections and failed or incomplete imports preserve the previous time.
+A failed upload prevents that cycle from advancing the clock, including on a later
+page of the same cycle. Subsequent completed cycles can advance it while an older
+uncertain or unsupported edit remains visible in the pending counts. Inspecting an
+uncertain request does not send it again. A retry after a failed calendar listing
+polls the change feed from the saved cursor before recording success.
 
 ## Periodic pull
 

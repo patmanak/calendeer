@@ -46,16 +46,18 @@ internal class ImportCoordinatorProjection(
     }
 
     // Keep the hold read and status publication out of the larger import coroutine.
-    suspend fun publishImportProgress(target: CalendarScope, status: String, completedAt: Long? = null): String {
+    suspend fun publishImportProgress(target: CalendarScope, status: String, completedAt: Long? = null): Boolean {
         val held = capturedProjectionHold(target).blocksProjection
-        val locallyHeld = store.heldProjectionCount(target) > 0
+        val backlog = store.projectionBacklog(target)
+        val locallyHeld = backlog.locallyHeld > 0
         val visible = when {
             held -> "CREATE_PENDING"
             locallyHeld && status in setOf("IMPORTED", "PARTIAL", "SERIES_PENDING", "HISTORY_GAP") -> "INCOMPLETE"
             else -> status
         }
         store.status(target, visible, if (held || locallyHeld) null else completedAt)
-        return visible
+        // A CREATE hold remains visible even when this receive cycle has nothing left to project.
+        return status == "IMPORTED" && backlog.pending == 0
     }
     private suspend fun requireProjectionAvailable(target: CalendarScope, eventId: EventId) {
         if (store.transaction(target) { hasPendingMutation(eventId) }) throw Pending()

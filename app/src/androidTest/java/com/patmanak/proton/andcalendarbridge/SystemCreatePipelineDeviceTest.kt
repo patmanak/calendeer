@@ -277,16 +277,42 @@ class SystemCreatePipelineDeviceTest {
         assertEquals(1, rows()); assertEquals("0", field(Events.DIRTY))
     }
 
-    @Test fun resumedScanCannotReportSuccessWithAnUnresolvedRowBeforeItsCursor() = fixture {
+    @Test fun lostSendPreservesTheClockButLaterInspectionCanFinishANetworkCycle() = fixture {
+        loseResponse = true
+        assertEquals(17L, runNetworkCycleWithPreviousSuccess(17L))
+        val unknown = work.read(target, row)!!
+        assertEquals(SystemCreateWorkStatus.UNKNOWN, unknown.status)
+        assertEquals(1, sends)
+        assertEquals(1, controller.state.value.pending[target])
+        val before = providerSnapshot()
+
+        reopen()
+        val inspectionsBefore = inspections
+        assertTrue(runNetworkCycleWithPreviousSuccess(17L) > 17L)
+        assertTrue(inspections > inspectionsBefore)
+        assertEquals(unknown, work.read(target, row))
+        assertEquals(CreateAttemptState.OUTCOME_UNKNOWN, attempts.read(target, unknown.attempt)!!.state)
+        assertEquals(1, controller.state.value.pending[target])
+        assertEquals(1, sends); assertEquals(1, preparations)
+        assertEquals(before, providerSnapshot())
+
+        incomingChanges = listOf(remoteEvent)
+        assertEquals(23L, runNetworkCycleWithPreviousSuccess(23L))
+        assertEquals(listOf(ProjectionIntent(target, remoteEvent)), store.pending(target))
+        assertEquals(unknown, work.read(target, row))
+        assertEquals(1, sends); assertEquals(1, rows())
+        assertEquals(before, providerSnapshot())
+    }
+
+    @Test fun resumedScanDoesNotReportAnEarlierDirtyRowAsAFailedSend() = fixture {
         assertEquals(ImportRunResult.COMPLETE, controller.run(network = true))
         assertEquals(0, work.count(target))
         mutate(ContentValues().apply { put(Events.DIRTY, 1); put(Events.TITLE, "Earlier dirty fixture") })
         val cursors = context.getSharedPreferences("system-create-cursors", Context.MODE_PRIVATE)
         val scan = cursors.all.keys.single { it.startsWith("v1-scan-") }
         assertTrue(cursors.edit().putLong(scan, row).commit())
-        var unresolved = false
-        assertEquals(ImportRunResult.COMPLETE, controller.run(network = true, fresh = false, onFailure = { unresolved = true }))
-        assertTrue(unresolved)
+        assertEquals(ImportRunResult.COMPLETE, controller.run(network = true, fresh = false,
+            onFailure = { fail("An earlier dirty row did not cause a send failure in this pass") }))
         assertEquals("1", field(Events.DIRTY))
         assertEquals(1, sends)
     }
@@ -400,7 +426,11 @@ class SystemCreatePipelineDeviceTest {
             assertEquals(1, it.count); assertTrue(it.moveToFirst())
             assertEquals(15, it.getInt(0)); assertEquals(Reminders.METHOD_ALERT, it.getInt(1))
         }
-        assertNotEquals(SystemCreateWorkStatus.COMPLETE, work.read(target, row)!!.status)
+        assertEquals(SystemCreateWorkStatus.UNSUPPORTED, captured.status)
+        assertTrue(runNetworkCycleWithPreviousSuccess(17L) > 17L)
+        assertEquals(1, controller.state.value.pending[target])
+        assertEquals(captured, work.read(target, row))
+        assertEquals(0, preparations); assertEquals(0, sends)
     }
 
     @Test fun offlineObserverKeepsImportedIntentAcrossRestartAndAllocatesNextCycleIdentity() = fixture {
@@ -513,6 +543,7 @@ class SystemCreatePipelineDeviceTest {
         var sends = 0
         var inspections = 0
         var loseResponse = false
+        var incomingChanges = emptyList<RemoteChange>()
         var beforeClaim: suspend () -> Unit = {}
         var beforeTransport: suspend () -> Unit = {}
         var afterClaim: suspend () -> Unit = {}
@@ -529,7 +560,10 @@ class SystemCreatePipelineDeviceTest {
         private val remote = object : ReadOnlyCalendarRemote, CalendarCreateSubmissionPort {
             override val format = importFormat
             override suspend fun currentAccount() = target.account
-            override suspend fun fetch(request: PageRequest): RemotePage = error("No transport in controlled fixture")
+            override suspend fun fetch(request: PageRequest): RemotePage {
+                assertEquals(target, request.checkpoint.scope)
+                return RemotePage(target, importFormat, incomingChanges, null, traversalComplete = true)
+            }
             override suspend fun dispatch(mutation: Mutation): DispatchResult = error("No generic dispatch")
             override suspend fun prepareSubmission(draft: CalendarCreateDraft) = submissionPort().prepareSubmission(draft)
             override suspend fun submit(record: CreateAttemptRecord, journal: CreateAttemptJournal) = submissionPort().submit(record, journal)
@@ -569,7 +603,7 @@ class SystemCreatePipelineDeviceTest {
                 expected: CalendarCreateDraft): CreateSubmissionObservation {
                 inspections++; assertDraft(expected)
                 assertEquals(CreateAttemptState.OUTCOME_UNKNOWN, record.state)
-                return if (created) CreateSubmissionObservation.Verified(CreateAttemptIdentity.of(record), remoteEvent)
+                return if (created && !loseResponse) CreateSubmissionObservation.Verified(CreateAttemptIdentity.of(record), remoteEvent)
                     else CreateSubmissionObservation.Unknown
             }
         }
@@ -580,6 +614,25 @@ class SystemCreatePipelineDeviceTest {
             creates = attempts, localCreates = captures, systemCreatesEnabled = work::modeEnabled)
         private fun newController() = SystemCreateController(context, coordinator, projection, work, captures,
             attempts, port, jobs, scheduler, titleRecovery = titleRecovery)
+
+        suspend fun runNetworkCycleWithPreviousSuccess(previous: Long): Long {
+            val account = projection.accountFor(target.account)
+            val preferences = context.getSharedPreferences(SystemSyncWork.PREFS, Context.MODE_PRIVATE)
+            val key = "success:${account.name}"
+            assertTrue(preferences.edit().putLong(key, previous).commit())
+            val result = executeImportWork(ready = { true }, run = {
+                var failed = false
+                val outgoing = controller.run(network = true, fresh = true, expectedAccount = target.account,
+                    onFailure = { failed = true })
+                assertEquals(ImportRunResult.COMPLETE, outgoing)
+                val incoming = coordinator.runPass(network = true, fresh = true, expectedAccount = target.account)
+                assertEquals(ImportRunResult.COMPLETE, incoming.work)
+                incoming.copy(outgoingFailed = failed)
+            }, continueWork = { error("Unexpected continuation") },
+                recordNetworkSuccess = { SystemSyncWork.recordSuccess(context, account) })
+            assertEquals(ImportRunResult.COMPLETE, result)
+            return preferences.getLong(key, 0)
+        }
         fun usePort(port: CalendarCreateSubmissionPort) {
             nativePort = port
             controller = SystemCreateController(context, coordinator, projection, work, captures, attempts, port, jobs, scheduler)

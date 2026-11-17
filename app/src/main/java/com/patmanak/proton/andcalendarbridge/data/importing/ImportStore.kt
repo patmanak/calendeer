@@ -182,9 +182,11 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
     suspend fun holdLocalProjection(intent: ProjectionIntent): Boolean = stagingMutation(intent.scope) { db ->
         ImportStorePageState.holdLocalProjection(db, intent)
     }
-    suspend fun heldProjectionCount(scope: CalendarScope): Int = access { db ->
-        ImportStorePageState.heldProjectionCount(db, scope)
+    internal data class ProjectionBacklog(val pending: Int, val locallyHeld: Int)
+    internal suspend fun projectionBacklog(scope: CalendarScope): ProjectionBacklog = access { db ->
+        ImportStorePageState.projectionBacklog(db, scope)
     }
+    suspend fun heldProjectionCount(scope: CalendarScope): Int = projectionBacklog(scope).locallyHeld
     /** Excluded identities remain pending. Filter before the batch limit to avoid starvation. */
     suspend fun pending(scope: CalendarScope, limit: Int = 100, excludedEvents: Set<EventId> = emptySet()): List<ProjectionIntent> = access { db ->
         ImportStorePageState.pending(db, scope, limit, excludedEvents)

@@ -25,7 +25,7 @@ class CoordinatorSystemSeriesOperationsTest {
     }
     @Test fun explicitSeriesRouteUsesGuardedSeriesCapsuleAndDistinctWireIdentity() = runBlocking {
         val f = Fixture()
-        assertFalse(f.process())
+        assertTrue(f.process()) // The fixture claims the series wire and loses the reply.
         assertEquals(1, f.calls.count { it == "series-capsule" })
         assertFalse("personal-capsule" in f.calls)
         assertEquals(1, f.calls.count { it == "series-submit" })

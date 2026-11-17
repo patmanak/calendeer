@@ -47,6 +47,18 @@ class CoordinatorSystemDeleteOperationsTest {
         assertEquals(unknown, f.saved)
     }
 
+    @Test fun newlyUnknownSubmissionFailsOnlyThePassThatSentIt() = runBlocking {
+        val f = DeleteOperationsFixture()
+        f.submitObservation = { DeleteSubmissionObservation.Unknown }
+        assertTrue(f.process())
+        assertEquals(DeleteAttemptState.OUTCOME_UNKNOWN, f.saved!!.state)
+        assertFalse(f.process())
+        f.inspectObservation = { DeleteSubmissionObservation.Unknown }
+        val progress = f.operations.inspect(f.query, { true }) { fail("No proof") }
+        assertEquals(1, progress.held); assertEquals(0, progress.failed)
+        assertEquals(1, f.calls.count { it == "submit" })
+    }
+
     @Test fun preparedAndUnknownRemoteConflictsRetainObservedVariantWithoutNativeAck() = runBlocking {
         for (recovery in listOf(false, true)) {
             val f = DeleteOperationsFixture()
@@ -106,7 +118,7 @@ class CoordinatorSystemDeleteOperationsTest {
 
     @Test fun failedProofOrAckCannotCompleteAndDurableProofSurvivesAckFailure() = runBlocking {
         val noProof = DeleteOperationsFixture(); noProof.acceptProof = false
-        noProof.process()
+        assertTrue(noProof.process())
         assertFalse("wake" in noProof.calls); assertFalse("ack" in noProof.calls)
         assertNull(noProof.result); assertNull(noProof.completion)
         val noAck = DeleteOperationsFixture(); noAck.acceptAck = false
@@ -116,6 +128,13 @@ class CoordinatorSystemDeleteOperationsTest {
         noAck.calls.clear(); noAck.acceptAck = true
         assertEquals(1, noAck.operations.recoverOffline(noAck.query) { true }.completed)
         assertEquals(listOf("ack", "complete"), noAck.calls)
+    }
+
+    @Test fun inspectionReportsFailureWhenItCannotStoreVerifiedEvidence() = runBlocking {
+        val f = DeleteOperationsFixture(); f.seed(); f.acceptProof = false
+        val progress = f.operations.inspect(f.query, { true }) { fail("No retained proof") }
+        assertEquals(1, progress.failed); assertEquals(0, progress.completed)
+        assertFalse("submit" in f.calls); assertFalse("ack" in f.calls)
     }
 
     @Test fun revokedModeKeepsLateEvidenceButRevokedSessionCannotRetainIt() = runBlocking {

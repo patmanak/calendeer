@@ -11,6 +11,15 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class ProtonPersonalUpdateSubmissionAdapterTest {
+    @Test fun typedTransientPreclaimPreparationReadKeepsPersonalUpdateUnsent() = runTest {
+        val f = PersonalSubmissionFixture(); val prepared = f.seed()
+        f.hook = { if (it == "prepare") throw LocalEditPreparationException(LocalEditPreparationFailure.NETWORK) }
+        try {
+            f.submit(prepared); fail("Expected preclaim read failure")
+        } catch (failure: OutgoingReadUnavailableException) { assertNull(failure.cause) }
+        assertEquals(prepared, f.journal.stored)
+        assertEquals(0, f.count("claim")); assertEquals(0, f.count("send"))
+    }
     @Test fun wrongRequestFormatAndSwappedPreparationOrWireNeverClaim() = runTest {
         for (variant in 0..4) {
             val f = PersonalSubmissionFixture(); val first = f.seed()

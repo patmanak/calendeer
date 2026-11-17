@@ -11,6 +11,18 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class ProtonDeleteSubmissionTest {
+    @Test fun preparationReadFailureReachesTheCallerBeforeClaimOrSend() = runTest {
+        val f = DeleteSubmissionFixture()
+        val failure = IOException("Synthetic event read failure")
+        f.readFailure = failure
+        try {
+            f.adapter.prepareSubmission(MutationId("request"), f.intent) { true }
+            fail("A transport error must remain visible to the caller")
+        } catch (observed: OutgoingReadUnavailableException) {
+            assertNull(observed.cause)
+        }
+        assertNull(f.journal.stored); assertEquals(0, f.count("send"))
+    }
     @Test fun verifiedDeleteNeedsClaimBeforeOneSendEvidenceBeforeAuthenticatedAbsence() = runTest {
         val f = DeleteSubmissionFixture(); val record = f.seed()
         val result = f.submit(record)
@@ -68,9 +80,21 @@ class ProtonDeleteSubmissionTest {
         f.read = ProtonDeleteEventRead.Unknown
         assertEquals(DeleteSubmissionObservation.Unknown, f.inspect(requireNotNull(f.journal.stored)))
         f.readFailure = IOException("synthetic network")
-        assertEquals(DeleteSubmissionObservation.Unknown, f.inspect(requireNotNull(f.journal.stored)))
+        try {
+            f.inspect(requireNotNull(f.journal.stored)); fail("Inspection read failed")
+        } catch (failure: OutgoingReadUnavailableException) { assertNull(failure.cause) }
+        assertEquals(0, f.count("send"))
         f.readFailure = null; f.read = ProtonDeleteEventRead.Absent("foreign-calendar", f.intent.base.eventId.value)
         assertEquals(DeleteSubmissionObservation.Unknown, f.inspect(requireNotNull(f.journal.stored)))
+    }
+    @Test fun transientPreclaimReadKeepsThePreparedDeleteUnsent() = runTest {
+        val f = DeleteSubmissionFixture(); val prepared = f.seed()
+        f.readFailure = IOException("synthetic qualification read failure")
+        try {
+            f.submit(prepared); fail("Expected preclaim read failure")
+        } catch (failure: OutgoingReadUnavailableException) { assertNull(failure.cause) }
+        assertEquals(prepared, f.journal.stored)
+        assertEquals(0, f.count("claim")); assertEquals(0, f.count("send"))
     }
     @Test fun absentBeforeClaimIsNotSendPermission() = runTest {
         val f = DeleteSubmissionFixture(); val record = f.seed(); f.read = f.absent()

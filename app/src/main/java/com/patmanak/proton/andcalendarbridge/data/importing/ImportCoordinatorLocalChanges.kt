@@ -23,13 +23,6 @@ internal class ImportCoordinatorLocalChanges(
     private val capturedRawHold: suspend (CalendarScope) -> CapturedProjectionHold,
 ) {
     suspend fun discoverSystemChanges(target: CalendarScope, afterRow: Long = 0, limit: Int = 25):
-        com.patmanak.proton.andcalendarbridge.data.calendar.SystemCalendarChangePage? =
-        readSystemChanges(target, afterRow, limit, checkEmptyOnly = false)
-
-    suspend fun outgoingChangesDrained(target: CalendarScope): Boolean =
-        readSystemChanges(target, afterRow = 0, limit = 1, checkEmptyOnly = true)?.changes?.isEmpty() == true
-
-    private suspend fun readSystemChanges(target: CalendarScope, afterRow: Long, limit: Int, checkEmptyOnly: Boolean):
         com.patmanak.proton.andcalendarbridge.data.calendar.SystemCalendarChangePage? = mutex.withLock {
         val expected = generation()
         val policy = policyRevision()
@@ -38,13 +31,12 @@ internal class ImportCoordinatorLocalChanges(
         if (!active() || !isCurrent(expected, target.account)) return@withLock null
         val selected = store.selection(target)
         if (selected?.enabled != true || !selected.available) return@withLock null
-        if (checkEmptyOnly && selected.retainedLocalChangeCount > 0) return@withLock null
         projection.admitOperation = active
         store.admitTransaction = { it == target && active() }
         try {
             val page = projection.discoverSystemChanges(target, afterRow, limit)
                 ?: return@withLock null
-            val keys = if (checkEmptyOnly) emptySet() else page.changes.filter { it.kind == com.patmanak.proton.andcalendarbridge.data.calendar.SystemCalendarChangeKind.IMPORTED }
+            val keys = page.changes.filter { it.kind == com.patmanak.proton.andcalendarbridge.data.calendar.SystemCalendarChangeKind.IMPORTED }
                 .mapNotNull { it.nativeKey }.toSet()
             val resolved = mutableMapOf<String, EventId>()
             val ambiguous = mutableSetOf<String>()
@@ -71,8 +63,7 @@ internal class ImportCoordinatorLocalChanges(
                     change.copy(event = change.nativeKey?.let(resolved::get)) else change
             })
             val current = store.selection(target)
-            if (active() && current?.enabled == true && current.available &&
-                (!checkEmptyOnly || current.retainedLocalChangeCount == 0)) canonical else null
+            if (active() && current?.enabled == true && current.available) canonical else null
         } catch (cancelled: CancellationException) { throw cancelled }
           catch (_: Exception) { null }
           finally { projection.admitOperation = { false }; store.admitTransaction = { false } }

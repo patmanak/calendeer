@@ -141,6 +141,12 @@ internal class ProtonPersonalUpdateSubmissionAdapter(
             checkpoint()
             observed
         } catch (cancelled: CancellationException) { throw cancelled }
+          catch (failure: LocalEditPreparationException) {
+              operation.ensureActive()
+              if (failure.reason == LocalEditPreparationFailure.NETWORK || failure.reason == LocalEditPreparationFailure.RETRY)
+                  throw OutgoingReadUnavailableException()
+              PersonalUpdateSubmissionObservation.Unknown
+          }
           catch (_: Exception) { operation.ensureActive(); PersonalUpdateSubmissionObservation.Unknown }
           finally { lease.close(); evidenceLease.close() }
     }

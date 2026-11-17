@@ -5,8 +5,13 @@ import kotlinx.serialization.json.*
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
+import java.io.IOException
+import java.net.SocketTimeoutException
+import java.net.UnknownHostException
 import me.proton.core.network.data.ApiProvider
 import me.proton.core.network.data.protonApi.BaseRetrofitApi
+import me.proton.core.network.domain.ApiException
+import me.proton.core.network.domain.ApiResult
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.RequestBody
@@ -105,15 +110,29 @@ internal class ProtonDeleteSubmissionRemote(private val provider: ApiProvider) :
         currentCoroutineContext().ensureActive()
         val attempt = ProtonDeleteReadAttempt(endpoint(calendar, id), session.sessionId.id)
         return try {
-            try {
+            val transportFailure = try {
                 provider.get<ProtonDeleteSubmissionApi>(sessionId = session.sessionId).invoke(forceNoRetryOnConnectionErrors = true) {
                     val response = event(calendar, id, attempt)
                     response.body()?.close(); response.errorBody()?.close()
                 }.valueOrThrow
+                null
             } catch (cancelled: CancellationException) { throw cancelled }
-              catch (_: Exception) { currentCoroutineContext().ensureActive() }
+              catch (failure: Exception) {
+                  currentCoroutineContext().ensureActive()
+                  val reason = (failure as? ApiException)?.error
+                  when {
+                      failure is SocketTimeoutException || failure is UnknownHostException -> failure
+                      reason is ApiResult.Error.NoInternet || reason is ApiResult.Error.Timeout ->
+                          IOException("Delete event read unavailable", failure)
+                      else -> null
+                  }
+              }
             currentCoroutineContext().ensureActive()
-            val captured = attempt.finish() ?: return ProtonDeleteEventRead.Unknown
+            val captured = attempt.finish()
+            if (captured == null) {
+                if (transportFailure != null) throw transportFailure
+                return ProtonDeleteEventRead.Unknown
+            }
             currentCoroutineContext().ensureActive()
             // Core exception codes/bodies are deliberately ignored. Only this GET's raw captured
             // route, authenticated session and duplicate-key-preserving body may establish evidence.

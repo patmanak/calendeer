@@ -30,7 +30,7 @@ internal class ProtonDeleteSubmissionAdapter(
             val session = session(frozen.scope, lease)
             val checkpoint: suspend () -> Unit = { checkSession(session, lease) }
             val qualified = deleteSnapshot(context.qualify(session, frozen.scope, checkpoint)); checkpoint()
-            val read = remote.event(session, frozen.scope.calendar.value, frozen.base.eventId.value); checkpoint()
+            val read = readEvent(session, frozen.scope, frozen.base.eventId); checkpoint()
             val row = (read as? ProtonDeleteEventRead.Present)?.row ?: return null
             val actual = verified(session, frozen.scope, frozen.base.eventId, row, qualified, checkpoint) ?: return null
             if (actual != frozen.base) return null
@@ -39,6 +39,7 @@ internal class ProtonDeleteSubmissionAdapter(
             val record = codec.seal(id, frozen, qualified, row); checkpoint()
             record
         } catch (cancelled: CancellationException) { throw cancelled }
+          catch (failure: OutgoingReadUnavailableException) { currentCoroutineContext().ensureActive(); throw failure }
           catch (_: Exception) { currentCoroutineContext().ensureActive(); null }
           finally { lease.close() }
     }
@@ -69,7 +70,7 @@ internal class ProtonDeleteSubmissionAdapter(
             val request = codec.open(frozen); checkpoint()
             val qualified = deleteSnapshot(context.qualify(session, frozen.scope, checkpoint)); checkpoint()
             if (qualified != request.context) return DeleteSubmissionObservation.Unknown
-            val read = remote.event(session, frozen.scope.calendar.value, frozen.eventId.value); checkpoint()
+            val read = readEvent(session, frozen.scope, frozen.eventId); checkpoint()
             val row = (read as? ProtonDeleteEventRead.Present)?.row ?: return DeleteSubmissionObservation.Unknown
             val actual = verified(session, frozen.scope, frozen.eventId, row, qualified, checkpoint)
                 ?: return DeleteSubmissionObservation.Unknown
@@ -98,6 +99,7 @@ internal class ProtonDeleteSubmissionAdapter(
             val observed = inspect(latest, journal, lease::allows); checkpoint()
             observed
         } catch (cancelled: CancellationException) { throw cancelled }
+          catch (failure: OutgoingReadUnavailableException) { operation.ensureActive(); throw failure }
           catch (_: Exception) { operation.ensureActive(); DeleteSubmissionObservation.Unknown }
           finally { lease.close(); evidenceLease.close() }
     }
@@ -119,7 +121,7 @@ internal class ProtonDeleteSubmissionAdapter(
             frozen.protectedEvidence?.let { validateEvidence(frozen, protector.open(it)) }; checkpoint()
             val qualified = deleteSnapshot(context.qualify(session, frozen.scope, checkpoint)); checkpoint()
             if (qualified != request.context) return DeleteSubmissionObservation.Unknown
-            val read = remote.event(session, frozen.scope.calendar.value, frozen.eventId.value); checkpoint()
+            val read = readEvent(session, frozen.scope, frozen.eventId); checkpoint()
             val actual = if (read is ProtonDeleteEventRead.Present)
                 verified(session, frozen.scope, frozen.eventId, read.row, qualified, checkpoint) else null
             checkpoint()
@@ -135,9 +137,14 @@ internal class ProtonDeleteSubmissionAdapter(
                 else -> DeleteSubmissionObservation.Unknown
             }
         } catch (cancelled: CancellationException) { throw cancelled }
+          catch (failure: OutgoingReadUnavailableException) { currentCoroutineContext().ensureActive(); throw failure }
           catch (_: Exception) { currentCoroutineContext().ensureActive(); DeleteSubmissionObservation.Unknown }
           finally { lease.close() }
     }
+
+    private suspend fun readEvent(session: CatalogSession, scope: CalendarScope, event: EventId): ProtonDeleteEventRead =
+        try { remote.event(session, scope.calendar.value, event.value) }
+        catch (_: java.io.IOException) { currentCoroutineContext().ensureActive(); throw OutgoingReadUnavailableException() }
 
     private suspend fun verified(session: CatalogSession, scope: CalendarScope, event: EventId, supplied: JsonObject,
         qualified: JsonObject, checkpoint: suspend () -> Unit): RemoteChange.Upsert? {

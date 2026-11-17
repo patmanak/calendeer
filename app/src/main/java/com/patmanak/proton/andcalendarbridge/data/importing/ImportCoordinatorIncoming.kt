@@ -255,14 +255,14 @@ internal class ImportCoordinatorIncoming(
                     else -> "IMPORTED"
                 }
                 if (!isCurrent(expected, account)) return null
-                val published = projectionWork.publishImportProgress(calendarScope, status,
+                val importComplete = projectionWork.publishImportProgress(calendarScope, status,
                     if (!blocked && progress.traversalComplete && !remaining && deltaProgress?.blocked != true &&
                         deltaProgress?.workRemaining != true &&
                         !historyGap && !missingSeries && !mappingRemaining &&
                         (localProgress || selection.completedAt == null || selection.status !in setOf("IMPORTED", "PARTIAL")))
                         System.currentTimeMillis() else null)
                 val readCalendarData = deltaEngine != null || bootstrap.pagesCommitted + progress.pagesCommitted > (if (retainedPage) 1 else 0)
-                networkSynchronized = allowNetwork && published == "IMPORTED" && readCalendarData
+                networkSynchronized = allowNetwork && importComplete && readCalendarData
                 retry = retry || deferredNetwork
                 remaining = remaining || incompleteNetwork || (allowNetwork && mappingRemaining)
             } else if (network && selection.nextAttempt > System.currentTimeMillis()) {
@@ -273,11 +273,11 @@ internal class ImportCoordinatorIncoming(
                 remaining = drain() || !progress.traversalComplete || store.mappingRescanPending(calendarScope)
                 val missingSeries = store.blockedSeriesCount(calendarScope) > 0
                 if (!isCurrent(expected, account)) return null
-                val published = projectionWork.publishImportProgress(calendarScope, if (remaining) "PENDING" else if (missingSeries) "SERIES_PENDING"
+                val importComplete = projectionWork.publishImportProgress(calendarScope, if (remaining) "PENDING" else if (missingSeries) "SERIES_PENDING"
                     else if (selection.historyGap) "HISTORY_GAP" else "IMPORTED",
                     if (remaining || selection.historyGap || missingSeries)
                         null else System.currentTimeMillis())
-                networkSynchronized = published == "IMPORTED" && progress.pagesCommitted > 0
+                networkSynchronized = importComplete && progress.pagesCommitted > 0
             } else {
                 // Local work must not overwrite the reason the last network run was blocked.
                 val blocked = selection.status in setOf("NETWORK", "UNSUPPORTED", "ERROR", "AUTH", "CAPACITY", "LOCAL_KEYS")

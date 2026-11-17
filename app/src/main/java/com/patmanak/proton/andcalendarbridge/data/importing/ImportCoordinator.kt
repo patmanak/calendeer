@@ -279,8 +279,6 @@ class ImportCoordinator(
         com.patmanak.proton.andcalendarbridge.data.calendar.SystemCalendarChangePage? =
         localChanges.discoverSystemChanges(target, afterRow, limit)
 
-    internal suspend fun outgoingChangesDrained(target: CalendarScope): Boolean =
-        localChanges.outgoingChangesDrained(target)
 
     private suspend fun ensureCreateLifecycle() {
         val journal = creates ?: return

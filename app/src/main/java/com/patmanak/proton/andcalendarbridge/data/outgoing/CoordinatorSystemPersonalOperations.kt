@@ -97,14 +97,16 @@ class CoordinatorSystemPersonalOperations(
             if (record.state == PersonalUpdateAttemptState.OUTCOME_UNKNOWN) return false // inspection has its own traversal
             val observed = checked { owners.submit(record, journal, submissions, lease, evidence) }
             currentCoroutineContext().ensureActive()
-            if (observed is PersonalUpdateSubmissionObservation.Verified && evidence(scope)) {
-                val result = PersonalUpdateVerifiedResult.of(record.copy(state = PersonalUpdateAttemptState.OUTCOME_UNKNOWN), observed)
-                if (checked { journal.retainVerified(result, evidence) }) {
-                    proofRetained()
-                    if (active() && checked { owners.acknowledge(result, journal, lease) })
-                        checked { owners.complete(result, journal, lease) }
-                }
+            if (observed !is PersonalUpdateSubmissionObservation.Verified) {
+                // A refusal before claim leaves the reusable PREPARED request untouched.
+                return !evidence(scope) || checked { journal.read(scope, id, evidence) }?.state != PersonalUpdateAttemptState.PREPARED
             }
+            if (!evidence(scope)) return true
+            val result = PersonalUpdateVerifiedResult.of(record.copy(state = PersonalUpdateAttemptState.OUTCOME_UNKNOWN), observed)
+            if (!checked { journal.retainVerified(result, evidence) }) return true
+            proofRetained()
+            if (active() && checked { owners.acknowledge(result, journal, lease) })
+                checked { owners.complete(result, journal, lease) }
             return false
         } catch (cancelled: CancellationException) { throw cancelled }
           catch (failure: LocalEditPreparationException) {
@@ -168,6 +170,7 @@ class CoordinatorSystemPersonalOperations(
                             is PersonalUpdateSubmissionObservation.Verified -> {
                                 val fresh = PersonalUpdateVerifiedResult.of(record, observation)
                                 if (checked { journal.retainVerified(fresh, evidence) }) { result = fresh; proofRetained() }
+                                else if (evidence(query.scope)) { failed++; continue }
                             }
                         }
                     }

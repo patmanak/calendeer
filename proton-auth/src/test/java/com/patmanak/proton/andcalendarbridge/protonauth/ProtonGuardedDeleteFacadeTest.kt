@@ -12,6 +12,19 @@ import org.junit.Test
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class ProtonGuardedDeleteFacadeTest {
+    @Test fun transientReadsCrossTheAuthenticatedFacade() = runTest {
+        val f = DeleteFacadeFixture(); val record = f.seed(); val runtime = Runtime(record)
+        runtime.during = { throw OutgoingReadUnavailableException() }
+        val facade = facade(runtime, StandardTestDispatcher(testScheduler)); facade.restore()
+        for (stage in 0..2) try {
+            when (stage) {
+                0 -> facade.prepareSubmission(record.id, record.intent) { true }
+                1 -> facade.submit(record, f.journal, { true }, { true }, { true })
+                else -> facade.inspect(record.copy(state = DeleteAttemptState.OUTCOME_UNKNOWN), f.journal) { true }
+            }
+            fail("Read failure was hidden at stage $stage")
+        } catch (failure: OutgoingReadUnavailableException) { assertNull(failure.cause) }
+    }
     private class DeleteFacadeFixture {
         private val source = TitleSubmissionFixture()
         private val intent = LocalDeleteIntent(source.intent.id, source.intent.scope, source.intent.format,

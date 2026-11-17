@@ -102,6 +102,18 @@ class CoordinatorSystemPersonalOperationsTest {
         assertEquals(listOf("inspect", "proof", "wake", "ack", "complete"), f.calls)
     }
 
+    @Test fun newlyUnknownSubmissionFailsOnlyThePassThatSentIt() = runBlocking {
+        val f = PersonalOperationsFixture()
+        f.submitObservation = { PersonalUpdateSubmissionObservation.Unknown }
+        assertTrue(f.process())
+        assertEquals(PersonalUpdateAttemptState.OUTCOME_UNKNOWN, f.saved!!.state)
+        assertFalse(f.process())
+        f.inspectHook = { PersonalUpdateSubmissionObservation.Unknown }
+        val progress = f.operations.inspect(f.query, { true }) { fail("No proof") }
+        assertEquals(1, progress.held); assertEquals(0, progress.failed)
+        assertEquals(1, f.calls.count { it == "submit" })
+    }
+
     @Test fun offlineDurableProofCompletesWithoutTransportAndAbsentProofIsHeld() = runBlocking {
         val f = PersonalOperationsFixture(); f.seedUnknown()
         val held = f.operations.recoverOffline(f.query) { true }
@@ -215,10 +227,17 @@ class CoordinatorSystemPersonalOperationsTest {
 
     @Test fun failedProofRetentionCannotWakeOrAcknowledgeAndFailedAckCannotComplete() = runBlocking {
         val denied = PersonalOperationsFixture(); denied.acceptProof = false
-        denied.process(); assertFalse("wake" in denied.calls); assertFalse("ack" in denied.calls)
+        assertTrue(denied.process()); assertFalse("wake" in denied.calls); assertFalse("ack" in denied.calls)
         val noAck = PersonalOperationsFixture(); noAck.acceptAck = false
         noAck.process(); assertTrue("wake" in noAck.calls); assertTrue("ack" in noAck.calls)
         assertFalse("complete" in noAck.calls); assertNotNull(noAck.result)
+    }
+
+    @Test fun inspectionReportsFailureWhenItCannotStoreVerifiedEvidence() = runBlocking {
+        val f = PersonalOperationsFixture(); f.seedUnknown(); f.acceptProof = false
+        val progress = f.operations.inspect(f.query, { true }) { fail("No retained proof") }
+        assertEquals(1, progress.failed); assertEquals(0, progress.completed)
+        assertFalse("submit" in f.calls); assertFalse("ack" in f.calls)
     }
 
     @Test fun offlinePagePreservesItsCursorAndNeverInspectsUnknownTransport() = runBlocking {

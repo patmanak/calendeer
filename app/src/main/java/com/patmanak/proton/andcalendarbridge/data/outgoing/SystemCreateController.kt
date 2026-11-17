@@ -260,7 +260,10 @@ class SystemCreateController(
         mutableState.update { it.copy(busy = true, failed = false) }
         var more = false
         var retry = false
-        var unresolvedCreate = false
+        fun operationFailed(stage: AttentionStage) {
+            reportAttention(stage)
+            onFailure?.invoke()
+        }
         try {
             val targets = activeScopes().filter { expectedAccount == null || it.account == expectedAccount }
             for (target in targets) {
@@ -281,34 +284,34 @@ class SystemCreateController(
                 // A failed native scan/CREATE must not block already durable title proof.
                 // This is the same captured epoch; no new authority is acquired after a pause.
                 val recovered = titleRecovery?.run(target, fresh) { active(target, epoch) }
-                if (recovered?.failed == true) reportAttention(AttentionStage.TITLE_RECOVERY)
+                if (recovered?.failed == true) operationFailed(AttentionStage.TITLE_RECOVERY)
                 more = more || recovered?.more == true
                 if (!active(target, epoch)) continue
                 // Existing local text proof remains recoverable with text sending disabled.
                 val recoveredText = if (textSupportAvailable) textRecovery?.run(target, fresh) {
                     active(target, epoch) && textProofAdmission?.invoke(target) == true
                 } else null
-                if (recoveredText?.failed == true) reportAttention(AttentionStage.TEXT_RECOVERY)
+                if (recoveredText?.failed == true) operationFailed(AttentionStage.TEXT_RECOVERY)
                 more = more || recoveredText?.more == true
                 if (!active(target, epoch)) continue
                 // Existing local time proof remains recoverable with time sending disabled.
                 val recoveredTime = if (timeSupportAvailable) timeRecovery?.run(target, fresh) {
                     active(target, epoch) && timeProofAdmission?.invoke(target) == true
                 } else null
-                if (recoveredTime?.failed == true) reportAttention(AttentionStage.TIME_RECOVERY)
+                if (recoveredTime?.failed == true) operationFailed(AttentionStage.TIME_RECOVERY)
                 more = more || recoveredTime?.more == true
                 if (!active(target, epoch)) continue
                 val recoveredPersonal = if (personalSupportAvailable) personalRecovery?.run(target, fresh) {
                     active(target, epoch) && personalProofAdmission?.invoke(target) == true
                 } else null
-                if (recoveredPersonal?.failed == true) reportAttention(AttentionStage.PERSONAL_RECOVERY)
+                if (recoveredPersonal?.failed == true) operationFailed(AttentionStage.PERSONAL_RECOVERY)
                 more = more || recoveredPersonal?.more == true
                 if (!active(target, epoch)) continue
                 // Retained deletion proof can finish locally after deletion sending is disabled.
                 val recoveredDelete = if (deleteSupportAvailable) deleteRecovery?.run(target, fresh) {
                     active(target, epoch) && deleteProofAdmission?.invoke(target) == true
                 } else null
-                if (recoveredDelete?.failed == true) reportAttention(AttentionStage.DELETE_RECOVERY)
+                if (recoveredDelete?.failed == true) operationFailed(AttentionStage.DELETE_RECOVERY)
                 more = more || recoveredDelete?.more == true
                 if (!active(target, epoch)) continue
                 if (!imports.configureSystemCalendar(target)) { retry = true; continue }
@@ -387,64 +390,50 @@ class SystemCreateController(
                 for (retained in pending) {
                     if (!active(target, epoch)) break
                     if (retained.status == SystemCreateWorkStatus.UNSUPPORTED) continue
-                    if (process(retained, network, epoch, providerWake, ::maySend)) retry = true
+                    if (process(retained, network, epoch, providerWake, ::maySend, onFailure)) retry = true
                 }
                 if (!active(target, epoch)) continue
                 val after = pending.lastOrNull()?.row ?: 0
-                if (network && onFailure != null && pending.isNotEmpty() && !unresolvedCreate) {
-                    // Only rows visited on this page can veto success before the next page runs.
-                    val firstPending = work.page(target, start, 1).firstOrNull()
-                    unresolvedCreate = firstPending != null && firstPending.row <= after
-                }
                 val further = after > 0 && work.page(target, after, 1).isNotEmpty()
                 saveCursor(target, "jobs", if (further) after else 0)
                 more = more || further
                 val titles = titleUpdates?.run(target, network, fresh) {
                     maySend() && titleAdmission(target)
                 }
-                if (titles?.failed == true) reportAttention(AttentionStage.TITLE_UPDATE)
+                if (titles?.failed == true) operationFailed(AttentionStage.TITLE_UPDATE)
                 more = more || titles?.more == true
                 if (!active(target, epoch)) continue
                 val texts = if (textSupportAvailable) textUpdates?.run(target, network, fresh) {
                     maySend() && work.textsEnabled(target) && textAdmission?.invoke(target) == true
                 } else null
-                if (texts?.failed == true) reportAttention(AttentionStage.TEXT_UPDATE)
+                if (texts?.failed == true) operationFailed(AttentionStage.TEXT_UPDATE)
                 more = more || texts?.more == true
                 if (!active(target, epoch)) continue
                 val times = if (timeSupportAvailable) timeUpdates?.run(target, network, fresh) {
                     maySend() && work.timesEnabled(target) && timeAdmission?.invoke(target) == true
                 } else null
-                if (times?.failed == true) reportAttention(AttentionStage.TIME_UPDATE)
+                if (times?.failed == true) operationFailed(AttentionStage.TIME_UPDATE)
                 more = more || times?.more == true
                 if (!active(target, epoch)) continue
                 val personal = if (personalSupportAvailable) personalUpdates?.run(target, network, fresh) {
                     maySend() && personalAdmission?.invoke(target) == true
                 } else null
-                if (personal?.failed == true) reportAttention(AttentionStage.PERSONAL_UPDATE)
+                if (personal?.failed == true) operationFailed(AttentionStage.PERSONAL_UPDATE)
                 more = more || personal?.more == true
                 if (!active(target, epoch)) continue
                 val deletes = if (deleteSupportAvailable) deleteUpdates?.run(target, network, fresh) {
                     maySend() && work.deletesEnabled(target) && deleteAdmission?.invoke(target) == true
                 } else null
-                if (deletes?.failed == true) reportAttention(AttentionStage.DELETE_UPDATE)
+                if (deletes?.failed == true) operationFailed(AttentionStage.DELETE_UPDATE)
                 more = more || deletes?.more == true
             }
             publish()
-            if (onFailure != null && (state.value.failed || unresolvedCreate ||
-                network && !retry && !more && targets.any { hasUnresolvedOutgoingWork(it) })) onFailure()
             when { retry -> ImportRunResult.RETRY; more -> ImportRunResult.CONTINUE; else -> ImportRunResult.COMPLETE }
         } catch (cancelled: CancellationException) { throw cancelled }
         catch (_: Exception) {
             reportAttention(AttentionStage.WORKER_FAILURE)
             ImportRunResult.RETRY
         } finally { mutableState.update { it.copy(busy = false) } }
-    }
-
-    /** A resumed cursor can start after an earlier dirty row. Verify from the beginning before reporting success. */
-    private suspend fun hasUnresolvedOutgoingWork(target: CalendarScope): Boolean {
-        val snapshot = state.value
-        return snapshot.pending[target] != 0 || target in snapshot.legacyUnsupported ||
-            !imports.outgoingChangesDrained(target)
     }
 
     // Closed stage codes only: no scope, row, event, payload, exception or account values.
@@ -474,7 +463,7 @@ class SystemCreateController(
 
     /** True requests backoff only for a known transient failure, never for UNKNOWN alone. */
     private suspend fun process(retained: SystemCreateWork, network: Boolean, epoch: Long, providerWake: Boolean,
-        maySend: () -> Boolean): Boolean {
+        maySend: () -> Boolean, onFailure: (() -> Unit)?): Boolean {
         val target = retained.scope
         if (!active(target, epoch)) return false
         val priorAttempt = attempts.read(target, retained.attempt)
@@ -508,7 +497,8 @@ class SystemCreateController(
                 SystemCreateWorkStatus.UNKNOWN else SystemCreateWorkStatus.CAPTURED)
             return false
         }
-        val guarded = guardedPort(target, maySend)
+        var submitting = false
+        val guarded = guardedPort(target, maySend) { submitting = true }
         if (priorAttempt?.state != CreateAttemptState.OUTCOME_UNKNOWN) {
             when (imports.stageLocalCreateSubmission(target, retained.localId, retained.captureId, retained.attempt, guarded)) {
                 LocalCreateSubmissionResult.RETAINED -> Unit
@@ -526,47 +516,52 @@ class SystemCreateController(
         if (!maySend()) return false
         val submitted = imports.submitLocalCreate(target, retained.localId, retained.captureId, retained.attempt, guarded,
             pushAllowed = maySend)
+        // Inspection of an older uncertain request never enters submitCaptured.
+        if (submitting && submitted !is CreateSubmissionObservation.Verified) onFailure?.invoke()
         if (!active(target, epoch)) return false
         if (submitted !is CreateSubmissionObservation.Verified) {
             work.status(retained, if (attempts.read(target, retained.attempt)?.state == CreateAttemptState.OUTCOME_UNKNOWN)
                 SystemCreateWorkStatus.UNKNOWN else SystemCreateWorkStatus.WAITING)
             return false
         }
+        val submissionFailure = if (submitting) onFailure else null
         if (imports.bindLocalCreateObservation(target, retained.localId, retained.captureId, retained.attempt, guarded)
-            != CapturedCreateBindingResult.RETAINED) return waiting(retained)
+            != CapturedCreateBindingResult.RETAINED) return waiting(retained, submissionFailure)
         if (!active(target, epoch)) return false
         if (imports.attachLocalCreateBinding(target, retained.localId, retained.captureId, retained.attempt)
-            != CapturedCreateAttachmentResult.ATTACHED) return waiting(retained)
+            != CapturedCreateAttachmentResult.ATTACHED) return waiting(retained, submissionFailure)
         if (!active(target, epoch)) return false
         if (imports.retainLocalCreateBaseline(target, retained.localId, retained.captureId, retained.attempt)
-            != CapturedCreateBaselineResult.RETAINED) return waiting(retained)
+            != CapturedCreateBaselineResult.RETAINED) return waiting(retained, submissionFailure)
         if (!active(target, epoch)) return false
         val reconciliation = imports.reconcileLocalCreate(target, retained.localId, retained.captureId, retained.attempt, mutation)
         if (reconciliation != CapturedCreateReconciliationResult.UNCHANGED) {
+            if (reconciliation == CapturedCreateReconciliationResult.UNRESOLVED) submissionFailure?.invoke()
             work.status(retained, if (reconciliation == CapturedCreateReconciliationResult.UNSUPPORTED)
                 SystemCreateWorkStatus.UNSUPPORTED else SystemCreateWorkStatus.WAITING)
             return false
         }
         if (!active(target, epoch)) return false
         if (imports.acknowledgeLocalCreate(target, retained.localId, retained.captureId, retained.attempt)
-            != CapturedCreateAcknowledgementResult.ACKNOWLEDGED) return waiting(retained)
+            != CapturedCreateAcknowledgementResult.ACKNOWLEDGED) return waiting(retained, submissionFailure)
         if (!active(target, epoch)) return false
         if (imports.qualifyAcknowledgedLocalCreate(target, retained.localId, retained.captureId, retained.attempt)
-            != CapturedCreateCleanResult.CLEAN) return waiting(retained)
+            != CapturedCreateCleanResult.CLEAN) return waiting(retained, submissionFailure)
         if (!active(target, epoch)) return false
         if (imports.handoffLocalCreate(target, retained.localId, retained.captureId, retained.attempt)
-            != CapturedCreateHandoffResult.HANDED_OFF) return waiting(retained)
+            != CapturedCreateHandoffResult.HANDED_OFF) return waiting(retained, submissionFailure)
         work.status(retained, SystemCreateWorkStatus.COMPLETE)
         return false
     }
 
-    private suspend fun waiting(retained: SystemCreateWork): Boolean {
+    private suspend fun waiting(retained: SystemCreateWork, onFailure: (() -> Unit)?): Boolean {
+        onFailure?.invoke()
         work.status(retained, SystemCreateWorkStatus.WAITING)
         return false
     }
 
     /** Claim and transport share the run's current push policy and original editing epoch. */
-    private fun guardedPort(target: CalendarScope, maySend: () -> Boolean): CalendarCreateSubmissionPort =
+    private fun guardedPort(target: CalendarScope, maySend: () -> Boolean, onSubmit: () -> Unit): CalendarCreateSubmissionPort =
         object : CalendarCreateSubmissionPort by port {
             override suspend fun submitCaptured(record: CreateAttemptRecord, expected: CalendarCreateDraft,
                 journal: CreateAttemptJournal): CreateSubmissionObservation {
@@ -577,6 +572,7 @@ class SystemCreateController(
                     override fun allowsTransport(scope: CalendarScope): Boolean =
                         scope == target && maySend() && journal.allowsTransport(scope)
                 }
+                onSubmit()
                 return port.submitCaptured(record, expected, guardedJournal)
             }
         }

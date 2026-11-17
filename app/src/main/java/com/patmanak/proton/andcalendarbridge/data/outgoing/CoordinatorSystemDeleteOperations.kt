@@ -51,17 +51,17 @@ class CoordinatorSystemDeleteOperations(
             if (record.state == DeleteAttemptState.OUTCOME_UNKNOWN) return false
             if (!checked { owners.reserve(record, lease::allows) } || !lease.active()) return false
             when (val observed = checked { owners.submit(record, journal, submissions, lease::allows, evidence::allows) }) {
-                DeleteSubmissionObservation.Unknown -> Unit
+                DeleteSubmissionObservation.Unknown -> return !evidence.active() ||
+                    checked { journal.read(scope, id, evidence::allows) }?.state != DeleteAttemptState.PREPARED
                 is DeleteSubmissionObservation.Conflict ->
                     if (lease.active() && observed.record.copy(state = DeleteAttemptState.PREPARED, protectedEvidence = null) == record)
                         checked { owners.conflict(frozen, observed.event, lease::allows) }
                 is DeleteSubmissionObservation.Verified -> {
                     val result = DeleteVerifiedResult.of(record.copy(state = DeleteAttemptState.OUTCOME_UNKNOWN), observed)
-                    if (evidence.active() && checked { journal.retainVerified(result, evidence::allows) }) {
-                        proofRetained()
-                        if (lease.active() && checked { owners.acknowledge(result, journal, lease::allows) })
-                            checked { owners.complete(result, journal, lease::allows) }
-                    }
+                    if (!evidence.active() || !checked { journal.retainVerified(result, evidence::allows) }) return true
+                    proofRetained()
+                    if (lease.active() && checked { owners.acknowledge(result, journal, lease::allows) })
+                        checked { owners.complete(result, journal, lease::allows) }
                 }
             }
             return false
@@ -104,7 +104,7 @@ class CoordinatorSystemDeleteOperations(
                                 val fresh = DeleteVerifiedResult.of(record, observed)
                                 if (evidence.active() && checked { journal.retainVerified(fresh, evidence::allows) }) {
                                     result = fresh; proofRetained()
-                                }
+                                } else if (evidence.active()) { failed++; continue }
                             }
                         }
                     }

@@ -377,10 +377,12 @@ internal object ImportStorePageState {
         }
     }
 
-    fun heldProjectionCount(db: SQLiteDatabase, scope: CalendarScope): Int = run {
+    fun projectionBacklog(db: SQLiteDatabase, scope: CalendarScope): ImportStore.ProjectionBacklog {
         requireKnown(db, scope)
-        db.rawQuery("SELECT COUNT(*) FROM records WHERE scope=? AND pending=2", arrayOf(key(scope))).use {
-            check(it.moveToFirst()); it.getInt(0)
+        return db.rawQuery("SELECT COUNT(*), COUNT(CASE WHEN pending=2 THEN 1 END) " +
+            "FROM records WHERE scope=? AND pending IN (1,2)", arrayOf(key(scope))).use {
+            check(it.moveToFirst())
+            ImportStore.ProjectionBacklog(pending = it.getInt(0), locallyHeld = it.getInt(1))
         }
     }
 

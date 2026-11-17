@@ -7,6 +7,9 @@ enum class LocalEditPreparationFailure { AUTHENTICATION, PERMISSION, CONTEXT, CO
 class LocalEditPreparationException(val reason: LocalEditPreparationFailure) :
     IllegalStateException("Calendar local edit preparation: ${reason.name}")
 
+/** A transient qualification or inspection read failed. This carries no remote write outcome. */
+class OutgoingReadUnavailableException : IllegalStateException("Calendar outgoing read unavailable", null)
+
 /** Fresh authenticated reads followed by a protected, title-only preparation.
  * Freeze the paused intent before suspension, verify the observed base and current local session,
  * and refuse changed/unsupported context. Cancellation propagates; failures expose no private data.
