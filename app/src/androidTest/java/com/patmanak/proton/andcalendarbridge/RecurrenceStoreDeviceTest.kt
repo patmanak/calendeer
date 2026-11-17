@@ -244,7 +244,7 @@ class RecurrenceStoreDeviceTest {
             db.version = 5
         }
         ImportStore(context, name).use { reopened ->
-            assertEquals(26, reopened.readableDatabase.version)
+            assertEquals(27, reopened.readableDatabase.version)
             assertEquals(legacy, reopened.readableDatabase.rawQuery("SELECT payload FROM records WHERE event='legacy'", null).use {
                 assertTrue(it.moveToFirst()); it.getString(0)
             })

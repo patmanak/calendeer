@@ -47,7 +47,7 @@ enum class CreatePauseReason {
  * This does not capture Provider edits, send requests, or acknowledge remote creation.
  */
 class CreateAttemptStore(context: Context, name: String = "calendar-create-attempt-v1.db") :
-    SQLiteOpenHelper(context, name, null, 8), CreateAssociationJournal {
+    SQLiteOpenHelper(context, name, null, 9), CreateAssociationJournal {
     private val lock = Mutex()
     @Volatile var admitAssociation: (CalendarScope) -> Boolean = { true }
     @Volatile var admitDispatch: (CalendarScope) -> Boolean = { true }
@@ -81,7 +81,7 @@ class CreateAttemptStore(context: Context, name: String = "calendar-create-attem
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        check(oldVersion in 1..7 && newVersion == 8) { "Explicit create journal schema migration required" }
+        check(oldVersion in 1..8 && newVersion in 8..9 && oldVersion < newVersion) { "Explicit create journal schema migration required" }
         if (oldVersion == 1) db.execSQL("ALTER TABLE create_attempts ADD COLUMN evidence TEXT")
         if (oldVersion < 3) createBindings(db)
         if (oldVersion < 4) createPauses(db)
@@ -90,11 +90,11 @@ class CreateAttemptStore(context: Context, name: String = "calendar-create-attem
         if (oldVersion < 7) createCapturedAttachments(db)
         CapturedCreateSchemaMigration.rebuild(db,
             listOf("captured_create_links", "captured_create_bindings", "captured_create_attachments")) {
-            createCapturedLinks(db); createCapturedBindings(db); createCapturedAttachments(db)
+            createCapturedLinks(db, newVersion >= 9); createCapturedBindings(db, newVersion >= 9); createCapturedAttachments(db, newVersion >= 9)
         }
     }
 
-    private fun createCapturedAttachments(db: SQLiteDatabase) {
+    private fun createCapturedAttachments(db: SQLiteDatabase, occurrence: Boolean = true) {
         db.execSQL("""
             CREATE TABLE captured_create_attachments (
                 account TEXT NOT NULL, calendar TEXT NOT NULL,
@@ -104,7 +104,7 @@ class CreateAttemptStore(context: Context, name: String = "calendar-create-attem
                 local_id TEXT NOT NULL, capture_id TEXT NOT NULL,
                 capture_adapter TEXT NOT NULL, capture_version INTEGER NOT NULL CHECK(capture_version > 0),
                 timestamp INTEGER NOT NULL, content_fingerprint TEXT NOT NULL,
-                fingerprint_version INTEGER NOT NULL CHECK(fingerprint_version IN (1,2)),
+                fingerprint_version INTEGER NOT NULL CHECK(fingerprint_version IN (${if (occurrence) "1,2,3" else "1,2"})),
                 event TEXT NOT NULL, verified_revision TEXT NOT NULL,
                 nonce TEXT NOT NULL UNIQUE, protocol INTEGER NOT NULL CHECK(protocol = 1),
                 PRIMARY KEY(account, calendar, generation, mutation),
@@ -115,7 +115,7 @@ class CreateAttemptStore(context: Context, name: String = "calendar-create-attem
         """.trimIndent())
     }
 
-    private fun createCapturedBindings(db: SQLiteDatabase) {
+    private fun createCapturedBindings(db: SQLiteDatabase, occurrence: Boolean = true) {
         db.execSQL("""
             CREATE TABLE captured_create_bindings (
                 account TEXT NOT NULL, calendar TEXT NOT NULL,
@@ -125,7 +125,7 @@ class CreateAttemptStore(context: Context, name: String = "calendar-create-attem
                 local_id TEXT NOT NULL, capture_id TEXT NOT NULL,
                 capture_adapter TEXT NOT NULL, capture_version INTEGER NOT NULL CHECK(capture_version > 0),
                 timestamp INTEGER NOT NULL, content_fingerprint TEXT NOT NULL,
-                fingerprint_version INTEGER NOT NULL CHECK(fingerprint_version IN (1,2)),
+                fingerprint_version INTEGER NOT NULL CHECK(fingerprint_version IN (${if (occurrence) "1,2,3" else "1,2"})),
                 event TEXT NOT NULL, verified_revision TEXT NOT NULL,
                 PRIMARY KEY(account, calendar, generation, mutation),
                 UNIQUE(account, calendar, generation, event),
@@ -135,7 +135,7 @@ class CreateAttemptStore(context: Context, name: String = "calendar-create-attem
         """.trimIndent())
     }
 
-    private fun createCapturedLinks(db: SQLiteDatabase) {
+    private fun createCapturedLinks(db: SQLiteDatabase, occurrence: Boolean = true) {
         db.execSQL("""
             CREATE TABLE captured_create_links (
                 account TEXT NOT NULL, calendar TEXT NOT NULL,
@@ -145,7 +145,7 @@ class CreateAttemptStore(context: Context, name: String = "calendar-create-attem
                 local_id TEXT NOT NULL, capture_id TEXT NOT NULL,
                 capture_adapter TEXT NOT NULL, capture_version INTEGER NOT NULL CHECK(capture_version > 0),
                 timestamp INTEGER NOT NULL, content_fingerprint TEXT NOT NULL,
-                fingerprint_version INTEGER NOT NULL CHECK(fingerprint_version IN (1,2)),
+                fingerprint_version INTEGER NOT NULL CHECK(fingerprint_version IN (${if (occurrence) "1,2,3" else "1,2"})),
                 PRIMARY KEY(account, calendar, generation, mutation),
                 UNIQUE(account, calendar, generation, local_id),
                 UNIQUE(account, calendar, generation, capture_id),

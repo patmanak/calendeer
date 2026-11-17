@@ -45,12 +45,12 @@ internal object ImportSchema {
         createDeleteAcknowledgements(db)
     }
     fun upgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int, checkCapacity: (SQLiteDatabase) -> Unit) {
-        check(oldVersion in 1..25 && newVersion in 25..26 && oldVersion < newVersion) { "Explicit import schema migration required" }
-        if (oldVersion < 25) {
+        check(oldVersion in 1..26 && newVersion in 25..27 && oldVersion < newVersion) { "Explicit import schema migration required" }
+        if (oldVersion < 25 || newVersion == 27) {
             if (oldVersion < 24) upgradeTo24(db, oldVersion, 24, checkCapacity)
-            CapturedCreateSchemaMigration.rebuild(db, listOf("captured_create_bases")) { createCapturedBases(db) }
+            CapturedCreateSchemaMigration.rebuild(db, listOf("captured_create_bases")) { createCapturedBases(db, newVersion >= 27) }
         }
-        if (newVersion == 26) {
+        if (oldVersion < 26 && newVersion >= 26) {
             addLocalEditProfile(db)
             addEditProfile(db, "conflict_archives")
         }
@@ -338,7 +338,7 @@ internal object ImportSchema {
             state TEXT NOT NULL CHECK(state IN ('UNKNOWN','PROVEN')), PRIMARY KEY(scope,event)
         )""".trimIndent())
     }
-    private fun createCapturedBases(db: SQLiteDatabase) {
+    private fun createCapturedBases(db: SQLiteDatabase, occurrence: Boolean = true) {
         db.execSQL("""CREATE TABLE captured_create_bases (
             scope TEXT NOT NULL, event TEXT NOT NULL,
             account TEXT NOT NULL, calendar TEXT NOT NULL, generation INTEGER NOT NULL CHECK(generation >= 0),
@@ -346,7 +346,7 @@ internal object ImportSchema {
             payload_fingerprint TEXT NOT NULL, local_id TEXT NOT NULL, capture_id TEXT NOT NULL,
             capture_adapter TEXT NOT NULL, capture_version INTEGER NOT NULL CHECK(capture_version > 0),
             timestamp INTEGER NOT NULL, content_fingerprint TEXT NOT NULL,
-            fingerprint_version INTEGER NOT NULL CHECK(fingerprint_version IN (1,2)),
+            fingerprint_version INTEGER NOT NULL CHECK(fingerprint_version IN (${if (occurrence) "1,2,3" else "1,2"})),
             verified_revision TEXT NOT NULL, nonce TEXT NOT NULL UNIQUE,
             protocol INTEGER NOT NULL CHECK(protocol = 1), payload TEXT NOT NULL,
             PRIMARY KEY(scope,event), UNIQUE(scope,attempt), UNIQUE(scope,local_id), UNIQUE(scope,capture_id)

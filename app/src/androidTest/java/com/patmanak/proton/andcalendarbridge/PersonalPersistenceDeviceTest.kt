@@ -418,7 +418,7 @@ class PersonalPersistenceDeviceTest {
         for (table in addedImport) store.writableDatabase.execSQL("DROP TABLE $table")
         store.writableDatabase.version = 22; store.close()
         ImportStore(context, name).use { reopened ->
-            assertEquals(26, reopened.readableDatabase.version)
+            assertEquals(27, reopened.readableDatabase.version)
             assertEquals(before, snapshot(reopened.readableDatabase, old))
             for (table in addedImport) assertTrue(bytes(reopened.readableDatabase, table).isEmpty())
             assertEquals(legacyPreparation.intent, reopened.localTimeEditPreparation(scope, legacy.base.eventId)!!.intent)

@@ -30,12 +30,23 @@ class CapturedSeriesSchemaDeviceTest {
     private val content = EventContent("Synthetic series", EventTime.AllDay(LocalDate.parse("2030-10-02"),
         LocalDate.parse("2030-10-03")), details = EventDetails())
     private fun record(index: Int = 1) = CreateAttemptRecord(MutationId(UUID(0, index * 10L).toString()), scope,
-        AdapterFormat("synthetic-submission", if (index == 1) 2 else 4), "synthetic-opaque-payload-$index",
+        AdapterFormat("synthetic-submission", when (index) { 1 -> 2; 3 -> 5; else -> 4 }), "synthetic-opaque-payload-$index",
         CreateAttemptState.OUTCOME_UNKNOWN, "synthetic-opaque-evidence-$index")
-    private fun identity(index: Int = 1): CapturedCreateDispatchIdentity = CapturedCreateDispatchIdentity.of(record(index),
+    private fun identity(index: Int = 1): CapturedCreateDispatchIdentity {
+        if (index == 3) {
+            val master = RemoteChange.Upsert(EventId("master"), Revision("master-revision"), content.copy(
+                recurrence = EventRecurrence("master@calendeer.invalid", "FREQ=DAILY;COUNT=5")))
+            val child = content.copy(title = "Synthetic child")
+            val intent = LocalCreateIntent(LocalCreateReservation(MutationId("capture-3"), LocalEventId(UUID(0, 3).toString()),
+                scope, AdapterFormat("synthetic-import", 1), Instant.parse("2030-01-01T00:00:00Z")), child,
+                occurrence = OccurrenceEditCandidate(master, RecurrencePoint.AllDay(LocalDate.parse("2030-10-03")), child))
+            return CapturedCreateDispatchIdentity.ofOccurrence(record(index), intent)
+        }
+        return CapturedCreateDispatchIdentity.of(record(index),
         LocalCreateIntent(LocalCreateReservation(MutationId("capture-$index"), LocalEventId(UUID(0, index.toLong()).toString()),
             scope, AdapterFormat("synthetic-import", 1), Instant.parse("2030-01-01T00:00:00Z")), content,
             if (index == 1) null else CreateSeriesRule(5)))
+    }
     private fun receipt(index: Int = 1) = CapturedCreateAttachmentReceipt(CapturedCreateBinding(identity(index),
         EventId("event-$index"), Revision("verified-$index")), UUID(0, 100L + index).toString())
     private val tables = listOf("captured_create_links", "captured_create_bindings", "captured_create_attachments")
@@ -49,7 +60,8 @@ class CapturedSeriesSchemaDeviceTest {
         timestamp INTEGER NOT NULL, content_fingerprint TEXT NOT NULL,
         fingerprint_version INTEGER NOT NULL CHECK(fingerprint_version=1)
     """.trimIndent()
-    private fun legacyCreate(db: SQLiteDatabase) {
+    private fun legacyCreate(db: SQLiteDatabase, allowTwo: Boolean = false) {
+        val identityColumns = if (allowTwo) identityColumns.replace("fingerprint_version=1", "fingerprint_version IN (1,2)") else identityColumns
         db.execSQL("""CREATE TABLE create_attempts(account TEXT NOT NULL,calendar TEXT NOT NULL,generation INTEGER NOT NULL,
             mutation TEXT NOT NULL,adapter TEXT NOT NULL,version INTEGER NOT NULL,payload TEXT NOT NULL,
             state TEXT NOT NULL CHECK(state IN ('PREPARED','OUTCOME_UNKNOWN')),evidence TEXT,
@@ -90,13 +102,13 @@ class CapturedSeriesSchemaDeviceTest {
         row.put("nonce", receipt(index).nonce); row.put("protocol", 1)
         db.insertOrThrow(tables[2], null, row)
     }
-    private fun legacyImport(db: SQLiteDatabase) {
+    private fun legacyImport(db: SQLiteDatabase, allowTwo: Boolean = false) {
         db.execSQL("""CREATE TABLE captured_create_bases(scope TEXT NOT NULL,event TEXT NOT NULL,
             account TEXT NOT NULL,calendar TEXT NOT NULL,generation INTEGER NOT NULL CHECK(generation>=0),
             attempt TEXT NOT NULL,adapter TEXT NOT NULL,version INTEGER NOT NULL CHECK(version>0),
             payload_fingerprint TEXT NOT NULL,local_id TEXT NOT NULL,capture_id TEXT NOT NULL,capture_adapter TEXT NOT NULL,
             capture_version INTEGER NOT NULL CHECK(capture_version>0),timestamp INTEGER NOT NULL,content_fingerprint TEXT NOT NULL,
-            fingerprint_version INTEGER NOT NULL CHECK(fingerprint_version=1),verified_revision TEXT NOT NULL,
+            fingerprint_version INTEGER NOT NULL CHECK(${if (allowTwo) "fingerprint_version IN (1,2)" else "fingerprint_version=1"}),verified_revision TEXT NOT NULL,
             nonce TEXT NOT NULL UNIQUE,protocol INTEGER NOT NULL CHECK(protocol=1),payload TEXT NOT NULL,
             PRIMARY KEY(scope,event),UNIQUE(scope,attempt),UNIQUE(scope,local_id),UNIQUE(scope,capture_id))""")
         db.execSQL("""CREATE TABLE captured_create_acknowledgements(scope TEXT NOT NULL,event TEXT NOT NULL,nonce TEXT NOT NULL UNIQUE,
@@ -123,21 +135,21 @@ class CapturedSeriesSchemaDeviceTest {
             while (rows.moveToNext()) add((0 until rows.columnCount).map { if (rows.isNull(it)) null else "${rows.getType(it)}:${rows.getString(it)}" })
         } }
     }
-    private fun fixture(importing: Boolean = false, block: (Context, String, SQLiteDatabase) -> Unit) {
+    private fun fixture(importing: Boolean = false, previous: Boolean = false, block: (Context, String, SQLiteDatabase) -> Unit) {
         assumeTrue(InstrumentationRegistry.getArguments().getString("providerFixture") == "true")
         val context = ApplicationProvider.getApplicationContext<Context>()
         val name = "series-schema-fixture-${UUID.randomUUID()}.db"
         try {
             context.openOrCreateDatabase(name, Context.MODE_PRIVATE, null).use { db ->
                 db.setForeignKeyConstraintsEnabled(true)
-                if (importing) legacyImport(db) else legacyCreate(db)
-                db.version = if (importing) 24 else 7
+                if (importing) legacyImport(db, previous) else legacyCreate(db, previous)
+                db.version = if (previous) { if (importing) 26 else 8 } else if (importing) 24 else 7
                 block(context, name, db)
             }
         } finally { context.deleteDatabase(name) }
     }
-    private fun upgrade(context: Context, name: String, importing: Boolean, failAfter: Boolean = false) =
-        object : SQLiteOpenHelper(context, name, null, if (importing) 25 else 8) {
+    private fun upgrade(context: Context, name: String, importing: Boolean, failAfter: Boolean = false, current: Boolean = false) =
+        object : SQLiteOpenHelper(context, name, null, if (current) { if (importing) 27 else 9 } else if (importing) 25 else 8) {
             override fun onConfigure(db: SQLiteDatabase) { db.setForeignKeyConstraintsEnabled(true) }
             override fun onCreate(db: SQLiteDatabase) = error("Historical fixture required")
             override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
@@ -146,6 +158,42 @@ class CapturedSeriesSchemaDeviceTest {
                 if (failAfter) error("Synthetic interrupted upgrade")
             }
         }
+    @Test fun occurrenceMigrationsKeepUnknownBytesAndAcceptOnlyTheNewFingerprintVersion() {
+        for (importing in listOf(false, true)) fixture(importing, previous = true) { context, name, raw ->
+            val names = if (importing) listOf("captured_create_bases", "captured_create_acknowledgements", "captured_create_handoffs")
+                else listOf("create_attempts") + tables
+            val before = snapshot(raw, names)
+            val constrained = if (importing) listOf(names[0]) else tables
+            constrained.forEach { table -> assertThrows(SQLiteException::class.java) { raw.execSQL("UPDATE $table SET fingerprint_version=3") } }
+            upgrade(context, name, importing, current = true).use { helper ->
+                val db = helper.writableDatabase
+                assertEquals(if (importing) 27 else 9, db.version); assertEquals(before, snapshot(db, names))
+                if (importing) db.execSQL("UPDATE captured_create_bases SET fingerprint_version=3") else seedCreate(db, 3)
+                constrained.forEach { table -> assertThrows(SQLiteException::class.java) { db.execSQL("UPDATE $table SET fingerprint_version=4") } }
+                db.rawQuery("PRAGMA foreign_key_check", null).use { assertFalse(it.moveToFirst()) }
+            }
+            if (!importing) CreateAttemptStore(context, name).use { store -> runBlocking {
+                assertEquals(record(3), store.read(scope, record(3).id))
+                assertEquals(identity(3), store.capturedIdentity(scope, record(3).id))
+                assertEquals(receipt(3), store.capturedAttachment(receipt(3).binding))
+                assertFalse(store.claimCaptured(record(3), identity(3)))
+            } }
+        }
+    }
+    @Test fun interruptedOccurrenceMigrationsRetainVersionTwoConstraintsAndBytes() {
+        for (importing in listOf(false, true)) fixture(importing, previous = true) { context, name, raw ->
+            val names = if (importing) listOf("captured_create_bases", "captured_create_acknowledgements", "captured_create_handoffs")
+                else listOf("create_attempts") + tables
+            val before = snapshot(raw, names)
+            upgrade(context, name, importing, failAfter = true, current = true).use { helper ->
+                assertThrows(IllegalStateException::class.java) { helper.writableDatabase }
+            }
+            assertEquals(if (importing) 26 else 8, raw.version); assertEquals(before, snapshot(raw, names))
+            val table = if (importing) names[0] else tables[0]
+            assertThrows(SQLiteException::class.java) { raw.execSQL("UPDATE $table SET fingerprint_version=3") }
+            upgrade(context, name, importing, current = true).use { assertEquals(if (importing) 27 else 9, it.writableDatabase.version) }
+        }
+    }
     @Test fun schemaSevenPreservesUnknownEvidenceAndAllIdentityRowsThenAcceptsVersionTwo() = fixture { context, name, raw ->
         val names = listOf("create_attempts") + tables
         val before = snapshot(raw, names)

@@ -31,7 +31,7 @@ class CapturedSeriesIdentityTest {
             canonical.copy(recurrence = canonical.recurrence!!.copy(excludedDates = listOf(RecurrencePoint.AllDay(LocalDate.parse("2030-10-03")))))))
             assertFalse(identity.matchesContent(changed))
         assertFalse(identity.copy(fingerprintVersion = 1).matchesContent(canonical))
-        assertThrows(IllegalArgumentException::class.java) { identity.copy(fingerprintVersion = 3) }
+        assertThrows(IllegalArgumentException::class.java) { identity.copy(fingerprintVersion = 4) }
     }
     @Test fun baselineKeepsTheVerifiedUidAndOwnsMutableRecurrenceLists() {
         val dates = mutableListOf<RecurrencePoint>()

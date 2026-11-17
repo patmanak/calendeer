@@ -123,7 +123,7 @@ class SeriesEditStoreDeviceTest {
     @Test fun migrationFromIndependentVersionTwentyFiveKeepsEveryHistoricalByteAndDefaultsToSimple() = legacy { name, before ->
         ImportStore(context, name).use { store ->
             val db = store.writableDatabase
-            assertEquals(26, db.version); assertEquals(before, rows(db))
+            assertEquals(27, db.version); assertEquals(before, rows(db))
             db.rawQuery("SELECT edit_profile FROM local_edits", null).use { assertTrue(it.moveToFirst()); assertEquals(1, it.getInt(0)) }
             db.rawQuery("SELECT base,local,edit_profile FROM conflict_archives", null).use {
                 assertTrue(it.moveToFirst()); assertEquals(before.single()[5], it.getString(0))
@@ -146,7 +146,7 @@ class SeriesEditStoreDeviceTest {
                 while (columns.moveToNext()) assertNotEquals("edit_profile", columns.getString(1))
             }
         }
-        ImportStore(context, name).use { assertEquals(26, it.readableDatabase.version); assertEquals(before, rows(it.readableDatabase)) }
+        ImportStore(context, name).use { assertEquals(27, it.readableDatabase.version); assertEquals(before, rows(it.readableDatabase)) }
     }
     private fun rows(db: SQLiteDatabase) = db.rawQuery("SELECT scope,mutation,event,adapter,version,base,local,state,kind FROM local_edits ORDER BY event", null).use {
         buildList { while (it.moveToNext()) add((0 until it.columnCount).map { index -> it.getString(index) }) }
@@ -169,6 +169,16 @@ class SeriesEditStoreDeviceTest {
                     arrayOf<Any>(key, scope.account.value, scope.calendar.value, scope.generation, "Legacy fixture"))
                 db.execSQL("CREATE TABLE local_edits(scope TEXT NOT NULL,mutation TEXT NOT NULL,event TEXT NOT NULL,adapter TEXT NOT NULL,version INTEGER NOT NULL,base TEXT NOT NULL,local TEXT NOT NULL,state TEXT NOT NULL CHECK(state IN ('PAUSED','CONFLICT')),kind TEXT NOT NULL DEFAULT 'UPDATE' CHECK(kind IN ('UPDATE','DELETE')),PRIMARY KEY(scope,mutation),UNIQUE(scope,event))")
                 db.execSQL("CREATE TABLE conflict_archives(id INTEGER PRIMARY KEY AUTOINCREMENT,scope TEXT NOT NULL,event TEXT NOT NULL,mutation TEXT NOT NULL,kind TEXT NOT NULL CHECK(kind IN ('UPDATE','DELETE')),adapter TEXT NOT NULL,version INTEGER NOT NULL CHECK(version>0),base TEXT NOT NULL,local TEXT NOT NULL,UNIQUE(scope,mutation))")
+                // Independent empty captured table from schema 25, required by the schema-27 rebuild.
+                db.execSQL("""CREATE TABLE captured_create_bases(scope TEXT NOT NULL,event TEXT NOT NULL,
+                    account TEXT NOT NULL,calendar TEXT NOT NULL,generation INTEGER NOT NULL CHECK(generation>=0),
+                    attempt TEXT NOT NULL,adapter TEXT NOT NULL,version INTEGER NOT NULL CHECK(version>0),
+                    payload_fingerprint TEXT NOT NULL,local_id TEXT NOT NULL,capture_id TEXT NOT NULL,
+                    capture_adapter TEXT NOT NULL,capture_version INTEGER NOT NULL CHECK(capture_version>0),
+                    timestamp INTEGER NOT NULL,content_fingerprint TEXT NOT NULL,
+                    fingerprint_version INTEGER NOT NULL CHECK(fingerprint_version IN (1,2)),
+                    verified_revision TEXT NOT NULL,nonce TEXT NOT NULL UNIQUE,protocol INTEGER NOT NULL CHECK(protocol=1),payload TEXT NOT NULL,
+                    PRIMARY KEY(scope,event),UNIQUE(scope,attempt),UNIQUE(scope,local_id),UNIQUE(scope,capture_id))""")
                 val original = """{"id":"legacy","revision":"opaque","deleted":false,"title":"Original","description":"","location":"","allDay":true,"start":"2030-04-01","end":"2030-04-02"}"""
                 db.execSQL("INSERT INTO local_edits VALUES(?,?,?,?,?,?,?,?,?)", arrayOf<Any>(key, "legacy-edit", "legacy", "legacy", 1,
                     original, original.replace("Original", "Local"), "CONFLICT", "UPDATE"))

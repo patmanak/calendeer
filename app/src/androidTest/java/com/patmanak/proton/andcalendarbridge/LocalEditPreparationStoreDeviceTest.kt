@@ -224,7 +224,7 @@ class LocalEditPreparationStoreDeviceTest {
             it.version = 13
         }
         ImportStore(context, name).use { upgraded ->
-            assertEquals(26, upgraded.readableDatabase.version)
+            assertEquals(27, upgraded.readableDatabase.version)
             assertEquals(edit(), upgraded.localEdit(scope, base.eventId)); assertEquals(base, upgraded.projectedBaseline(scope, base.eventId))
             assertEquals(receipt, upgraded.transaction(scope) { (this as StagedSyncTransaction).received })
             assertNull(upgraded.localEditPreparation(scope, base.eventId)); assertTrue(upgraded.retainLocalEditPreparation(preparation()))

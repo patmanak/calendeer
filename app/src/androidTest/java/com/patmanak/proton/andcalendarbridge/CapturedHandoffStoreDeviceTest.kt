@@ -487,7 +487,7 @@ class CapturedHandoffStoreDeviceTest {
     @Test fun reopeningRetainsRoleCurrentReferenceWaitingAndHistoricalReceipt() = fixture {
         val (frame, _) = advanced(); val plan = plan(frame, incoming(2)); store.waitCapturedHandoff(frame); val before = snapshot()
         store.close(); ImportStore(context, name).use { reopened ->
-            assertEquals(26, reopened.writableDatabase.version)
+            assertEquals(27, reopened.writableDatabase.version)
             assertEquals(frame, reopened.capturedHandoff(scope, frame.eventId)!!.frame)
             assertTrue(reopened.capturedHandoff(scope, frame.eventId)!!.waiting)
             assertEquals(plan, reopened.capturedHandoffProjection(frame))
@@ -520,7 +520,7 @@ class CapturedHandoffStoreDeviceTest {
             it.execSQL("DROP TABLE captured_create_handoffs"); it.version = 12
         }
         ImportStore(context, name).use { migrated ->
-            assertEquals(26, migrated.writableDatabase.version); assertNull(migrated.capturedHandoff(scope, original.change.eventId))
+            assertEquals(27, migrated.writableDatabase.version); assertNull(migrated.capturedHandoff(scope, original.change.eventId))
             assertEquals(original, migrated.capturedBaseline(scope, original.change.eventId))
             assertEquals(acknowledgement, migrated.capturedAcknowledgement(scope, original.change.eventId)!!.receipt)
             assertTrue(migrated.writableDatabase.rawQuery("SELECT * FROM captured_create_handoffs", null).use { !it.moveToFirst() })

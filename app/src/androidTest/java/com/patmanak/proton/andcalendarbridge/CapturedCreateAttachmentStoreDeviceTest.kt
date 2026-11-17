@@ -334,7 +334,7 @@ class CapturedCreateAttachmentStoreDeviceTest {
                     generic.format.version, genericIdentity.payloadFingerprint, "legacy-event", "legacy-proof", 41, 59, "legacy-projected"))
                 legacy.version = 6
             }
-            assertEquals(8, store.writableDatabase.version)
+            assertEquals(9, store.writableDatabase.version)
             assertEquals(unknown, store.read(scope, unknown.id)); assertEquals(paused, store.read(scope, paused.id))
             assertEquals(generic, store.read(scope, generic.id)); assertEquals(binding, store.capturedBinding(link))
             assertEquals(pausedLink, store.capturedIdentity(scope, paused.id))

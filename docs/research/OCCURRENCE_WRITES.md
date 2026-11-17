@@ -150,3 +150,25 @@ reply can leave a committed marker; recovery inspects it rather than writing aga
 This is not request capsule v4 or dispatch fingerprint v2: those historical
 contracts remain frozen. Existing preparation, submission and fingerprint paths
 reject occurrence captures. No worker route, network preparation or ACK is enabled.
+
+## Inactive occurrence request identity
+
+An explicit dispatch fingerprint v3 binds the frozen master event ID, revision,
+UID, canonical rule and personal content, original DATE or DATE-TIME slot, and
+flat child content. It nests the unchanged historical content fingerprints;
+versions 1 and 2 keep their byte contracts. Matching v3 requires the complete
+retained intent and its capture metadata. Bare-content matching and historical
+factories remain closed to occurrences.
+
+Protected CREATE capsule v5 likewise requires that independently retained intent
+on inspection. It binds the attempt and capture identities to v3, preserves the
+whole source JSON, frozen request, key context and notification defaults, and
+accepts exactly one child CREATE envelope. Inspection does not authenticate the
+master's signed SEQUENCE, qualify rights or authorize dispatch. Those checks
+belong to preparation and pre-claim qualification. Historical capsule readers
+still reject v5. Inspecting UNKNOWN work neither changes nor resends it.
+
+The existing dispatch and import tables accept fingerprint v3 through explicit
+transactional migrations; prior payloads, evidence and acknowledgement states
+are copied unchanged. No occurrence preparation, worker, readback or native/SQL
+acknowledgement route is activated by this storage contract.

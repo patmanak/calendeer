@@ -406,7 +406,7 @@ class TitleUpdateAcknowledgementStoreDeviceTest {
         store.writableDatabase.execSQL("DROP TABLE title_update_acknowledgements")
         store.writableDatabase.version = 15; store.close()
         ImportStore(context, name).use { reopened ->
-            assertEquals(26, reopened.readableDatabase.version)
+            assertEquals(27, reopened.readableDatabase.version)
             sourceIntact(reopened); assertEquals(base, reopened.transaction(scope) { remote(base.eventId) })
             assertNull(reopened.titleUpdateAcknowledgement(scope, base.eventId)); assertTrue(reserve(reopened).fresh)
         }

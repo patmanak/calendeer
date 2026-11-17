@@ -202,7 +202,7 @@ class DeleteAcknowledgementStoreDeviceTest {
         val first = reserve(store); assertTrue(store.restoreDeleteAcknowledgement(AppliedDeleteAcknowledgement(first.record.receipt)))
         store.close()
         ImportStore(context,name).use { reopened ->
-            assertEquals(26,reopened.readableDatabase.version)
+            assertEquals(27,reopened.readableDatabase.version)
             assertEquals(first.record.copy(state=DeleteAcknowledgementState.RESTORED),reopened.deleteAcknowledgement(scope,base.eventId,work.id))
             assertEquals(first.copy(record=first.record.copy(state=DeleteAcknowledgementState.RESTORED),fresh=false),reopened.prepareDeleteAcknowledgement(work))
             assertEquals(base,reopened.projectedBaseline(scope,base.eventId)); queue(reopened,base); assertTrue(reopened.pending(scope).isEmpty())
@@ -235,7 +235,7 @@ class DeleteAcknowledgementStoreDeviceTest {
         store.writableDatabase.execSQL("DROP TABLE delete_acknowledgements")
         store.writableDatabase.version = 21; store.close()
         ImportStore(context,name).use { reopened ->
-            assertEquals(26,reopened.readableDatabase.version); assertNull(reopened.deleteAcknowledgement(scope,base.eventId))
+            assertEquals(27,reopened.readableDatabase.version); assertNull(reopened.deleteAcknowledgement(scope,base.eventId))
             assertEquals(intent,reopened.localDelete(scope,base.eventId)); pendingOwner(reopened,1)
             assertTrue(reserve(reopened).fresh)
         }
