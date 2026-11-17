@@ -276,51 +276,8 @@ class ImportCoordinator(
     suspend fun disconnectCalendars() = nativeCalendars.disconnect()
 
     suspend fun discoverSystemChanges(target: CalendarScope, afterRow: Long = 0, limit: Int = 25):
-        com.patmanak.proton.andcalendarbridge.data.calendar.SystemCalendarChangePage? = mutex.withLock {
-        val expected = generation
-        val policy = createPolicyRevision.get()
-        val active = { authenticated && generation == expected && createPolicyRevision.get() == policy &&
-            systemCreatesEnabled(target) && hasCalendarPermissions() }
-        if (!active() || !isCurrent(expected, target.account)) return@withLock null
-        val selected = store.selections(target.account).singleOrNull { it.scope == target }
-        if (selected?.enabled != true || !selected.available) return@withLock null
-        projection.admitOperation = active
-        store.admitTransaction = { it == target && active() }
-        try {
-            val page = projection.discoverSystemChanges(target, afterRow, limit)
-                ?: return@withLock null
-            val keys = page.changes.filter { it.kind == com.patmanak.proton.andcalendarbridge.data.calendar.SystemCalendarChangeKind.IMPORTED }
-                .mapNotNull { it.nativeKey }.toSet()
-            val resolved = mutableMapOf<String, EventId>()
-            val ambiguous = mutableSetOf<String>()
-            var afterEvent: EventId? = null
-            // Metadata traversal can be linear in acknowledged event count. Memory stays bounded
-            // to one ID page and the native change page; a persisted native-key index is future work.
-            if (keys.isNotEmpty()) while (true) {
-                currentCoroutineContext().ensureActive()
-                if (!active() || !isCurrent(expected, target.account)) return@withLock null
-                val ids = store.projectedEventIds(target, afterEvent, 100)
-                for (event in ids) {
-                    val key = projection.eventIdentityKey(target, event) ?: continue
-                    if (key !in keys || key in ambiguous) continue
-                    val previous = resolved.put(key, event)
-                    if (previous != null && previous != event) {
-                        resolved.remove(key); ambiguous += key
-                    }
-                }
-                if (ids.size < 100) break
-                afterEvent = ids.last()
-            }
-            val canonical = page.copy(changes = page.changes.map { change ->
-                if (change.kind == com.patmanak.proton.andcalendarbridge.data.calendar.SystemCalendarChangeKind.IMPORTED)
-                    change.copy(event = change.nativeKey?.let(resolved::get)) else change
-            })
-            val current = store.selections(target.account).singleOrNull { it.scope == target }
-            if (active() && current?.enabled == true && current.available) canonical else null
-        } catch (cancelled: CancellationException) { throw cancelled }
-          catch (_: Exception) { null }
-          finally { projection.admitOperation = { false }; store.admitTransaction = { false } }
-    }
+        com.patmanak.proton.andcalendarbridge.data.calendar.SystemCalendarChangePage? =
+        localChanges.discoverSystemChanges(target, afterRow, limit)
 
     private suspend fun ensureCreateLifecycle() {
         val journal = creates ?: return

@@ -9,15 +9,12 @@ import com.patmanak.proton.andcalendarbridge.data.importing.ImportStoreLocalPrep
 import com.patmanak.proton.andcalendarbridge.data.importing.ImportStoreLocalPreparations.readLocalTimeEditPreparation
 import com.patmanak.proton.andcalendarbridge.data.importing.ImportStoreLocalPreparations.supportedPersonalIntent
 import com.patmanak.proton.andcalendarbridge.data.importing.ImportStoreLocalPreparations.readPersonalEditPreparation
-import com.patmanak.proton.andcalendarbridge.data.importing.ImportStoreLocalPreparations.readLocalEditPreparation
 import com.patmanak.proton.andcalendarbridge.data.importing.ImportStoreUpdateAcknowledgements.readTextUpdateAcknowledgement
 import com.patmanak.proton.andcalendarbridge.data.importing.ImportStoreUpdateAcknowledgements.encodeTextUpdateAcknowledgement
 import com.patmanak.proton.andcalendarbridge.data.importing.ImportStoreUpdateAcknowledgements.readTimeUpdateAcknowledgement
 import com.patmanak.proton.andcalendarbridge.data.importing.ImportStoreUpdateAcknowledgements.encodeTimeUpdateAcknowledgement
 import com.patmanak.proton.andcalendarbridge.data.importing.ImportStoreUpdateAcknowledgements.readPersonalUpdateAcknowledgement
 import com.patmanak.proton.andcalendarbridge.data.importing.ImportStoreUpdateAcknowledgements.encodePersonalUpdateAcknowledgement
-import com.patmanak.proton.andcalendarbridge.data.importing.ImportStoreUpdateAcknowledgements.readTitleUpdateAcknowledgement
-import com.patmanak.proton.andcalendarbridge.data.importing.ImportStoreUpdateAcknowledgements.encodeTitleUpdateAcknowledgement
 import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
@@ -59,6 +56,9 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
         ::localTimePreparationAdmission, ::personalPreparationAdmission, ::localTitlePreparationAdmission)
     private val updates = ImportStoreUpdateSql(localMutations, ::localTextPreparationAdmission,
         ::localTimePreparationAdmission, ::personalPreparationAdmission, ::localTitlePreparationAdmission)
+    private val titles = ImportStoreTitleOperations(object : ImportStoreMutations {
+        override suspend fun <T> mutate(scope: CalendarScope, action: (SQLiteDatabase) -> T): T = stagingMutation(scope, action)
+    }, preparation, updates, ::localTitlePreparationAdmission)
     /** Check the run lease both before its transaction and before durable commit. */
     @Volatile var admitTransaction: (CalendarScope) -> Boolean = { true }
     override fun onConfigure(db: SQLiteDatabase) {
@@ -623,75 +623,19 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
         }
     }
 
-    /** Freeze an exact captured owner and sealed fragments together, without dispatch admission.
-     * Existing evidence is immutable even after its current owner becomes conflicted or paused.
-     */
-    suspend fun retainLocalEditPreparation(value: LocalEditPreparation): Boolean {
-        // Snapshot caller-owned empty lists and serialized observations before the first suspension.
-        val frozen = value.copy(intent = LocalEditPreparation.freezeIntent(value.intent))
-        val intent = frozen.intent
-        val base = encodeChange(intent.base).also(::requirePreparationSnapshotBudget)
-        val local = encodeChange(intent.base.copy(content = intent.content)).also(::requirePreparationSnapshotBudget)
-        return stagingMutation(intent.scope) { db ->
-        preparation.retainLocalEditPreparation(db, frozen, intent, base, local)
-        }
-    }
-    /** SQL observation only; does not inspect Android or refresh remote access. */
-    suspend fun assessLocalTitlePreparation(intent: LocalEditIntent): LocalTitlePreparationAdmission =
-        stagingMutation(intent.scope) { db -> localTitlePreparationAdmission(db, intent) }
+    suspend fun retainLocalEditPreparation(value: LocalEditPreparation): Boolean = titles.retainLocalEditPreparation(value)
+    suspend fun assessLocalTitlePreparation(intent: LocalEditIntent): LocalTitlePreparationAdmission = titles.assessLocalTitlePreparation(intent)
+    suspend fun retainCurrentLocalTitlePreparation(value: LocalEditPreparation): LocalTitlePreparationAdmission = titles.retainCurrentLocalTitlePreparation(value)
+    suspend fun conflictLocalTitlePreparation(intent: LocalEditIntent): LocalTitlePreparationAdmission = titles.conflictLocalTitlePreparation(intent)
+    suspend fun prepareTitleUpdateAcknowledgement(result: TitleUpdateVerifiedResult,
+        handoff: CapturedCreateHandoffFrame? = null): TitleUpdateAcknowledgementReservation? = titles.prepareTitleUpdateAcknowledgement(result, handoff)
+    suspend fun titleUpdateAcknowledgement(scope: CalendarScope, event: EventId,
+        attempt: MutationId? = null): TitleUpdateAcknowledgementRecord? = titles.titleUpdateAcknowledgement(scope, event, attempt)
+    suspend fun restoreTitleUpdateAcknowledgement(witness: AppliedTitleUpdateAcknowledgement): Boolean = titles.restoreTitleUpdateAcknowledgement(witness)
+    suspend fun localEditPreparation(scope: CalendarScope, eventId: EventId): LocalEditPreparation? = titles.localEditPreparation(scope, eventId)
 
-    /** First admission rechecks the owner, checkpoint, baseline and remote in the insertion transaction. */
-    suspend fun retainCurrentLocalTitlePreparation(value: LocalEditPreparation): LocalTitlePreparationAdmission {
-        val frozen = value.copy(intent = LocalEditPreparation.freezeIntent(value.intent))
-        val base = encodeChange(frozen.intent.base).also(::requirePreparationSnapshotBudget)
-        val local = encodeChange(frozen.intent.base.copy(content = frozen.intent.content)).also(::requirePreparationSnapshotBudget)
-        return stagingMutation(frozen.intent.scope) { db ->
-        preparation.retainCurrentLocalTitlePreparation(db, frozen, base, local)
-        }
-    }
-    /** Monotone exact-owner transition after a remote conflict; original snapshots/evidence stay intact. */
-    suspend fun conflictLocalTitlePreparation(intent: LocalEditIntent): LocalTitlePreparationAdmission =
-        stagingMutation(intent.scope) { db ->
-        preparation.conflictLocalTitlePreparation(db, intent)
-    }
     private fun localTitlePreparationAdmission(db: SQLiteDatabase, intent: LocalEditIntent): LocalTitlePreparationAdmission =
         ImportStoreLocalPreparations.localTitlePreparationAdmission(db, intent, ::readBaseline)
-
-    /** Reserve the immutable title receipt before the one fresh native metadata write.
-     * The coordinator owns verified-result admission; this transaction qualifies only its SQL source.
-     */
-    suspend fun prepareTitleUpdateAcknowledgement(result: TitleUpdateVerifiedResult,
-        handoff: CapturedCreateHandoffFrame? = null): TitleUpdateAcknowledgementReservation? {
-        val frozen = TitleUpdateVerifiedResult.of(result.record,
-            TitleUpdateSubmissionObservation.Verified(result.attempt, result.event))
-        val proposed = TitleUpdateAcknowledgementReceipt.of(frozen, UUID.randomUUID().toString(), handoff)
-        val encoded = encodeTitleUpdateAcknowledgement(proposed)
-        return stagingMutation(proposed.intent.scope) { db ->
-            updates.prepareTitleUpdateAcknowledgement(db, frozen, proposed, encoded)
-        }
-    }
-
-    /** Historical leased inspection, including inactive scopes; never permission for a native write. */
-    suspend fun titleUpdateAcknowledgement(scope: CalendarScope, event: EventId,
-        attempt: MutationId? = null): TitleUpdateAcknowledgementRecord? =
-        stagingMutation(scope) { db -> readTitleUpdateAcknowledgement(db, scope, event, attempt) }
-
-    /** Close only the exact historically acknowledged owner. New remote/deferred work survives.
-     * A RESTORED replay is read-only and cannot consume a subsequent intent or preparation.
-     */
-    suspend fun restoreTitleUpdateAcknowledgement(witness: AppliedTitleUpdateAcknowledgement): Boolean {
-        val receipt = witness.receipt.snapshot()
-        val intent = receipt.intent
-        val scope = intent.scope
-        val event = intent.base.eventId
-        return stagingMutation(scope) { db ->
-            updates.restoreTitleUpdateAcknowledgement(db, receipt, intent, scope, event)
-        }
-    }
-
-    /** Historical inspection only: a frozen PAUSED snapshot never resets the current conflict state. */
-    suspend fun localEditPreparation(scope: CalendarScope, eventId: EventId): LocalEditPreparation? =
-        stagingMutation(scope) { db -> readLocalEditPreparation(db, scope, eventId) }
 
     /** Decode the complete immutable binding before using even its completion state. */
     suspend fun deleteAcknowledgement(scope: CalendarScope, event: EventId, attempt: MutationId): DeleteAcknowledgementRecord? =
