@@ -137,6 +137,9 @@ interface CalendarProjection {
     suspend fun captureOwnedPersonalEdit(scope: CalendarScope, base: RemoteChange.Upsert): OwnedLocalEditSnapshot? = null
     /** Explicit master-series observation only; no remote family proof, preparation or ACK. */
     suspend fun captureOwnedSeriesEdit(scope: CalendarScope, base: RemoteChange.Upsert): OwnedLocalEditSnapshot? = null
+    /** Inactive first-occurrence observation only; no durable claim, preparation, upload or ACK. */
+    suspend fun captureOwnedOccurrenceEdit(scope: CalendarScope, master: RemoteChange.Upsert,
+        childRow: Long): OwnedOccurrenceEditSnapshot? = null
     /** Present, dirty local tombstone only; absence never establishes deletion intent. No ACK. */
     suspend fun captureOwnedSimpleDelete(scope: CalendarScope, base: RemoteChange.Upsert): OwnedLocalEditSnapshot? = null
     /** One-shot identity stamp after a durable claim; preserves DIRTY and never assigns remote IDs. */

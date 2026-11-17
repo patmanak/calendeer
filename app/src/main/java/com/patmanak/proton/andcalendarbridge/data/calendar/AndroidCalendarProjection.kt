@@ -495,6 +495,8 @@ class AndroidCalendarProjection(context: Context,
     override suspend fun captureOwnedSeriesEdit(scope: CalendarScope, base: RemoteChange.Upsert): OwnedLocalEditSnapshot? = operation {
         captureSimpleSnapshot(scope, base, deleted = false, personal = true, series = true)
     }
+    override suspend fun captureOwnedOccurrenceEdit(scope: CalendarScope, master: RemoteChange.Upsert,
+        childRow: Long): OwnedOccurrenceEditSnapshot? = readOccurrenceEdit(scope, master, childRow)
 
     override suspend fun captureOwnedSimpleDelete(scope: CalendarScope, base: RemoteChange.Upsert): OwnedLocalEditSnapshot? = operation {
         captureSimpleSnapshot(scope, base, deleted = true)

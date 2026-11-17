@@ -114,3 +114,19 @@ Before activation, prove exact family capture, requalification before claim,
 crypto with controlled HTTP, independent readback, native/SQL ACK and interrupted
 recovery in E3. Then qualify one authorized live test occurrence. E4 clients remain
 grouped separately; source knowledge alone does not enable a worker route.
+
+## Inactive native observation
+
+`captureOwnedOccurrenceEdit` is a separate assertion-only observation on the
+existing projection port. `calendeer-native-occurrence` version 1 snapshots an
+ordinary imported clean master and its first unstamped dirty child. Parent
+identity/revision/geometry, exact original slot, complete native family, reminders,
+color-key evidence and absence of participants/extended properties are asserted
+in one Provider batch. The candidate owns bounded immutable domain data; Android
+row locators stay outside it. No identity is stamped and neither row is cleaned.
+
+Transferred CREATE provenance, additional exceptions, unsupported fields and an
+unwitnessed null color in calendar-color mode remain held. This native profile
+does not prove a signed parent SEQUENCE or complete remote membership. It has no
+durable request, preparation or worker route; those need independently versioned
+extensions of the existing stores and the remaining adapter/recovery gates.
