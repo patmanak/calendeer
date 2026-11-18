@@ -175,6 +175,7 @@ class ConflictResolutionFenceDeviceTest {
         val db = store.writableDatabase
         // Reconstruct the exact pre-fence schema without invoking the upgrade implementation.
         db.execSQL("DROP TABLE conflict_resolution_fences")
+        restorePreGuestUpdateTable(db)
         val tables = listOf("text_update_attempts", "time_update_attempts", "personal_update_attempts", "delete_attempts")
         for (table in tables) {
             db.execSQL("INSERT INTO $table(account,calendar,generation,mutation,event,state,capsule,result,completion) " +
@@ -183,7 +184,7 @@ class ConflictResolutionFenceDeviceTest {
         db.version = 10
         store.close()
         TitleUpdateAttemptStore(context, name).use { reopened ->
-            assertEquals(11, reopened.writableDatabase.version)
+            assertEquals(12, reopened.writableDatabase.version)
             assertEquals(prepared(), reopened.read(scope, prepared().id))
             for (table in tables) {
                 reopened.readableDatabase.rawQuery("SELECT hex(capsule),hex(result),hex(completion),state FROM $table", null).use {

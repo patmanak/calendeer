@@ -65,7 +65,7 @@ class TextUpdateWorkPageDeviceTest {
         TitleUpdateAttemptStore(context, name).use { reopened ->
             val page = reopened.page(TextUpdateWorkQuery(scope, 1, cursor))
             assertEquals(listOf("b"), page.entries.map { it.eventId.value }); assertNull(page.next)
-            assertEquals(11, reopened.readableDatabase.version)
+            assertEquals(12, reopened.readableDatabase.version)
         }
     }
 

@@ -236,7 +236,7 @@ class TitleUpdateCompletionJournalDeviceTest {
                     }); raw.version = version
                 }
                 TitleUpdateAttemptStore(context, name).use { migrated ->
-                    assertEquals(11, migrated.readableDatabase.version)
+                    assertEquals(12, migrated.readableDatabase.version)
                     migrated.readableDatabase.rawQuery("SELECT preparation,payload,evidence,result,completion,state FROM title_update_attempts", null).use {
                         assertTrue(it.moveToFirst()); assertEquals("opaque legacy preparation\n", it.getString(0))
                         assertEquals("opaque legacy ciphertext\n", it.getString(1)); assertEquals("opaque legacy evidence\n", it.getString(2))

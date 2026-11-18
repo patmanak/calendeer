@@ -310,7 +310,7 @@ class PersonalPersistenceDeviceTest {
         store.writableDatabase.execSQL("DROP TABLE conflict_resolution_fences")
         store.writableDatabase.version = 9; store.close()
         TitleUpdateAttemptStore(context, name).use { reopened ->
-            assertEquals(11, reopened.readableDatabase.version)
+            assertEquals(12, reopened.readableDatabase.version)
             assertEquals(before, snapshot(reopened.readableDatabase, old))
             assertTrue(bytes(reopened.readableDatabase, "personal_update_attempts").isEmpty())
             assertTrue(reopened.personalJournal.remember(personal(), allow))

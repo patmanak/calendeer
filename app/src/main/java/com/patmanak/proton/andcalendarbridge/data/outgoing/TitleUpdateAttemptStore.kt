@@ -33,28 +33,22 @@ import org.json.JSONObject
  * Payload/evidence are opaque protected strings; this store grants no HTTP or Provider capability.
  */
 class TitleUpdateAttemptStore(context: Context, name: String = "calendar-title-update-attempt-v1.db") :
-    SQLiteOpenHelper(context, name, null, 11), TitleUpdateRecoveryJournal, TitleUpdatePreparationJournal {
+    SQLiteOpenHelper(context, name, null, 12), TitleUpdateRecoveryJournal, TitleUpdatePreparationJournal {
     private val lock = Mutex()
-    /** Text history shares the same connection and reciprocal ownership transaction. */
-    internal val textJournal: TextUpdateRecoveryJournal = SqlTextUpdateAttemptJournal(object : TextAttemptDatabase {
+    private val sharedDatabase = object : AttemptJournalDatabase {
         override suspend fun <T> withDatabase(beforeOpen: () -> Unit, action: (SQLiteDatabase) -> T): T =
             withContext(Dispatchers.IO) { lock.withLock { beforeOpen(); action(writableDatabase) } }
-    }, ::canTextOwn)
+    }
+    internal val textJournal: TextUpdateRecoveryJournal = SqlTextUpdateAttemptJournal(sharedDatabase, ::canTextOwn)
     /** Temporal history shares the same connection and reciprocal ownership transaction. */
-    internal val timeJournal: TimeUpdateRecoveryJournal = SqlTimeUpdateAttemptJournal(object : TimeAttemptDatabase {
-        override suspend fun <T> withDatabase(beforeOpen: () -> Unit, action: (SQLiteDatabase) -> T): T =
-            withContext(Dispatchers.IO) { lock.withLock { beforeOpen(); action(writableDatabase) } }
-    }, ::canTimeOwn)
+    internal val timeJournal: TimeUpdateRecoveryJournal = SqlTimeUpdateAttemptJournal(sharedDatabase, ::canTimeOwn)
     /** Personal edit history shares the same connection and reciprocal ownership transaction. */
-    internal val personalJournal: PersonalUpdateRecoveryJournal = SqlPersonalUpdateAttemptJournal(object : PersonalAttemptDatabase {
-        override suspend fun <T> withDatabase(beforeOpen: () -> Unit, action: (SQLiteDatabase) -> T): T =
-            withContext(Dispatchers.IO) { lock.withLock { beforeOpen(); action(writableDatabase) } }
-    }, ::canPersonalOwn)
+    internal val personalJournal: PersonalUpdateRecoveryJournal = SqlPersonalUpdateAttemptJournal(sharedDatabase) { db, work, check ->
+        canUpdateOwn(db, work.scope, work.eventId, work.id, work.preparation.intent.id, check)
+    }
+    internal val guestJournal = GuestDeliveryJournal(sharedDatabase, ::canUpdateOwn)
     /** Completed DELETE retains its permanent event and request hold. */
-    internal val deleteJournal: DeleteRecoveryJournal = SqlDeleteAttemptJournal(object : DeleteAttemptDatabase {
-        override suspend fun <T> withDatabase(beforeOpen: () -> Unit, action: (SQLiteDatabase) -> T): T =
-            withContext(Dispatchers.IO) { lock.withLock { beforeOpen(); action(writableDatabase) } }
-    }, ::canDeleteOwn)
+    internal val deleteJournal: DeleteRecoveryJournal = SqlDeleteAttemptJournal(sharedDatabase, ::canDeleteOwn)
     override val completionProtocol = 1
     @Volatile var admitDispatch: (CalendarScope) -> Boolean = { false }
 
@@ -136,7 +130,9 @@ class TitleUpdateAttemptStore(context: Context, name: String = "calendar-title-u
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        check(oldVersion in 1..10 && newVersion == 11) { "Explicit title update journal migration required" }
+        check(oldVersion in 1..11 && newVersion == 12) { "Explicit title update journal migration required" }
+        if (oldVersion >= 10) db.execSQL("ALTER TABLE personal_update_attempts ADD COLUMN guest INTEGER NOT NULL DEFAULT 0 CHECK(guest IN (0,1))")
+        if (oldVersion == 11) return
         if (oldVersion >= 3) ConflictResolutionFenceSql.createTable(db)
         if (oldVersion == 10) return
         if (oldVersion >= 3) {
@@ -615,14 +611,15 @@ class TitleUpdateAttemptStore(context: Context, name: String = "calendar-title-u
             history.all { it.completed } && !usedIdentity && !text && !time && !personal && !fenced
         }
 
-    private fun canPersonalOwn(db: SQLiteDatabase, work: PersonalUpdateAttemptRecord, checkCancelled: () -> Unit): Boolean =
+    private fun canUpdateOwn(db: SQLiteDatabase, scope: CalendarScope, event: EventId, id: MutationId,
+        localId: MutationId, checkCancelled: () -> Unit): Boolean =
         qualifiedOwnership(checkCancelled) {
-            val history = ownershipHistory(db, work.scope, work.eventId)
-            val usedIdentity = titleRequestExists(db, work.scope, work.id, checkCancelled)
-            val text = TextUpdateAttemptSql(db, checkCancelled).hasOwner(work.scope, work.eventId, work.id)
-            val time = TimeUpdateAttemptSql(db, checkCancelled).hasOwner(work.scope, work.eventId, work.id)
-            val delete = DeleteAttemptSql(db, checkCancelled).hasOwner(work.scope, work.eventId, work.id)
-            val fenced = ConflictResolutionFenceSql(db).blocks(work.scope, work.eventId, work.id, work.preparation.intent.id)
+            val history = ownershipHistory(db, scope, event)
+            val usedIdentity = titleRequestExists(db, scope, id, checkCancelled)
+            val text = TextUpdateAttemptSql(db, checkCancelled).hasOwner(scope, event, id)
+            val time = TimeUpdateAttemptSql(db, checkCancelled).hasOwner(scope, event, id)
+            val delete = DeleteAttemptSql(db, checkCancelled).hasOwner(scope, event, id)
+            val fenced = ConflictResolutionFenceSql(db).blocks(scope, event, id, localId)
             history.all { it.completed } && !usedIdentity && !text && !time && !delete && !fenced
         }
 

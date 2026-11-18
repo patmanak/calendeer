@@ -23,10 +23,9 @@ internal class PersonalUpdateAttemptSql(private val db: SQLiteDatabase, private 
             arrayOf(fence.scope.account.value, fence.scope.calendar.value)).use { rows -> buildList {
             while (rows.moveToNext()) {
                 checkCancelled(); require(size < 128 && rows.getType(0) == Cursor.FIELD_TYPE_INTEGER)
-                val stored = requireNotNull(readStored("rowid=?", arrayOf(rows.getLong(0).toString())))
-                val completed = readCompletion(stored) != null
-                val collision = stored.record.id in ids || stored.record.preparation.intent.id in ids
-                add((!completed && stored.record.eventId == fence.eventId) || collision)
+                val owner = readOwner(rows.getLong(0))
+                val collision = owner.id in ids || owner.localId in ids
+                add((!owner.completed && owner.event == fence.eventId) || collision)
             }
         } }
         return conflicts.any { it }
@@ -34,6 +33,8 @@ internal class PersonalUpdateAttemptSql(private val db: SQLiteDatabase, private 
 
     fun hasOwner(scope: CalendarScope, event: EventId, id: MutationId): Boolean =
         owners(scope, event, id).any { !it.completed || it.id == id }
+    fun hasExclusiveOwner(scope: CalendarScope, event: EventId, id: MutationId, rowId: Long): Boolean =
+        owners(scope, event, id).singleOrNull { !it.completed }?.rowId == rowId
     fun read(scope: CalendarScope, id: MutationId): PersonalUpdateAttemptRecord? = readStored(scope, id)?.record
 
     fun remember(record: PersonalUpdateAttemptRecord, capsule: ByteArray): Boolean {
@@ -69,7 +70,17 @@ internal class PersonalUpdateAttemptSql(private val db: SQLiteDatabase, private 
     }
 
     private data class Stored(val rowId: Long, val record: PersonalUpdateAttemptRecord)
-    private data class Owner(val rowId: Long, val id: MutationId, val event: EventId, val completed: Boolean)
+    private data class Owner(val rowId: Long, val id: MutationId, val localId: MutationId, val event: EventId, val completed: Boolean)
+    private fun readOwner(rowId: Long): Owner {
+        val guest = GuestAttemptSql(db, checkCancelled)
+        if (guest.isGuest(rowId)) {
+            val owner = guest.readRow(rowId).owner
+            return Owner(rowId, owner.id, owner.localIntentId, owner.eventId, false)
+        }
+        val stored = requireNotNull(readStored("rowid=?", arrayOf(rowId.toString())))
+        return Owner(rowId, stored.record.id, stored.record.preparation.intent.id, stored.record.eventId,
+            readCompletion(stored) != null)
+    }
     private fun identity(scope: CalendarScope, id: MutationId) = arrayOf(scope.account.value, scope.calendar.value,
         scope.generation.toString(), id.value)
 
@@ -80,10 +91,7 @@ internal class PersonalUpdateAttemptSql(private val db: SQLiteDatabase, private 
             buildList {
                 while (rows.moveToNext()) {
                     checkCancelled(); require(rows.getType(0) == Cursor.FIELD_TYPE_INTEGER)
-                    val stored = requireNotNull(readStored("rowid=?", arrayOf(rows.getLong(0).toString())))
-                    // Non-null completion alone never releases an event. Decode one whole history at a time.
-                    val completed = readCompletion(stored) != null
-                    add(Owner(stored.rowId, stored.record.id, stored.record.eventId, completed))
+                    add(readOwner(rows.getLong(0)))
                 }
             }.also { owners -> require(owners.filter { !it.completed }.groupBy { it.event }.all { it.value.size <= 1 }) }
         }
@@ -137,7 +145,7 @@ internal class PersonalUpdateAttemptSql(private val db: SQLiteDatabase, private 
 
     /** No full BLOB enters a CursorWindow. Every metadata cell is bounded before materialization. */
     private fun readStored(where: String, arguments: Array<String>): Stored? {
-        val metadata = blobs.metadata(where, arguments, PersonalUpdateAttemptStorageCodec.MAX_CAPSULE_BYTES) ?: return null
+        val metadata = blobs.metadata("($where) AND guest=0", arguments, PersonalUpdateAttemptStorageCodec.MAX_CAPSULE_BYTES) ?: return null
         val bytes = blobs.capsule(metadata.rowId, metadata.length)
         val record = PersonalUpdateAttemptStorageCodec.decode(bytes)
         require(record.scope == metadata.scope && record.id == metadata.id && record.eventId == metadata.event &&
@@ -155,6 +163,7 @@ internal class PersonalUpdateAttemptSql(private val db: SQLiteDatabase, private 
                 generation INTEGER NOT NULL CHECK(generation >= 0),
                 mutation TEXT NOT NULL, event TEXT NOT NULL,
                 state TEXT NOT NULL CHECK(state IN ('PREPARED','OUTCOME_UNKNOWN')),
+                guest INTEGER NOT NULL DEFAULT 0 CHECK(guest IN (0,1)),
                 capsule BLOB NOT NULL, result BLOB, completion BLOB,
                 PRIMARY KEY(account,calendar,generation,mutation),
                 UNIQUE(account,calendar,mutation)

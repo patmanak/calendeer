@@ -194,7 +194,7 @@ class TextUpdateProofStoreDeviceTest {
             db.execSQL("DROP TABLE conflict_resolution_fences"); db.version = 5
         }
         TitleUpdateAttemptStore(context, name).use { migrated ->
-            assertEquals(11, migrated.readableDatabase.version); assertEquals(record, migrated.textJournal.read(scope, record.id, allow))
+            assertEquals(12, migrated.readableDatabase.version); assertEquals(record, migrated.textJournal.read(scope, record.id, allow))
             migrated.readableDatabase.rawQuery("SELECT capsule,result,completion FROM text_update_attempts", null).use {
                 assertTrue(it.moveToFirst()); assertArrayEquals(capsule, it.getBlob(0)); assertTrue(it.isNull(1)); assertTrue(it.isNull(2))
             }
@@ -371,7 +371,7 @@ class TextUpdateProofStoreDeviceTest {
             db.execSQL("DROP TABLE migration_index_collision")
         }
         TitleUpdateAttemptStore(context, name).use { migrated ->
-            assertEquals(11, migrated.readableDatabase.version)
+            assertEquals(12, migrated.readableDatabase.version)
             assertEquals(record, migrated.textJournal.read(scope, record.id, allow))
         }
     }

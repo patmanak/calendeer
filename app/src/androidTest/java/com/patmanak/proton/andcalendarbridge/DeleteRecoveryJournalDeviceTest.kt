@@ -126,7 +126,7 @@ class DeleteRecoveryJournalDeviceTest {
         db.execSQL("DROP TABLE conflict_resolution_fences")
         db.version = 8; store.close()
         TitleUpdateAttemptStore(context, name).use { reopened ->
-            assertEquals(11, reopened.readableDatabase.version)
+            assertEquals(12, reopened.readableDatabase.version)
             reopened.readableDatabase.rawQuery("SELECT capsule,result,completion FROM delete_attempts", null).use { row ->
                 assertTrue(row.moveToFirst()); assertArrayEquals(bytes,row.getBlob(0)); assertTrue(row.isNull(1)); assertTrue(row.isNull(2))
             }
