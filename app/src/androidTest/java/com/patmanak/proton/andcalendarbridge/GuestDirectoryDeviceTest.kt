@@ -25,10 +25,12 @@ class GuestDirectoryDeviceTest {
         val recipient = fixture.readText().trimEnd('\n', '\r')
         require(fixture.delete())
         withTimeout(60_000) { app.authentication.state.first { it.destination == AuthenticationDestination.AUTHENTICATED } }
-        val result = ProtonGuestDirectoryProbe.inspect(app, args.getString("createAccountHash").orEmpty(), recipient)
+        val preferences = args.getString("guestPreferences") == "true"
+        val result = ProtonGuestDirectoryProbe.inspect(app, args.getString("createAccountHash").orEmpty(), recipient, preferences)
         runner.sendStatus(0, Bundle().apply { putString("guest_directory", result.name) })
         assertTrue(result !in setOf(ProtonGuestDirectoryProbe.Status.ENROLLMENT_UNAVAILABLE,
             ProtonGuestDirectoryProbe.Status.SETTINGS_UNAVAILABLE, ProtonGuestDirectoryProbe.Status.KEYS_UNAVAILABLE,
-            ProtonGuestDirectoryProbe.Status.RECIPIENT_TYPE_UNAVAILABLE))
+            ProtonGuestDirectoryProbe.Status.RECIPIENT_TYPE_UNAVAILABLE, ProtonGuestDirectoryProbe.Status.CANONICAL_UNAVAILABLE,
+            ProtonGuestDirectoryProbe.Status.CONTACT_PREFERENCES_UNAVAILABLE))
     }
 }

@@ -86,6 +86,30 @@ matches a single enrolled account and its current ready/authenticated session
 and reports only the presence of the literal `mail` grant. This observation
 does not establish recipient preferences, sender key usability or delivery.
 
+For the explicitly enrolled test guest, the separate debug directory probe reads
+Mail settings and queries Proton's key directory. It compares the Android route's
+explicit RecipientType (internal 1, external 2) with the direct, catch-all and
+unverified key sets returned by `GET /core/v4/keys/all`. Inbox resolves Mail
+recipients using key sources and Mail support flags. Its classification cannot
+be inferred from the IsProton field or an empty direct-key list alone. An
+external recipient without directory keys may still receive a standard external
+invitation according to the recipient's actual send preferences. A directory
+lookup proves neither receipt nor permission to use clear delivery.
+[Inbox classification][inbox] · [Directory request][directory] · [Android key DTOs][keys]
+
+The optional preference check binds the supplied guest to the canonical address
+in the authenticated batch response. Core pages the contact-email index and
+Calendar compares each CanonicalEmail with this canonical address to find
+custom settings (Defaults = 0). The Web Email filter alone cannot establish
+whether a different alias in this index has custom settings. The debug probe
+reads up to 1,024 metadata rows in pages of 32, skips unrelated fields and
+keeps only temporary ID hashes across pages to detect duplicate rows. A
+changing total, missing page, ambiguous match or exceeded bound leaves
+preferences unavailable. A custom match requires separate signed-card
+qualification. The probe fetches no contact cards. Pagination provides no
+atomic service snapshot, so production must requalify before delivery.
+[Calendar preference resolution][prefs] · [Core contact index][contactcore]
+
 ## Internal recipient package
 
 The published Core 36.8.0 `mail-message-domain` helper performs delivery as
@@ -131,13 +155,13 @@ followed by an uncertain Calendar write requires Calendar inspection while
 preserving the Mail result. Without a correlated receipt, leave uncertainty
 visible. Never record ICS, shared keys or recipient addresses in logs.
 
-The present `SqlPersonalUpdateAttemptJournal.claim` persists one uncertain
-submission and `retainEvidence` binds one response to that identity. The
-existing personal content policy also requires an empty participant list.
-An organizer attempt therefore needs an explicit version of the same journal
-family, with a guest-aware source/receipt codec and two independently claimed
-operations. Historical formats and uncertain attempts keep their original
-recovery path. Proposed transitions for one already upgraded event:
+The first guest capsule shares the personal update table, unresolved-event
+unique index, mutex, writer transaction and conflict fences. Schema 12 adds
+a guest discriminator, defaulting to zero for historical records. It retains
+the protected source context, both protected requests, Mail delivery time and
+protected Calendar readback. Guest rows have their own work-page selection.
+Historical personal records keep their original decoder and recovery path.
+The local journal supports these transitions for one already upgraded event:
 
 | Durable state before executing the action | Action after restart |
 | --- | --- |
@@ -145,7 +169,7 @@ recovery path. Proposed transitions for one already upgraded event:
 | Mail claimed without correlated response | Inspect only. Calendar remains unclaimed. A matching current guest list cannot clear Mail uncertainty. |
 | Mail response retained, Calendar unclaimed | Recheck full source and admission. Atomically claim only Calendar. Preserve the Mail receipt if the source changed. |
 | Calendar claimed without proven readback | Inspect the exact event against its identity and signed guest changes. Never submit either operation again. |
-| Both responses/readback proven | Perform the native/SQL acknowledgement against the original local capture, preserving newer edits. |
+| Both responses/readback proven | Retain the owner until native/SQL acknowledgement against the original capture is implemented and proven. |
 
 Each claim and receipt must compare the previous durable state and both frozen
 request identities in one transaction. Freezing must include the intended mail
@@ -178,3 +202,7 @@ claiming interoperability.
 [picker]: https://github.com/ProtonMail/android-calendar/blob/dbc20fa485ca9a3e02988ec8f430145fc9e0b1af/app/src/main/java/me/proton/android/calendar/presentation/calendar/fragment/EventFormAttendeesFragment.kt
 [package]: https://github.com/ProtonMail/android-calendar/blob/dbc20fa485ca9a3e02988ec8f430145fc9e0b1af/app/src/main/java/me/proton/android/calendar/domain/usecase/GenerateEmailPackageUseCase.kt
 [domain]: https://repo.maven.apache.org/maven2/me/proton/core/mail-message-domain/36.8.0/mail-message-domain-36.8.0-sources.jar
+[inbox]: https://github.com/ProtonMail/WebClients/blob/c9b5f2995744b6f7c8ff1301ca3d5ac4f7a18672/packages/key-transparency/lib/keys/getPublicKeysEmailHelperWithKT.ts
+[directory]: https://github.com/ProtonMail/WebClients/blob/c9b5f2995744b6f7c8ff1301ca3d5ac4f7a18672/packages/shared/lib/api/keys.ts
+[keys]: https://repo.maven.apache.org/maven2/me/proton/core/key-data/36.8.0/key-data-36.8.0-sources.jar
+[contactcore]: https://repo.maven.apache.org/maven2/me/proton/core/contact-data/36.8.0/contact-data-36.8.0-sources.jar

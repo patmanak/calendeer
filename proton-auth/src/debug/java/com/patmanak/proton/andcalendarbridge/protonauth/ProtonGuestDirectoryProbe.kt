@@ -15,18 +15,25 @@ import me.proton.core.network.data.protonApi.BaseRetrofitApi
 import okhttp3.ResponseBody
 import retrofit2.http.GET
 import retrofit2.http.Streaming
+import retrofit2.http.Query
 
 internal interface GuestMailSettingsReadApi : BaseRetrofitApi {
     @Streaming @GET("mail/v4/settings") suspend fun settings(): ResponseBody
+    @Streaming @GET("core/v4/addresses/canonical")
+    suspend fun canonical(@Query("Emails[]") email: String): ResponseBody
+    @Streaming @GET("contacts/v4/contacts/emails")
+    suspend fun contacts(@Query("Page") page: Int, @Query("PageSize") size: Int): ResponseBody
 }
 
 /** Read-only service observation. Reports no Mail settings, public keys, addresses or stable IDs. */
 object ProtonGuestDirectoryProbe {
     enum class Status { ENROLLMENT_UNAVAILABLE, SETTINGS_UNAVAILABLE, KEYS_UNAVAILABLE, RECIPIENT_TYPE_UNAVAILABLE,
         DIRECTORY_DISAGREEMENT, INTERNAL_NO_ADDRESS_KEY, INTERNAL_CATCH_ALL, UNVERIFIED_INTERNAL_KEY,
-        EXTERNAL_WITH_KEY, EXTERNAL_WITHOUT_DIRECTORY_KEY, UNSUPPORTED_KEY_SET, INTERNAL_KEY_OBSERVED }
+        EXTERNAL_WITH_KEY, EXTERNAL_WITHOUT_DIRECTORY_KEY, UNSUPPORTED_KEY_SET, INTERNAL_KEY_OBSERVED,
+        CANONICAL_UNAVAILABLE, CONTACT_PREFERENCES_UNAVAILABLE, INTERNAL_DEFAULT_CONTACT, INTERNAL_CUSTOM_CONTACT,
+        INTERNAL_NO_MATCHING_CONTACT }
 
-    suspend fun inspect(context: Context, enrolledHash: String, guest: String): Status = withContext(Dispatchers.IO) {
+    suspend fun inspect(context: Context, enrolledHash: String, guest: String, preferences: Boolean): Status = withContext(Dispatchers.IO) {
         if (!enrolledHash.matches(Regex("[0-9a-f]{64}")) || guest.length !in 3..254 ||
             !guest.matches(Regex("[a-zA-Z0-9._+-]+@[a-zA-Z0-9.-]+"))) return@withContext Status.ENROLLMENT_UNAVAILABLE
         fun field(target: Any, name: String): Any? =
@@ -79,8 +86,31 @@ object ProtonGuestDirectoryProbe {
                 if (primary == null || !primary.canEncryptEmail() || !primary.canVerifyEmail() ||
                     primary.source?.let { it != PublicAddressKeySource.Internal } == true) return@withLock Status.UNSUPPORTED_KEY_SET
                 val pgp = AndroidCryptoContext().pgpCrypto
-                if (pgp.isKeyExpired(primary.publicKey.key) || pgp.isKeyRevoked(primary.publicKey.key))
-                    Status.UNSUPPORTED_KEY_SET else Status.INTERNAL_KEY_OBSERVED
+                if (pgp.isKeyExpired(primary.publicKey.key) || pgp.isKeyRevoked(primary.publicKey.key)) return@withLock Status.UNSUPPORTED_KEY_SET
+                if (!preferences) return@withLock Status.INTERNAL_KEY_OBSERVED
+                val reads = provider.get<GuestMailSettingsReadApi>(sessionId = session.sessionId)
+                failure = Status.CANONICAL_UNAVAILABLE
+                val canonicalGuest = reads.invoke(forceNoRetryOnConnectionErrors = true) {
+                    canonical(guest).use {
+                        val root = Json.parseToJsonElement(CalendarCatalogBodyReader.read(it)).jsonObject
+                        require(root.number("Code") == 1001L)
+                        val row = root.getValue("Responses").jsonArray.single().jsonObject
+                        require(row.string("Email").equals(guest, true))
+                        val reply = row.getValue("Response").jsonObject
+                        require(reply.number("Code") == 1000L)
+                        reply.string("CanonicalEmail").also { email ->
+                            require(email.length in 3..254 && email.matches(Regex("[a-zA-Z0-9._+-]+@[a-zA-Z0-9.-]+")))
+                        }
+                    }
+                }.valueOrThrow
+                checkpoint()
+                failure = Status.CONTACT_PREFERENCES_UNAVAILABLE
+                val status = inspectGuestContactIndex(canonicalGuest) { page, size ->
+                    checkpoint()
+                    reads.invoke(forceNoRetryOnConnectionErrors = true) { contacts(page, size) }.valueOrThrow
+                }
+                checkpoint()
+                status
             }
         } catch (cancelled: CancellationException) { throw cancelled }
           catch (_: Exception) { failure }
