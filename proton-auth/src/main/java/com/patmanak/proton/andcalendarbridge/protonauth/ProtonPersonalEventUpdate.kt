@@ -53,7 +53,7 @@ internal object ProtonPersonalEventUpdate {
         return JsonObject(original + newMetadata)
     }
 
-    private fun metadata(time: EventTime): JsonObject = when (time) {
+    internal fun metadata(time: EventTime): JsonObject = when (time) {
         is EventTime.Timed -> timedMetadata(time)
         is EventTime.AllDay -> {
             require(time.start.year in 1970..9999 && time.endExclusive.year in 1970..9999)

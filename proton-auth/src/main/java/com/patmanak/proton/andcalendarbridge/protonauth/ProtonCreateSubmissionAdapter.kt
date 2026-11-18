@@ -101,6 +101,9 @@ internal class ProtonCreateSubmissionAdapter(private val preparations: CalendarC
     private suspend fun inspectWithExpectation(record: CreateAttemptRecord, suppliedExpected: CalendarCreateDraft?): CreateSubmissionObservation = guarded {
         val expected = suppliedExpected?.frozen()
         if (record.state != CreateAttemptState.OUTCOME_UNKNOWN) return@guarded CreateSubmissionObservation.Unknown
+        if (record.format == OCCURRENCE_CREATE_SUBMISSION_FORMAT) {
+            return@guarded occurrences?.inspect(record, requireNotNull(expected)) ?: CreateSubmissionObservation.Unknown
+        }
         val submission = ProtonCreateSubmissionCodec.open(record, protector)
         qualifyCaptured(record, submission, expected)
         val session = session(record.scope)

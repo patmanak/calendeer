@@ -13,12 +13,12 @@ internal fun interface OccurrenceCreateCryptography {
 }
 
 /** Inactive extension of CREATE. The caller's journal owns final native/SQL admission.
- * This adapter never grants a fresh right to an existing UNKNOWN request or proves readback. */
+ * UNKNOWN submission is inert. Its separate inspector has no journal or transport permit. */
 internal class ProtonOccurrenceCreateAdapter(private val sessions: CatalogSessionSource,
     private val context: EventContextRefresher, private val metadata: CreateCalendarMetadataRemote,
     private val events: EventImportRemote, private val remote: CreateSubmissionRemote,
-    private val crypto: OccurrenceCreateCryptography, verifier: SeriesFamilyEventVerifier,
-    private val protector: EventPayloadProtector) {
+    private val crypto: OccurrenceCreateCryptography, private val verifier: SeriesFamilyEventVerifier,
+    private val protector: EventPayloadProtector, private val childVerifier: OccurrenceChildVerifier) {
     private val codec = ProtonOccurrenceSubmissionCodec(protector)
     private val family = ProtonCreatedEventReadback(sessions, remote, events, CreateEventVerifier { _, _, _, _, _, _ -> null }, verifier)
 
@@ -77,6 +77,51 @@ internal class ProtonOccurrenceCreateAdapter(private val sessions: CatalogSessio
         }
         checkSession(session)
         CreateSubmissionObservation.Unknown
+    }
+
+    suspend fun inspect(record: CreateAttemptRecord, draft: CalendarCreateDraft): CreateSubmissionObservation {
+        require(record.state == CreateAttemptState.OUTCOME_UNKNOWN && record.id == draft.correlation && record.scope == draft.scope)
+        val retained = codec.open(record, requireNotNull(draft.occurrence))
+        val candidate = requireNotNull(retained.intent.occurrence)
+        val master = candidate.master
+        val uid = requireNotNull(master.content.recurrence).uid
+        val calendar = record.scope.calendar.value
+        val hint = record.protectedEvidence?.let { sealed ->
+            val plain = protector.open(sealed)
+            require(plain.length <= 2_097_152 && UniqueJsonKeys(plain).validate())
+            val evidence = Json.parseToJsonElement(plain).jsonObject
+            require(evidence.number("version") == 1L && evidence.string("account") == record.scope.account.value &&
+                evidence.string("calendar") == calendar && evidence.number("generation") == record.scope.generation &&
+                evidence.string("correlation") == record.id.value)
+            when (val response = ProtonCreateResponseParser.parse(evidence.string("body"), calendar, uid)) {
+                is ProtonCreateResponse.Candidate -> response.event.string("ID")
+                is ProtonCreateResponse.ReportedFailure -> return CreateSubmissionObservation.Unknown
+                ProtonCreateResponse.Unknown -> null
+            }
+        }
+        val session = session(record.scope)
+        suspend fun members() = family.uidFamily(session, record.scope, uid, 2) { checkSession(session) }
+        val ids = members() ?: return CreateSubmissionObservation.Unknown
+        val masterId = master.eventId.value
+        if (ids.size != 2 || masterId !in ids) return CreateSubmissionObservation.Unknown
+        val childId = (ids - masterId).single()
+        if (hint != null && hint != childId) return CreateSubmissionObservation.Unknown
+        val source = remote.event(session, calendar, masterId)
+        checkSession(session)
+        if (source != retained.source) return CreateSubmissionObservation.Unknown
+        val child = remote.event(session, calendar, childId)
+        checkSession(session)
+        require(child.string("ID") == childId && child.string("CalendarID") == calendar && child.string("UID") == uid)
+        qualifyOccurrenceChild(child, retained)
+        val bootstrap = events.bootstrap(session, calendar)
+        checkSession(session)
+        if (verifier.verify(session, calendar, bootstrap, source, uid) != master) return CreateSubmissionObservation.Unknown
+        checkSession(session)
+        val actual = childVerifier.verify(session, calendar, bootstrap, child, uid) ?: return CreateSubmissionObservation.Unknown
+        checkSession(session)
+        if (actual.eventId.value != childId || normalizedCreateReadback(actual.content) != normalizedCreateReadback(candidate.content) || members() != ids)
+            return CreateSubmissionObservation.Unknown
+        return CreateSubmissionObservation.Verified(CreateAttemptIdentity.of(record), actual.copy(content = candidate.content))
     }
 
     private suspend fun session(scope: CalendarScope) = sessions.current()?.takeIf { it.userId.id == scope.account.value }

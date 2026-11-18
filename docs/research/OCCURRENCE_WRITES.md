@@ -126,7 +126,8 @@ in one Provider batch. The candidate owns bounded immutable domain data; Android
 row locators stay outside it. No identity is stamped and neither row is cleaned.
 
 Transferred CREATE provenance, additional exceptions, unsupported fields and an
-unwitnessed null color in calendar-color mode remain held. This native profile
+unwitnessed absent child color under a colored master remain held. A dirty child
+can outlive display-mode changes and parent reprojection. This native profile
 does not prove a signed parent SEQUENCE or complete remote membership. It has no
 durable request, preparation or worker route; those need independently versioned
 extensions of the existing stores and the remaining adapter/recovery gates.
@@ -225,5 +226,22 @@ Claim commits UNKNOWN before any transport call. Responses are protected evidenc
 both success and lost replies remain UNKNOWN at this stage. Replaying that work
 does not prepare, read fresh remote context or send again. A reservation with no
 retained payload cannot regenerate one; a retained unclaimed payload may use the
-existing explicit qualified resume policy. Independent readback, native/SQL ACK
-and worker activation remain closed pending the next steps.
+existing explicit qualified resume policy. Occurrence staging checks editable
+consent before reserving this right and during qualification and retention.
+
+## Inactive independent occurrence readback
+
+The explicit captured inspector can now open an UNKNOWN v5 attempt with its
+retained intent. A bounded authenticated UID query must return exactly two
+distinct IDs, including the frozen master. The inspector fetches both events,
+checks the original master source and signed base, then decrypts and verifies
+the child against the retained attempt. Its original slot, generated signed
+packets, personal flag, notifications (including null inheritance or email),
+color and current decoded content must match. The GET response may supply
+authors for the signatures. The inspector checks membership again and returns
+the child's observed ID and revision. A protected success response can constrain
+that ID. Missing responses still require the full independent proof.
+
+These reads do not provide an atomic server snapshot. Incomplete or conflicting
+observations remain UNKNOWN. Inspection has no journal or send capability.
+The production assembly keeps the occurrence adapter disabled.

@@ -91,7 +91,7 @@ internal class ProtonCreatedEventReadback(private val sessions: CatalogSessionSo
             checkpoint(); currentCoroutineContext().ensureActive()
         }
         check()
-        val id = uniqueUidEvent(session, scope, uid, rejectMultiple = true, checkpoint = ::check)
+        val id = uidFamily(session, scope, uid, 1, rejectMultiple = true, checkpoint = ::check)?.singleOrNull()
             ?: localEditUnavailable(LocalEditPreparationFailure.RETRY)
         if (id != frozen.eventId.value) localEditUnavailable(LocalEditPreparationFailure.CONFLICT)
         check()
@@ -122,7 +122,7 @@ internal class ProtonCreatedEventReadback(private val sessions: CatalogSessionSo
         return try {
             if (uid.isBlank() || !policy.acceptsExpected(expected)) return null
             checkSession(session, scope)
-            val id = uniqueUidEvent(session, scope, uid) { checkSession(session, scope) } ?: return null
+            val id = uidFamily(session, scope, uid, 1) { checkSession(session, scope) }?.singleOrNull() ?: return null
             if (candidateId != null && candidateId != id) return null
             val row = remote.event(session, scope.calendar.value, id)
             checkSession(session, scope)
@@ -138,8 +138,8 @@ internal class ProtonCreatedEventReadback(private val sessions: CatalogSessionSo
     }
 
     /** A short terminal page is mandatory. An already ambiguous family is refused immediately. */
-    private suspend fun uniqueUidEvent(session: CatalogSession, scope: CalendarScope, uid: String,
-        rejectMultiple: Boolean = false, checkpoint: suspend () -> Unit): String? {
+    suspend fun uidFamily(session: CatalogSession, scope: CalendarScope, uid: String, maximum: Int,
+        rejectMultiple: Boolean = false, checkpoint: suspend () -> Unit): Set<String>? {
         val ids = mutableSetOf<String>()
         var finished = false
         for (page in 0 until 100) {
@@ -150,13 +150,13 @@ internal class ProtonCreatedEventReadback(private val sessions: CatalogSessionSo
                 if (row.string("CalendarID") != scope.calendar.value || row.string("UID") != uid || row.string("ID").isBlank() ||
                     !ids.add(row.string("ID"))) return null
             }
-            if (ids.size > 1) {
+            if (ids.size > maximum) {
                 if (rejectMultiple) localEditUnavailable(LocalEditPreparationFailure.UNSUPPORTED)
                 return null
             }
             if (rows.size < 100) { finished = true; break }
         }
-        return if (finished && ids.size == 1) ids.single() else null
+        return ids.takeIf { finished }
     }
 
     private suspend fun checkSession(expected: CatalogSession, scope: CalendarScope) {
@@ -164,14 +164,16 @@ internal class ProtonCreatedEventReadback(private val sessions: CatalogSessionSo
             createUnavailable(CreatePreparationFailure.AUTHENTICATION)
     }
 
-    private fun normalized(content: EventContent, policy: CreatedEventReadbackPolicy) = content.copy(title = content.title.replace("\r\n", "\n"),
-        description = content.description.replace("\r\n", "\n"), location = content.location.replace("\r\n", "\n"),
+    private fun normalized(content: EventContent, policy: CreatedEventReadbackPolicy) = normalizedCreateReadback(content).copy(
         details = if (policy == CreatedEventReadbackPolicy.SHARED_ONLY_V1) null else content.details,
         recurrence = if (policy == CreatedEventReadbackPolicy.SERIES_CREATE_V4) content.recurrence?.let {
             it.copy(rule = CreateSeriesRule.parse(requireNotNull(it.rule)).rule)
-        } else content.recurrence,
-        time = when (val time = content.time) {
-            is EventTime.Timed -> if (time.zone.normalized() == java.time.ZoneOffset.UTC) time.copy(zone = java.time.ZoneOffset.UTC) else time
-            is EventTime.AllDay -> time
-        })
+        } else content.recurrence)
 }
+
+internal fun normalizedCreateReadback(content: EventContent) = content.copy(title = content.title.replace("\r\n", "\n"),
+    description = content.description.replace("\r\n", "\n"), location = content.location.replace("\r\n", "\n"),
+    time = when (val time = content.time) {
+        is EventTime.Timed -> if (time.zone.normalized() == java.time.ZoneOffset.UTC) time.copy(zone = java.time.ZoneOffset.UTC) else time
+        is EventTime.AllDay -> time
+    })

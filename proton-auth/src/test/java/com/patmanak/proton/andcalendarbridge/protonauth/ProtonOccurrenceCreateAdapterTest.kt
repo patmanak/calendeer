@@ -38,12 +38,17 @@ class ProtonOccurrenceCreateAdapterTest {
         var afterCrypto: () -> Unit = {}
         var onRead: () -> Unit = {}
         var sent: JsonObject? = null
+        var childRow: JsonObject? = null
+        var familyOverride: List<JsonObject>? = null
+        var observedChild = RemoteChange.Upsert(EventId("child"), Revision("observed"), intent.occurrence!!.content)
         val remote = object : CreateSubmissionRemote {
             override suspend fun byUid(session: CatalogSession, calendar: String, uid: String, page: Int): List<JsonObject> {
                 reads++; onRead(); check(calendar == "calendar" && uid == "master@calendeer.invalid" && page == 0)
-                return if (extraChild) listOf(row, JsonObject(row + ("ID" to JsonPrimitive("child")))) else listOf(row)
+                return familyOverride ?: if (extraChild) listOf(row, JsonObject(row + ("ID" to JsonPrimitive("child")))) else listOfNotNull(row, childRow)
             }
-            override suspend fun event(session: CatalogSession, calendar: String, id: String): JsonObject { reads++; onRead(); return row }
+            override suspend fun event(session: CatalogSession, calendar: String, id: String): JsonObject {
+                reads++; onRead(); return if (id == "master") row else checkNotNull(childRow)
+            }
             override suspend fun send(session: CatalogSession, calendar: String, request: JsonObject, allowsTransport: () -> Boolean): String = error("Historical sender must refuse")
             override suspend fun sendOccurrence(session: CatalogSession, calendar: String, request: JsonObject, allowsTransport: () -> Boolean): String {
                 sends++; sent = request
@@ -65,9 +70,28 @@ class ProtonOccurrenceCreateAdapterTest {
                 val record = CreateAttemptRecord(id, scope, OCCURRENCE_CREATE_SUBMISSION_FORMAT,
                     codec.seal(id, captured, context, source, generated, JsonNull))
                 afterCrypto(); record
-            }, SeriesFamilyEventVerifier { _, _, _, _, _ -> master }, protector)
+            }, SeriesFamilyEventVerifier { _, _, _, _, _ -> master }, protector, OccurrenceChildVerifier { _, _, _, _, _ -> observedChild })
         suspend fun prepared(): CreateAttemptRecord = adapter.prepare(reserved.draft).let {
             CreateAttemptRecord(reserved.attempt, scope, it.format, it.protectedPayload)
+        }
+        val port = ProtonCreateSubmissionAdapter(CalendarCreatePreparationPort { error("No preparation") }, protector,
+            CatalogSessionSource { session }, remote, events, CreateEventVerifier { _, _, _, _, _, _ -> error("Wrong verifier") }, adapter)
+        suspend fun unknownWithChild(): CreateAttemptRecord {
+            val record = prepared()
+            val event = codec.open(record, intent).request.array("Events").single().jsonObject.obj("Event")
+            childRow = buildJsonObject {
+                put("ID", "child"); put("UID", row.string("UID")); put("CalendarID", "calendar")
+                put("RecurrenceID", Instant.parse("2030-04-02T00:00:00Z").epochSecond)
+                put("StartTime", Instant.parse("2030-04-01T00:00:00Z").epochSecond)
+                put("EndTime", Instant.parse("2030-04-02T00:00:00Z").epochSecond)
+                put("StartTimezone", "UTC"); put("EndTimezone", "UTC"); put("FullDay", 1)
+                for (key in listOf("Exdates", "CalendarEvents", "Attendees", "AttendeesEvents")) put(key, JsonArray(emptyList()))
+                for (key in listOf("SharedKeyPacket", "IsOrganizer", "Permissions", "IsPersonalSingleEdit", "Notifications", "Color")) put(key, event.getValue(key))
+                put("SharedEvents", JsonArray(event.array("SharedEventContent").map { JsonObject(it.jsonObject + ("Author" to JsonPrimitive("synthetic@example.invalid"))) }))
+                put("CreateTime", 1); put("ModifyTime", 2)
+            }
+            resetCounts()
+            return record.copy(state = CreateAttemptState.OUTCOME_UNKNOWN)
         }
         fun journal(record: CreateAttemptRecord) = Journal(record)
         fun resetCounts() { reads = 0; preparations = 0; sends = 0 }
@@ -98,6 +122,56 @@ class ProtonOccurrenceCreateAdapterTest {
         f.resetCounts(); f.session = null
         f.adapter.submit(record, f.reserved.draft, journal)
         assertEquals(0, f.reads); assertEquals(0, f.preparations); assertEquals(0, f.sends); assertEquals(1, journal.claims)
+    }
+    @Test fun lostResponseRequiresTheExactAuthenticatedChildAndUnchangedMasterWithoutAnotherSend() = runTest {
+        val f = Fixture()
+        val record = f.unknownWithChild()
+        val result = f.port.inspectCaptured(record, f.reserved.draft)
+        assertTrue(result is CreateSubmissionObservation.Verified)
+        assertEquals(CreateAttemptIdentity.of(record), (result as CreateSubmissionObservation.Verified).attempt)
+        assertEquals(f.observedChild, result.event)
+        assertEquals(0, f.preparations); assertEquals(0, f.sends)
+    }
+    @Test fun familyAmbiguityOrAnyUnprovenChildKeepsTheOutcomeUnknown() = runTest {
+        for (variant in 0..10) {
+            val f = Fixture()
+            val record = f.unknownWithChild()
+            val child = checkNotNull(f.childRow)
+            when (variant) {
+                0 -> f.childRow = null
+                1 -> f.familyOverride = listOf(f.row, child, child)
+                2 -> f.familyOverride = listOf(f.row, child, JsonObject(child + ("ID" to JsonPrimitive("other"))))
+                3 -> f.row = JsonObject(f.row + ("changed" to JsonPrimitive(true)))
+                4 -> f.childRow = JsonObject(child + ("SharedKeyPacket" to JsonPrimitive("other-request")))
+                5 -> f.childRow = JsonObject(child + ("RecurrenceID" to JsonPrimitive(42)))
+                6 -> f.childRow = JsonObject(child + ("Notifications" to JsonArray(emptyList())))
+                7 -> f.childRow = JsonObject(child + ("Color" to JsonPrimitive("#415df0")))
+                8 -> f.observedChild = f.observedChild.copy(content = f.observedChild.content.copy(title = "newer"))
+                9 -> f.onRead = { f.session = null }
+                10 -> f.childRow = JsonObject(child + ("FutureField" to JsonNull))
+            }
+            assertSame("variant $variant", CreateSubmissionObservation.Unknown, f.port.inspectCaptured(record, f.reserved.draft))
+            assertEquals(0, f.preparations); assertEquals(0, f.sends)
+        }
+    }
+    @Test fun inspectionRequiresCapturedUnknownAndConsistentProtectedResponseIdentity() = runTest {
+        val f = Fixture()
+        val record = f.unknownWithChild()
+        assertSame(CreateSubmissionObservation.Unknown, f.port.inspect(record))
+        assertSame(CreateSubmissionObservation.Unknown, f.port.inspectCaptured(record.copy(state = CreateAttemptState.PREPARED), f.reserved.draft))
+        assertEquals(0, f.reads)
+        fun evidence(id: String, correlation: String = record.id.value) = buildJsonObject {
+            put("version", 1); put("account", f.scope.account.value); put("calendar", f.scope.calendar.value)
+            put("generation", f.scope.generation); put("correlation", correlation)
+            put("body", """{"Code":1000,"Responses":[{"Index":0,"Response":{"Code":1000,"Event":{"ID":"$id","CalendarID":"calendar","UID":"master@calendeer.invalid","ModifyTime":2}}}]}""")
+        }.toString()
+        for (mismatch in listOf(evidence("child", "foreign"), evidence("other"))) {
+            assertSame(CreateSubmissionObservation.Unknown, f.port.inspectCaptured(record.copy(protectedEvidence = mismatch), f.reserved.draft))
+        }
+        assertTrue(f.port.inspectCaptured(record.copy(protectedEvidence = evidence("child")), f.reserved.draft) is CreateSubmissionObservation.Verified)
+        f.onRead = { throw CancellationException("Synthetic readback cancellation") }
+        assertTrue(runCatching { f.port.inspectCaptured(record, f.reserved.draft) }.exceptionOrNull() is CancellationException)
+        assertEquals(0, f.preparations); assertEquals(0, f.sends)
     }
     @Test fun childAppearingBeforeOrDuringPreparationKeepsTheRequestUnclaimed() = runTest {
         for (late in listOf(false, true)) {

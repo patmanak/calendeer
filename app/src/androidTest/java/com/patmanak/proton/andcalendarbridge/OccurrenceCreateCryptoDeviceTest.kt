@@ -13,6 +13,10 @@ class OccurrenceCreateCryptoDeviceTest {
     @Test fun submissionRequalifiesRealCryptoAndNeverRepeatsAnUnknownInterceptedHttpAttempt() = runBlocking {
         assertEquals("RESULT=SUCCESS", ProtonOccurrenceCreateCryptoProbe.runSubmission())
     }
+    @Test fun occurrenceReadbackVerifiesOriginalSlotAfterKindChangeAndPreservedDefaultEmail() = runBlocking {
+        assertEquals("RESULT=SUCCESS", ProtonOccurrenceCreateCryptoProbe.run(changeKind = true, submission = true))
+        assertEquals("RESULT=SUCCESS", ProtonOccurrenceCreateCryptoProbe.run(timed = true, personalOnly = true, submission = true))
+    }
     @Test fun titleOnlyAllDayChildPreservesItsSourceAndSequence() = runBlocking {
         assertEquals("RESULT=SUCCESS", ProtonOccurrenceCreateCryptoProbe.run())
     }
