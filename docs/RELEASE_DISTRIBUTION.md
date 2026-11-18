@@ -1,7 +1,6 @@
 # Signed release preparation and preserved-state update
 
-This procedure prepares local candidates. Publication is a separate authorized
-action. The selected source-native license review is recorded in
+This procedure prepares local candidates. F-Droid submission follows maintainer approval after several weeks of daily use. The selected source-native license review is recorded in
 [licensing](LICENSING.md); current native advisory applicability and complete
 runtime/signed-update qualification remain release gates. The F-Droid signature
 choice is deferred; see [distribution preparation](FDROID.md). A successful build
@@ -88,8 +87,7 @@ The environment password syntax and separate sign/verify stages are documented i
    deterministically updates `app/src/main/assets/legal/THIRD-PARTY-NOTICES.txt` from
    the reviewed evidence and retained unresolved material. A blocked audit stays
    blocked and is clearly marked in that asset. Rebuild and inspect the actual APK
-   assets after completing the remaining two source/licensing questions in
-   [licensing](LICENSING.md#concrete-distribution-blockers).
+   assets against the candidate’s [reviewed inventory](LICENSING.md#resolved-release-inventory).
    The app excludes JSR305 only from `releaseRuntimeClasspath` and retains it as
    `compileOnly` for annotation processing/compiler visibility. After regenerating
    the actual affected locks and rebuilding the signed candidate, run:

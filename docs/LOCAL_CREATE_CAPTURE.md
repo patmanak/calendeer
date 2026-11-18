@@ -115,8 +115,8 @@ This narrow admission does not loosen generic imported-event capture.
 
 ## Opt-in system creation
 
-Each accessible imported calendar has an experimental creation switch, disabled
-by default. It enables Android's editor access for that mirror; event entry stays
+Choosing Editable for an eligible calendar enables Android's editor access for
+that mirror and admits supported local creation; event entry stays
 in the system calendar client. Disabling the mode, pausing the import or losing
 calendar access closes editing on the existing mirror. Retained mirrors are also
 closed after sign-out or a cold restart without the owning authenticated account.

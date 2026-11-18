@@ -28,6 +28,9 @@ and explains its status; it has no event browser or editor.
 | V11 | Eight languages (en, fr, de, es, it, nl, pl, pt), system-language mode, and light/dark/system themes. | Preferences persist and supported locale/theme changes are reflected. |
 | V12 | F-Droid distribution: public source, Proton cryptography rebuilt from source, reproducible builds. | Independent local F-Droid builds match. |
 
+V12 governs the F-Droid distribution. The candidate is intended for several
+weeks of daily use before the maintainer decides whether to submit it.
+
 Implement V05 in order: reminders, color, recurrence, then guests. Guests require
 Proton's encrypted invitation delivery. The owner may defer them to 0.2 after the
 research if they would unduly delay 0.1; no such deferral is assumed here.
@@ -114,7 +117,7 @@ after E4 qualifies Android upload. Report added/removed lines for each batch.
 
 ## 9. Exit criteria
 
-Verify V01–V12. Run one grouped E4 campaign on the authorized test phone: closed
+Verify V01–V11 for the daily-use candidate and V12 before F-Droid submission. Run one grouped E4 campaign on the authorized test phone: closed
 app, Refresh in /e/OS Calendar and Etar, offline/reconnect, reboot, permission
 revocation, prolonged idle with/without battery exemption, and automatic sync OFF
 with manual and periodic behavior preserved. Require green remote CI, a signing

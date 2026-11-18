@@ -1,8 +1,6 @@
 # Implementation status
 
-Calendeer bridges Proton Calendar and Android's Calendar Provider. Viewing,
-editing and reminders belong to calendar clients; the bridge has no event editor
-or reminder notifications. This is current status, not an execution log.
+Calendeer syncs Proton events into the Android Calendar Provider. Calendar clients handle editing and reminders.
 
 Application ID: `com.patmanak.calendeer`; native account type:
 `com.patmanak.calendeer.account`. This installs separately from earlier development
@@ -16,22 +14,16 @@ and V05 reminder/color/series/occurrence/guest editing. These are release target
 current outgoing capability remains narrower. Read-only is the default. See the
 [accepted specification](SPECIFICATION.md). Guests may be deferred only by the owner.
 
-Scheduling follows the DAVx5 model: the thin calendar SyncAdapter accepts Android
-change/manual triggers, enqueues expedited WorkManager work and waits at most ten
-minutes without cancelling it. Android always receives success; WorkManager owns
-retry and the app owns actual status. The Android 14+ pending latch is cleared.
-One network-constrained WorkManager periodic synchronization runs at 15 / 30 / 60 default /
-120 / 360 minutes; native Android periodic syncs are removed. Android automatic
-switches control push only. App actions are manual and bypass those switches;
-periodic sending precedes receiving when push is allowed; receiving continues
-alone while push is OFF. Manual requests coalesce with KEEP. The URI watcher remains temporarily;
-retire it only after Android-triggered upload is qualified in E4.
+SyncAdapter relays Android requests to WorkManager. Periodic work runs hourly by
+default. Android’s automatic sync switches control uploads. Manual requests from
+Calendeer coalesce and can run with those switches off. The URI watcher remains
+until Android-triggered uploads pass the grouped device trials.
+[Scheduling and intervals](SYNC_SCHEDULING.md)
 
-Exit: working scope, one grouped physical-device/live-test-account E4 run
-(closed-app local edit, Refresh from /e/OS Calendar and Etar, Google Calendar if
-possible, offline/reconnect, reboot, permission revocation, prolonged idle
-with/without exemption and auto-sync OFF), green remote CI and signing decision.
-Samsung/One UI is outside 0.1. Signature management remains deferred by the owner.
+Candidate qualification covers closed-app edits, client refresh in /e/OS Calendar
+and Etar, offline recovery, reboot, permissions, idle and sync switches. Samsung
+One UI is outside 0.1. F-Droid submission follows several weeks of daily use,
+maintainer approval and the [distribution checks](FDROID.md).
 
 ## Current capabilities
 
@@ -86,16 +78,14 @@ Samsung/One UI is outside 0.1. Signature management remains deferred by the owne
 
 ## Evidence and remaining gates
 
-Existing evidence is frozen in [validation](VALIDATION.md); detailed new runs and
-operator notes stay ignored locally. Focused JVM and instrumented contract tests
-cover the system relay; they do not replace E4 client/OEM/live-service journeys.
-Android batching, periodic intervals and battery exemption promise no deadline.
+[Earlier validation](VALIDATION.md) covers a specific development baseline.
+Physical client and live-service trials remain part of candidate qualification.
 
 F-Droid preparation includes English/French metadata and a disabled recipe. Proton
 crypto/SRP JNI is rebuilt from pinned source; independent Linux artifacts matched,
 API/ABI/alignment/license checks passed, and API35 retained-session crypto and
-isolated fresh password login were tested. Remote CI, canonical release/update
-installation, other ABIs/OEMs and signing remain release gates.
+isolated fresh password login were tested. CI on the release revision, canonical signed update
+installation and release signing still need qualification.
 [Distribution](LICENSING.md), [build security](BUILD_SECURITY.md).
 
 Still required: remaining V05 recurrence/occurrence/guest editing
@@ -105,5 +95,4 @@ Trustworthy comparable modification timestamps remain unavailable for general
 last-writer-wins. GET then PUT is not atomic; concurrent changes can be overwritten.
 [Conditional writes](research/CONDITIONAL_WRITES.md).
 
-Work uses risk-based E1–E4 evidence and bounded batches. See [workflow](WORKFLOW.md),
-[architecture](ARCHITECTURE.md) and [requirements](SPECIFICATION.md).
+[Working method](WORKFLOW.md) · [Architecture](ARCHITECTURE.md) · [Requirements](SPECIFICATION.md)

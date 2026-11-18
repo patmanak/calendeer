@@ -2,10 +2,8 @@
 
 This JVM module adapts the application-facing authentication contract and state
 holder from **Contako**, copyright 2026 Patmanak, GPL-3.0-or-later. Preserve that
-license and attribution with these sources. The source repository was the
-owner-provided Contako checkout, pinned to commit
-`33289e18e1303d1a1788f1e6d2154f0603738c54`; the imported files had no working-tree
-diff from that commit. Other files in that checkout had unrelated changes.
+license and attribution with these sources. The imported files match the pinned
+[Contako source revision](https://github.com/patmanak/contako/tree/33289e18e1303d1a1788f1e6d2154f0603738c54).
 No account data, generated output or stored session was imported.
 
 ## Imported files

@@ -1,25 +1,23 @@
 # Synchronization behavior and capability gates
 
-Status: proposed extension of the development baseline. The bridge-only scope,
-bidirectional goal and independent per-calendar modes are confirmed requirements.
-The policies below refine provisional choices; they are not implemented features
-unless identified in [current status](STATUS.md). Execution plans remain private.
+The table describes the development build. Later sections describe the design
+and the evidence still needed for broader support. [Current status](STATUS.md)
 
 ## Capability boundary
 
 | Capability | Current behavior | Required behavior before advertising support |
 | --- | --- | --- |
-| Simple events | Read-only import of title, description, location, timed/all-day dates and optional event color. | Preserve identity, timezone/date semantics and color inheritance on refresh and restart. |
+| Simple events | Import of title, description, location, timed/all-day dates, reminders and event color. | Preserve identity, timezone/date semantics and color inheritance on refresh and restart. |
 | Remote changes and deletion | Durable calendar feed obligations, individual refetch, explicit tombstones and retained unavailable mirrors; simple live mutation journey qualified. Advancing resets restart acquisition with a persistent history gap; absence never deletes. | Complete historical reconciliation and live reset/revocation qualification. |
 | Coverage | Near-date priority, frozen traversal and persistent interval progress. Compatible fully processed observations plus a drained feed allow future-edge extension; uncertain states fall back to full scans. Legacy coverage stays unknown. | Broader live-volume qualification and per-interval projection/freshness attribution. No claim of an atomic snapshot. |
 | Unsupported events | Safely identified events are deferred individually, with encrypted evidence and visible partial status. | Extend supported mappings and preserve the distinction from malformed envelopes or unavailable keys, which still block their page. |
-| Recurrences | Native read-only masters, additional/excluded dates and single moved/cancelled exceptions; durable series dependencies and explicit limits. | Broader rule/OEM qualification and recurrence writes. See the supported subset in READ_ONLY_IMPORT.md. |
+| Recurrences | Incoming masters, additional/excluded dates and supported moved/cancelled exceptions. Editable calendars also support creating and editing a whole finite daily personal series without individual exceptions. | Changes to a single occurrence, recurring deletion and broader rule/client coverage. [Incoming subset](READ_ONLY_IMPORT.md). |
 | Reminders and participants | Bounded personal DISPLAY reminders and verified read-only participants; durable replacement and settings refresh. | External-author trust integration, real invitation journeys and broad local notification qualification; no implicit invitation replies. |
-| Local writes | Opt-in experimental simple CREATE and a separate default-off title-only UPDATE option use durable capture, protected attempts, production workers and same-row acknowledgement. Unknown submissions are inspect-only. Other edits and DELETE are held locally. | Automatic client-to-worker qualification, broader editable fields and profiles, conflict recovery and operation-specific service qualification. |
+| Local writes | One Editable mode enables supported creation, personal edits and deletion of ordinary events. It also covers supported series operations. An uncertain submission can only be inspected. | Automatic client-to-worker qualification, broader editable fields and profiles, conflict recovery and operation-specific service qualification. |
 
 The first writable scope is existing calendars owned by the connected account,
 with simple events and qualified fields. Calendar-container creation/deletion,
-cross-calendar moves, recurrence writes, invitations and attendee replies are
+cross-calendar moves, other recurrence writes, invitations and attendee replies are
 separate capabilities. An Android application may still let a user attempt an
 unsupported edit: retain it as blocked, explain why it was not uploaded and do
 not silently discard fields or report remote success. Calendar-level permissions
@@ -111,8 +109,7 @@ atomicity across operations or calendars.
 The local content hash currently used as a revision is not a server-side write
 precondition. A read followed by a write cannot prevent an intervening remote
 change. General UPDATE/DELETE require an atomic condition or a separately
-reviewed conflict strategy with explicitly accepted guarantees. The current
-experimental title-only option does not provide atomic conflict protection.
+reviewed conflict strategy with explicitly accepted guarantees. Editable mode has the same concurrency limit.
 CREATE also needs a qualified way to identify an accepted request after response
 loss. A client UID is only a correlation candidate until its service semantics
 are proven; do not assume uniqueness or retry idempotency.

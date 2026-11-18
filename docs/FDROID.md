@@ -4,16 +4,37 @@ Calendeer is not included in F-Droid. The [draft recipe](../fdroid/metadata/com.
 is disabled at application and build level, with update checks and automatic
 builds off. It describes the existing development baseline, code `1` and name
 `0.1.0-dev`; it does not create a release or a tag. The selected native source
-build and bounded application checks are qualified below. Full build-server
-validation, matching signed-release comparison, current security/runtime release
-gates and the signing choice remain open.
+build and bounded application checks are qualified below. The selected release still needs build-server validation, candidate security
+and runtime checks, and a signing decision. Developer-signed distribution also
+requires comparison against the signed APK.
+
+## From daily use to submission
+
+1. Build the candidate from a recorded source revision. Before installing it
+   for daily use, identify the signer. Android requires compatible signing
+   certificates for an in-place update. A later change of distribution channel
+   can require a fresh installation. [Signed updates](RELEASE_DISTRIBUTION.md)
+2. Use the candidate as an everyday calendar bridge for several weeks.
+   Check that offline edits arrive after reconnection, reminders appear in the
+   chosen agenda, Read-only calendars keep their mode and updates preserve
+   pending changes. Record reproducible issues with fictional events.
+3. After the maintainer approves the trial, select the release version and
+   signing model, pin the public source revision in the recipe and verify that
+   the listing describes that revision. Run the build-server, license, security
+   and update checks below. For developer-signed distribution, also verify that
+   the F-Droid rebuild matches the signed APK.
+4. Submit the reviewed recipe to fdroiddata for inclusion. F-Droid decides
+   whether to accept the app and proposed metadata. The tracked development
+   recipe stays disabled throughout the trial.
+   [Inclusion policy](https://f-droid.org/docs/Inclusion_Policy/) ·
+   [Reproducible builds](https://f-droid.org/docs/Reproducible_Builds/)
 
 ## Listing and versions
 
 The [Fastlane listing](../fastlane/README.md) contains English and French text and
 Calendeer's existing deer artwork. No screenshots are supplied. The product is a
-bridge to Android calendar applications: read-only by default, with separate
-experimental write options and no internal event editor or calendar browser.
+bridge to Android calendar applications: read-only by default, with one optional Editable
+mode per writable calendar. The Android calendar client handles viewing and editing.
 Keep the listing aligned with [current capabilities](STATUS.md). The recipe
 uses `GPL-3.0-only` for the combined APK; original project contributions retain
 their separate [licensing terms](LICENSING.md).
@@ -98,7 +119,10 @@ build-server, native build, install or independent APK comparison. The
 [metadata reference](https://f-droid.org/docs/Build_Metadata_Reference/) defines
 the recipe fields and build phases.
 
-## Measured local checks
+## Earlier development baseline
+
+The following measurements describe the earlier pinned source. Repeat the
+applicable checks on the selected release revision.
 
 | Check | Result and boundary |
 | --- | --- |
@@ -141,9 +165,7 @@ only to the unsigned rebuild. Two copies of one build and fake comparison tests
 do not establish reproducibility. See [F-Droid reproducible builds](https://f-droid.org/docs/Reproducible_Builds/).
 
 If F-Droid signing is selected instead, document its certificate and update
-continuity implications before submission. The existing
-[release preparation](RELEASE_DISTRIBUTION.md) remains a separate process; this
-document does not authorize signing, publishing, a ticket or a merge request.
+continuity implications before submission. Follow the [release procedure](RELEASE_DISTRIBUTION.md) for the signed candidate.
 
 ## Method provenance
 

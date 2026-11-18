@@ -2,8 +2,8 @@
 
 ## Decisions for the initial implementation
 
-Calendar Bridge is an Android synchronization utility, with no event editor.
-The build uses Kotlin, Java 17, Gradle 9.4.1 and AGP 9.2.1; Android modules use
+Calendeer is an Android synchronization utility. Calendar clients provide the editor.
+Build with JDK 21. The project targets Java 17 bytecode and uses Kotlin, Gradle 9.4.1 and AGP 9.2.1; Android modules use
 AGP's built-in Kotlin support and Compose for the small configuration UI.
 These pinned versions match the inspected Contako integration baseline; they
 are not a claim that Calendar's dependencies have already been qualified.
@@ -13,8 +13,8 @@ Android 17 runtime qualification remains separate from successful SDK 37 builds
 and API 35 regressions; see [build security](BUILD_SECURITY.md#android-api-37-baseline).
 The application identity is `com.patmanak.calendeer`; its native account type is
 `com.patmanak.calendeer.account`. Internal Kotlin/Gradle namespaces remain unchanged.
-The application ID is selected for this project; the Android compatibility
-baseline remains provisional. No release has been published.
+Android 12 is the minimum supported platform. See the [distribution plan](FDROID.md)
+for the daily-use trial and subsequent F-Droid submission.
 
 ## Modules
 
@@ -27,8 +27,8 @@ baseline remains provisional. No release has been published.
   Contako, kept separate from contact synchronization and Proton SDK types.
 - `proton-auth`: Android Proton Core binding, SRP login, protected account/session
   persistence, user-key unlock and origin-bound hosted human verification.
-  It implements the `auth` and metadata catalog ports; an authenticated identity does not imply Calendar
-  keys, membership or synchronization readiness.
+  It implements the calendar catalog, event import and supported outgoing operations.
+  Each operation checks its calendar access and keys against the active session.
 
 Domain contracts own behavior. The Proton adapter owns SDK types, opaque
 payloads/revisions, keys and versioned continuation state. The Android adapter

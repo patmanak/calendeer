@@ -17,9 +17,8 @@ implementation of a conditional-write contract.
 This is **absence of a demonstrated mechanism in the inspected client paths**,
 not a claim that Proton's server cannot support one. A documented, supported
 precondition or an authoritative server implementation is still needed before
-advertising outgoing edits with the current conflict guarantees. The current
-development build exposes a separate experimental title-only UPDATE option;
-its guarded preflight is not an atomic conditional write. See the current
+advertising outgoing edits with the current conflict guarantees. The original experiment used a title-only option. Current supported writes use
+the per-calendar Editable mode. Its preflight leaves the same concurrency window. See the current
 qualification limits below and [implementation status](../STATUS.md).
 
 ## Resolved public references

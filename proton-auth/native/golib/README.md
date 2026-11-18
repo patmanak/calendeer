@@ -23,12 +23,11 @@ The builder checks Linux, exact Go and NDK versions, JDK 21 and SDK presence.
 It requires Python 3, a C build toolchain, `realpath`, `sha256sum`, and network
 access for checksum-verified Go modules and the pinned API-reference AAR.
 
-From the repository root, with the toolchain directories already installed:
+Set `JAVA_HOME` and `ANDROID_HOME` to the installed JDK and Android SDK. With
+Go 1.27.1 on the path, run from the repository root:
 
 ```sh
-export GOROOT=/path/to/go1.27.1
-export JAVA_HOME=/path/to/jdk21
-export ANDROID_HOME=/path/to/android-sdk
+export GOROOT="$(go env GOROOT)"
 export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/27.2.12479018"
 bash proton-auth/native/golib/build.sh --go-home "$GOROOT" \
   --java-home "$JAVA_HOME" --android-sdk "$ANDROID_HOME" \

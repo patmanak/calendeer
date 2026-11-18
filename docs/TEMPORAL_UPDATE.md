@@ -1,4 +1,8 @@
-# Temporal UPDATE implementation slice
+# Historical temporal UPDATE profile
+
+This document preserves the former writer’s format and qualification history.
+Fresh date and time edits use [personal-v2](PERSONAL_UPDATE.md) under the
+calendar’s Editable mode. References below to a time option describe the earlier UI.
 
 Confirmed target: date/time editing through the Android calendar client, with
 replaceable Proton integration, durable offline work and no bridge event editor.

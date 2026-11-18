@@ -7,8 +7,9 @@ Imported Proton Calendar/WebClients adaptations are GPL-3.0-only: the combined
 APK is constrained to GPL version 3. Do not label the complete APK GPL-3.0-or-later
 or promise a later-version option for those upstream contributions.
 
-Distribution remains blocked until resolved dependency notices and native-source
-licensing are reviewed. See the [release procedure](RELEASE_DISTRIBUTION.md).
+The selected source-built native dependency and resolved release inventory have
+reviewed license evidence. Recheck the notices against the exact APK and ship
+the corresponding source. [Release procedure](RELEASE_DISTRIBUTION.md)
 
 ## Imported components
 

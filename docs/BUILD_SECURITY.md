@@ -216,11 +216,10 @@ native APK gate, required device profiles, test matrix and pass criteria.
 
 | Gate | Required evidence or decision |
 | --- | --- |
-| Concurrent remote edits | A supported atomic server precondition or an explicit accepted-risk product decision. GET then PUT/DELETE leaves a race; the experimental options display this warning and remain default-off. See [conditional writes](research/CONDITIONAL_WRITES.md). |
+| Concurrent remote edits | A supported atomic server precondition or an explicit accepted-risk product decision. GET then PUT/DELETE leaves a race; Read-only is the default and selecting Editable exposes supported writes to that race. See [conditional writes](research/CONDITIONAL_WRITES.md). |
 | Distribution | Original contributions use GPL-3.0-or-later, while imported Proton terms constrain the combined application to GPLv3. Preserve complete notices and qualify actual signed updates. The selected native source/license review and two byte-identical unsigned Git Linux builds are recorded. Current native advisory/runtime qualification, F-Droid build-server and matching signed-release comparison remain separate. The F-Droid signature choice is deferred. See [licensing](LICENSING.md), [F-Droid](FDROID.md) and [distribution](RELEASE_DISTRIBUTION.md). |
 | Android qualification | Extend the measured editor/device coverage to the intended OEM, real reboot/power loss, production-worker interruption during transport, periodic scheduling, battery and large calendars. Process restart and synthetic fixtures do not substitute for these journeys. |
-| Supported write profile | Keep unsupported fields/variants held. Richer events, combined edits and kind/zone transitions need explicit profile contracts and qualification before enabling them. |
+| Supported write profile | Keep unsupported fields/variants held. Supported combined edits and timed/all-day or zone changes are documented in [Personal edits](PERSONAL_UPDATE.md). Broader profiles require qualification. |
 
-Do not create signing keys, choose the owner's license or promise a server
-guarantee merely to close an audit item. Current measured scope and outstanding
-work remain in [status](STATUS.md) and [validation](VALIDATION.md).
+The [implementation status](STATUS.md) tracks outstanding release work.
+[Validation](VALIDATION.md) records the earlier qualification baseline.

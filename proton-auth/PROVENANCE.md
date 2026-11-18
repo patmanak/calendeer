@@ -548,8 +548,8 @@ signature trust restrictions remain in force. Unit and native crypto fixtures ar
 synthetic local tests, not evidence of complete server/OEM compatibility.
 
 The authentication/session and hosted-verification integration adapts Contako,
-copyright 2026 Patmanak, GPL-3.0-or-later, from the owner-provided source checkout
-at commit `4a1d2e4f6626a2a1e1b194542bd175ac019013e0`. No stored session, credential,
+copyright 2026 Patmanak, GPL-3.0-or-later, from the pinned
+[Contako revision](https://github.com/patmanak/contako/tree/4a1d2e4f6626a2a1e1b194542bd175ac019013e0). No stored session, credential,
 account data or generated build output was imported. Preserve these notices and
 [the upstream license](LICENSE).
 

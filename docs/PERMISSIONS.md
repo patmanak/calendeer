@@ -25,7 +25,10 @@ failure; never silently disable a device firewall, VPN or global restriction.
 
 Calendar import declares `READ_CALENDAR` and `WRITE_CALENDAR`. A contextual button
 requests these permissions after explaining the local mirror and its privacy
-consequences. No calendar permission dialog is shown automatically at launch.
+consequences. The mirror contains readable event details. Other apps with Android
+calendar access can read them, even when the Proton calendar is set to Read-only.
+The agenda app controls its reminders and their visibility on the lock screen.
+No calendar permission dialog is shown automatically at launch.
 Launch/foreground checks update the blocked state, and provider operations check
 again. Both permissions are needed even for a read-only Proton import.
 

@@ -1,102 +1,65 @@
 # Calendeer
 
-Calendeer brings your Proton Calendar into Android's own calendar. Your Proton
-events appear in the calendar app you already use (for example /e/OS Calendar,
-Etar or Google Calendar), alongside your other calendars, and changes you make
-there can be sent back to Proton.
+Calendeer syncs Proton Calendar with the Android Calendar Provider. It lets you
+see Proton events alongside your other calendars in the calendar app you already
+use. That app handles event editing and reminders. Calendeer is an independent
+open-source project and requires Android 12 or later and a Proton account.
 
-Calendeer is an independent application, not an official Proton product. It is
-a bridge: it has no event editor of its own. You view and edit events in your
-usual calendar app; Calendeer keeps them in sync in the background.
+**Availability.** Calendeer is in development. You can build it from source.
+An F-Droid submission is planned after several weeks of daily use and review
+of a release candidate. [Distribution plan](docs/FDROID.md)
 
-## What you can do
+## Connect a calendar
 
-**Connect your Proton account**
-- Sign in with your Proton account, including two-factor authentication and
-  Proton's human verification. The session is kept, so you sign in once.
-- Settings show which account is connected.
+1. Open Calendeer and sign in to Proton. Complete any verification requested
+   by Proton. Settings show the connected account.
+2. Grant calendar access and enable the calendars you want on this device.
+   Each starts in **Read-only** mode. Open your usual agenda and make those
+   calendars visible there if necessary.
+3. To send supported changes back to a calendar you own, select **Editable** for
+   that calendar. In your agenda, select that calendar when creating an event.
+   Use **Synchronize** in Calendeer to request an update and check its status.
 
-**Choose your calendars**
-- Calendeer lists your Proton calendars with their names and colors.
-- Turn each calendar on or off to show it or hide it on the phone.
-- For each calendar, choose **Read-only** (the default: Proton is copied to the
-  phone, nothing is sent back) or **Editable** (changes made on the phone are
-  sent to Proton).
+## What synchronizes
 
-**See your events in your Android calendar app**
-- Events from the selected calendars appear in Android's calendar, with their
-  title, description, location, dates and times, all-day events and time zones.
-- Your personal reminders and event colors come along too.
-- Choose how events are colored: **each event's own color** (default) or
-  **the calendar's color**. Switching only changes the display on the phone;
-  your colors in Proton are untouched.
-- Events stay available without a network connection.
+| In your Android calendar | Current support |
+| --- | --- |
+| View events offline | Selected events, times, all-day dates, locations, descriptions, supported recurrences, personal reminders and event colors. Settings can display the calendar color instead. |
+| Edit ordinary personal events | Create, edit and delete supported events. Editing covers title, description, location, date, time zone, personal reminders and colors from Proton’s palette. |
+| Edit a repeating event | Create or edit a whole personal daily series with 2–366 occurrences and an interval of 1–365 days. Whole-series edits require a series without individual exceptions and unambiguous times. |
+| Edit one occurrence, delete a series or change guests | These outgoing operations are still in development. Unsupported changes stay on the phone and the affected calendar shows their status. Invitations and cancellations are outside the current release profile. |
 
-**Edit from your phone** (Editable calendars)
-- Create an event, with its reminders and color.
-- Create a finite daily series (2–366 occurrences, every 1–365 days), with
-  reminders and color. Times must remain valid and unambiguous across the series.
-- Change the title, description, location, dates, times, all-day setting or
-  time zone.
-- Add, change or remove reminders, and change an event's color.
-- Delete an event.
-- Changes are sent to Proton automatically; **Synchronize** requests a sync now.
-  Proton's email reminders are preserved when you edit an event.
-- New event colors must belong to Proton's 20-color palette. Creates or edits
-  with another new color stay saved on the phone; Calendeer does not silently
-  replace the chosen color or send a request that Proton is known to reject.
-  This palette is advertised to Android calendar apps that support account event
-  colors; each calendar app decides whether to offer it.
-- Edit a whole finite daily personal series without individual exceptions, including
-  its rule, dates, reminders and color. Other recurrence edits, recurring deletion
-  and guest changes stay saved on the phone, pending support.
+Changes can be captured offline. Background sync requests run hourly by default
+and Android controls when work runs. Settings offer intervals from 15 minutes to
+6 hours. Automatic push follows Android’s sync switches. If a request may already
+have reached Proton, Calendeer keeps it pending until the result can be verified.
+Simultaneous edits on the phone and in Proton can still conflict.
+[Sync settings](docs/SYNC_SCHEDULING.md) · [Implementation status](docs/STATUS.md)
 
-**Stay in sync without thinking about it**
-- Automatic synchronization every 15 minutes up to every 6 hours (hourly by
-  default), plus the **Synchronize** button to request an update.
-- Pull-to-refresh in your calendar app also triggers a synchronization.
-- One status line tells you at a glance whether everything is up to date,
-  in progress, offline or needs your attention.
-- If a change can't be sent, it stays on the phone and the
-  affected calendar says so in plain words.
+Settings offer English, French, German, Italian, Dutch, Polish, Portuguese and
+Spanish. You can follow the system language and light/dark theme or choose your own.
 
-**Sign out cleanly**
-- Sign-out asks for confirmation and tells you if changes are still waiting to
-  be sent.
-- It removes the Proton session and Calendeer's calendars from the phone.
+## What calendar access means
 
-**Make it yours**
-- Light, dark or system theme.
-- Available in English, French, German, Spanish, Italian, Dutch, Polish and
-  Portuguese.
+Calendeer writes the selected events into Android’s shared Calendar Provider.
+This requires Android calendar write permission even in Read-only mode. Apps
+with calendar access can read the local event details, and your calendar app
+controls what appears in reminders and on the lock screen. Proton’s encryption
+does not extend to the copy exposed through Android’s calendar API.
 
-## Coming next
-
-- Editing/deleting repeating events and changing single occurrences; other repeat rules.
-- Guests and invitations.
-
-## Learn more
-
-- [Current status](docs/STATUS.md): what is available today and what remains
-  before the first release.
-- [Interface](docs/DESIGN.md): screens and their behavior.
-- [Specification](docs/SPECIFICATION.md): requirements and accepted limits.
-- [Synchronization behavior](docs/SYNCHRONIZATION_BEHAVIOR.md),
-  [scheduling](docs/SYNC_SCHEDULING.md) and [permissions](docs/PERMISSIONS.md).
-- [Architecture](docs/ARCHITECTURE.md) and [validation](docs/VALIDATION.md).
-- [F-Droid preparation](docs/FDROID.md), [build security](docs/BUILD_SECURITY.md)
-  and [signed release preparation](docs/RELEASE_DISTRIBUTION.md).
-- Contributors and agents: [AGENTS.md](AGENTS.md) and [working method](docs/WORKFLOW.md).
+Signing out clears the Proton session. If calendar permission is missing,
+Calendeer finishes removing its calendar copies when access returns.
+[Android permissions](docs/PERMISSIONS.md)
 
 ## Build
 
-Use JDK 21 and Android SDK platform 37 (set the SDK in ignored `local.properties`
-or `ANDROID_HOME`). First rebuild the Proton native dependency with the
+Use JDK 21, Android SDK platform `platforms;android-37.0` and Build Tools
+`36.0.0`. Set the SDK in `local.properties` or `ANDROID_HOME`. First rebuild the Proton native dependency with the
 [Linux reference builder](proton-auth/native/golib/README.md) (Go 1.27.1, NDK r27c);
 Gradle refuses a missing or altered native artifact. Then run:
 
 ```sh
-./gradlew :sync:test :auth:test :proton-auth:testDebugUnitTest :app:testDebugUnitTest :app:assembleDebug :app:lintDebug
+bash gradlew --dependency-verification strict :sync:test :auth:test :proton-auth:testDebugUnitTest :app:testDebugUnitTest :app:assembleDebug :app:lintDebug
 ```
 
 Use `gradlew.bat` on Windows. The debug APK is generated under
@@ -109,3 +72,14 @@ Original contributions use [GPL-3.0-or-later](LICENSE). Imported Proton adaptati
 retain GPL-3.0-only terms, so the combined application is distributed under GPL
 version 3. See [licensing](docs/LICENSING.md) and the notices in
 [docs/licenses](docs/licenses).
+
+## Contributing
+
+For a bug report, include the Calendeer version or source revision, Android
+version, calendar app, sync mode, and steps to reproduce with a fictional event.
+Keep account addresses, calendar contents, share links, session data and raw
+device logs out of public reports. [Issue tracker](https://github.com/patmanak/calendeer/issues)
+
+For code changes, start from the accepted behavior and use the focused checks for
+the affected module. [Specification](docs/SPECIFICATION.md) ·
+[Architecture](docs/ARCHITECTURE.md) · [Working method](docs/WORKFLOW.md)

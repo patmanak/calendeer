@@ -5,8 +5,8 @@ It handles a combined edit in one protected request: title, description/location
 and dates may change together. Supported date changes include timed/all-day
 transitions and changes of named time zone. All-day end dates remain exclusive.
 The calendar must be Editable, with current account access, selection and calendar
-permissions. The effective mode supplies the internal per-field admission gates
-until the legacy families are retired; those gates are not separate user options.
+permissions. The effective mode supplies the internal per-field admission checks. Legacy
+records retain their original recovery rules.
 
 Imported and transferred events support changes to display reminders and event color,
 including removal and calendar-color fallback. Before/at/after-start reminders use
