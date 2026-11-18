@@ -67,6 +67,16 @@ Samsung/One UI is outside 0.1. Signature management remains deferred by the owne
   Initial CREATE captures reminders/color with personal-v3. Finite DAILY CREATE (COUNT 2–366, INTERVAL 1–365) uses
   capsule v4 and fingerprint v2, with a guarded native profile chosen before reservation.
   Whole finite DAILY personal masters without exceptions use series-v3 from ordinary/transferred capture through crypto, readback and native/SQL ACK.
+- The first detached occurrence can pass through the worker, signed readback, Android
+  acknowledgement and transfer in instrumented tests. The production Proton port keeps
+  this capability disabled. Compatible master updates preserve a newer local child edit.
+  Removal planning checks signed family members and preserves existing exclusions.
+  Whole-series deletion can prepare a sealed batch and inspect each member after an
+  uncertain response. Series deletion still needs a worker and native acknowledgement. [Occurrence support](research/OCCURRENCE_WRITES.md).
+- Organizer guest changes have encrypted REQUEST/CANCEL preparation for one internal
+  recipient. Instrumented tests decrypt and verify both attachments. Separate durable
+  claims keep an interrupted Calendar edit from replaying Mail. The real Mail and
+  Calendar transports and end-to-end recipient delivery still need qualification. [Guest changes](research/GUEST_WRITES.md).
 - UNKNOWN is inspect-only, never reset/resend. Unsupported local changes and
   conflicts retain their variants. Native permission/account/generation and consent
   are rechecked; a system sync request cannot lift a paused CREATE.
@@ -90,7 +100,7 @@ installation, other ABIs/OEMs and signing remain release gates.
 
 Still required: remaining V05 recurrence/occurrence/guest editing
 ([recurrence plan](research/RECURRENCE_WRITES.md)), milestone qualification,
-unresolved historical associations/conflicts, remote CI and signed packaging.
+unresolved historical associations/conflicts, CI on the candidate revision and signed packaging.
 Trustworthy comparable modification timestamps remain unavailable for general
 last-writer-wins. GET then PUT is not atomic; concurrent changes can be overwritten.
 [Conditional writes](research/CONDITIONAL_WRITES.md).
