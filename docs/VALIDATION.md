@@ -37,12 +37,12 @@ depending on a new content notification. See [scheduling](SYNC_SCHEDULING.md).
 
 ## Selected source-native aggregate
 
-The project-owned `android-golib:2.10.0-2-go1.27.1-16k-linux1` is built from
+The project-owned `android-golib:2.10.0-2-go1.27.1-16k-linux2` is built from
 selected unmodified Proton crypto/SRP packages and pinned mobile sources.
-Two independent Linux source/work/module/compiler-cache builds produce identical
-AAR/POM bytes. After separate repackaging of their independently compiled libraries,
-the admitted AAR SHA-256 is
-`41253b873c64e9dceec6c21b12d9a2e3a8152cb4f52957a67d43d9d77753171f`.
+Two Linux builds with independent compiler caches and different NDK installation paths
+produce identical AAR and POM bytes. The linker omits the path-dependent Go cache ID
+and emits a content-derived GNU build ID. The admitted AAR SHA-256 is
+`d396296afd2bff218a1ea8eed8747cd25fb7263262a25e3ff4256313a39428a8`.
 Per-declaring-class public Java API, exact four-ABI source/module identity,
 ELF 16 KiB LOAD/RELRO layout and retained notices pass. Seven builder rejection
 tests and 15 packager tests pass. The three new notice/API guard cases were

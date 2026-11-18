@@ -194,7 +194,7 @@ me.proton.core:user-settings-domain:36.8.0 — GPL-3.0-only
 me.proton.core:util-android-device:36.8.0 — GPL-3.0-only
 me.proton.core:util-android-shared-preferences:36.8.0 — GPL-3.0-only
 me.proton.core:util-kotlin:36.8.0 — GPL-3.0-only
-com.patmanak.calendeer.crypto:android-golib:2.10.0-2-go1.27.1-16k-linux1 — GPL-3.0-only
+com.patmanak.calendeer.crypto:android-golib:2.10.0-2-go1.27.1-16k-linux2 — GPL-3.0-only
 net.sf.biweekly:biweekly:0.6.8 — BSD-2-Clause AND MIT AND Apache-2.0
 org.jetbrains.kotlin:kotlin-android-extensions-runtime:2.1.0 — Apache-2.0
 org.jetbrains.kotlin:kotlin-parcelize-runtime:2.1.0 — Apache-2.0
@@ -2361,7 +2361,7 @@ Source example: commonMain/androidx/datastore/DataStoreDelegateUtils.kt
 
 ========================================================================
 Preserved notice: dependency-notices/18951c084f68bce792efa2037685466628ebc1c67f4bff8b7147f3d5050e50a4.txt
-Origins: android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/github.com_cloudflare_circl/ecc/p384/LICENSE; https://proxy.golang.org/github.com/cloudflare/circl/@v/v1.6.2.zip!/github.com/cloudflare/circl@v1.6.2/ecc/p384/LICENSE
+Origins: android-golib-2.10.0-2-go1.27.1-16k-linux2.aar!/legal/github.com_cloudflare_circl/ecc/p384/LICENSE; https://proxy.golang.org/github.com/cloudflare/circl/@v/v1.6.2.zip!/github.com/cloudflare/circl@v1.6.2/ecc/p384/LICENSE
 
 Copyright (c) 2018, Brendan McMillion. All rights reserved.
 
@@ -3996,7 +3996,7 @@ Source example: commonMain/kotlinx/atomicfu/AtomicFU.common.kt
 
 ========================================================================
 Preserved notice: dependency-notices/2d36597f7117c38b006835ae7f537487207d8ec407aa9d9980794b2030cbc067.txt
-Origins: android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/github.com_ProtonMail_go-crypto/LICENSE; android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/github.com_cronokirby_saferith/LICENSE_go; https://proxy.golang.org/github.com/!proton!mail/go-crypto/@v/v1.4.1-proton.zip!/github.com/ProtonMail/go-crypto@v1.4.1-proton/LICENSE; https://proxy.golang.org/github.com/cronokirby/saferith/@v/v0.33.0.zip!/github.com/cronokirby/saferith@v0.33.0/LICENSE_go
+Origins: android-golib-2.10.0-2-go1.27.1-16k-linux2.aar!/legal/github.com_ProtonMail_go-crypto/LICENSE; android-golib-2.10.0-2-go1.27.1-16k-linux2.aar!/legal/github.com_cronokirby_saferith/LICENSE_go; https://proxy.golang.org/github.com/!proton!mail/go-crypto/@v/v1.4.1-proton.zip!/github.com/ProtonMail/go-crypto@v1.4.1-proton/LICENSE; https://proxy.golang.org/github.com/cronokirby/saferith/@v/v0.33.0.zip!/github.com/cronokirby/saferith@v0.33.0/LICENSE_go
 
 Copyright (c) 2009 The Go Authors. All rights reserved.
 
@@ -5729,7 +5729,7 @@ Source example: commonMain/androidx/compose/material3/AppBarColumn.kt
 
 ========================================================================
 Preserved notice: dependency-notices/503bdcb689e2033376caa35eb66f170920221e96706da77be941804bc4f36422.txt
-Origins: android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/github.com_ProtonMail_go-mime/LICENSE; android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/github.com_ProtonMail_gopenpgp_v2/LICENSE; https://proxy.golang.org/github.com/!proton!mail/go-mime/@v/v0.0.0-20230322103455-7d82a3887f2f.zip!/github.com/ProtonMail/go-mime@v0.0.0-20230322103455-7d82a3887f2f/LICENSE; https://proxy.golang.org/github.com/!proton!mail/gopenpgp/v2/@v/v2.10.0-proton.zip!/github.com/ProtonMail/gopenpgp/v2@v2.10.0-proton/LICENSE
+Origins: android-golib-2.10.0-2-go1.27.1-16k-linux2.aar!/legal/github.com_ProtonMail_go-mime/LICENSE; android-golib-2.10.0-2-go1.27.1-16k-linux2.aar!/legal/github.com_ProtonMail_gopenpgp_v2/LICENSE; https://proxy.golang.org/github.com/!proton!mail/go-mime/@v/v0.0.0-20230322103455-7d82a3887f2f.zip!/github.com/ProtonMail/go-mime@v0.0.0-20230322103455-7d82a3887f2f/LICENSE; https://proxy.golang.org/github.com/!proton!mail/gopenpgp/v2/@v/v2.10.0-proton.zip!/github.com/ProtonMail/gopenpgp/v2@v2.10.0-proton/LICENSE
 
 (The MIT License)
 
@@ -6692,7 +6692,7 @@ Source example: commonMain/androidx/compose/material3/AppBarColumn.kt
 
 ========================================================================
 Preserved notice: dependency-notices/5aa3167c44245f0b12b27195d85c6a8c8e067cfdd511059daa4d7b3c5b232129.txt
-Origins: android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/github.com_ProtonMail_go-crypto/AUTHORS; https://proxy.golang.org/github.com/!proton!mail/go-crypto/@v/v1.4.1-proton.zip!/github.com/ProtonMail/go-crypto@v1.4.1-proton/AUTHORS
+Origins: android-golib-2.10.0-2-go1.27.1-16k-linux2.aar!/legal/github.com_ProtonMail_go-crypto/AUTHORS; https://proxy.golang.org/github.com/!proton!mail/go-crypto/@v/v1.4.1-proton.zip!/github.com/ProtonMail/go-crypto@v1.4.1-proton/AUTHORS
 
 # This source code refers to The Go Authors for copyright purposes.
 # The master list of authors is in the main Go distribution,
@@ -8116,7 +8116,7 @@ Source example: androidx/arch/core/internal/FastSafeIterableMap.java
 
 ========================================================================
 Preserved notice: dependency-notices/6d18204bd2f491153e8ad86767bdccedaf238e2a7bc2a1fee592888dfcfe2735.txt
-Origins: android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/github.com_cronokirby_saferith/LICENSE; https://proxy.golang.org/github.com/cronokirby/saferith/@v/v0.33.0.zip!/github.com/cronokirby/saferith@v0.33.0/LICENSE
+Origins: android-golib-2.10.0-2-go1.27.1-16k-linux2.aar!/legal/github.com_cronokirby_saferith/LICENSE; https://proxy.golang.org/github.com/cronokirby/saferith/@v/v0.33.0.zip!/github.com/cronokirby/saferith@v0.33.0/LICENSE
 
 Copyright (c) 2021 Lúcás Meier
 
@@ -9310,7 +9310,7 @@ Source example: androidx/transition/TransitionSeekController.java
 
 ========================================================================
 Preserved notice: dependency-notices/7b3f092184869028bb9706f902c60e45fe53bbad504fa8fefa54e9119d0571a0.txt
-Origins: android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/github.com_ProtonMail_go-srp/LICENSE.txt; https://proxy.golang.org/github.com/!proton!mail/go-srp/@v/v0.0.7.zip!/github.com/ProtonMail/go-srp@v0.0.7/LICENSE.txt
+Origins: android-golib-2.10.0-2-go1.27.1-16k-linux2.aar!/legal/github.com_ProtonMail_go-srp/LICENSE.txt; https://proxy.golang.org/github.com/!proton!mail/go-srp/@v/v0.0.7.zip!/github.com/ProtonMail/go-srp@v0.0.7/LICENSE.txt
 
 The MIT License
 
@@ -10465,7 +10465,7 @@ Source example: androidx/activity/compose/internal/BackHandlerCompat.kt
 
 ========================================================================
 Preserved notice: dependency-notices/8d427fd87bc9579ea368fde3d49f9ca22eac857f91a9dec7e3004bdfab7dee86.txt
-Origins: android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/github.com_pkg_errors/LICENSE; https://proxy.golang.org/github.com/pkg/errors/@v/v0.9.1.zip!/github.com/pkg/errors@v0.9.1/LICENSE
+Origins: android-golib-2.10.0-2-go1.27.1-16k-linux2.aar!/legal/github.com_pkg_errors/LICENSE; https://proxy.golang.org/github.com/pkg/errors/@v/v0.9.1.zip!/github.com/pkg/errors@v0.9.1/LICENSE
 
 Copyright (c) 2015, Dave Cheney <dave@cheney.net>
 All rights reserved.
@@ -10559,7 +10559,7 @@ Source example: androidx/customview/poolingcontainer/PoolingContainer.kt
 
 ========================================================================
 Preserved notice: dependency-notices/911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad.txt
-Origins: android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/Go/LICENSE; android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/golang.org_x_crypto/LICENSE; android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/golang.org_x_mobile/LICENSE; android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/golang.org_x_sys/LICENSE; android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/golang.org_x_text/LICENSE; https://proxy.golang.org/golang.org/x/crypto/@v/v0.41.0.zip!/golang.org/x/crypto@v0.41.0/LICENSE; https://proxy.golang.org/golang.org/x/mobile/@v/v0.0.0-20260908204917-8b95e45f8d3e.zip!/golang.org/x/mobile@v0.0.0-20260908204917-8b95e45f8d3e/LICENSE; https://proxy.golang.org/golang.org/x/sys/@v/v0.48.0.zip!/golang.org/x/sys@v0.48.0/LICENSE; https://proxy.golang.org/golang.org/x/text/@v/v0.28.0.zip!/golang.org/x/text@v0.28.0/LICENSE; https://raw.githubusercontent.com/golang/go/go1.27.1/LICENSE
+Origins: android-golib-2.10.0-2-go1.27.1-16k-linux2.aar!/legal/Go/LICENSE; android-golib-2.10.0-2-go1.27.1-16k-linux2.aar!/legal/golang.org_x_crypto/LICENSE; android-golib-2.10.0-2-go1.27.1-16k-linux2.aar!/legal/golang.org_x_mobile/LICENSE; android-golib-2.10.0-2-go1.27.1-16k-linux2.aar!/legal/golang.org_x_sys/LICENSE; android-golib-2.10.0-2-go1.27.1-16k-linux2.aar!/legal/golang.org_x_text/LICENSE; https://proxy.golang.org/golang.org/x/crypto/@v/v0.41.0.zip!/golang.org/x/crypto@v0.41.0/LICENSE; https://proxy.golang.org/golang.org/x/mobile/@v/v0.0.0-20260908204917-8b95e45f8d3e.zip!/golang.org/x/mobile@v0.0.0-20260908204917-8b95e45f8d3e/LICENSE; https://proxy.golang.org/golang.org/x/sys/@v/v0.48.0.zip!/golang.org/x/sys@v0.48.0/LICENSE; https://proxy.golang.org/golang.org/x/text/@v/v0.28.0.zip!/golang.org/x/text@v0.28.0/LICENSE; https://raw.githubusercontent.com/golang/go/go1.27.1/LICENSE
 
 Copyright 2009 The Go Authors.
 
@@ -11148,7 +11148,7 @@ Source example: commonMain/androidx/room/concurrent/Atomics.kt
 
 ========================================================================
 Preserved notice: dependency-notices/96f408bfae65bf137fc2525d3ecb030271c50c1e90799f87abf8846d8dd505cc.txt
-Origins: android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/Go/PATENTS; android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/github.com_ProtonMail_go-crypto/PATENTS; android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/golang.org_x_crypto/PATENTS; android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/golang.org_x_mobile/PATENTS; android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/golang.org_x_sys/PATENTS; android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/golang.org_x_text/PATENTS; https://proxy.golang.org/github.com/!proton!mail/go-crypto/@v/v1.4.1-proton.zip!/github.com/ProtonMail/go-crypto@v1.4.1-proton/PATENTS; https://proxy.golang.org/golang.org/x/crypto/@v/v0.41.0.zip!/golang.org/x/crypto@v0.41.0/PATENTS; https://proxy.golang.org/golang.org/x/mobile/@v/v0.0.0-20260908204917-8b95e45f8d3e.zip!/golang.org/x/mobile@v0.0.0-20260908204917-8b95e45f8d3e/PATENTS; https://proxy.golang.org/golang.org/x/sys/@v/v0.48.0.zip!/golang.org/x/sys@v0.48.0/PATENTS; https://proxy.golang.org/golang.org/x/text/@v/v0.28.0.zip!/golang.org/x/text@v0.28.0/PATENTS; https://raw.githubusercontent.com/golang/go/go1.27.1/PATENTS
+Origins: android-golib-2.10.0-2-go1.27.1-16k-linux2.aar!/legal/Go/PATENTS; android-golib-2.10.0-2-go1.27.1-16k-linux2.aar!/legal/github.com_ProtonMail_go-crypto/PATENTS; android-golib-2.10.0-2-go1.27.1-16k-linux2.aar!/legal/golang.org_x_crypto/PATENTS; android-golib-2.10.0-2-go1.27.1-16k-linux2.aar!/legal/golang.org_x_mobile/PATENTS; android-golib-2.10.0-2-go1.27.1-16k-linux2.aar!/legal/golang.org_x_sys/PATENTS; android-golib-2.10.0-2-go1.27.1-16k-linux2.aar!/legal/golang.org_x_text/PATENTS; https://proxy.golang.org/github.com/!proton!mail/go-crypto/@v/v1.4.1-proton.zip!/github.com/ProtonMail/go-crypto@v1.4.1-proton/PATENTS; https://proxy.golang.org/golang.org/x/crypto/@v/v0.41.0.zip!/golang.org/x/crypto@v0.41.0/PATENTS; https://proxy.golang.org/golang.org/x/mobile/@v/v0.0.0-20260908204917-8b95e45f8d3e.zip!/golang.org/x/mobile@v0.0.0-20260908204917-8b95e45f8d3e/PATENTS; https://proxy.golang.org/golang.org/x/sys/@v/v0.48.0.zip!/golang.org/x/sys@v0.48.0/PATENTS; https://proxy.golang.org/golang.org/x/text/@v/v0.28.0.zip!/golang.org/x/text@v0.28.0/PATENTS; https://raw.githubusercontent.com/golang/go/go1.27.1/PATENTS
 
 Additional IP Rights Grant (Patents)
 
@@ -12012,7 +12012,7 @@ Source example: commonMain/androidx/window/core/layout/WindowSizeClassSelectors.
 
 ========================================================================
 Preserved notice: dependency-notices/b0da1764fe4d13d610b695536fc3f2ebc362482d053a1cd258e36975bc6b97a7.txt
-Origins: android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/github.com_cloudflare_circl/LICENSE; https://proxy.golang.org/github.com/cloudflare/circl/@v/v1.6.2.zip!/github.com/cloudflare/circl@v1.6.2/LICENSE
+Origins: android-golib-2.10.0-2-go1.27.1-16k-linux2.aar!/legal/github.com_cloudflare_circl/LICENSE; https://proxy.golang.org/github.com/cloudflare/circl/@v/v1.6.2.zip!/github.com/cloudflare/circl@v1.6.2/LICENSE
 
 Copyright (c) 2019 Cloudflare. All rights reserved.
 
@@ -15047,7 +15047,7 @@ Source example: golang.org/x/crypto@v0.41.0/acme/pebble_test.go
 
 ========================================================================
 Preserved notice: dependency-notices/da4b77ea67eea3548aac445741cd70cfbd87e2a5bcbb03a2bb85abda0e2fa3c1.txt
-Origins: android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/github.com_ProtonMail_bcrypt/LICENSE; https://proxy.golang.org/github.com/!proton!mail/bcrypt/@v/v0.0.0-20210511135022-227b4adcab57.zip!/github.com/ProtonMail/bcrypt@v0.0.0-20210511135022-227b4adcab57/LICENSE
+Origins: android-golib-2.10.0-2-go1.27.1-16k-linux2.aar!/legal/github.com_ProtonMail_bcrypt/LICENSE; https://proxy.golang.org/github.com/!proton!mail/bcrypt/@v/v0.0.0-20210511135022-227b4adcab57.zip!/github.com/ProtonMail/bcrypt@v0.0.0-20210511135022-227b4adcab57/LICENSE
 
 Copyright (c) 2011 James Keane <james.keane@gmail.com>. All rights reserved.
 Copyright (c) 2006 Damien Miller <djm@mindrot.org>.

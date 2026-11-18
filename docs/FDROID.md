@@ -48,7 +48,7 @@ that case. Qualify a suitable F-Droid image rather than removing the guard.
 Native compilation runs in `build`, after scanning. The versioned
 [native builder](../proton-auth/native/golib/README.md) populates
 `proton-auth/native/build/maven` from selected Proton sources. The project-owned
-coordinate is `com.patmanak.calendeer.crypto:android-golib:2.10.0-2-go1.27.1-16k-linux1`.
+coordinate is `com.patmanak.calendeer.crypto:android-golib:2.10.0-2-go1.27.1-16k-linux2`.
 The Gradle build then produces
 `app/build/outputs/apk/release/app-release-unsigned.apk`. A coordinate or matching
 Java API alone does not qualify native behavior or provenance. Keep the source,
@@ -56,7 +56,7 @@ module, license, checksum, API and four-ABI/16 KiB ELF checks; never substitute
 the precompiled upstream JNI libraries when the local source build is missing.
 
 Use Linux as the native release reference. Two independent clean builds must use
-distinct source/work/cache paths and compare the resulting AAR and canonical LF
+distinct source, work, Go cache and NDK installation paths and compare the resulting AAR and canonical LF
 POM, with their provenance and module/ELF checks. Do not adopt Windows-generated
 checksums as Linux expectations or regenerate verification metadata merely to
 make a build pass. Native identity and whole-APK reproducibility are separate

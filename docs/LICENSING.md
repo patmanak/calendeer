@@ -99,7 +99,7 @@ it with `python tools/release_notices.py --bundle-assets` after an evidence chan
   runtime checks pass. This is a packaged-artifact mitigation, not a reclassification
   of the original source grant. The
   runtime notice inventory now follows the verified 218-coordinate resolved snapshot.
-- `com.patmanak.calendeer.crypto:android-golib:2.10.0-2-go1.27.1-16k-linux1`
+- `com.patmanak.calendeer.crypto:android-golib:2.10.0-2-go1.27.1-16k-linux2`
   replaces the upstream aggregate in every resolved app configuration. The
   [source builder](../proton-auth/native/golib/README.md) selects unchanged Proton
   crypto/SRP packages and pinned mobile bindings, compiled with Go 1.27.1 for four

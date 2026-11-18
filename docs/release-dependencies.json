@@ -1,50 +1,50 @@
 {
   "schemaVersion": 1,
   "scope": "app:releaseRuntimeClasspath",
-  "lockSha256": "f37b6c968b67ce3062e765109c0d576f0bfb1c2185f488f5a61562be275bc89b",
+  "lockSha256": "6a32661538d4472b4e3957f91d4c2276b3cc7cf43d8790b4cb8b61dfa5786706",
   "nativeSourceReview": {
     "reviewed": true,
-    "sourceRevision": "sha256:cc83a777182a25a2eabfad5036576dd8ff72d7873517a4a6470b96b369580a04",
+    "sourceRevision": "sha256:fb727850aecd77ea12d1418eabfba6ad2664df38989f44b28299a48cc2c3c092",
     "reviewEvidence": "Selected unmodified Proton crypto and current mobile binding sources reconstructed under the checked-in recipe. All 12 exact linked module archives independently recompute to embedded h1 sums; compatible source grants, additional notices and headers retained. Unused KT module and untraceable upstream aggregate root are not part of this replacement. Original aggregate evidence remains archived separately.",
     "buildMapping": {
-      "artifactSha256": "41253b873c64e9dceec6c21b12d9a2e3a8152cb4f52957a67d43d9d77753171f",
-      "pomSha256": "3d87f9ed87559c39ee12252f94537a143472c2b9ee06980c53cf1f54661b87bb",
+      "artifactSha256": "d396296afd2bff218a1ea8eed8747cd25fb7263262a25e3ff4256313a39428a8",
+      "pomSha256": "c5e903bb2053a5a23f63abeee3a3067c45a1ff3aa8466523a616aec9c325d8dc",
       "sourceDescriptors": {
         "go.mod": "1aa0b4ee39976d09b967a21e56911d8bfdf0c0f8724e7ca6ce034740a3ee9ce9",
         "go.sum": "2e6ec8297605f1caea038ce48d4daa4420a4c279192fcb81c00a5d64cfff3b81",
         "dependencies.go": "e766531b25cbb0b96155d8db40a4febfdd13f0f06947315121d4325a3672b615",
-        "build.ps1": "9178db31c7ed2c8decb4d82aedf32bb6c59ac272a97b9005fe0b66318c21318d",
-        "build.sh": "9f0f79f862c49323477aeaa9540aaa29f0fb287ab2c43d18d52c98e62401d0ab",
-        "package-aar.py": "ab3ee4a4aeb968853c35d0e43cfd40cb99f8d296ae94f475f6c1e81c387cdcb5",
-        "golib.pom": "3d87f9ed87559c39ee12252f94537a143472c2b9ee06980c53cf1f54661b87bb"
+        "build.ps1": "1aaa8f99000199b43d7a6d0ea5aa8ac9d5d264acc8784d37f75e6dfa728f27e4",
+        "build.sh": "20d0539e41cbe3fec8ad42e795885cccbddfe508b7945668c365b8164624f63d",
+        "package-aar.py": "dfc2302885e63b87ddec59240d9afaadc04ce5391aa237be68b9bd23a986c955",
+        "golib.pom": "c5e903bb2053a5a23f63abeee3a3067c45a1ff3aa8466523a616aec9c325d8dc"
       },
       "upstreamReferenceSha256": "f64705f4ae14dde5c619d03a3a7fc2e8d747fb2803c4b5da01b0c38dac7884c9",
       "publicJavaApiSha256": "aab64fa635f9a1fc0c6d6609bcb5a31b671578670082d3c196632c65494d8b55",
       "abis": [
         {
           "entry": "jni/arm64-v8a/libgojni.so",
-          "sha256": "7d7d025089bd929db56a734bc1ff9cc1e1e7fcf4bb57dc585648089001057622",
+          "sha256": "cfbe9b84804635342de6349aad418a88b6a4a6b986134f615b505943a8136f26",
           "go": "1.27.1",
           "minimum_load_alignment": 16384,
           "relro_16k_compatible": true
         },
         {
           "entry": "jni/armeabi-v7a/libgojni.so",
-          "sha256": "edf2f2c0ba9b81929e00f1aecedc7f36ed50a8e23d86ca5b98eecb6667adb584",
+          "sha256": "471686f5f4f8ea3c5e37f7027fac9ef27d04710e891eb0680ab1ae075786d2bc",
           "go": "1.27.1",
           "minimum_load_alignment": 16384,
           "relro_16k_compatible": true
         },
         {
           "entry": "jni/x86/libgojni.so",
-          "sha256": "f3331014c34603fdbc8cefe06eefc1f2e29b427b9fe6025b281d5d3c8d67edd0",
+          "sha256": "bf0c220a0967579eb20e176a8d372c82bc99e926c03bdc5d93bb07fa5a429916",
           "go": "1.27.1",
           "minimum_load_alignment": 16384,
           "relro_16k_compatible": true
         },
         {
           "entry": "jni/x86_64/libgojni.so",
-          "sha256": "e14207416d14dc88c1e7b693e083f5f7749725fe11a1aac21d968a452e8ec4a0",
+          "sha256": "dcbd237d07f3c683528c5c18f0da5ec0841f2005e693df419d7d3193c813273c",
           "go": "1.27.1",
           "minimum_load_alignment": 16384,
           "relro_16k_compatible": true
@@ -699,119 +699,119 @@
         "sha256": "96f408bfae65bf137fc2525d3ecb030271c50c1e90799f87abf8846d8dd505cc"
       },
       {
-        "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/Go/LICENSE",
+        "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux2.aar!/legal/Go/LICENSE",
         "file": "dependency-notices/911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad.txt",
         "sha256": "911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad"
       },
       {
-        "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/Go/PATENTS",
+        "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux2.aar!/legal/Go/PATENTS",
         "file": "dependency-notices/96f408bfae65bf137fc2525d3ecb030271c50c1e90799f87abf8846d8dd505cc.txt",
         "sha256": "96f408bfae65bf137fc2525d3ecb030271c50c1e90799f87abf8846d8dd505cc"
       },
       {
-        "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/github.com_ProtonMail_bcrypt/LICENSE",
+        "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux2.aar!/legal/github.com_ProtonMail_bcrypt/LICENSE",
         "file": "dependency-notices/da4b77ea67eea3548aac445741cd70cfbd87e2a5bcbb03a2bb85abda0e2fa3c1.txt",
         "sha256": "da4b77ea67eea3548aac445741cd70cfbd87e2a5bcbb03a2bb85abda0e2fa3c1"
       },
       {
-        "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/github.com_ProtonMail_go-crypto/AUTHORS",
+        "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux2.aar!/legal/github.com_ProtonMail_go-crypto/AUTHORS",
         "file": "dependency-notices/5aa3167c44245f0b12b27195d85c6a8c8e067cfdd511059daa4d7b3c5b232129.txt",
         "sha256": "5aa3167c44245f0b12b27195d85c6a8c8e067cfdd511059daa4d7b3c5b232129"
       },
       {
-        "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/github.com_ProtonMail_go-crypto/LICENSE",
+        "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux2.aar!/legal/github.com_ProtonMail_go-crypto/LICENSE",
         "file": "dependency-notices/2d36597f7117c38b006835ae7f537487207d8ec407aa9d9980794b2030cbc067.txt",
         "sha256": "2d36597f7117c38b006835ae7f537487207d8ec407aa9d9980794b2030cbc067"
       },
       {
-        "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/github.com_ProtonMail_go-crypto/PATENTS",
+        "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux2.aar!/legal/github.com_ProtonMail_go-crypto/PATENTS",
         "file": "dependency-notices/96f408bfae65bf137fc2525d3ecb030271c50c1e90799f87abf8846d8dd505cc.txt",
         "sha256": "96f408bfae65bf137fc2525d3ecb030271c50c1e90799f87abf8846d8dd505cc"
       },
       {
-        "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/github.com_ProtonMail_go-mime/LICENSE",
+        "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux2.aar!/legal/github.com_ProtonMail_go-mime/LICENSE",
         "file": "dependency-notices/503bdcb689e2033376caa35eb66f170920221e96706da77be941804bc4f36422.txt",
         "sha256": "503bdcb689e2033376caa35eb66f170920221e96706da77be941804bc4f36422"
       },
       {
-        "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/github.com_ProtonMail_go-srp/LICENSE.txt",
+        "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux2.aar!/legal/github.com_ProtonMail_go-srp/LICENSE.txt",
         "file": "dependency-notices/7b3f092184869028bb9706f902c60e45fe53bbad504fa8fefa54e9119d0571a0.txt",
         "sha256": "7b3f092184869028bb9706f902c60e45fe53bbad504fa8fefa54e9119d0571a0"
       },
       {
-        "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/github.com_ProtonMail_gopenpgp_v2/LICENSE",
+        "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux2.aar!/legal/github.com_ProtonMail_gopenpgp_v2/LICENSE",
         "file": "dependency-notices/503bdcb689e2033376caa35eb66f170920221e96706da77be941804bc4f36422.txt",
         "sha256": "503bdcb689e2033376caa35eb66f170920221e96706da77be941804bc4f36422"
       },
       {
-        "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/github.com_cloudflare_circl/LICENSE",
+        "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux2.aar!/legal/github.com_cloudflare_circl/LICENSE",
         "file": "dependency-notices/b0da1764fe4d13d610b695536fc3f2ebc362482d053a1cd258e36975bc6b97a7.txt",
         "sha256": "b0da1764fe4d13d610b695536fc3f2ebc362482d053a1cd258e36975bc6b97a7"
       },
       {
-        "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/github.com_cloudflare_circl/ecc/p384/LICENSE",
+        "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux2.aar!/legal/github.com_cloudflare_circl/ecc/p384/LICENSE",
         "file": "dependency-notices/18951c084f68bce792efa2037685466628ebc1c67f4bff8b7147f3d5050e50a4.txt",
         "sha256": "18951c084f68bce792efa2037685466628ebc1c67f4bff8b7147f3d5050e50a4"
       },
       {
-        "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/github.com_cronokirby_saferith/LICENSE",
+        "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux2.aar!/legal/github.com_cronokirby_saferith/LICENSE",
         "file": "dependency-notices/6d18204bd2f491153e8ad86767bdccedaf238e2a7bc2a1fee592888dfcfe2735.txt",
         "sha256": "6d18204bd2f491153e8ad86767bdccedaf238e2a7bc2a1fee592888dfcfe2735"
       },
       {
-        "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/github.com_cronokirby_saferith/LICENSE_go",
+        "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux2.aar!/legal/github.com_cronokirby_saferith/LICENSE_go",
         "file": "dependency-notices/2d36597f7117c38b006835ae7f537487207d8ec407aa9d9980794b2030cbc067.txt",
         "sha256": "2d36597f7117c38b006835ae7f537487207d8ec407aa9d9980794b2030cbc067"
       },
       {
-        "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/github.com_pkg_errors/LICENSE",
+        "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux2.aar!/legal/github.com_pkg_errors/LICENSE",
         "file": "dependency-notices/8d427fd87bc9579ea368fde3d49f9ca22eac857f91a9dec7e3004bdfab7dee86.txt",
         "sha256": "8d427fd87bc9579ea368fde3d49f9ca22eac857f91a9dec7e3004bdfab7dee86"
       },
       {
-        "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/golang.org_x_crypto/LICENSE",
+        "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux2.aar!/legal/golang.org_x_crypto/LICENSE",
         "file": "dependency-notices/911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad.txt",
         "sha256": "911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad"
       },
       {
-        "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/golang.org_x_crypto/PATENTS",
+        "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux2.aar!/legal/golang.org_x_crypto/PATENTS",
         "file": "dependency-notices/96f408bfae65bf137fc2525d3ecb030271c50c1e90799f87abf8846d8dd505cc.txt",
         "sha256": "96f408bfae65bf137fc2525d3ecb030271c50c1e90799f87abf8846d8dd505cc"
       },
       {
-        "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/golang.org_x_mobile/LICENSE",
+        "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux2.aar!/legal/golang.org_x_mobile/LICENSE",
         "file": "dependency-notices/911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad.txt",
         "sha256": "911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad"
       },
       {
-        "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/golang.org_x_mobile/PATENTS",
+        "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux2.aar!/legal/golang.org_x_mobile/PATENTS",
         "file": "dependency-notices/96f408bfae65bf137fc2525d3ecb030271c50c1e90799f87abf8846d8dd505cc.txt",
         "sha256": "96f408bfae65bf137fc2525d3ecb030271c50c1e90799f87abf8846d8dd505cc"
       },
       {
-        "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/golang.org_x_sys/LICENSE",
+        "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux2.aar!/legal/golang.org_x_sys/LICENSE",
         "file": "dependency-notices/911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad.txt",
         "sha256": "911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad"
       },
       {
-        "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/golang.org_x_sys/PATENTS",
+        "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux2.aar!/legal/golang.org_x_sys/PATENTS",
         "file": "dependency-notices/96f408bfae65bf137fc2525d3ecb030271c50c1e90799f87abf8846d8dd505cc.txt",
         "sha256": "96f408bfae65bf137fc2525d3ecb030271c50c1e90799f87abf8846d8dd505cc"
       },
       {
-        "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/golang.org_x_text/LICENSE",
+        "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux2.aar!/legal/golang.org_x_text/LICENSE",
         "file": "dependency-notices/911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad.txt",
         "sha256": "911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad"
       },
       {
-        "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/golang.org_x_text/PATENTS",
+        "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux2.aar!/legal/golang.org_x_text/PATENTS",
         "file": "dependency-notices/96f408bfae65bf137fc2525d3ecb030271c50c1e90799f87abf8846d8dd505cc.txt",
         "sha256": "96f408bfae65bf137fc2525d3ecb030271c50c1e90799f87abf8846d8dd505cc"
       }
     ],
-    "inventorySha256": "bdbdacc7942fcaaaf3930c44832acf850be588a4c1702c7cf552983301482e81",
+    "inventorySha256": "b884ccceab1abf2e4cf41ebbdcb8361533acaed30e5aeeb7f406a1a8ed69bb81",
     "reviewAttestation": {
-      "sha256": "bdbdacc7942fcaaaf3930c44832acf850be588a4c1702c7cf552983301482e81",
+      "sha256": "b884ccceab1abf2e4cf41ebbdcb8361533acaed30e5aeeb7f406a1a8ed69bb81",
       "basis": "Exact source-descriptor digest, linked source/archive/grant inventory and reviewed API/ELF mapping; no publisher aggregate license inference."
     }
   },
@@ -11718,7 +11718,7 @@
       }
     },
     {
-      "coordinate": "com.patmanak.calendeer.crypto:android-golib:2.10.0-2-go1.27.1-16k-linux1",
+      "coordinate": "com.patmanak.calendeer.crypto:android-golib:2.10.0-2-go1.27.1-16k-linux2",
       "licenses": [
         {
           "name": "GNU GENERAL PUBLIC LICENSE, Version 3.0",
@@ -11728,121 +11728,121 @@
       "licenseExpression": "GPL-3.0-only",
       "source": "https://github.com/patmanak/calendeer/tree/main/proton-auth/native/golib",
       "pomPackaging": "aar",
-      "pomSha256": "3d87f9ed87559c39ee12252f94537a143472c2b9ee06980c53cf1f54661b87bb",
+      "pomSha256": "c5e903bb2053a5a23f63abeee3a3067c45a1ff3aa8466523a616aec9c325d8dc",
       "artifacts": [
         {
-          "name": "android-golib-2.10.0-2-go1.27.1-16k-linux1.aar",
-          "sha256": "41253b873c64e9dceec6c21b12d9a2e3a8152cb4f52957a67d43d9d77753171f"
+          "name": "android-golib-2.10.0-2-go1.27.1-16k-linux2.aar",
+          "sha256": "d396296afd2bff218a1ea8eed8747cd25fb7263262a25e3ff4256313a39428a8"
         }
       ],
       "notices": [
         {
-          "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/Go/LICENSE",
+          "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux2.aar!/legal/Go/LICENSE",
           "file": "dependency-notices/911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad.txt",
           "sha256": "911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad"
         },
         {
-          "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/Go/PATENTS",
+          "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux2.aar!/legal/Go/PATENTS",
           "file": "dependency-notices/96f408bfae65bf137fc2525d3ecb030271c50c1e90799f87abf8846d8dd505cc.txt",
           "sha256": "96f408bfae65bf137fc2525d3ecb030271c50c1e90799f87abf8846d8dd505cc"
         },
         {
-          "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/github.com_ProtonMail_bcrypt/LICENSE",
+          "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux2.aar!/legal/github.com_ProtonMail_bcrypt/LICENSE",
           "file": "dependency-notices/da4b77ea67eea3548aac445741cd70cfbd87e2a5bcbb03a2bb85abda0e2fa3c1.txt",
           "sha256": "da4b77ea67eea3548aac445741cd70cfbd87e2a5bcbb03a2bb85abda0e2fa3c1"
         },
         {
-          "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/github.com_ProtonMail_go-crypto/AUTHORS",
+          "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux2.aar!/legal/github.com_ProtonMail_go-crypto/AUTHORS",
           "file": "dependency-notices/5aa3167c44245f0b12b27195d85c6a8c8e067cfdd511059daa4d7b3c5b232129.txt",
           "sha256": "5aa3167c44245f0b12b27195d85c6a8c8e067cfdd511059daa4d7b3c5b232129"
         },
         {
-          "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/github.com_ProtonMail_go-crypto/LICENSE",
+          "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux2.aar!/legal/github.com_ProtonMail_go-crypto/LICENSE",
           "file": "dependency-notices/2d36597f7117c38b006835ae7f537487207d8ec407aa9d9980794b2030cbc067.txt",
           "sha256": "2d36597f7117c38b006835ae7f537487207d8ec407aa9d9980794b2030cbc067"
         },
         {
-          "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/github.com_ProtonMail_go-crypto/PATENTS",
+          "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux2.aar!/legal/github.com_ProtonMail_go-crypto/PATENTS",
           "file": "dependency-notices/96f408bfae65bf137fc2525d3ecb030271c50c1e90799f87abf8846d8dd505cc.txt",
           "sha256": "96f408bfae65bf137fc2525d3ecb030271c50c1e90799f87abf8846d8dd505cc"
         },
         {
-          "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/github.com_ProtonMail_go-mime/LICENSE",
+          "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux2.aar!/legal/github.com_ProtonMail_go-mime/LICENSE",
           "file": "dependency-notices/503bdcb689e2033376caa35eb66f170920221e96706da77be941804bc4f36422.txt",
           "sha256": "503bdcb689e2033376caa35eb66f170920221e96706da77be941804bc4f36422"
         },
         {
-          "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/github.com_ProtonMail_go-srp/LICENSE.txt",
+          "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux2.aar!/legal/github.com_ProtonMail_go-srp/LICENSE.txt",
           "file": "dependency-notices/7b3f092184869028bb9706f902c60e45fe53bbad504fa8fefa54e9119d0571a0.txt",
           "sha256": "7b3f092184869028bb9706f902c60e45fe53bbad504fa8fefa54e9119d0571a0"
         },
         {
-          "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/github.com_ProtonMail_gopenpgp_v2/LICENSE",
+          "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux2.aar!/legal/github.com_ProtonMail_gopenpgp_v2/LICENSE",
           "file": "dependency-notices/503bdcb689e2033376caa35eb66f170920221e96706da77be941804bc4f36422.txt",
           "sha256": "503bdcb689e2033376caa35eb66f170920221e96706da77be941804bc4f36422"
         },
         {
-          "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/github.com_cloudflare_circl/LICENSE",
+          "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux2.aar!/legal/github.com_cloudflare_circl/LICENSE",
           "file": "dependency-notices/b0da1764fe4d13d610b695536fc3f2ebc362482d053a1cd258e36975bc6b97a7.txt",
           "sha256": "b0da1764fe4d13d610b695536fc3f2ebc362482d053a1cd258e36975bc6b97a7"
         },
         {
-          "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/github.com_cloudflare_circl/ecc/p384/LICENSE",
+          "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux2.aar!/legal/github.com_cloudflare_circl/ecc/p384/LICENSE",
           "file": "dependency-notices/18951c084f68bce792efa2037685466628ebc1c67f4bff8b7147f3d5050e50a4.txt",
           "sha256": "18951c084f68bce792efa2037685466628ebc1c67f4bff8b7147f3d5050e50a4"
         },
         {
-          "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/github.com_cronokirby_saferith/LICENSE",
+          "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux2.aar!/legal/github.com_cronokirby_saferith/LICENSE",
           "file": "dependency-notices/6d18204bd2f491153e8ad86767bdccedaf238e2a7bc2a1fee592888dfcfe2735.txt",
           "sha256": "6d18204bd2f491153e8ad86767bdccedaf238e2a7bc2a1fee592888dfcfe2735"
         },
         {
-          "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/github.com_cronokirby_saferith/LICENSE_go",
+          "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux2.aar!/legal/github.com_cronokirby_saferith/LICENSE_go",
           "file": "dependency-notices/2d36597f7117c38b006835ae7f537487207d8ec407aa9d9980794b2030cbc067.txt",
           "sha256": "2d36597f7117c38b006835ae7f537487207d8ec407aa9d9980794b2030cbc067"
         },
         {
-          "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/github.com_pkg_errors/LICENSE",
+          "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux2.aar!/legal/github.com_pkg_errors/LICENSE",
           "file": "dependency-notices/8d427fd87bc9579ea368fde3d49f9ca22eac857f91a9dec7e3004bdfab7dee86.txt",
           "sha256": "8d427fd87bc9579ea368fde3d49f9ca22eac857f91a9dec7e3004bdfab7dee86"
         },
         {
-          "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/golang.org_x_crypto/LICENSE",
+          "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux2.aar!/legal/golang.org_x_crypto/LICENSE",
           "file": "dependency-notices/911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad.txt",
           "sha256": "911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad"
         },
         {
-          "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/golang.org_x_crypto/PATENTS",
+          "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux2.aar!/legal/golang.org_x_crypto/PATENTS",
           "file": "dependency-notices/96f408bfae65bf137fc2525d3ecb030271c50c1e90799f87abf8846d8dd505cc.txt",
           "sha256": "96f408bfae65bf137fc2525d3ecb030271c50c1e90799f87abf8846d8dd505cc"
         },
         {
-          "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/golang.org_x_mobile/LICENSE",
+          "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux2.aar!/legal/golang.org_x_mobile/LICENSE",
           "file": "dependency-notices/911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad.txt",
           "sha256": "911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad"
         },
         {
-          "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/golang.org_x_mobile/PATENTS",
+          "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux2.aar!/legal/golang.org_x_mobile/PATENTS",
           "file": "dependency-notices/96f408bfae65bf137fc2525d3ecb030271c50c1e90799f87abf8846d8dd505cc.txt",
           "sha256": "96f408bfae65bf137fc2525d3ecb030271c50c1e90799f87abf8846d8dd505cc"
         },
         {
-          "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/golang.org_x_sys/LICENSE",
+          "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux2.aar!/legal/golang.org_x_sys/LICENSE",
           "file": "dependency-notices/911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad.txt",
           "sha256": "911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad"
         },
         {
-          "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/golang.org_x_sys/PATENTS",
+          "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux2.aar!/legal/golang.org_x_sys/PATENTS",
           "file": "dependency-notices/96f408bfae65bf137fc2525d3ecb030271c50c1e90799f87abf8846d8dd505cc.txt",
           "sha256": "96f408bfae65bf137fc2525d3ecb030271c50c1e90799f87abf8846d8dd505cc"
         },
         {
-          "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/golang.org_x_text/LICENSE",
+          "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux2.aar!/legal/golang.org_x_text/LICENSE",
           "file": "dependency-notices/911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad.txt",
           "sha256": "911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad"
         },
         {
-          "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux1.aar!/legal/golang.org_x_text/PATENTS",
+          "origin": "android-golib-2.10.0-2-go1.27.1-16k-linux2.aar!/legal/golang.org_x_text/PATENTS",
           "file": "dependency-notices/96f408bfae65bf137fc2525d3ecb030271c50c1e90799f87abf8846d8dd505cc.txt",
           "sha256": "96f408bfae65bf137fc2525d3ecb030271c50c1e90799f87abf8846d8dd505cc"
         }
@@ -11855,14 +11855,14 @@
           "go.mod": "1aa0b4ee39976d09b967a21e56911d8bfdf0c0f8724e7ca6ce034740a3ee9ce9",
           "go.sum": "2e6ec8297605f1caea038ce48d4daa4420a4c279192fcb81c00a5d64cfff3b81",
           "dependencies.go": "e766531b25cbb0b96155d8db40a4febfdd13f0f06947315121d4325a3672b615",
-          "build.ps1": "9178db31c7ed2c8decb4d82aedf32bb6c59ac272a97b9005fe0b66318c21318d",
-          "build.sh": "9f0f79f862c49323477aeaa9540aaa29f0fb287ab2c43d18d52c98e62401d0ab",
-          "package-aar.py": "ab3ee4a4aeb968853c35d0e43cfd40cb99f8d296ae94f475f6c1e81c387cdcb5",
-          "golib.pom": "3d87f9ed87559c39ee12252f94537a143472c2b9ee06980c53cf1f54661b87bb"
+          "build.ps1": "1aaa8f99000199b43d7a6d0ea5aa8ac9d5d264acc8784d37f75e6dfa728f27e4",
+          "build.sh": "20d0539e41cbe3fec8ad42e795885cccbddfe508b7945668c365b8164624f63d",
+          "package-aar.py": "dfc2302885e63b87ddec59240d9afaadc04ce5391aa237be68b9bd23a986c955",
+          "golib.pom": "c5e903bb2053a5a23f63abeee3a3067c45a1ff3aa8466523a616aec9c325d8dc"
         }
       },
       "reviewAttestation": {
-        "sha256": "9eed55787973f23c1410888f9b5664ab51f9b2f7e3c6758b56a9de57dc3500af",
+        "sha256": "e12cea00afaa50ee90eb5eed55d20152a13ca191132865f6cd4720d211f55ec7",
         "basis": "Project-owned POM/AAR with exact admitted hashes and full native source review; all other Maven reviews preserved unchanged."
       }
     },
@@ -13448,7 +13448,7 @@
       }
     }
   ],
-  "verificationMetadataSha256": "f88c81bd31b883e9d01bf7d21fd66b9260e52f6deba844d2e18b97e080e8d2a0",
+  "verificationMetadataSha256": "5eaf32d7a77450f165ab5494e19219fca25db591c532d5c3ba6013d85a3d4b2b",
   "nonPackagedComponents": [
     {
       "coordinate": "com.google.code.findbugs:jsr305:3.0.2",

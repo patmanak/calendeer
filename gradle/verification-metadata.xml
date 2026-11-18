@@ -5,12 +5,12 @@
       <verify-signatures>false</verify-signatures>
    </configuration>
    <components>
-      <component group="com.patmanak.calendeer.crypto" name="android-golib" version="2.10.0-2-go1.27.1-16k-linux1">
-         <artifact name="android-golib-2.10.0-2-go1.27.1-16k-linux1.aar">
-            <sha256 value="41253b873c64e9dceec6c21b12d9a2e3a8152cb4f52957a67d43d9d77753171f" origin="Reviewed Calendeer source build; two independent Linux reconstructions"/>
+      <component group="com.patmanak.calendeer.crypto" name="android-golib" version="2.10.0-2-go1.27.1-16k-linux2">
+         <artifact name="android-golib-2.10.0-2-go1.27.1-16k-linux2.aar">
+            <sha256 value="d396296afd2bff218a1ea8eed8747cd25fb7263262a25e3ff4256313a39428a8" origin="Reviewed Calendeer source build; two independent Linux reconstructions"/>
          </artifact>
-         <artifact name="android-golib-2.10.0-2-go1.27.1-16k-linux1.pom">
-            <sha256 value="3d87f9ed87559c39ee12252f94537a143472c2b9ee06980c53cf1f54661b87bb" origin="Reviewed Calendeer source-built native POM"/>
+         <artifact name="android-golib-2.10.0-2-go1.27.1-16k-linux2.pom">
+            <sha256 value="c5e903bb2053a5a23f63abeee3a3067c45a1ff3aa8466523a616aec9c325d8dc" origin="Reviewed Calendeer source-built native POM"/>
          </artifact>
       </component>
       <component group="androidx.activity" name="activity" version="1.12.4">

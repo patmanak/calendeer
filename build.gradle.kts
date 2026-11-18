@@ -35,7 +35,7 @@ plugins {
 }
 
 val sourceBuiltCryptoGroup = "com.patmanak.calendeer.crypto"
-val sourceBuiltCryptoVersion = "2.10.0-2-go1.27.1-16k-linux1"
+val sourceBuiltCryptoVersion = "2.10.0-2-go1.27.1-16k-linux2"
 extra["calendeerNativeVersion"] = sourceBuiltCryptoVersion
 val nativeSource = layout.projectDirectory.dir("proton-auth/native/golib")
 val nativeRepository = layout.projectDirectory.dir("proton-auth/native/build/maven")

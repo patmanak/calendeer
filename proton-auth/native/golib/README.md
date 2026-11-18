@@ -46,9 +46,9 @@ reviewing the candidate, not disabling verification or automatically blessing
 new checksums. Keep Gradle verification metadata and dependency locks intact.
 
 The output coordinate is
-`com.patmanak.calendeer.crypto:android-golib:2.10.0-2-go1.27.1-16k-linux1`.
+`com.patmanak.calendeer.crypto:android-golib:2.10.0-2-go1.27.1-16k-linux2`.
 The local repository contains its `.aar` and canonical LF `.pom` under
-`com/patmanak/calendeer/crypto/android-golib/2.10.0-2-go1.27.1-16k-linux1/`.
+`com/patmanak/calendeer/crypto/android-golib/2.10.0-2-go1.27.1-16k-linux2/`.
 Work directories contain downloads, module/build caches, raw AAR, extracted
 libraries and logs. These are generated artifacts and must remain uncommitted.
 
