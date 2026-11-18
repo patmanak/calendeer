@@ -46,12 +46,25 @@ jobs:
           test "$(go env GOVERSION)" = go1.27.1
           python3 proton-auth/native/golib/test-build.py
           python3 proton-auth/native/golib/test-package-aar.py
-          bash proton-auth/native/golib/build.sh --go-home "$GOROOT" \
+          native_source="$RUNNER_TEMP/calendeer-native-source"
+          mkdir -p "$native_source"
+          git archive HEAD:proton-auth/native/golib | tar -x -C "$native_source"
+          bash "$native_source/build.sh" --go-home "$GOROOT" \
             --android-sdk "$ANDROID_HOME" --android-ndk "$ANDROID_NDK_HOME" \
             --java-home "$JAVA_HOME" --work "$RUNNER_TEMP/calendeer-native" \
             --repository "$GITHUB_WORKSPACE/proton-auth/native/build/maven"
       - name: Report native build fingerprints
         run: |
+          elf="$RUNNER_TEMP/calendeer-native/arm64-v8a.so"
+          go version -m "$elf"
+          readelf -p .comment "$elf"
+          objcopy="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-objcopy"
+          for section in .text .rodata .gopclntab .go.buildinfo .data .note.go.buildid; do
+            if "$objcopy" --dump-section "$section=$RUNNER_TEMP/section.dat" "$elf" "$RUNNER_TEMP/elf-copy" 2>/dev/null && test -s "$RUNNER_TEMP/section.dat"; then
+              echo "$section $(sha256sum < "$RUNNER_TEMP/section.dat")"
+              rm -f "$RUNNER_TEMP/section.dat"
+            fi
+          done
           python3 - <<'PY'
           from pathlib import Path
           import hashlib, io, json, zipfile, zlib
