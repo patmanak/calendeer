@@ -22,10 +22,10 @@ internal class LocalCreateStaging(
     private val currentAccount: suspend () -> Boolean,
     private val recordFreshSubmission: (MutationId, LocalCreateSubmission) -> Unit,
 ) {
-    private fun installAdmission() {
-        store.admitTransaction = { it == target && active() }
-        projection.admitOperation = active
-        journal.admitCapture = { it == target && active() }
+    private fun installAdmission(admitted: () -> Boolean = active) {
+        store.admitTransaction = { it == target && admitted() }
+        projection.admitOperation = admitted
+        journal.admitCapture = { it == target && admitted() }
     }
 
     private fun clearAdmission() {
@@ -171,11 +171,11 @@ internal class LocalCreateStaging(
     }
 
     suspend fun stageSubmission(localId: LocalEventId, id: MutationId, attempt: MutationId,
-        port: CalendarCreateSubmissionPort): LocalCreateSubmissionResult {
+        port: CalendarCreateSubmissionPort, occurrenceEditable: () -> Boolean): LocalCreateSubmissionResult {
         installAdmission()
         return try {
-            suspend fun admission(): LocalCreateSubmissionResult? {
-                if (!currentAccount() || !active()) return LocalCreateSubmissionResult.INACTIVE
+            suspend fun admission(admitted: () -> Boolean = active): LocalCreateSubmissionResult? {
+                if (!currentAccount() || !admitted()) return LocalCreateSubmissionResult.INACTIVE
                 val selection = store.selections(target.account).singleOrNull { it.scope == target }
                 if (selection?.enabled != true || !selection.available) return LocalCreateSubmissionResult.INACTIVE
                 return null
@@ -184,6 +184,9 @@ internal class LocalCreateStaging(
             val importFormat = store.transaction(target) { checkpoint?.format }
             if (importFormat != currentFormat()) return LocalCreateSubmissionResult.UNQUALIFIED
             val intent = journal.readIntent(target, localId) ?: return LocalCreateSubmissionResult.UNQUALIFIED
+            val admitted = { active() && (intent.occurrence == null || occurrenceEditable()) }
+            if (!admitted()) return LocalCreateSubmissionResult.INACTIVE
+            installAdmission(admitted)
             val captured = intent.reservation
             if (captured.scope != target || captured.localId != localId || captured.id != id ||
                 captured.format != importFormat || captured.markerProtocol != 1) return LocalCreateSubmissionResult.UNQUALIFIED
@@ -193,16 +196,16 @@ internal class LocalCreateStaging(
                 catch (_: IllegalArgumentException) { return LocalCreateSubmissionResult.UNQUALIFIED }
 
             suspend fun qualify(): LocalCreateSubmissionResult? {
-                admission()?.let { return it }
+                admission(admitted)?.let { return it }
                 if (port.capturedSubmissionFormat(intent) != submissionFormat || currentFormat() != importFormat ||
                     store.transaction(target) { checkpoint?.format } != importFormat) return LocalCreateSubmissionResult.UNQUALIFIED
                 if (intent.occurrence != null && journal.readOccurrenceContext(target, localId) != intent) return LocalCreateSubmissionResult.UNQUALIFIED
                 if (!projection.matchesCapturedIntent(intent) || !store.matchesOccurrenceSource(intent)) return LocalCreateSubmissionResult.UNQUALIFIED
                 // Provider inspection and SQLite are separate. Recheck app state after every external await.
-                admission()?.let { return it }
+                admission(admitted)?.let { return it }
                 if (port.capturedSubmissionFormat(intent) != submissionFormat || currentFormat() != importFormat ||
                     store.transaction(target) { checkpoint?.format } != importFormat) return LocalCreateSubmissionResult.UNQUALIFIED
-                if (!active()) return LocalCreateSubmissionResult.INACTIVE
+                if (!admitted()) return LocalCreateSubmissionResult.INACTIVE
                 return null
             }
             qualify()?.let { return it }

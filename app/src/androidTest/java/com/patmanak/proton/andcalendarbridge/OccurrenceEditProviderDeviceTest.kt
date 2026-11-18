@@ -100,9 +100,25 @@ class OccurrenceEditProviderDeviceTest {
         assertEquals(raw, rows())
     }
 
-    internal class Fixture(val context: Context, val allDay: Boolean) {
+    @Test fun childCreatedWithMaskedColorStaysUnresolvedAcrossEventModeReprojection() {
+        for (reprojectParent in listOf(false, true)) fixture(masked = true) {
+            assertNull(rows().getValue(parent)[Events.EVENT_COLOR])
+            assertNull(rows().getValue(child)[Events.EVENT_COLOR])
+            mode = EventColorMode.EVENT
+            if (reprojectParent) {
+                projection.reprojectEventColors(scope)
+                assertEquals(0xff123456.toInt().toString(), rows().getValue(parent)[Events.EVENT_COLOR])
+            }
+            val before = rows()
+            assertNull(projection.captureOwnedOccurrenceEdit(scope, base, child))
+            assertEquals(before, rows())
+        }
+    }
+
+    internal class Fixture(val context: Context, val allDay: Boolean, masked: Boolean = false) {
         val scope = CalendarScope(AccountId("occurrence-${UUID.randomUUID()}"), CalendarId("fixture"), 0)
-        val projection = AndroidCalendarProjection(context)
+        var mode = if (masked) EventColorMode.CALENDAR else EventColorMode.EVENT
+        val projection = AndroidCalendarProjection(context) { mode }
         val start = Instant.parse("2030-04-01T09:00:00Z")
         val original = if (allDay) RecurrencePoint.AllDay(LocalDate.of(2030, 4, 2)) else RecurrencePoint.Timed(start.plusSeconds(86400))
         val base = RemoteChange.Upsert(EventId("master"), Revision("v1"), EventContent("Master",
@@ -126,7 +142,8 @@ class OccurrenceEditProviderDeviceTest {
             put(Events.STATUS, Events.STATUS_CONFIRMED); put(Events.IS_ORGANIZER, 1)
             put(Events.ORGANIZER, projection.accountFor(scope.account).name)
             put(Events.GUESTS_CAN_INVITE_OTHERS, 0); put(Events.GUESTS_CAN_SEE_GUESTS, 0)
-            put(Events.EVENT_COLOR, 0xff345678.toInt()); put(Events.DIRTY, 1)
+            if (mode == EventColorMode.EVENT) put(Events.EVENT_COLOR, 0xff345678.toInt())
+            put(Events.DIRTY, 1)
         })))
         fun change(id: Long, column: String, value: Any) = assertEquals(1, context.contentResolver.update(uri(Events.CONTENT_URI),
             ContentValues().apply { when (value) { is String -> put(column, value); is Int -> put(column, value); is Long -> put(column, value); else -> error("Fixture value") } },
@@ -190,9 +207,9 @@ class OccurrenceEditProviderDeviceTest {
             if (AccountManager.get(context).getAccountsByType(account.type).contains(account)) assertTrue(AccountManager.get(context).removeAccountExplicitly(account))
         }
     }
-    private fun fixture(allDay: Boolean = false, block: suspend Fixture.() -> Unit) = runBlocking {
+    private fun fixture(allDay: Boolean = false, masked: Boolean = false, block: suspend Fixture.() -> Unit) = runBlocking {
         assumeTrue(InstrumentationRegistry.getArguments().getString("providerFixture") == "true")
-        val fixture = Fixture(ApplicationProvider.getApplicationContext(), allDay)
+        val fixture = Fixture(ApplicationProvider.getApplicationContext(), allDay, masked)
         check(fixture.projection.hasPermissions())
         try { fixture.seed(); fixture.block() } finally { fixture.close() }
     }

@@ -33,7 +33,8 @@ internal suspend fun AndroidCalendarProjection.readOccurrenceEdit(scope: Calenda
 }
 
 private fun AndroidCalendarProjection.observeOccurrence(scope: CalendarScope, master: RemoteChange.Upsert,
-    childRow: Long, intent: LocalCreateIntent? = null, first: Boolean = false, checkActive: () -> Unit = {}): OwnedOccurrenceEditSnapshot? {
+    childRow: Long, intent: LocalCreateIntent? = null, first: Boolean = false, checkActive: () -> Unit = {},
+    step: OccurrenceNativeReceipt? = null): OwnedOccurrenceEditSnapshot? {
     if (childRow <= 0) return null
     val account = accountFor(scope.account)
     val calendar = calendarRow(scope, account) ?: return null
@@ -69,11 +70,14 @@ private fun AndroidCalendarProjection.observeOccurrence(scope: CalendarScope, ma
     val childArgs = arrayOf(calendar.toString(), childRow.toString())
     val child = row(childWhere, childArgs) ?: return null
     val marker = intent?.let { occurrenceMarker(it) }
+    val expectedSync = step?.let { occurrenceExpectedMetadata(it) } ?: ContentValues()
+    if (marker != null && !first) expectedSync.put(Events.SYNC_DATA5, marker)
+    val dirty = if (step?.action == OccurrenceReceiptAction.INSPECT_ACKNOWLEDGEMENT) 0 else 1
     if (child.getAsLong(Events.ORIGINAL_ID) != parentId ||
         (child[Events.ORIGINAL_SYNC_ID] != null && child.getAsString(Events.ORIGINAL_SYNC_ID) != series) ||
-        child.getAsInteger(Events.DIRTY) != 1 || child.getAsInteger(Events.DELETED) != 0 ||
+        child.getAsInteger(Events.DIRTY) != dirty || child.getAsInteger(Events.DELETED) != 0 ||
         child.getAsInteger(Events.STATUS) != Events.STATUS_CONFIRMED ||
-        ATTACHMENT_SYNC_COLUMNS.any { if (it == Events.SYNC_DATA5 && marker != null && !first) child.getAsString(it) != marker else child[it] != null } ||
+        ATTACHMENT_SYNC_COLUMNS.any { child.getAsString(it) != expectedSync.getAsString(it) } ||
         listOf(Events.RRULE, Events.RDATE, Events.EXRULE, Events.EXDATE, Events.DURATION,
             Events.CUSTOM_APP_PACKAGE, Events.CUSTOM_APP_URI).any { child[it] != null }) return null
     val rawOriginal = child.getAsLong(Events.ORIGINAL_INSTANCE_TIME) ?: return null
@@ -92,8 +96,8 @@ private fun AndroidCalendarProjection.observeOccurrence(scope: CalendarScope, ma
     val time = readSimpleTime(child, placeholder, personalAllDayUtcAlias = true) ?: return null
     val rawColor = child.getAsInteger(Events.EVENT_COLOR)
     if (rawColor != null && rawColor != 0 && rawColor.ushr(24) != 0xff) return null
-    // An unstamped child has no saved mask witness. Null cannot prove a user's color choice.
-    if (colorMode() == EventColorMode.CALENDAR && rawColor == null && master.content.colorRgb != null) return null
+    // Dirty children have no display history. An absent color can outlive a masked parent.
+    if ((rawColor == null || rawColor == 0) && master.content.colorRgb != null) return null
     val personal = EventContent(child.getAsString(Events.TITLE).orEmpty(), time,
         child.getAsString(Events.DESCRIPTION).orEmpty(), child.getAsString(Events.EVENT_LOCATION).orEmpty(),
         colorRgb = rawColor?.takeUnless { it == 0 }?.and(0xffffff), details = EventDetails())
@@ -141,7 +145,18 @@ private fun AndroidCalendarProjection.observeOccurrence(scope: CalendarScope, ma
         checks += ContentProviderOperation.newAssertQuery(childUri).withSelection("$column=?", args).withExpectedCount(0).build()
         expected += 0
     }
-    if (marker != null && first) {
+    if (step != null) {
+        val remote = capturedRemoteSelection(step.attachment, calendar)
+        val count = if (step.action == OccurrenceReceiptAction.ATTACH) 0 else 1
+        val remoteAssertion = ContentProviderOperation.newAssertQuery(uri).withSelection(remote.sql, remote.args)
+        if (count == 1) remoteAssertion.withValue(Events._ID, childRow)
+        checks += remoteAssertion.withExpectedCount(count).build()
+        expected += count
+        occurrenceMetadataWrite(step)?.let { update ->
+            checks += ContentProviderOperation.newUpdate(uri).withSelection(childWhere, childArgs).withValues(update).withExpectedCount(1).build()
+            expected += 1
+        }
+    } else if (marker != null && first) {
         checks += ContentProviderOperation.newUpdate(uri).withSelection(childWhere, childArgs)
             .withValue(Events.SYNC_DATA5, marker).withExpectedCount(1).build()
         expected += 1
@@ -154,7 +169,8 @@ private fun AndroidCalendarProjection.occurrenceMarker(intent: LocalCreateIntent
     digest("local-occurrence-v1", calendarSyncId(intent.reservation.scope), intent.reservation.localId.value)
 
 /** A previously consumed reservation can inspect only the exact marker, never a row hint. */
-internal suspend fun AndroidCalendarProjection.stampOccurrenceIdentity(intent: LocalCreateIntent, firstRow: Long?): OwnedOccurrenceEditSnapshot? {
+internal suspend fun AndroidCalendarProjection.stampOccurrenceIdentity(intent: LocalCreateIntent, firstRow: Long?,
+    step: OccurrenceNativeReceipt? = null): OwnedOccurrenceEditSnapshot? {
     val caller = currentCoroutineContext()
     caller.ensureActive()
     val candidate = intent.occurrence ?: return null
@@ -167,7 +183,7 @@ internal suspend fun AndroidCalendarProjection.stampOccurrenceIdentity(intent: L
             if (it.count != 1 || !it.moveToFirst()) return@operation null
             it.getLong(0)
         } ?: fail(CalendarProjectionFailure.PROVIDER_UNAVAILABLE)
-        observeOccurrence(scope, candidate.master, row, intent, firstRow != null, caller::ensureActive)
+        observeOccurrence(scope, candidate.master, row, intent, firstRow != null, caller::ensureActive, step)
     }
 }
 

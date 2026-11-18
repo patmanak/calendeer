@@ -229,6 +229,22 @@ class OccurrenceCaptureDeviceTest {
         assertEquals(0, port.sends); assertEquals(CreateAttemptState.PREPARED, attempts.read(scope, attempt)!!.state)
     }
 
+    @Test fun readOnlyOccurrenceKeepsItsOneShotPreparationRight() = fixture {
+        assertEquals(LocalEditCaptureResult.RETAINED, capture())
+        val owner = coordinator()
+        val port = SubmissionPort()
+        val attempt = MutationId(UUID.randomUUID().toString())
+        editable = false
+        val outcome = owner.stageLocalCreateSubmission(scope, localId, id, attempt, port)
+        journal.admitCapture = { it == scope }
+        assertNull(journal.readSubmissionReservation(scope, localId))
+        assertEquals(0, port.prepares)
+        assertEquals(LocalCreateSubmissionResult.INACTIVE, outcome)
+        editable = true
+        assertEquals(LocalCreateSubmissionResult.RETAINED, owner.stageLocalCreateSubmission(scope, localId, id, attempt, port))
+        assertEquals(1, port.prepares)
+    }
+
     @Test fun interruptedOccurrenceSubmissionReservationNeverRegeneratesAfterReopen() = fixture {
         assertEquals(LocalEditCaptureResult.RETAINED, capture())
         val port = SubmissionPort(); val owner = coordinator(); val attempt = MutationId(UUID.randomUUID().toString())

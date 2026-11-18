@@ -86,7 +86,7 @@ internal class ImportCoordinatorCapturedCreates(
         val expected = generation()
         val policy = policyRevision()
         if (!isCurrent(expected, target.account) || !hasCalendarPermissions()) return@withLock LocalCreateSubmissionResult.INACTIVE
-        localCreateStaging(target, journal, expected, policy).stageSubmission(localId, id, attempt, port)
+        localCreateStaging(target, journal, expected, policy).stageSubmission(localId, id, attempt, port) { systemCreatesEnabled(target) }
     }
 
     /** Opt-in automatic path requalifies the same unsent payload; UNKNOWN remains inspect-only. */
