@@ -114,7 +114,7 @@ class NoticeAttestationTest(unittest.TestCase):
     def test_capture_reads_source_built_native_from_local_repository_and_retains_patents(self):
         with tempfile.TemporaryDirectory() as folder:
             root, _, _ = self.fixture(folder)
-            version = "2.10.0-2-go1.27.1-16k-linux1"
+            version = "2.10.0-2-go1.27.1-16k-linux2"
             group = "com.patmanak.calendeer.crypto"
             coordinate = f"{group}:android-golib:{version}"
             for module in ("app", "auth", "sync", "proton-auth"):

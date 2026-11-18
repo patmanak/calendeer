@@ -1050,7 +1050,7 @@ and qualification limits.
 
 The transitive `me.proton.crypto:android-golib:2.10.0-2` runtime artifact is
 substituted globally with the project-owned source coordinate
-`com.patmanak.calendeer.crypto:android-golib:2.10.0-2-go1.27.1-16k-linux1`.
+`com.patmanak.calendeer.crypto:android-golib:2.10.0-2-go1.27.1-16k-linux2`.
 [Builder provenance](native/golib/PROVENANCE.md) records the pinned Contako utility
 extraction and adaptations; `go.mod`/`go.sum` pin the upstream source modules.
 GopenPGP v2.10.0-proton, go-crypto v1.4.1-proton and go-srp v0.0.7 remain unchanged.
