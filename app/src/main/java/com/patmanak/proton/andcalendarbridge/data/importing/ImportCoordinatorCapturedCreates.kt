@@ -259,7 +259,8 @@ internal class ImportCoordinatorCapturedCreates(
         return CapturedCreateRestoration(target, store, projection, captures, journal,
             currentFormat = { remote.format },
             active = { authenticated() && generation() == expected && policyRevision() == policy && hasCalendarPermissions() },
-            currentAccount = { isCurrent(expected, target.account) }, expectations = remote as? CalendarCreateSubmissionPort)
+            currentAccount = { isCurrent(expected, target.account) }, occurrenceEditable = { systemCreatesEnabled(target) },
+            expectations = remote as? CalendarCreateSubmissionPort)
     }
 
     /** Reconstruct only a fully proven historical queue association; never prepare, send or ACK. */

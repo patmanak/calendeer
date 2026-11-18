@@ -72,10 +72,9 @@ private fun AndroidCalendarProjection.observeOccurrence(scope: CalendarScope, ma
     val marker = intent?.let { occurrenceMarker(it) }
     val expectedSync = step?.let { occurrenceExpectedMetadata(it) } ?: ContentValues()
     if (marker != null && !first) expectedSync.put(Events.SYNC_DATA5, marker)
-    val dirty = if (step?.action == OccurrenceReceiptAction.INSPECT_ACKNOWLEDGEMENT) 0 else 1
     if (child.getAsLong(Events.ORIGINAL_ID) != parentId ||
         (child[Events.ORIGINAL_SYNC_ID] != null && child.getAsString(Events.ORIGINAL_SYNC_ID) != series) ||
-        child.getAsInteger(Events.DIRTY) != dirty || child.getAsInteger(Events.DELETED) != 0 ||
+        child.getAsInteger(Events.DIRTY) != 1 || child.getAsInteger(Events.DELETED) != 0 ||
         child.getAsInteger(Events.STATUS) != Events.STATUS_CONFIRMED ||
         ATTACHMENT_SYNC_COLUMNS.any { child.getAsString(it) != expectedSync.getAsString(it) } ||
         listOf(Events.RRULE, Events.RDATE, Events.EXRULE, Events.EXDATE, Events.DURATION,
@@ -165,7 +164,7 @@ private fun AndroidCalendarProjection.observeOccurrence(scope: CalendarScope, ma
     return OwnedOccurrenceEditSnapshot(parentId, childRow, candidate)
 }
 
-private fun AndroidCalendarProjection.occurrenceMarker(intent: LocalCreateIntent) =
+internal fun AndroidCalendarProjection.occurrenceMarker(intent: LocalCreateIntent) =
     digest("local-occurrence-v1", calendarSyncId(intent.reservation.scope), intent.reservation.localId.value)
 
 /** A previously consumed reservation can inspect only the exact marker, never a row hint. */

@@ -40,7 +40,10 @@ internal fun AndroidCalendarProjection.inspectCapturedHistory(receipt: CapturedC
         throw failure
     } ?: return false
     val uri = syncUri(Events.CONTENT_URI, account)
-    val local = capturedLocalSelection(baseline.receipt, calendar)
+    val intent = baseline.occurrenceIntent
+    if (intent != null && projectionReceipt != null) return false
+    val local = if (intent == null) capturedLocalSelection(baseline.receipt, calendar) else
+        Selection("${Events.CALENDAR_ID}=? AND ${Events.SYNC_DATA5}=?", arrayOf(calendar.toString(), occurrenceMarker(intent)))
     val values = attachmentMetadata(uri, local) ?: return false
     if (!colorMetadataMatches(values, expected) || values.getAsString(Events.SYNC_DATA5) != local.args[1])
         return false
@@ -54,13 +57,20 @@ internal fun AndroidCalendarProjection.inspectCapturedHistory(receipt: CapturedC
     checkActive()
     requirePermissions()
     checkActive()
-    capturedBatch(arrayListOf(
+    val checks = arrayListOf(
         assertion(syncUri(Calendars.CONTENT_URI, account), calendarSelection(scope, account), calendar),
         ContentProviderOperation.newAssertQuery(uri).withSelection(local.sql, local.args)
             .withValues(metadata).withExpectedCount(1).build(),
         ContentProviderOperation.newAssertQuery(uri).withSelection(remote.sql, remote.args)
             .withValue(Events._ID, values.getAsLong(Events._ID)).withExpectedCount(1).build(),
-    ), intArrayOf(1, 1, 1))
+    )
+    if (intent != null) {
+        val family = occurrenceHistoryAssertions(intent, calendar, values.getAsLong(Events._ID)) ?: return false
+        checks.addAll(family)
+    }
+    checkActive()
+    requirePermissions()
+    capturedBatch(checks, IntArray(checks.size) { 1 })
     checkActive()
     requirePermissions()
     checkActive()

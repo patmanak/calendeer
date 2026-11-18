@@ -23,6 +23,7 @@ import com.patmanak.proton.andcalendarbridge.data.importing.ImportPayloadCodec.d
 import com.patmanak.proton.andcalendarbridge.data.importing.ImportPayloadCodec.encodeChange
 import com.patmanak.proton.andcalendarbridge.data.importing.ImportPayloadCodec.key
 import com.patmanak.proton.andcalendarbridge.sync.*
+import com.patmanak.proton.andcalendarbridge.data.outgoing.LocalCreateContentCodec
 
 /** Projection SQL only; ImportStore retains IO, mutex, cancellation and transaction ownership. */
 internal class ImportStoreProjectionSql(
@@ -73,11 +74,23 @@ internal class ImportStoreProjectionSql(
         } finally { db.endTransaction() }
     }
 
+    private fun occurrenceFamilyCurrent(db: SQLiteDatabase, baseline: CapturedCreateBaseline): Boolean {
+        val master = baseline.occurrenceIntent?.occurrence?.master ?: return true
+        val scope = baseline.scope
+        val child = baseline.change
+        if (stabilizedProjection(db, scope, master.eventId) != master || localMutations.readBaseline(db, scope, master.eventId) != master ||
+            hasRawEventRow(db, "projection_receipts", scope, master.eventId) || hasLocalMutation(db, scope, child.eventId) ||
+            hasRawEventRow(db, "projection_receipts", scope, child.eventId) || hasRawEventRow(db, "deferred_events", scope, child.eventId)) return false
+        return db.rawQuery("SELECT payload FROM records WHERE scope=? AND event=?", arrayOf(key(scope), child.eventId.value)).use {
+            !it.moveToFirst() || decodeChange(it.getString(0)) == child
+        }
+    }
+
     fun retainCapturedBaseline(db: SQLiteDatabase, baseline: CapturedCreateBaseline): Boolean = run {
 
         val event = baseline.change.eventId
         if (hasRawEventRow(db, "captured_create_handoffs", baseline.scope, event)) return@run false
-        if (!activeProjectionScope(db, baseline.scope) ||
+        if (!activeProjectionScope(db, baseline.scope) || !occurrenceFamilyCurrent(db, baseline) ||
             !capturedFormatMatches(db, baseline.scope, baseline.format)) return@run false
         if (hasCapturedBase(db, baseline.scope, event)) {
             if (readCapturedBase(db, baseline.scope, event) != baseline) return@run false
@@ -101,7 +114,8 @@ internal class ImportStoreProjectionSql(
                 put("capture_version", link.captureFormat.version); put("timestamp", link.timestamp.epochSecond)
                 put("content_fingerprint", link.contentFingerprint); put("fingerprint_version", link.fingerprintVersion)
                 put("verified_revision", receipt.binding.verifiedRevision.value); put("nonce", receipt.nonce)
-                put("protocol", receipt.protocol); put("payload", encodeChange(baseline.change))
+                put("protocol", receipt.protocol)
+                put("payload", baseline.occurrenceIntent?.let(LocalCreateContentCodec::encodeContent) ?: encodeChange(baseline.change))
             })
             db.insertOrThrow("projection_bases", null, ContentValues().apply {
                 put("scope", key(baseline.scope)); put("event", event.value); put("payload", encodeChange(baseline.change))
@@ -118,6 +132,7 @@ internal class ImportStoreProjectionSql(
     }
 
     fun reserveCapturedAcknowledgement(db: SQLiteDatabase, proposed: CapturedCreateAcknowledgementReceipt): CapturedCreateAcknowledgementReservation = run {
+        check(occurrenceFamilyCurrent(db, proposed.baseline)) { "Occurrence family changed before ACK reservation" }
         requireCapturedAcknowledgementSource(db, proposed.baseline)
         val existing = readCapturedAcknowledgement(db, proposed.baseline.scope, proposed.baseline.change.eventId)
         if (existing != null) {
@@ -135,6 +150,7 @@ internal class ImportStoreProjectionSql(
 
     fun retainCapturedAcknowledgement(db: SQLiteDatabase, witness: AppliedCapturedCreateAcknowledgement): CapturedCreateAcknowledgementRecord = run {
         val receipt = witness.receipt
+        check(occurrenceFamilyCurrent(db, receipt.baseline)) { "Occurrence family changed before ACK proof" }
         requireCapturedAcknowledgementSource(db, receipt.baseline)
         val existing = checkNotNull(readCapturedAcknowledgement(db, receipt.baseline.scope, receipt.baseline.change.eventId)) {
             "Captured acknowledgement requires its durable reservation"

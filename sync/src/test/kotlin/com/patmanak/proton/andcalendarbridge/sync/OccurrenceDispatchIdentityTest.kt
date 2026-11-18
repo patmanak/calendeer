@@ -26,6 +26,25 @@ class OccurrenceDispatchIdentityTest {
         assertFalse(identity.matchesContent(candidate.content))
         assertEquals(identity, CapturedCreateDispatchIdentity.ofOccurrence(record, intent.copy()))
     }
+    @Test fun verifiedDetachedBindingRequiresTheOriginalAttemptAndCompleteSlot() {
+        val identity = CapturedCreateDispatchIdentity.ofOccurrence(record, intent)
+        val child = RemoteChange.Upsert(EventId("child"), Revision("child-revision"), candidate.content)
+        fun proof(change: RemoteChange.Upsert) = CreateSubmissionObservation.Verified(identity.attempt, change)
+        assertTrue(identity.matchesOccurrenceObservation(intent, proof(child)))
+        val binding = CapturedCreateBinding(identity, child.eventId, child.revision)
+        val receipt = CapturedCreateAttachmentReceipt(binding, "11111111-2222-3333-4444-555555555555")
+        assertEquals(intent, CapturedCreateBaseline(receipt, child, intent).occurrenceIntent)
+        assertThrows(IllegalArgumentException::class.java) { CapturedCreateBaseline(receipt, child) }
+        assertThrows(IllegalArgumentException::class.java) { CapturedCreateBaseline(receipt, child.copy(content = content), intent) }
+        assertFalse(identity.matchesOccurrenceObservation(intent, proof(child.copy(eventId = master.eventId))))
+        assertFalse(identity.matchesOccurrenceObservation(intent, proof(child.copy(content = content))))
+        val other = OccurrenceEditCandidate(master, RecurrencePoint.AllDay(LocalDate.of(2030, 4, 3)), content)
+        assertFalse(identity.matchesOccurrenceObservation(intent, proof(child.copy(content = other.content))))
+        assertFalse(identity.matchesOccurrenceObservation(intent.copy(occurrence = other), proof(child)))
+        val wrongAttempt = CreateAttemptIdentity.of(record.copy(id = MutationId("different-attempt")))
+        assertFalse(identity.matchesOccurrenceObservation(intent, CreateSubmissionObservation.Verified(wrongAttempt, child)))
+    }
+
     @Test fun masterRevisionUidRuleSlotAndContentCannotReuseTheFingerprint() {
         val expected = CapturedCreateDispatchIdentity.ofOccurrence(record, intent)
         val variants = listOf(
@@ -56,8 +75,8 @@ class OccurrenceDispatchIdentityTest {
         assertThrows(IllegalArgumentException::class.java) { CapturedCreateDispatchIdentity.of(record, intent) }
         val identity = CapturedCreateDispatchIdentity.ofOccurrence(record, intent)
         val binding = CapturedCreateBinding(identity, EventId("child"), Revision("verified"))
-        val receipt = CapturedCreateAttachmentReceipt(binding, "00000000-0000-0000-0000-000000000001")
         assertThrows(IllegalArgumentException::class.java) {
+            val receipt = CapturedCreateAttachmentReceipt(binding, "00000000-0000-0000-0000-000000000001")
             CapturedCreateBaseline(receipt, RemoteChange.Upsert(binding.eventId, binding.verifiedRevision, candidate.content))
         }
     }

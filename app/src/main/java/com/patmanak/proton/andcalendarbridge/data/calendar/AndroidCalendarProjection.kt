@@ -500,6 +500,11 @@ class AndroidCalendarProjection(context: Context,
         childRow: Long): OwnedOccurrenceEditSnapshot? = readOccurrenceEdit(scope, master, childRow)
     override suspend fun captureAndStampOccurrence(intent: LocalCreateIntent, childRow: Long) = stampOccurrenceIdentity(intent, childRow)
     override suspend fun inspectStampedOccurrence(intent: LocalCreateIntent) = stampOccurrenceIdentity(intent, null)
+    override suspend fun applyOccurrenceReceipt(step: OccurrenceNativeReceipt): Boolean =
+        if (step.action == OccurrenceReceiptAction.INSPECT_ACKNOWLEDGEMENT) {
+            val caller = kotlinx.coroutines.currentCoroutineContext()
+            operation { inspectCapturedHistory(requireNotNull(step.acknowledgement), checkActive = caller::ensureActive) }
+        } else stampOccurrenceIdentity(step.intent, null, step) != null
 
     override suspend fun captureOwnedSimpleDelete(scope: CalendarScope, base: RemoteChange.Upsert): OwnedLocalEditSnapshot? = operation {
         captureSimpleSnapshot(scope, base, deleted = true)

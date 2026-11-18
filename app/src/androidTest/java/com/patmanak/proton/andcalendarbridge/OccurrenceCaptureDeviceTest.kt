@@ -287,7 +287,7 @@ class OccurrenceCaptureDeviceTest {
         assertEquals(CreateAttemptState.PREPARED, attempts.read(scope, attempt)!!.state)
     }
 
-    private class SubmissionPort : CalendarCreateSubmissionPort {
+    internal open class SubmissionPort : CalendarCreateSubmissionPort {
         override val occurrenceSubmissionFormat = AdapterFormat("synthetic-occurrence-submission", 5)
         var prepares = 0; var sends = 0
         var onPrepare: suspend () -> Unit = {}; var beforeClaim: suspend () -> Unit = {}
@@ -306,10 +306,11 @@ class OccurrenceCaptureDeviceTest {
             if (journal.claim(record)) sends++
             return CreateSubmissionObservation.Unknown
         }
-        override suspend fun inspectCaptured(record: CreateAttemptRecord, expected: CalendarCreateDraft) = CreateSubmissionObservation.Unknown
+        override suspend fun inspectCaptured(record: CreateAttemptRecord, expected: CalendarCreateDraft): CreateSubmissionObservation =
+            CreateSubmissionObservation.Unknown
     }
 
-    private class Fixture(val context: Context, allDay: Boolean) {
+    internal class Fixture(val context: Context, allDay: Boolean) {
         val native = OccurrenceEditProviderDeviceTest.Fixture(context, allDay)
         val scope get() = native.scope
         private val token = UUID.randomUUID().toString()
@@ -326,12 +327,15 @@ class OccurrenceCaptureDeviceTest {
         val localId = LocalEventId(UUID.randomUUID().toString())
         val id = MutationId("capture-$token")
         val reservation get() = LocalCreateReservation(id, localId, scope, format, timestamp)
-        fun coordinator() = ImportCoordinatorCapturedCreates(store, object : ReadOnlyCalendarRemote {
+        private val reader = object : ReadOnlyCalendarRemote {
             override val format get() = this@Fixture.format
             override suspend fun currentAccount() = scope.account
             override suspend fun fetch(request: PageRequest): RemotePage = error("No import network")
             override suspend fun dispatch(mutation: Mutation): DispatchResult = error("No generic dispatch")
-        }, projection, kotlinx.coroutines.sync.Mutex(), object : ImportScheduler {
+        }
+        fun coordinator(port: CalendarCreateSubmissionPort? = null) = ImportCoordinatorCapturedCreates(store,
+            if (port == null) reader else object : ReadOnlyCalendarRemote by reader, CalendarCreateSubmissionPort by port {},
+            projection, kotlinx.coroutines.sync.Mutex(), object : ImportScheduler {
             override fun cancel() {}; override fun requestLocal() {}; override fun requestNetwork() {}; override fun continueWork(network: Boolean) {}
         }, attempts, journal, { 0 }, { 0 }, { allowed }, { editable }, { allowed }, { _, _ -> allowed }, {}, { _, _, _ -> check(allowed) })
         private fun staging() = LocalCreateStaging(scope, store, projection, journal, { format }, { allowed }, { allowed }, { _, _ -> error("No outgoing lease") })
@@ -358,7 +362,7 @@ class OccurrenceCaptureDeviceTest {
             context.deleteDatabase("occurrence-dispatch-$token.db")
         }
     }
-    private fun fixture(allDay: Boolean = false, block: suspend Fixture.() -> Unit) = runBlocking {
+    internal fun fixture(allDay: Boolean = false, block: suspend Fixture.() -> Unit) = runBlocking {
         assumeTrue(InstrumentationRegistry.getArguments().getString("providerFixture") == "true")
         val fixture = Fixture(ApplicationProvider.getApplicationContext(), allDay)
         try { fixture.seed(); fixture.block() } finally { fixture.close() }

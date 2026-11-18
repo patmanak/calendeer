@@ -210,6 +210,7 @@ internal fun AndroidCalendarProjection.capturedAttachmentValues(receipt: Capture
 
 internal fun AndroidCalendarProjection.capturedLocalSelection(receipt: CapturedCreateAttachmentReceipt, calendar: Long): Selection {
     val identity = receipt.binding.identity
+    require(identity.fingerprintVersion != 3) { "Occurrence attachment requires its parent and original slot" }
     return Selection("${Events.CALENDAR_ID}=? AND ${Events.SYNC_DATA5}=?", arrayOf(calendar.toString(),
         digest("local-create-v1", calendarSyncId(identity.attempt.scope), identity.localId.value)))
 }

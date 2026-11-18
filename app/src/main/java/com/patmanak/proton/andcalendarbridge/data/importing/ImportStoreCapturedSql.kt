@@ -11,6 +11,7 @@ import com.patmanak.proton.andcalendarbridge.data.importing.ImportStoreLocalPrep
 import com.patmanak.proton.andcalendarbridge.data.importing.ImportStoreLocalPreparations.hasRawEventRow
 import com.patmanak.proton.andcalendarbridge.data.importing.ImportStorePageState.hasLocalMutation
 import com.patmanak.proton.andcalendarbridge.sync.*
+import com.patmanak.proton.andcalendarbridge.data.outgoing.LocalCreateContentCodec
 import java.time.DateTimeException
 import java.time.Instant
 import java.util.UUID
@@ -103,9 +104,17 @@ internal object ImportStoreCapturedSql {
                 AdapterFormat(row.getString(9), row.getInt(10)), Instant.ofEpochSecond(row.getLong(11)), row.getString(12), row.getInt(13))
             val binding = CapturedCreateBinding(link, event, Revision(row.getString(14)))
             val receipt = CapturedCreateAttachmentReceipt(binding, row.getString(15), row.getInt(16))
-            val change = decodeChange(row.getString(17)) as? RemoteChange.Upsert
-            if (change == null || change.eventId != event || row.getString(17) != encodeChange(change)) null
-            else CapturedCreateBaseline(receipt, change)
+            val payload = row.getString(17)
+            if (link.fingerprintVersion == 3) {
+                val reservation = LocalCreateReservation(link.captureId, link.localId, scope, link.captureFormat, link.timestamp)
+                val intent = LocalCreateContentCodec.decodeIntent(payload, reservation)
+                val occurrence = requireNotNull(intent.occurrence)
+                if (LocalCreateContentCodec.encodeContent(intent) != payload) null else
+                    CapturedCreateBaseline(receipt, RemoteChange.Upsert(event, binding.verifiedRevision, occurrence.content), intent)
+            } else {
+                val change = decodeChange(payload) as? RemoteChange.Upsert
+                if (change == null || change.eventId != event || payload != encodeChange(change)) null else CapturedCreateBaseline(receipt, change)
+            }
         }
     } catch (_: IllegalArgumentException) { null }
     catch (_: DateTimeException) { null }

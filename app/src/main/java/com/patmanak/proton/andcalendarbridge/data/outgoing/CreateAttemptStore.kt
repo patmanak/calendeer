@@ -25,6 +25,8 @@ import com.patmanak.proton.andcalendarbridge.sync.CapturedCreateBinding
 import com.patmanak.proton.andcalendarbridge.sync.CapturedCreateAttachmentReceipt
 import com.patmanak.proton.andcalendarbridge.sync.CapturedProjectionHold
 import com.patmanak.proton.andcalendarbridge.sync.LocalCreateSubmission
+import com.patmanak.proton.andcalendarbridge.sync.LocalCreateIntent
+import com.patmanak.proton.andcalendarbridge.sync.matchesOccurrenceObservation
 import com.patmanak.proton.andcalendarbridge.sync.LocalEventId
 import java.time.Instant
 import java.time.DateTimeException
@@ -255,16 +257,18 @@ class CreateAttemptStore(context: Context, name: String = "calendar-create-attem
     override suspend fun binding(identity: CreateAttemptIdentity): CreatedEventBinding? =
         access { db -> readBinding(db, identity) }
 
-    /** Immutable authenticated proof only. No Provider acknowledgement or admission reset.
-     * The owner must compare the exact captured content after strict inspectCaptured verification.
-     * This store compares the attempt/link and remote identity/revision, not plaintext content.
-     */
+    /** Immutable authenticated identity. Occurrence links also require their frozen family and detached content. */
     suspend fun bindCaptured(expectedUnknown: CreateAttemptRecord, identity: CapturedCreateDispatchIdentity,
-        observation: CreateSubmissionObservation.Verified): CapturedCreateBinding {
+        observation: CreateSubmissionObservation.Verified, occurrenceIntent: LocalCreateIntent? = null): CapturedCreateBinding {
         require(expectedUnknown.state == CreateAttemptState.OUTCOME_UNKNOWN) { "Captured binding requires unknown work" }
         require(CreateAttemptIdentity.of(expectedUnknown) == identity.attempt && observation.attempt == identity.attempt) {
             "Captured observation requires identical work"
         }
+        if (identity.fingerprintVersion == 3) {
+            require(occurrenceIntent != null && identity.matchesOccurrenceObservation(occurrenceIntent, observation)) {
+                "Detached proof requires its exact captured family"
+            }
+        } else require(occurrenceIntent == null)
         val wanted = CapturedCreateBinding(identity, observation.event.eventId, observation.event.revision)
         return access { db ->
             associationTransaction(db, identity.attempt.scope) {
@@ -371,7 +375,8 @@ class CreateAttemptStore(context: Context, name: String = "calendar-create-attem
                             CreateAttemptState.PREPARED -> if (hasCapturedBinding(db, scope, id)) blocked = true
                             CreateAttemptState.OUTCOME_UNKNOWN -> {
                                 val proof = readCapturedBinding(db, link, parent)
-                                if (link.captureFormat != currentImportFormat || proof == null ||
+                                // The remote child ID alone cannot protect its native parent from reprojection.
+                                if (link.fingerprintVersion == 3 || link.captureFormat != currentImportFormat || proof == null ||
                                     hasEvent(db, "create_bindings", scope, proof.eventId)) blocked = true
                                 else events += proof.eventId
                             }

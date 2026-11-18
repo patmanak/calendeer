@@ -7,6 +7,14 @@ data class CapturedCreateBinding(val identity: CapturedCreateDispatchIdentity,
     override fun toString() = "CapturedCreateBinding(REDACTED)"
 }
 
+/** Compares an already authenticated readback against the sealed work and its distinct detached slot. */
+fun CapturedCreateDispatchIdentity.matchesOccurrenceObservation(intent: LocalCreateIntent,
+    observed: CreateSubmissionObservation.Verified): Boolean {
+    val occurrence = intent.occurrence ?: return false
+    return observed.attempt == attempt && matchesOccurrence(intent) &&
+        observed.event.eventId != occurrence.master.eventId && observed.event.content == occurrence.content
+}
+
 /** Unresolved captured sends hold a whole scope until their remote identities are known.
  * Bound events remain held until original-row reconciliation is separately qualified.
  * A hold never consumes incoming work, alters its content, or grants dispatch permission.
