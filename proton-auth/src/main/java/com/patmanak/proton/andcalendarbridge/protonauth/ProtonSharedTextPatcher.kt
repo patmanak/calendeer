@@ -13,6 +13,8 @@ import com.patmanak.proton.andcalendarbridge.sync.SeriesEditProfile
 import com.patmanak.proton.andcalendarbridge.sync.CreateSeriesRule
 import com.patmanak.proton.andcalendarbridge.sync.OccurrenceEditCandidate
 import com.patmanak.proton.andcalendarbridge.sync.RecurrencePoint
+import com.patmanak.proton.andcalendarbridge.sync.RemoteChange
+import com.patmanak.proton.andcalendarbridge.sync.SeriesRemovalPlan
 import java.io.StringWriter
 import java.nio.CharBuffer
 import java.nio.charset.CodingErrorAction
@@ -208,6 +210,49 @@ internal object ProtonSharedTextPatcher {
             val clear = patched.clearShared.substring(0, insertion) + raw + patched.clearShared.substring(insertion)
             budget(clear, patched.encryptedShared)
             return ProtonEventTextParts(clear, patched.encryptedShared)
+        } catch (_: Exception) { throw ProtonPersonalPatchException() }
+    }
+
+    /** Apply the EXDATE component transformation before timestamping, signing and sealing. */
+    fun addExcludedSlot(original: ProtonEventTextParts, base: RemoteChange.Upsert, plan: SeriesRemovalPlan): ProtonEventTextParts {
+        try {
+            budget(original.clearShared, original.encryptedShared)
+            val updated = requireNotNull(plan.updatedMaster)
+            require(base.eventId == updated.eventId && base.revision == updated.revision)
+            val before = requireNotNull(base.content.recurrence)
+            val after = requireNotNull(updated.content.recurrence)
+            val oldDates = before.excludedDates.toList()
+            val dates = after.excludedDates.toList()
+            require(base.content.copy(recurrence = before.copy(excludedDates = dates)) == updated.content)
+            require(dates.containsAll(oldDates) && dates.size == oldDates.size + 1)
+            val slot = dates.single { it !in oldDates }
+            val source = blocks(original.clearShared)
+            val begin = source.single { it.logical.equals("BEGIN:VEVENT", true) }
+            val end = source.single { it.logical.equals("END:VEVENT", true) }
+            require(source.none { it.start >= begin.end && it.end <= end.start &&
+                property(it.logical).first in setOf("BEGIN", "END") })
+            val start = source.single { property(it.logical).first == "DTSTART" }
+            val header = property(start.logical).second.replaceFirst("DTSTART", "EXDATE", ignoreCase = true)
+            fun line(point: RecurrencePoint): String = header + ":" + when (point) {
+                is RecurrencePoint.AllDay -> DAY.format(point.date)
+                is RecurrencePoint.Timed -> {
+                    val zone = (base.content.time as EventTime.Timed).zone
+                    if (value(start).endsWith("Z")) STAMP.format(point.instant.atZone(ZoneOffset.UTC))
+                    else LOCAL_TIME.format(point.instant.atZone(zone))
+                }
+            }
+            val exclusions = source.filter { property(it.logical).first == "EXDATE" }
+            require(exclusions.all { it.start >= begin.end && it.end <= end.start })
+            require(exclusions.map { it.logical } == oldDates.map(::line))
+            val plain = StringBuilder(original.clearShared)
+            for (block in exclusions.asReversed()) plain.delete(block.start, block.end)
+            assertSeriesBase(ProtonEventTextParts(plain.toString(), original.encryptedShared), before.uid,
+                base.content.copy(recurrence = before.copy(excludedDates = emptyList())))
+            val nextLine = dates.dropWhile { it != slot }.drop(1).firstOrNull()?.let(::line)
+            val insertion = if (nextLine == null) end.start else exclusions.single { it.logical == nextLine }.start
+            val clear = StringBuilder(original.clearShared).insert(insertion, line(slot) + "\r\n").toString()
+            budget(clear, original.encryptedShared)
+            return ProtonEventTextParts(clear, original.encryptedShared)
         } catch (_: Exception) { throw ProtonPersonalPatchException() }
     }
 

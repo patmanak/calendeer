@@ -180,3 +180,21 @@ controlled service boundary, including timed/all-day edits, DST Instances, lost
 transport/native replies and newer phone edits. A live signed GET qualifies the
 current metadata shape only. E4 still groups actual UPDATE/client/OEM journeys;
 GET followed by PUT provides no atomic concurrency guarantee.
+
+
+### Personal series deletion preparation
+
+For a finite daily personal series, the offline planner compares the enumerated
+IDs with all verified rows and the retained master revision. An entire-series
+request identifies every child and the master. A single-occurrence request
+identifies a detached child by its original recurrence slot, even if its start
+was moved. Its master update retains existing exclusions and adds the original
+slot in the master's time zone. An already excluded slot needs no master update.
+An incomplete family, duplicate slot, unqualified personal row or changed master
+holds the request.
+
+The plaintext transformation checks the signed master against the enumerated
+base and preserves the existing property bytes while adding one EXDATE. This
+stage precedes signing and produces no transport request. Dispatch requires a
+fresh complete family, a sealed request with every operation, independent
+readback after an uncertain outcome, and exact Android tombstone acknowledgement.

@@ -35,6 +35,41 @@ class ProtonSeriesEditPatchTest {
     private fun refused(block: () -> Unit) {
         try { block(); fail("Expected refusal") } catch (_: ProtonPersonalPatchException) { }
     }
+    @Test fun exclusionUsesTheOriginalSlotAndPreservesPreviouslySignedBytes() {
+        val first = RecurrencePoint.Timed(time.start)
+        val second = RecurrencePoint.Timed(time.start.plusSeconds(86400))
+        val old = RemoteChange.Upsert(EventId("master"), Revision("revision"),
+            before.copy(recurrence = recurrence.copy(excludedDates = listOf(first))))
+        val plan = requireNotNull(seriesRemovalPlan(old, listOf(old.eventId), listOf(old), SeriesRemovalTarget.Single(second)))
+        val input = parts(rule = "RRULE:FREQ=DAILY;COUNT=5\r\nEXDATE:20261017T090000Z\r\n")
+        val patched = ProtonSharedTextPatcher.addExcludedSlot(input, old, plan)
+        assertEquals(input.clearShared, patched.clearShared.replace("EXDATE:20261018T090000Z\r\n", ""))
+        assertEquals(input.encryptedShared, patched.encryptedShared)
+        refused { ProtonSharedTextPatcher.addExcludedSlot(parts(), old, plan) }
+        refused { ProtonSharedTextPatcher.addExcludedSlot(input, old.copy(revision = Revision("later")), plan) }
+    }
+
+    @Test fun exclusionRetainsDateTypeAndLocalTimeZone() {
+        val allDay = java.time.LocalDate.of(2026, 10, 17)
+        val local = java.time.ZoneId.of("Europe/Paris")
+        val cases = listOf(
+            Triple(EventTime.AllDay(allDay, allDay.plusDays(1)),
+                "DTSTART;VALUE=DATE:20261017\r\nDTEND;VALUE=DATE:20261018\r\n",
+                RecurrencePoint.AllDay(allDay.plusDays(1)) to "EXDATE;VALUE=DATE:20261018"),
+            Triple(EventTime.Timed(time.start, time.end, local),
+                "DTSTART;TZID=Europe/Paris:20261017T110000\r\nDTEND;TZID=Europe/Paris:20261017T120000\r\n",
+                RecurrencePoint.Timed(time.start.plusSeconds(86400)) to "EXDATE;TZID=Europe/Paris:20261018T110000")
+        )
+        for ((sourceTime, dates, expected) in cases) {
+            val master = RemoteChange.Upsert(EventId("master"), Revision("revision"), before.copy(time = sourceTime))
+            val plan = requireNotNull(seriesRemovalPlan(master, listOf(master.eventId), listOf(master),
+                SeriesRemovalTarget.Single(expected.first)))
+            val input = parts(dates = dates)
+            val result = ProtonSharedTextPatcher.addExcludedSlot(input, master, plan)
+            assertEquals(input.clearShared, result.clearShared.replace(expected.second + "\r\n", ""))
+        }
+    }
+
     @Test fun ruleOnlyEditAdvancesSequenceOnceAndPreservesOpaqueProperties() {
         ProtonSharedTextPatcher.assertSeriesBase(parts(), "fixture-uid", before)
         val after = before.copy(recurrence = recurrence.copy(rule = "FREQ=DAILY;COUNT=8;INTERVAL=2"))
