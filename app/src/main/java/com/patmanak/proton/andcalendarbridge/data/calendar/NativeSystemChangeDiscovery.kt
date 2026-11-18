@@ -6,6 +6,23 @@ import com.patmanak.proton.andcalendarbridge.sync.CalendarScope
 import com.patmanak.proton.andcalendarbridge.data.calendar.AndroidCalendarProjection.Companion.OWNER_MARKER
 import com.patmanak.proton.andcalendarbridge.data.calendar.AndroidCalendarProjection.Companion.fail
 
+/** Locator only. Capture must assert the identified canonical master and exact native family in the stamping batch. */
+internal suspend fun AndroidCalendarProjection.nativeOccurrenceParentKey(scope: CalendarScope, childRow: Long): String? = operation {
+    val account = accountFor(scope.account)
+    val calendar = calendarRow(scope, account) ?: return@operation null
+    val uri = syncUri(Events.CONTENT_URI, account)
+    val row = "${Events.CALENDAR_ID}=? AND ${Events._ID}=?"
+    val parent = resolver.query(uri, arrayOf(Events.ORIGINAL_ID), row, arrayOf(calendar.toString(), childRow.toString()), null)?.use {
+        if (it.count != 1 || !it.moveToFirst() || it.isNull(0)) return@operation null
+        it.getLong(0)
+    } ?: fail(CalendarProjectionFailure.PROVIDER_UNAVAILABLE)
+    if (parent == childRow) return@operation null
+    resolver.query(uri, arrayOf(Events.SYNC_DATA1, Events.SYNC_DATA4), row, arrayOf(calendar.toString(), parent.toString()), null)?.use {
+        if (it.count != 1 || !it.moveToFirst() || it.getString(0) != OWNER_MARKER) return@operation null
+        it.getString(1)?.takeIf { key -> key.matches(Regex("[a-f0-9]{64}")) }
+    }
+}
+
 /** Metadata-only discovery under the caller's existing operation lease. */
 internal fun AndroidCalendarProjection.discoverNativeSystemChanges(scope: CalendarScope, afterRow: Long,
     limit: Int): SystemCalendarChangePage = run {

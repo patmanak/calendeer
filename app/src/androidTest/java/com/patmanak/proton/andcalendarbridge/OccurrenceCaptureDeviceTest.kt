@@ -327,7 +327,7 @@ class OccurrenceCaptureDeviceTest {
         val localId = LocalEventId(UUID.randomUUID().toString())
         val id = MutationId("capture-$token")
         val reservation get() = LocalCreateReservation(id, localId, scope, format, timestamp)
-        private val reader = object : ReadOnlyCalendarRemote {
+        internal val reader: ReadOnlyCalendarRemote = object : ReadOnlyCalendarRemote {
             override val format get() = this@Fixture.format
             override suspend fun currentAccount() = scope.account
             override suspend fun fetch(request: PageRequest): RemotePage = error("No import network")

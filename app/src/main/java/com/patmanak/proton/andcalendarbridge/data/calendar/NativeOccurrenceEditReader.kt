@@ -72,9 +72,14 @@ private fun AndroidCalendarProjection.observeOccurrence(scope: CalendarScope, ma
     val marker = intent?.let { occurrenceMarker(it) }
     val expectedSync = step?.let { occurrenceExpectedMetadata(it) } ?: ContentValues()
     if (marker != null && !first) expectedSync.put(Events.SYNC_DATA5, marker)
+    val clean = step?.action == OccurrenceReceiptAction.INSPECT_CLEAN || step?.action == OccurrenceReceiptAction.PROJECT
+    val expectedContent = step?.frame?.base?.content ?: intent?.occurrence?.content
+    val childStyle = NativeColorStyle.read(child.getAsString(Events.SYNC_DATA3)) ?: return null
+    if (childStyle.proof != expectedSync.getAsString(Events.SYNC_DATA3) || (childStyle.masked && !clean)) return null
+    expectedSync.put(Events.SYNC_DATA3, childStyle.marker())
     if (child.getAsLong(Events.ORIGINAL_ID) != parentId ||
         (child[Events.ORIGINAL_SYNC_ID] != null && child.getAsString(Events.ORIGINAL_SYNC_ID) != series) ||
-        child.getAsInteger(Events.DIRTY) != 1 || child.getAsInteger(Events.DELETED) != 0 ||
+        child.getAsInteger(Events.DIRTY) != (if (clean) 0 else 1) || child.getAsInteger(Events.DELETED) != 0 ||
         child.getAsInteger(Events.STATUS) != Events.STATUS_CONFIRMED ||
         ATTACHMENT_SYNC_COLUMNS.any { child.getAsString(it) != expectedSync.getAsString(it) } ||
         listOf(Events.RRULE, Events.RDATE, Events.EXRULE, Events.EXDATE, Events.DURATION,
@@ -96,10 +101,12 @@ private fun AndroidCalendarProjection.observeOccurrence(scope: CalendarScope, ma
     val rawColor = child.getAsInteger(Events.EVENT_COLOR)
     if (rawColor != null && rawColor != 0 && rawColor.ushr(24) != 0xff) return null
     // Dirty children have no display history. An absent color can outlive a masked parent.
-    if ((rawColor == null || rawColor == 0) && master.content.colorRgb != null) return null
+    if (clean) {
+        if (!childStyle.accepts(expectedContent?.colorRgb, rawColor)) return null
+    } else if ((rawColor == null || rawColor == 0) && master.content.colorRgb != null) return null
     val personal = EventContent(child.getAsString(Events.TITLE).orEmpty(), time,
         child.getAsString(Events.DESCRIPTION).orEmpty(), child.getAsString(Events.EVENT_LOCATION).orEmpty(),
-        colorRgb = rawColor?.takeUnless { it == 0 }?.and(0xffffff), details = EventDetails())
+        colorRgb = childStyle.logicalColor(rawColor), details = EventDetails())
     val personalOwner = knownPersonalOwner(child, account, personal)
     if (child[Events.ORGANIZER] != null && !personalOwner && !placeholder) return null
     if (!personalOwner && !placeholder && OCCURRENCE_FLAGS.any { child.getAsInteger(it) != 0 }) return null
@@ -112,7 +119,7 @@ private fun AndroidCalendarProjection.observeOccurrence(scope: CalendarScope, ma
     if (child.getAsInteger(Events.HAS_ALARM) != if (childAlerts.reminders.isEmpty()) 0 else 1) return null
     val candidate = try { OccurrenceEditCandidate(master, original, personal.copy(details = EventDetails(childAlerts.reminders))) }
         catch (_: IllegalArgumentException) { return null }
-    if (intent != null && candidate != intent.occurrence) return null
+    if (intent != null && (intent.occurrence?.original != original || candidate.content != expectedContent)) return null
     val familyWhere = "${Events.ORIGINAL_ID}=? OR (${Events.CALENDAR_ID}=? AND ${Events.ORIGINAL_SYNC_ID}=?)"
     val familyArgs = arrayOf(parentId.toString(), calendar.toString(), series)
     val family = row(familyWhere, familyArgs) ?: return null
@@ -155,12 +162,34 @@ private fun AndroidCalendarProjection.observeOccurrence(scope: CalendarScope, ma
             checks += ContentProviderOperation.newUpdate(uri).withSelection(childWhere, childArgs).withValues(update).withExpectedCount(1).build()
             expected += 1
         }
+        step.projection?.let { plan ->
+            val change = plan.receipt.change
+            val update = eventValues(change, account).apply {
+                put(Events.ORIGINAL_ID, parentId)
+                put(Events.ORIGINAL_SYNC_ID, series)
+                put(Events.SYNC_DATA2, digest("revision-v1", change.revision.value))
+                displayColor(this, change.content.colorRgb, receiptMarker(plan.receipt))
+            }
+            checks += ContentProviderOperation.newUpdate(uri).withSelection(childWhere, childArgs).withValues(update).withExpectedCount(1).build()
+            expected += 1
+        }
     } else if (marker != null && first) {
         checks += ContentProviderOperation.newUpdate(uri).withSelection(childWhere, childArgs)
             .withValue(Events.SYNC_DATA5, marker).withExpectedCount(1).build()
         expected += 1
     }
-    checkActive(); requirePermissions(); capturedBatch(checks, expected.toIntArray()); checkActive(); requirePermissions()
+    val next = step?.projection?.receipt?.change?.content
+    if (next != null && next.details != candidate.content.details) {
+        replaceDetails(checks, account, childRow, checks.lastIndex, next)
+        checkActive(); requirePermissions()
+        val results = checkedBatch(checks)
+        if (expected.indices.any { results[it].count != expected[it] } ||
+            results[expected.size].count != childAlerts.raw.size || results[expected.size + 1].count != 0)
+            fail(CalendarProjectionFailure.PROVIDER_UNAVAILABLE)
+    } else {
+        checkActive(); requirePermissions(); capturedBatch(checks, expected.toIntArray())
+    }
+    checkActive(); requirePermissions()
     return OwnedOccurrenceEditSnapshot(parentId, childRow, candidate)
 }
 

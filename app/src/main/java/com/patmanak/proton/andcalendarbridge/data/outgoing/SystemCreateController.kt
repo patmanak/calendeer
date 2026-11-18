@@ -486,7 +486,7 @@ class SystemCreateController(
         }
         if (!active(target, epoch)) return false
         when (imports.captureLocalCreate(target, retained.row, retained.localId, retained.captureId, retained.timestamp,
-            autoProfile = port.seriesSubmissionFormat != null)) {
+            autoProfile = port.seriesSubmissionFormat != null, autoOccurrence = port.occurrenceSubmissionFormat != null)) {
             LocalEditCaptureResult.RETAINED -> Unit
             LocalEditCaptureResult.UNAVAILABLE -> { work.status(retained, SystemCreateWorkStatus.WAITING); return true }
             else -> { work.status(retained, SystemCreateWorkStatus.WAITING); return false }

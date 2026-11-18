@@ -21,16 +21,19 @@ internal class CapturedCreateHandoff(
     private val currentFormat: () -> AdapterFormat,
     private val active: () -> Boolean,
     private val currentAccount: suspend (AccountId) -> Boolean,
+    private val occurrenceEditable: () -> Boolean,
     private val source: suspend (CapturedCreateHandoffFrame) -> Boolean,
     private val expectations: CalendarCreateSubmissionPort? = null,
 ) {
-    private suspend fun available(): Boolean = currentAccount(target.account) && active() &&
-        store.selections(target.account).singleOrNull { it.scope == target }?.let { it.enabled && it.available } == true && active()
+    private var occurrence = false
+    private fun admitted() = active() && (!occurrence || occurrenceEditable())
+    private suspend fun available(): Boolean = currentAccount(target.account) && admitted() &&
+        store.selections(target.account).singleOrNull { it.scope == target }?.let { it.enabled && it.available } == true && admitted()
 
     private fun installAdmission() {
-        store.admitTransaction = { it == target && active() }
-        captures.admitCapture = { it == target && active() }
-        projection.admitOperation = active
+        store.admitTransaction = { it == target && admitted() }
+        captures.admitCapture = { it == target && admitted() }
+        projection.admitOperation = ::admitted
     }
 
     private fun clearAdmission() {
@@ -44,6 +47,8 @@ internal class CapturedCreateHandoff(
             if (!available()) return CapturedCreateHandoffResult.INACTIVE
             installAdmission()
             val submission = captures.readSubmission(target, localId) ?: return CapturedCreateHandoffResult.UNRESOLVED
+            occurrence = submission.reservation.isOccurrence
+            if (!admitted()) return CapturedCreateHandoffResult.INACTIVE
             val capture = submission.reservation.intent.reservation
             if (capture.scope != target || capture.localId != localId || capture.id != id ||
                 submission.reservation.attempt != attempt || capture.format != currentFormat())
@@ -52,7 +57,9 @@ internal class CapturedCreateHandoff(
             val binding = journal.capturedBinding(identity) ?: return CapturedCreateHandoffResult.UNRESOLVED
             val attachment = journal.capturedAttachment(binding) ?: return CapturedCreateHandoffResult.UNRESOLVED
             val canonical = capturedCreateExpectation(submission, expectations) ?: return CapturedCreateHandoffResult.UNRESOLVED
-            val original = CapturedCreateBaseline(attachment, RemoteChange.Upsert(binding.eventId, binding.verifiedRevision, canonical))
+            val intent = submission.reservation.intent
+            val original = CapturedCreateBaseline(attachment, RemoteChange.Upsert(binding.eventId, binding.verifiedRevision, canonical),
+                intent.takeIf { it.occurrence != null })
             if (!available()) return CapturedCreateHandoffResult.INACTIVE
             if (captures.readSubmission(target, localId) != submission || journal.capturedBinding(identity) != binding ||
                 journal.capturedAttachment(binding) != attachment) return CapturedCreateHandoffResult.UNRESOLVED
@@ -108,6 +115,8 @@ internal class CapturedCreateHandoff(
             if (!available()) return CapturedCreateReconciliationResult.INACTIVE
             installAdmission()
             val submission = captures.readSubmission(target, localId) ?: return CapturedCreateReconciliationResult.UNRESOLVED
+            occurrence = submission.reservation.isOccurrence
+            if (!admitted()) return CapturedCreateReconciliationResult.INACTIVE
             val capture = submission.reservation.intent.reservation
             if (capture.id != id || capture.localId != localId || capture.scope != target || submission.reservation.attempt != attempt ||
                 mutation == id || mutation == attempt || mutation?.value == localId.value) return CapturedCreateReconciliationResult.UNRESOLVED
@@ -171,6 +180,13 @@ internal class CapturedCreateHandoff(
                     }
                 }
                 return CapturedCreateReconciliationResult.UNCHANGED
+            }
+            if (occurrence) {
+                // Subsequent local exception edits keep their native work until a distinct update is qualified.
+                if (!source(role.frame) || store.capturedHandoff(target, binding.eventId) != role || !available())
+                    return CapturedCreateReconciliationResult.UNRESOLVED
+                store.waitCapturedHandoff(role.frame)
+                return CapturedCreateReconciliationResult.UNSUPPORTED
             }
             val observed = projection.captureCapturedHandoffCurrent(role.frame)
             if (!available()) return CapturedCreateReconciliationResult.INACTIVE

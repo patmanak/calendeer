@@ -19,8 +19,9 @@ fun CapturedCreateDispatchIdentity.matchesOccurrenceObservation(intent: LocalCre
  * Bound events remain held until original-row reconciliation is separately qualified.
  * A hold never consumes incoming work, alters its content, or grants dispatch permission.
  */
-data class CapturedProjectionHold(val scopeBlocked: Boolean = false, val events: Set<EventId> = emptySet()) {
-    val blocksProjection: Boolean get() = scopeBlocked || events.isNotEmpty()
-    fun holds(event: EventId): Boolean = scopeBlocked || event in events
+data class CapturedProjectionHold(val scopeBlocked: Boolean = false, val events: Set<EventId> = emptySet(),
+    val occurrenceMasters: Set<EventId> = emptySet()) {
+    val blocksProjection: Boolean get() = scopeBlocked || events.isNotEmpty() || occurrenceMasters.isNotEmpty()
+    fun holds(event: EventId): Boolean = scopeBlocked || event in events || event in occurrenceMasters
     override fun toString() = "CapturedProjectionHold(REDACTED)"
 }

@@ -89,7 +89,7 @@ class ImportCoordinator(
         store, remote, projection, creates,
         generation = { generation }, policyRevision = { createPolicyRevision.get() },
         authenticated = { authenticated }, hasCalendarPermissions = ::hasCalendarPermissions,
-        isCurrent = ::isCurrent, handoffSource = ::handoffSource,
+        isCurrent = ::isCurrent, handoffSource = capturedCreates::releasedProjectionSource,
     )
 
     private val titleRecovery = ImportCoordinatorTitleRecovery(
@@ -617,8 +617,9 @@ class ImportCoordinator(
         localChanges.captureLocalDelete(target, eventId, id, beforeNewOwner)
 
     suspend fun captureLocalCreate(target: CalendarScope, eventRow: Long, localId: LocalEventId,
-        id: MutationId, timestamp: java.time.Instant, series: Boolean = false, autoProfile: Boolean = false): LocalEditCaptureResult =
-        capturedCreates.captureLocalCreate(target, eventRow, localId, id, timestamp, series, autoProfile)
+        id: MutationId, timestamp: java.time.Instant, series: Boolean = false, autoProfile: Boolean = false,
+        autoOccurrence: Boolean = false): LocalEditCaptureResult =
+        capturedCreates.captureLocalCreate(target, eventRow, localId, id, timestamp, series, autoProfile, autoOccurrence)
 
     suspend fun prepareLocalCreate(target: CalendarScope, localId: LocalEventId, id: MutationId,
         port: CalendarCreatePreparationPort): LocalCreatePreparationResult =

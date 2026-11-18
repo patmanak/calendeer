@@ -24,6 +24,8 @@ import com.patmanak.proton.andcalendarbridge.sync.CapturedCreateDispatchIdentity
 import com.patmanak.proton.andcalendarbridge.sync.CapturedCreateBinding
 import com.patmanak.proton.andcalendarbridge.sync.CapturedCreateAttachmentReceipt
 import com.patmanak.proton.andcalendarbridge.sync.CapturedProjectionHold
+import com.patmanak.proton.andcalendarbridge.sync.CapturedCreateHandoffRecord
+import com.patmanak.proton.andcalendarbridge.sync.CapturedCreateHandoffState
 import com.patmanak.proton.andcalendarbridge.sync.LocalCreateSubmission
 import com.patmanak.proton.andcalendarbridge.sync.LocalCreateIntent
 import com.patmanak.proton.andcalendarbridge.sync.matchesOccurrenceObservation
@@ -359,10 +361,11 @@ class CreateAttemptStore(context: Context, name: String = "calendar-create-attem
      * Database failures propagate so callers cannot interpret unreadable storage as freedom.
      */
     suspend fun capturedProjectionHold(scope: CalendarScope,
-        currentImportFormat: AdapterFormat): CapturedProjectionHold = access { db ->
+        currentImportFormat: AdapterFormat, occurrenceTransfers: Map<EventId, CapturedCreateHandoffRecord> = emptyMap()): CapturedProjectionHold = access { db ->
         transaction(db) {
             var blocked = false
             val events = mutableSetOf<EventId>()
+            val masters = mutableSetOf<EventId>()
             db.query("captured_create_links", arrayOf("mutation"), SCOPE, scopeIdentity(scope),
                 null, null, null).use { rows ->
                 while (rows.moveToNext()) {
@@ -376,9 +379,16 @@ class CreateAttemptStore(context: Context, name: String = "calendar-create-attem
                             CreateAttemptState.OUTCOME_UNKNOWN -> {
                                 val proof = readCapturedBinding(db, link, parent)
                                 // The remote child ID alone cannot protect its native parent from reprojection.
-                                if (link.fingerprintVersion == 3 || link.captureFormat != currentImportFormat || proof == null ||
+                                if (link.captureFormat != currentImportFormat || proof == null ||
                                     hasEvent(db, "create_bindings", scope, proof.eventId)) blocked = true
-                                else events += proof.eventId
+                                else if (link.fingerprintVersion == 3) {
+                                    val role = occurrenceTransfers[proof.eventId]
+                                    val origin = role?.frame?.receipt?.acknowledgement?.baseline
+                                    val master = origin?.occurrenceIntent?.occurrence?.master
+                                    if (role?.state != CapturedCreateHandoffState.RELEASED || origin == null || master == null ||
+                                        origin.receipt.binding != proof || readCapturedAttachment(db, proof, parent) != origin.receipt) blocked = true
+                                    else { masters += master.eventId; events += proof.eventId }
+                                } else events += proof.eventId
                             }
                         }
                     } catch (_: IllegalArgumentException) { blocked = true }
@@ -405,7 +415,7 @@ class CreateAttemptStore(context: Context, name: String = "calendar-create-attem
                     catch (_: DateTimeException) { blocked = true }
                 }
             }
-            CapturedProjectionHold(blocked, events.toSet())
+            CapturedProjectionHold(blocked, events.toSet(), masters.toSet())
         }
     }
 

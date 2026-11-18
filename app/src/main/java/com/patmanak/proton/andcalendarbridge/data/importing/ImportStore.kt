@@ -187,6 +187,22 @@ class ImportStore(context: Context, name: String = "calendar-import-v1.db") :
         ImportStorePageState.projectionBacklog(db, scope)
     }
     suspend fun heldProjectionCount(scope: CalendarScope): Int = projectionBacklog(scope).locallyHeld
+
+    internal suspend fun hasPendingProjection(scope: CalendarScope, event: EventId): Boolean = access { db ->
+        db.rawQuery("SELECT 1 FROM records WHERE scope=? AND event=? AND pending=1",
+            arrayOf(ImportPayloadCodec.key(scope), event.value)).use { it.moveToFirst() }
+    }
+
+    internal suspend fun capturedOccurrenceTransfers(scope: CalendarScope): Map<EventId, CapturedCreateHandoffRecord> = access { db ->
+        check(admitTransaction(scope))
+        val ids = db.rawQuery("SELECT h.event FROM captured_create_handoffs h JOIN captured_create_bases b ON b.scope=h.scope AND b.event=h.event " +
+            "WHERE h.scope=? AND h.state='RELEASED' AND b.fingerprint_version=3", arrayOf(ImportPayloadCodec.key(scope))).use { rows ->
+            buildList { while (rows.moveToNext()) add(EventId(rows.getString(0))) }
+        }
+        buildMap {
+            for (id in ids) projection.capturedHandoff(db, scope, id)?.let { put(id, it) }
+        }.also { check(admitTransaction(scope)) }
+    }
     /** Excluded identities remain pending. Filter before the batch limit to avoid starvation. */
     suspend fun pending(scope: CalendarScope, limit: Int = 100, excludedEvents: Set<EventId> = emptySet()): List<ProjectionIntent> = access { db ->
         ImportStorePageState.pending(db, scope, limit, excludedEvents)

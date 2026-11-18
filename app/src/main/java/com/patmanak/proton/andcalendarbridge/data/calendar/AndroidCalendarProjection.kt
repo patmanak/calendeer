@@ -500,6 +500,7 @@ class AndroidCalendarProjection(context: Context,
         childRow: Long): OwnedOccurrenceEditSnapshot? = readOccurrenceEdit(scope, master, childRow)
     override suspend fun captureAndStampOccurrence(intent: LocalCreateIntent, childRow: Long) = stampOccurrenceIdentity(intent, childRow)
     override suspend fun inspectStampedOccurrence(intent: LocalCreateIntent) = stampOccurrenceIdentity(intent, null)
+    override suspend fun occurrenceParentKey(scope: CalendarScope, childRow: Long) = nativeOccurrenceParentKey(scope, childRow)
     override suspend fun applyOccurrenceReceipt(step: OccurrenceNativeReceipt): Boolean =
         if (step.action == OccurrenceReceiptAction.INSPECT_ACKNOWLEDGEMENT) {
             val caller = kotlinx.coroutines.currentCoroutineContext()
@@ -613,17 +614,25 @@ class AndroidCalendarProjection(context: Context,
         captureCapturedCurrent(receipt.baseline, expectedAck = receipt).forCreate(receipt.baseline, receipt)
     }
 
-    override suspend fun inspectAcknowledgedCreateClean(receipt: CapturedCreateAcknowledgementReceipt): CapturedCreateCleanWitness? = operation {
-        if (captureCapturedCurrent(receipt.baseline, expectedAck = receipt, clean = true) is CapturedNativeObservation.Supported)
-            CapturedCreateCleanWitness(receipt) else null
+    override suspend fun inspectAcknowledgedCreateClean(receipt: CapturedCreateAcknowledgementReceipt): CapturedCreateCleanWitness? {
+        val intent = receipt.baseline.occurrenceIntent
+        val clean = if (intent != null) applyOccurrenceReceipt(OccurrenceNativeReceipt(OccurrenceReceiptAction.INSPECT_CLEAN,
+            intent, receipt.baseline.receipt, receipt)) else operation {
+            captureCapturedCurrent(receipt.baseline, expectedAck = receipt, clean = true) is CapturedNativeObservation.Supported
+        }
+        return if (clean) CapturedCreateCleanWitness(receipt) else null
     }
 
     override val capturedHandoffProtocol: Int get() = 1
 
-    override suspend fun inspectCapturedHandoffBase(frame: CapturedCreateHandoffFrame): CapturedHandoffCleanWitness? = operation {
+    override suspend fun inspectCapturedHandoffBase(frame: CapturedCreateHandoffFrame): CapturedHandoffCleanWitness? {
         val ack = frame.receipt.acknowledgement
-        if (captureCapturedCurrent(ack.baseline, expectedAck = ack, clean = true, handoff = frame) is CapturedNativeObservation.Supported)
-            CapturedHandoffCleanWitness(frame) else null
+        val intent = ack.baseline.occurrenceIntent
+        val clean = if (intent != null) applyOccurrenceReceipt(OccurrenceNativeReceipt(OccurrenceReceiptAction.INSPECT_CLEAN,
+            intent, ack.baseline.receipt, ack, frame)) else operation {
+            captureCapturedCurrent(ack.baseline, expectedAck = ack, clean = true, handoff = frame) is CapturedNativeObservation.Supported
+        }
+        return if (clean) CapturedHandoffCleanWitness(frame) else null
     }
 
     override suspend fun captureCapturedHandoffCurrent(frame: CapturedCreateHandoffFrame): CapturedHandoffCurrentObservation = operation {
@@ -636,11 +645,15 @@ class AndroidCalendarProjection(context: Context,
         }
     }
 
-    override suspend fun applyCapturedHandoffProjection(plan: CapturedHandoffProjection): AppliedCapturedHandoffProjection? = operation {
+    override suspend fun applyCapturedHandoffProjection(plan: CapturedHandoffProjection): AppliedCapturedHandoffProjection? {
         val ack = plan.frame.receipt.acknowledgement
-        if (captureCapturedCurrent(ack.baseline, expectedAck = ack, clean = true, handoff = plan.frame,
-                handoffProjection = plan) is CapturedNativeObservation.Supported)
-            AppliedCapturedHandoffProjection(plan) else null
+        val intent = ack.baseline.occurrenceIntent
+        val applied = if (intent != null) applyOccurrenceReceipt(OccurrenceNativeReceipt(OccurrenceReceiptAction.PROJECT,
+            intent, ack.baseline.receipt, ack, plan.frame, plan)) else operation {
+            captureCapturedCurrent(ack.baseline, expectedAck = ack, clean = true, handoff = plan.frame,
+                handoffProjection = plan) is CapturedNativeObservation.Supported
+        }
+        return if (applied) AppliedCapturedHandoffProjection(plan) else null
     }
 
     override suspend fun inspectCapturedHandoffProjection(plan: CapturedHandoffProjection): AppliedCapturedHandoffProjection? = operation {

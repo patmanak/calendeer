@@ -37,10 +37,12 @@ internal class ImportCoordinatorCapturedCreates(
     fun clearLeases() { freshCapturedSubmissions.clear() }
 
     /** Preparation never renews its original epoch; only fresh durable staging records a send lease. */
-    private fun localCreateStaging(target: CalendarScope, journal: LocalCreateStore, expected: Long, policy: Long) =
+    private fun localCreateStaging(target: CalendarScope, journal: LocalCreateStore, expected: Long, policy: Long,
+        editableOnly: Boolean = false) =
         LocalCreateStaging(target, store, projection, journal,
             currentFormat = { remote.format },
-            active = { authenticated() && generation() == expected && policyRevision() == policy && hasCalendarPermissions() },
+            active = { authenticated() && generation() == expected && policyRevision() == policy && hasCalendarPermissions() &&
+                (!editableOnly || systemCreatesEnabled(target)) },
             currentAccount = { isCurrent(expected, target.account) },
             recordFreshSubmission = { attempt, retained ->
                 if (creates != null) freshCapturedSubmissions[target to attempt] =
@@ -49,13 +51,15 @@ internal class ImportCoordinatorCapturedCreates(
 
     /** Explicit internal capture only; no preparation, submission or Android acknowledgement. */
     suspend fun captureLocalCreate(target: CalendarScope, eventRow: Long, localId: LocalEventId,
-        id: MutationId, timestamp: java.time.Instant, series: Boolean = false, autoProfile: Boolean = false): LocalEditCaptureResult = mutex.withLock {
+        id: MutationId, timestamp: java.time.Instant, series: Boolean = false, autoProfile: Boolean = false,
+        autoOccurrence: Boolean = false): LocalEditCaptureResult = mutex.withLock {
         val journal = localCreates ?: return@withLock LocalEditCaptureResult.UNAVAILABLE
         val expected = generation()
         val policy = policyRevision()
         if (!isCurrent(expected, target.account) || !hasCalendarPermissions())
             return@withLock LocalEditCaptureResult.INACTIVE
-        localCreateStaging(target, journal, expected, policy).capture(eventRow, localId, id, timestamp, series, autoProfile)
+        localCreateStaging(target, journal, expected, policy, editableOnly = autoOccurrence)
+            .capture(eventRow, localId, id, timestamp, series, autoProfile, autoOccurrence)
     }
 
     /** Explicit inactive occurrence capture; no preparation, dispatch or Provider acknowledgement. */
@@ -389,6 +393,7 @@ internal class ImportCoordinatorCapturedCreates(
         denied: java.util.concurrent.atomic.AtomicBoolean? = null) =
         CapturedCreateHandoff(target, store, projection, captures, journal, scheduler,
             currentFormat = { remote.format }, active = active,
+            occurrenceEditable = { systemCreatesEnabled(target) },
             currentAccount = { account -> isCurrent(expected, account).also { if (!it) denied?.set(true) } && denied?.get() != true },
             source = { frame -> handoffSource(frame, active) }, expectations = remote as? CalendarCreateSubmissionPort)
 
@@ -410,7 +415,20 @@ internal class ImportCoordinatorCapturedCreates(
     }
 
     /** Immutable local/dispatch provenance is checked separately from the mutable import reference. */
-    suspend fun handoffSource(frame: CapturedCreateHandoffFrame, active: () -> Boolean): Boolean {
+    /** Receiving changes on a transferred row remains allowed after its calendar becomes read-only. */
+    suspend fun releasedProjectionSource(frame: CapturedCreateHandoffFrame, active: () -> Boolean): Boolean {
+        if (frame.receipt.acknowledgement.baseline.occurrenceIntent == null) return handoffSource(frame, active)
+        suspend fun released() = store.capturedHandoff(frame.scope, frame.base.eventId)?.let {
+            it.state == CapturedCreateHandoffState.RELEASED && !it.waiting && it.frame == frame
+        } == true
+        return active() && released() && verifiedHandoffSource(frame, active, receiving = true) && active() && released()
+    }
+
+    suspend fun handoffSource(frame: CapturedCreateHandoffFrame, active: () -> Boolean): Boolean =
+        verifiedHandoffSource(frame, active, receiving = false)
+
+    private suspend fun verifiedHandoffSource(frame: CapturedCreateHandoffFrame, active: () -> Boolean,
+        receiving: Boolean): Boolean {
         val captures = localCreates ?: return false
         val journal = creates ?: return false
         val original = frame.receipt.acknowledgement.baseline
@@ -424,6 +442,9 @@ internal class ImportCoordinatorCapturedCreates(
         captures.admitCapture = { it == frame.scope && active() }
         try {
             val submission = captures.readSubmission(frame.scope, identity.localId) ?: return false
+            val intent = original.occurrenceIntent
+            if (intent != null && ((!receiving && !systemCreatesEnabled(frame.scope)) || submission.reservation.intent != intent ||
+                    captures.readOccurrenceContext(frame.scope, identity.localId) != intent || !store.matchesOccurrenceSource(intent))) return false
             val canonical = capturedCreateExpectation(submission, remote as? CalendarCreateSubmissionPort) ?: return false
             return CapturedCreateDispatchIdentity.of(submission) == identity &&
                 canonical == original.change.content && captures.readSubmission(frame.scope, identity.localId) == submission &&

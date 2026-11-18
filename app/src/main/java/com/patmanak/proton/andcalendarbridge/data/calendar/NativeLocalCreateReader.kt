@@ -31,11 +31,16 @@ internal class NativeLocalCreateReader(
         if (eventRow <= 0) return null
         val account = accountFor(scope.account)
         val calendar = calendarRow(scope, account) ?: return null
-        val result = resolver.query(syncUri(Events.CONTENT_URI, account), arrayOf(Events.RRULE),
+        val columns = arrayOf(Events.RRULE, Events.ORIGINAL_ID, Events.ORIGINAL_SYNC_ID, Events.ORIGINAL_INSTANCE_TIME, Events.ORIGINAL_ALL_DAY)
+        val result = resolver.query(syncUri(Events.CONTENT_URI, account), columns,
             "${Events.CALENDAR_ID}=? AND ${Events._ID}=?", arrayOf(calendar.toString(), eventRow.toString()), null)?.use {
             if (it.count != 1 || !it.moveToFirst()) return null
             // Even an empty or unsupported rule must never fall back to the simple reader.
-            if (it.isNull(0)) LocalCreateProfile.SIMPLE else LocalCreateProfile.SERIES
+            when {
+                (1 until columns.size).any { column -> !it.isNull(column) } -> LocalCreateProfile.OCCURRENCE
+                it.isNull(0) -> LocalCreateProfile.SIMPLE
+                else -> LocalCreateProfile.SERIES
+            }
         } ?: fail(CalendarProjectionFailure.PROVIDER_UNAVAILABLE)
         requirePermissions()
         return result

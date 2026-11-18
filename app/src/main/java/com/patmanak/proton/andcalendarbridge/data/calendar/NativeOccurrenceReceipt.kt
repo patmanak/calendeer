@@ -9,25 +9,33 @@ import com.patmanak.proton.andcalendarbridge.data.calendar.AndroidCalendarProjec
 import com.patmanak.proton.andcalendarbridge.data.calendar.AndroidCalendarProjection.Companion.digest
 
 /** All operations use the same stamped-row, parent, slot, reminder and family assertion batch. */
-enum class OccurrenceReceiptAction { ATTACH, INSPECT_ATTACHMENT, ACKNOWLEDGE, INSPECT_ACKNOWLEDGEMENT }
+enum class OccurrenceReceiptAction { ATTACH, INSPECT_ATTACHMENT, ACKNOWLEDGE, INSPECT_ACKNOWLEDGEMENT, INSPECT_CLEAN, PROJECT }
 
 class OccurrenceNativeReceipt(val action: OccurrenceReceiptAction, val intent: LocalCreateIntent,
-    val attachment: CapturedCreateAttachmentReceipt, val acknowledgement: CapturedCreateAcknowledgementReceipt? = null) {
+    val attachment: CapturedCreateAttachmentReceipt, val acknowledgement: CapturedCreateAcknowledgementReceipt? = null,
+    val frame: CapturedCreateHandoffFrame? = null, val projection: CapturedHandoffProjection? = null) {
     init {
         require(attachment.binding.identity.matchesOccurrence(intent))
         require(attachment.binding.eventId != intent.occurrence!!.master.eventId)
-        require((action == OccurrenceReceiptAction.ACKNOWLEDGE || action == OccurrenceReceiptAction.INSPECT_ACKNOWLEDGEMENT) ==
-            (acknowledgement != null))
+        require((action !in setOf(OccurrenceReceiptAction.ATTACH, OccurrenceReceiptAction.INSPECT_ATTACHMENT)) == (acknowledgement != null))
         if (acknowledgement != null) require(acknowledgement.baseline.receipt == attachment &&
             acknowledgement.baseline.occurrenceIntent == intent)
+        if (frame != null) require(frame.receipt.acknowledgement == acknowledgement &&
+            (action == OccurrenceReceiptAction.INSPECT_CLEAN || action == OccurrenceReceiptAction.PROJECT))
+        require((action == OccurrenceReceiptAction.PROJECT) == (projection != null))
+        if (projection != null) require(projection.frame == frame)
     }
     override fun toString() = "OccurrenceNativeReceipt(REDACTED)"
 }
 
 internal fun AndroidCalendarProjection.occurrenceExpectedMetadata(step: OccurrenceNativeReceipt): ContentValues =
     if (step.action == OccurrenceReceiptAction.ATTACH) ContentValues() else capturedAttachmentValues(step.attachment).apply {
-        if (step.action == OccurrenceReceiptAction.INSPECT_ACKNOWLEDGEMENT)
+        if (step.acknowledgement != null && step.action != OccurrenceReceiptAction.ACKNOWLEDGE)
             put(Events.SYNC_DATA7, capturedAcknowledgementMarker(requireNotNull(step.acknowledgement)))
+        step.frame?.let { frame ->
+            put(Events.SYNC_DATA2, digest("revision-v1", frame.base.revision.value))
+            put(Events.SYNC_DATA3, frame.lastProjection?.let(::receiptMarker))
+        }
     }
 
 internal fun AndroidCalendarProjection.occurrenceMetadataWrite(step: OccurrenceNativeReceipt): ContentValues? = when (step.action) {

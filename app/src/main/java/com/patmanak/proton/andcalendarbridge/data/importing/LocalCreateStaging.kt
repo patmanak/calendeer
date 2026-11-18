@@ -74,7 +74,7 @@ internal class LocalCreateStaging(
     }
 
     suspend fun capture(eventRow: Long, localId: LocalEventId, id: MutationId, timestamp: Instant,
-        series: Boolean = false, autoProfile: Boolean = false): LocalEditCaptureResult {
+        series: Boolean = false, autoProfile: Boolean = false, autoOccurrence: Boolean = false): LocalEditCaptureResult {
         installAdmission()
         return try {
             val selected = store.selections(target.account).singleOrNull { it.scope == target }
@@ -87,7 +87,8 @@ internal class LocalCreateStaging(
             // A retained intention is historical work, not a witness of the current Android row.
             val retained = journal.readIntent(target, localId)
             if (retained != null) {
-                if (retained.occurrence != null) return LocalEditCaptureResult.UNQUALIFIED
+                if (retained.occurrence != null && (!autoOccurrence || journal.readOccurrenceContext(target, localId) != retained))
+                    return LocalEditCaptureResult.UNQUALIFIED
                 val identity = retained.reservation
                 if (identity.id != id || identity.localId != localId || identity.scope != target ||
                     identity.format != format || identity.markerProtocol != 1 ||
@@ -95,10 +96,20 @@ internal class LocalCreateStaging(
                 return LocalEditCaptureResult.RETAINED
             }
             if (previous == null && (eventRow <= 0 || timestamp.nano != 0)) return LocalEditCaptureResult.UNQUALIFIED
-            val captureSeries = if (autoProfile) when (projection.localCreateProfile(target, eventRow)) {
+            if (autoOccurrence && previous != null) journal.readOccurrenceContext(target, localId)?.occurrence?.let {
+                return captureOccurrence(it.master, eventRow, localId, id, timestamp)
+            }
+            val profile = if (autoProfile || autoOccurrence) projection.localCreateProfile(target, eventRow) else null
+            if (profile == LocalCreateProfile.OCCURRENCE) {
+                if (!autoOccurrence || previous != null) return LocalEditCaptureResult.UNQUALIFIED
+                val key = projection.occurrenceParentKey(target, eventRow) ?: return LocalEditCaptureResult.UNQUALIFIED
+                val master = resolveOccurrenceMaster(key) ?: return LocalEditCaptureResult.UNQUALIFIED
+                return captureOccurrence(master, eventRow, localId, id, timestamp)
+            }
+            val captureSeries = if (autoProfile) when (profile) {
                 LocalCreateProfile.SIMPLE -> false
                 LocalCreateProfile.SERIES -> true
-                null -> return LocalEditCaptureResult.UNQUALIFIED
+                else -> return LocalEditCaptureResult.UNQUALIFIED
             } else series
             // Classification is an await, not permission to reserve against an obsolete owner.
             if (!currentAccount() || !active()) return LocalEditCaptureResult.INACTIVE
@@ -124,6 +135,21 @@ internal class LocalCreateStaging(
           finally {
               clearAdmission()
           }
+    }
+
+    private suspend fun resolveOccurrenceMaster(key: String): RemoteChange.Upsert? {
+        var after: EventId? = null
+        var matched: EventId? = null
+        while (active() && currentAccount()) {
+            val events = store.projectedEventIds(target, after, 100)
+            for (event in events) if (projection.eventIdentityKey(target, event) == key) {
+                if (matched != null) return null
+                matched = event
+            }
+            if (events.size < 100) return matched?.let { store.stabilizedProjection(target, it) }
+            after = events.last()
+        }
+        return null
     }
 
     suspend fun prepare(localId: LocalEventId, id: MutationId, port: CalendarCreatePreparationPort): LocalCreatePreparationResult {

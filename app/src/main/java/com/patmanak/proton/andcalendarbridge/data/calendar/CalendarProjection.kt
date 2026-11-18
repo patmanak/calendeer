@@ -143,6 +143,7 @@ interface CalendarProjection {
         childRow: Long): OwnedOccurrenceEditSnapshot? = null
     suspend fun captureAndStampOccurrence(intent: LocalCreateIntent, childRow: Long): OwnedOccurrenceEditSnapshot? = null
     suspend fun inspectStampedOccurrence(intent: LocalCreateIntent): OwnedOccurrenceEditSnapshot? = null
+    suspend fun occurrenceParentKey(scope: CalendarScope, childRow: Long): String? = null
     suspend fun applyOccurrenceReceipt(step: OccurrenceNativeReceipt): Boolean = false
     /** Present, dirty local tombstone only; absence never establishes deletion intent. No ACK. */
     suspend fun captureOwnedSimpleDelete(scope: CalendarScope, base: RemoteChange.Upsert): OwnedLocalEditSnapshot? = null

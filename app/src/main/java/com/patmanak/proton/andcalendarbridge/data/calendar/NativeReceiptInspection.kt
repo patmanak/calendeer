@@ -41,7 +41,6 @@ internal fun AndroidCalendarProjection.inspectCapturedHistory(receipt: CapturedC
     } ?: return false
     val uri = syncUri(Events.CONTENT_URI, account)
     val intent = baseline.occurrenceIntent
-    if (intent != null && projectionReceipt != null) return false
     val local = if (intent == null) capturedLocalSelection(baseline.receipt, calendar) else
         Selection("${Events.CALENDAR_ID}=? AND ${Events.SYNC_DATA5}=?", arrayOf(calendar.toString(), occurrenceMarker(intent)))
     val values = attachmentMetadata(uri, local) ?: return false

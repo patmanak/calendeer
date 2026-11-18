@@ -12,7 +12,7 @@ import org.junit.Test
 
 /** Real Provider and SQLite, controlled authenticated-observation port. */
 class OccurrenceBindingDeviceTest {
-    private class Port : OccurrenceCaptureDeviceTest.SubmissionPort() {
+    internal class Port : OccurrenceCaptureDeviceTest.SubmissionPort() {
         val attempt = MutationId(java.util.UUID.randomUUID().toString())
         var remoteId = EventId("synthetic-remote-child")
         var inspections = 0
@@ -85,12 +85,59 @@ class OccurrenceBindingDeviceTest {
         assertEquals("1", attached[Events.DIRTY])
         assertNotNull(attached[Events.SYNC_DATA6])
         repeat(2) { assertEquals(CapturedCreateBaselineResult.RETAINED, owner.retainLocalCreateBaseline(scope, localId, id, port.attempt)) }
+        val reconcile = MutationId("fixture-reconcile")
+        assertEquals(CapturedCreateReconciliationResult.UNCHANGED, owner.reconcileLocalCreate(scope, localId, id, port.attempt, reconcile))
         repeat(2) { assertEquals(CapturedCreateAcknowledgementResult.ACKNOWLEDGED, owner.acknowledgeLocalCreate(scope, localId, id, port.attempt)) }
         val after = native.rows()
         assertEquals(before.getValue(native.parent), after.getValue(native.parent))
         assertEquals("0", after.getValue(native.child)[Events.DIRTY])
         assertNotNull(after.getValue(native.child)[Events.SYNC_DATA7])
         assertEquals(attached[Events.SYNC_DATA6], after.getValue(native.child)[Events.SYNC_DATA6])
+        assertEquals(1, port.sends)
+        assertEquals(CapturedCreateCleanResult.CLEAN, owner.qualifyAcknowledgedLocalCreate(scope, localId, id, port.attempt))
+        native.mode = EventColorMode.CALENDAR
+        native.projection.admitOperation = { true }
+        native.projection.reprojectEventColors(scope)
+        assertEquals(CapturedCreateCleanResult.CLEAN, owner.qualifyAcknowledgedLocalCreate(scope, localId, id, port.attempt))
+        assertEquals(CapturedCreateReconciliationResult.UNCHANGED, owner.reconcileLocalCreate(scope, localId, id, port.attempt, reconcile))
+        native.change(native.child, Events.TITLE, "Another edit after clean")
+        native.change(native.child, Events.DIRTY, 1)
+        assertEquals(CapturedCreateCleanResult.UNRESOLVED, owner.qualifyAcknowledgedLocalCreate(scope, localId, id, port.attempt))
+        assertEquals(CapturedCreateReconciliationResult.UNRESOLVED, owner.reconcileLocalCreate(scope, localId, id, port.attempt, reconcile))
+    }
+
+    @Test fun transferredChildProjectionAdvancesOnlyItsOriginalSlotAndKeepsANewerLocalEdit() = OccurrenceCaptureDeviceTest().fixture {
+        val port = Port()
+        unknown(port)
+        val owner = coordinator(port)
+        assertEquals(CapturedCreateBindingResult.RETAINED, owner.bindLocalCreateObservation(scope, localId, id, port.attempt, port))
+        assertEquals(CapturedCreateAttachmentResult.ATTACHED, owner.attachLocalCreateBinding(scope, localId, id, port.attempt))
+        assertEquals(CapturedCreateBaselineResult.RETAINED, owner.retainLocalCreateBaseline(scope, localId, id, port.attempt))
+        assertEquals(CapturedCreateAcknowledgementResult.ACKNOWLEDGED, owner.acknowledgeLocalCreate(scope, localId, id, port.attempt))
+        repeat(2) { assertEquals(CapturedCreateHandoffResult.HANDED_OFF, owner.handoffLocalCreate(scope, localId, id, port.attempt)) }
+        store.admitTransaction = { it == scope }
+        native.projection.admitOperation = { true }
+        val frame = checkNotNull(store.capturedHandoff(scope, port.remoteId)).frame
+        val next = frame.base.copy(revision = Revision("verified-next"), content = frame.base.content.copy(title = "Remote update"))
+        val pending = ProjectionIntent(scope, next)
+        store.transaction(scope) { putRemote(next); putProjection(pending) }
+        editable = false
+        val receiving = ImportCoordinatorProjection(store, reader, projection, attempts, { 0L }, { 0L },
+            { true }, { true }, { _, account -> account == scope.account }, owner::releasedProjectionSource)
+        assertEquals(listOf(pending), receiving.runnableProjections(scope))
+        val plan = store.prepareCapturedHandoffProjection(frame, pending)
+        val parent = native.rows().getValue(native.parent)
+        assertNotNull(native.projection.applyCapturedHandoffProjection(plan))
+        native.change(native.child, Events.TITLE, "Subsequent edit")
+        native.change(native.child, Events.DIRTY, 1)
+        val before = native.rows()
+        val historical = checkNotNull(native.projection.inspectCapturedHandoffProjection(plan))
+        assertTrue(store.restoreCapturedHandoffProjection(historical))
+        val advanced = checkNotNull(store.capturedHandoff(scope, port.remoteId)).frame
+        assertEquals(next, advanced.base)
+        assertNull(native.projection.inspectCapturedHandoffBase(advanced))
+        assertEquals(before, native.rows())
+        assertEquals(parent, before.getValue(native.parent))
         assertEquals(1, port.sends)
     }
 

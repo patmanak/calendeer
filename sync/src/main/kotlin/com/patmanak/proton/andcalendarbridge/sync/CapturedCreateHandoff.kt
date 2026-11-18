@@ -136,6 +136,8 @@ private fun freezeHandoffContent(content: EventContent): EventContent {
 /** Transfer capability only. It never widens the simple personal-update submission profile. */
 fun supportsCapturedHandoffOrigin(baseline: CapturedCreateBaseline): Boolean =
     if (baseline.receipt.binding.identity.fingerprintVersion == 1) supportsPersonalCapturedOrigin(baseline)
+    else if (baseline.occurrenceIntent != null) baseline.receipt.binding.identity.matchesOccurrence(baseline.occurrenceIntent) &&
+        supportsCapturedHandoffContent(baseline, baseline.change)
     else supportsCapturedHandoffContent(baseline, baseline.change) && baseline.receipt.binding.identity.matchesContent(baseline.change.content)
 
 fun supportsCapturedHandoffContent(origin: CapturedCreateBaseline, change: RemoteChange): Boolean {
@@ -143,6 +145,11 @@ fun supportsCapturedHandoffContent(origin: CapturedCreateBaseline, change: Remot
     val value = (change as? RemoteChange.Upsert)?.content ?: return false
     if (change.eventId != origin.change.eventId ||
         !supportsPersonalHandoff(change.copy(content = value.copy(recurrence = null)))) return false
+    val occurrence = origin.occurrenceIntent?.occurrence
+    if (occurrence != null) return try {
+        value.recurrence == occurrence.content.recurrence && ProjectionReceipt.supports(change) &&
+            OccurrenceEditCandidate(occurrence.master, occurrence.original, value.copy(recurrence = null)).content == value
+    } catch (_: IllegalArgumentException) { false }
     return try {
         capturedCreateSeries(value)
         value.recurrence!!.uid == origin.change.content.recurrence!!.uid && ProjectionReceipt.supports(change)

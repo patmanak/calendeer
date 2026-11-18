@@ -34,6 +34,11 @@ class OccurrenceDispatchIdentityTest {
         val binding = CapturedCreateBinding(identity, child.eventId, child.revision)
         val receipt = CapturedCreateAttachmentReceipt(binding, "11111111-2222-3333-4444-555555555555")
         assertEquals(intent, CapturedCreateBaseline(receipt, child, intent).occurrenceIntent)
+        val baseline = CapturedCreateBaseline(receipt, child, intent)
+        assertTrue(supportsCapturedHandoffOrigin(baseline))
+        assertTrue(supportsCapturedHandoffContent(baseline, child.copy(content = child.content.copy(title = "Remote update"))))
+        assertFalse(supportsCapturedHandoffContent(baseline, child.copy(content = content)))
+        assertFalse(supportsCapturedHandoffContent(baseline, child.copy(eventId = master.eventId)))
         assertThrows(IllegalArgumentException::class.java) { CapturedCreateBaseline(receipt, child) }
         assertThrows(IllegalArgumentException::class.java) { CapturedCreateBaseline(receipt, child.copy(content = content), intent) }
         assertFalse(identity.matchesOccurrenceObservation(intent, proof(child.copy(eventId = master.eventId))))

@@ -333,10 +333,12 @@ internal class CapturedCreateRestoration(
                 return CapturedCreateCleanResult.UNRESOLVED
             val identity = CapturedCreateDispatchIdentity.of(submission)
             val binding = journal.capturedBinding(identity) ?: return CapturedCreateCleanResult.UNRESOLVED
+            val intent = reserved.intent
+            admitRestoration(intent)
             val attachment = journal.capturedAttachment(binding) ?: return CapturedCreateCleanResult.UNRESOLVED
             val canonical = capturedCreateExpectation(submission, expectations) ?: return CapturedCreateCleanResult.UNRESOLVED
             val baseline = CapturedCreateBaseline(attachment,
-                RemoteChange.Upsert(binding.eventId, binding.verifiedRevision, canonical))
+                RemoteChange.Upsert(binding.eventId, binding.verifiedRevision, canonical), intent.takeIf { reserved.isOccurrence })
             val record = store.capturedAcknowledgement(target, binding.eventId)
                 ?: return CapturedCreateCleanResult.UNRESOLVED
             if (record.state != CapturedCreateAcknowledgementState.PROVEN || record.receipt.baseline != baseline)
@@ -347,7 +349,7 @@ internal class CapturedCreateRestoration(
                 store.transaction(target) { checkpoint?.format } == capture.format &&
                 journal.capturedBinding(identity) == binding && journal.capturedAttachment(binding) == attachment &&
                 store.capturedBaseline(target, binding.eventId) == baseline &&
-                store.capturedCleanSource(record.receipt)
+                store.capturedCleanSource(record.receipt) && occurrenceSource(intent, binding)
             if (!available()) return CapturedCreateCleanResult.INACTIVE
             if (!exactSource()) return CapturedCreateCleanResult.UNRESOLVED
             val proof = projection.inspectAcknowledgedCreateClean(record.receipt)
@@ -385,11 +387,27 @@ internal class CapturedCreateRestoration(
                 return CapturedCreateReconciliationResult.UNRESOLVED
             val identity = CapturedCreateDispatchIdentity.of(submission)
             val binding = journal.capturedBinding(identity) ?: return CapturedCreateReconciliationResult.UNRESOLVED
+            val intent = reserved.intent
+            admitRestoration(intent)
             val receipt = journal.capturedAttachment(binding) ?: return CapturedCreateReconciliationResult.UNRESOLVED
             val canonical = capturedCreateExpectation(submission, expectations) ?: return CapturedCreateReconciliationResult.UNRESOLVED
             val baseline = CapturedCreateBaseline(receipt,
-                RemoteChange.Upsert(binding.eventId, binding.verifiedRevision, canonical))
+                RemoteChange.Upsert(binding.eventId, binding.verifiedRevision, canonical), intent.takeIf { reserved.isOccurrence })
             val acknowledgement = store.capturedAcknowledgement(target, binding.eventId)
+            if (reserved.isOccurrence) {
+                suspend fun sourceMatches() = available() && occurrenceSource(intent, binding) &&
+                    currentFormat() == capture.format && captures.readSubmission(target, localId) == submission &&
+                    journal.capturedBinding(identity) == binding && journal.capturedAttachment(binding) == receipt &&
+                    store.capturedBaseline(target, binding.eventId) == baseline &&
+                    store.capturedAcknowledgement(target, binding.eventId) == acknowledgement
+                if (!sourceMatches()) return CapturedCreateReconciliationResult.UNRESOLVED
+                val unchanged = if (acknowledgement == null) projection.applyOccurrenceReceipt(
+                    OccurrenceNativeReceipt(OccurrenceReceiptAction.INSPECT_ATTACHMENT, intent, receipt))
+                else acknowledgement.receipt.baseline == baseline &&
+                    projection.inspectAcknowledgedCreateClean(acknowledgement.receipt)?.receipt == acknowledgement.receipt
+                return if (unchanged && sourceMatches()) CapturedCreateReconciliationResult.UNCHANGED
+                    else CapturedCreateReconciliationResult.UNRESOLVED
+            }
             if (acknowledgement != null && (acknowledgement.state != CapturedCreateAcknowledgementState.PROVEN ||
                 acknowledgement.receipt.baseline != baseline || projection.capturedAcknowledgementProtocol != acknowledgement.receipt.protocol))
                 return CapturedCreateReconciliationResult.UNRESOLVED

@@ -22,9 +22,15 @@ internal class ImportCoordinatorProjection(
 ) {
     class Pending : IllegalStateException("Captured creation reconciliation pending")
     suspend fun capturedRawHold(target: CalendarScope): CapturedProjectionHold {
-        val dispatch = creates?.capturedProjectionHold(target, remote.format) ?: CapturedProjectionHold()
         val provenance = try { store.capturedProvenanceEvents(target) }
-        catch (_: IllegalArgumentException) { return dispatch.copy(scopeBlocked = true) }
+        catch (_: IllegalArgumentException) { return CapturedProjectionHold(scopeBlocked = true) }
+        val dispatch = creates?.let { journal ->
+            val first = journal.capturedProjectionHold(target, remote.format)
+            if (!first.scopeBlocked || provenance.isEmpty()) first else {
+                val transfers = store.capturedOccurrenceTransfers(target)
+                if (transfers.isEmpty()) first else journal.capturedProjectionHold(target, remote.format, transfers)
+            }
+        } ?: CapturedProjectionHold()
         return dispatch.copy(events = dispatch.events + provenance)
     }
     private suspend fun capturedProjectionHold(target: CalendarScope): CapturedProjectionHold {
@@ -47,7 +53,8 @@ internal class ImportCoordinatorProjection(
 
     // Keep the hold read and status publication out of the larger import coroutine.
     suspend fun publishImportProgress(target: CalendarScope, status: String, completedAt: Long? = null): Boolean {
-        val held = capturedProjectionHold(target).blocksProjection
+        val hold = capturedProjectionHold(target)
+        val held = hold.scopeBlocked || hold.events.isNotEmpty() || hold.occurrenceMasters.any { store.hasPendingProjection(target, it) }
         val backlog = store.projectionBacklog(target)
         val locallyHeld = backlog.locallyHeld > 0
         val visible = when {
@@ -65,7 +72,7 @@ internal class ImportCoordinatorProjection(
     }
     suspend fun runnableProjections(target: CalendarScope, limit: Int = 100): List<ProjectionIntent> {
         val hold = capturedProjectionHold(target)
-        return if (hold.scopeBlocked) emptyList() else store.pending(target, limit, hold.events)
+        return if (hold.scopeBlocked) emptyList() else store.pending(target, limit, hold.events + hold.occurrenceMasters)
     }
     suspend fun nativeChangesBlock(intent: ProjectionIntent): Boolean = projection.hasOwnedLocalChanges(intent,
         if (intent.change is RemoteChange.Deleted) store.deletedSeriesUid(intent.scope, intent.change.eventId) else null)
