@@ -625,6 +625,9 @@ class AndroidCalendarProjection(context: Context,
 
     override val capturedHandoffProtocol: Int get() = 1
 
+    override suspend fun projectOccurrenceMaster(frame: CapturedCreateHandoffFrame, receipt: ProjectionReceipt,
+        inspect: Boolean) = projectTransferredMaster(frame, receipt, inspect)
+
     override suspend fun inspectCapturedHandoffBase(frame: CapturedCreateHandoffFrame): CapturedHandoffCleanWitness? {
         val ack = frame.receipt.acknowledgement
         val intent = ack.baseline.occurrenceIntent
@@ -657,7 +660,7 @@ class AndroidCalendarProjection(context: Context,
     }
 
     override suspend fun inspectCapturedHandoffProjection(plan: CapturedHandoffProjection): AppliedCapturedHandoffProjection? = operation {
-        if (inspectCapturedHistory(plan.frame.receipt.acknowledgement, plan.receipt))
+        if (inspectCapturedHistory(plan.frame.receipt.acknowledgement, plan.receipt, master = plan.frame.occurrenceMaster))
             AppliedCapturedHandoffProjection(plan) else null
     }
 

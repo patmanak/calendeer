@@ -271,6 +271,13 @@ Keep all run-specific arguments and observations private.
 
 After a verified transfer, compatible remote updates can reach the same child
 through a conditional Provider batch. The original slot and both parent links
-remain qualified. Unrelated event projections can drain. A later change to the
-master remains pending to preserve its captured child, including a newer local
-edit. Supporting that parent update or deletion requires family-wide reconciliation.
+remain qualified. Unrelated event projections can drain. A clean master can
+receive remote changes to its title, description, location, color and reminders.
+The Provider verifies the stamped exception and its original slot in the same
+transaction that updates the master. A local edit on the child survives that
+transaction. Recovery verifies the master's stored projection nonce before
+advancing its baseline and qualifying a subsequent child revision.
+
+A change to series geometry or deletion of the master keeps the incoming
+projection in `CREATE_PENDING`. Retiring the pair requires separate evidence
+for the exception's removal.

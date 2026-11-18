@@ -34,12 +34,15 @@ internal suspend fun CalendarProjection.matchesCapturedIntent(intent: LocalCreat
     if (intent.occurrence == null) inspectCapturedIntent(intent).matches(intent)
     else inspectStampedOccurrence(intent)?.candidate == intent.occurrence
 
-internal suspend fun ImportStore.matchesOccurrenceSource(intent: LocalCreateIntent): Boolean {
-    val master = intent.occurrence?.master ?: return true
+internal suspend fun ImportStore.matchesOccurrenceSource(intent: LocalCreateIntent,
+    master: RemoteChange.Upsert? = intent.occurrence?.master, pendingMaster: Boolean = false): Boolean {
+    if (master == null) return intent.occurrence == null
     val scope = intent.reservation.scope
     return projectedBaseline(scope, master.eventId) == master && localEdit(scope, master.eventId) == null &&
         transaction(scope) {
             val staged = this as? StagedSyncTransaction
-            staged != null && staged.remote(master.eventId) == master && staged.deferred(master.eventId) == null && !hasPendingMutation(master.eventId)
+            val observed = staged?.remote(master.eventId)
+            staged != null && observed != null && (observed == master || pendingMaster && compatibleOccurrenceMaster(master, observed)) &&
+                staged.deferred(master.eventId) == null && !hasPendingMutation(master.eventId)
         }
 }

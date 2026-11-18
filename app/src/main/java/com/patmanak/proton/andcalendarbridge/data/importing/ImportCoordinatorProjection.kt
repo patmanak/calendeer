@@ -19,6 +19,7 @@ internal class ImportCoordinatorProjection(
     private val hasCalendarPermissions: () -> Boolean,
     private val isCurrent: suspend (Long, AccountId) -> Boolean,
     private val handoffSource: suspend (CapturedCreateHandoffFrame, () -> Boolean) -> Boolean,
+    private val masterSource: suspend (CapturedCreateHandoffFrame, () -> Boolean) -> Boolean = { _, _ -> false },
 ) {
     class Pending : IllegalStateException("Captured creation reconciliation pending")
     suspend fun capturedRawHold(target: CalendarScope): CapturedProjectionHold {
@@ -72,7 +73,20 @@ internal class ImportCoordinatorProjection(
     }
     suspend fun runnableProjections(target: CalendarScope, limit: Int = 100): List<ProjectionIntent> {
         val hold = capturedProjectionHold(target)
-        return if (hold.scopeBlocked) emptyList() else store.pending(target, limit, hold.events + hold.occurrenceMasters)
+        if (hold.scopeBlocked) return emptyList()
+        val excluded = hold.occurrenceMasters.toMutableSet()
+        if (excluded.isNotEmpty()) {
+            val roles = store.capturedOccurrenceTransfers(target).values.groupBy { it.frame.occurrenceMaster?.eventId }
+            val gen = generation()
+            val policy = policyRevision()
+            val active = { authenticated() && generation() == gen && policyRevision() == policy && hasCalendarPermissions() }
+            for (master in hold.occurrenceMasters) {
+                if (!store.hasPendingProjection(target, master)) continue
+                val role = roles[master]?.singleOrNull() ?: continue
+                if (masterSource(role.frame, active)) excluded.remove(master)
+            }
+        }
+        return store.pending(target, limit, hold.events + excluded)
     }
     suspend fun nativeChangesBlock(intent: ProjectionIntent): Boolean = projection.hasOwnedLocalChanges(intent,
         if (intent.change is RemoteChange.Deleted) store.deletedSeriesUid(intent.scope, intent.change.eventId) else null)
@@ -102,7 +116,14 @@ internal class ImportCoordinatorProjection(
 
     /** Kept out of the larger import coroutine; preparation precedes every tracked Provider write. */
     suspend fun projectPending(intent: ProjectionIntent, expected: Long) {
-        if (capturedRawHold(intent.scope).holds(intent.change.eventId)) {
+        val hold = capturedRawHold(intent.scope)
+        if (hold.scopeBlocked) throw Pending()
+        if (intent.change.eventId in hold.occurrenceMasters) {
+            if (intent.change.eventId in hold.events) throw Pending()
+            projectTransferredMaster(intent, expected)
+            return
+        }
+        if (hold.holds(intent.change.eventId)) {
             projectCapturedHandoff(intent, expected)
             return
         }
@@ -139,6 +160,49 @@ internal class ImportCoordinatorProjection(
                 store.deletedSeriesUid(intent.scope, intent.change.eventId) else null)
             requireProjectionAvailable(intent.scope, intent.change.eventId)
             store.acknowledge(intent)
+        }
+    }
+
+    private suspend fun projectTransferredMaster(intent: ProjectionIntent, expected: Long) {
+        val scope = intent.scope
+        val event = intent.change.eventId
+        val frame = store.capturedOccurrenceTransfers(scope).values.singleOrNull {
+            it.frame.occurrenceMaster?.eventId == event
+        }?.frame ?: throw Pending()
+        val base = frame.occurrenceMaster ?: throw Pending()
+        if (!compatibleOccurrenceMaster(base, intent.change)) throw Pending()
+        val policy = policyRevision()
+        val active = { authenticated() && generation() == expected && policyRevision() == policy && hasCalendarPermissions() }
+        suspend fun verify() {
+            if (!active() || !isCurrent(expected, scope.account)) throw CancellationException("Inactive occurrence master")
+            val hold = capturedRawHold(scope)
+            if (hold.scopeBlocked || event !in hold.occurrenceMasters || event in hold.events ||
+                !masterSource(frame, active)) throw Pending()
+            store.requireDirectProjection(scope, event)
+        }
+        val previousStore = store.admitTransaction
+        val previousProjection = projection.admitOperation
+        store.admitTransaction = { it == scope && active() && previousStore(it) }
+        projection.admitOperation = { active() && previousProjection() }
+        try {
+            verify()
+            val existing = store.projectionReceipt(scope, event)
+            val receipt = existing ?: store.prepareProjection(intent, remote.format)
+            if (receipt.previousBase != base || receipt.format != frame.format ||
+                !compatibleOccurrenceMaster(base, receipt.change)) throw Pending()
+            verify()
+            val history = existing?.let { projection.projectOccurrenceMaster(frame, it, inspect = true) }
+            val proof = history ?: run {
+                if (receipt.change != intent.change) throw CalendarProjectionException(CalendarProjectionFailure.LOCAL_CHANGE_PENDING)
+                verify()
+                projection.projectOccurrenceMaster(frame, receipt, inspect = false)
+                    ?: throw CalendarProjectionException(CalendarProjectionFailure.LOCAL_CHANGE_PENDING)
+            }
+            verify()
+            check(proof.receipt == receipt && store.restoreProjection(proof)) { "Unresolved occurrence master projection" }
+        } finally {
+            store.admitTransaction = previousStore
+            projection.admitOperation = previousProjection
         }
     }
 

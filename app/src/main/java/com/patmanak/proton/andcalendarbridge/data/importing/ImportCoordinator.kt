@@ -90,6 +90,7 @@ class ImportCoordinator(
         generation = { generation }, policyRevision = { createPolicyRevision.get() },
         authenticated = { authenticated }, hasCalendarPermissions = ::hasCalendarPermissions,
         isCurrent = ::isCurrent, handoffSource = capturedCreates::releasedProjectionSource,
+        masterSource = capturedCreates::releasedMasterSource,
     )
 
     private val titleRecovery = ImportCoordinatorTitleRecovery(

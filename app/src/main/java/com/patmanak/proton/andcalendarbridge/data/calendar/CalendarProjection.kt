@@ -88,6 +88,8 @@ interface CalendarProjection {
     val capturedHandoffProtocol: Int? get() = null
     /** Assert the current clean reference and full origin in one batch; no future write lease. */
     suspend fun inspectCapturedHandoffBase(frame: CapturedCreateHandoffFrame): CapturedHandoffCleanWitness? = null
+    suspend fun projectOccurrenceMaster(frame: CapturedCreateHandoffFrame, receipt: ProjectionReceipt,
+        inspect: Boolean): AppliedProjectionWitness? = null
     /** Exact current dirty snapshot, including a present tombstone; no deletion from absence. */
     suspend fun captureCapturedHandoffCurrent(frame: CapturedCreateHandoffFrame): CapturedHandoffCurrentObservation =
         CapturedHandoffCurrentObservation.Unresolved

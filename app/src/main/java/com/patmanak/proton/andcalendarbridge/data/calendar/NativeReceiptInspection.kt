@@ -5,6 +5,7 @@ import com.patmanak.proton.andcalendarbridge.data.calendar.NativeCalendarSelecti
 import android.content.ContentProviderOperation
 import android.content.ContentValues
 import android.database.DatabaseUtils
+import com.patmanak.proton.andcalendarbridge.sync.RemoteChange
 import android.net.Uri
 import android.provider.CalendarContract.Calendars
 import android.provider.CalendarContract.Events
@@ -25,7 +26,17 @@ import com.patmanak.proton.andcalendarbridge.data.calendar.AndroidCalendarProjec
 import com.patmanak.proton.andcalendarbridge.data.calendar.AndroidCalendarProjection.Companion.fail
 
 internal fun AndroidCalendarProjection.inspectCapturedHistory(receipt: CapturedCreateAcknowledgementReceipt, projectionReceipt: ProjectionReceipt? = null,
-    checkActive: () -> Unit = {}): Boolean {
+    checkActive: () -> Unit = {}, master: RemoteChange.Upsert? = null): Boolean {
+    val checks = capturedHistoryChecks(receipt, projectionReceipt, checkActive, master) ?: return false
+    checkActive(); requirePermissions()
+    capturedBatch(checks, IntArray(checks.size) { 1 })
+    checkActive(); requirePermissions()
+    return true
+}
+
+internal fun AndroidCalendarProjection.capturedHistoryChecks(receipt: CapturedCreateAcknowledgementReceipt,
+    projectionReceipt: ProjectionReceipt?, checkActive: () -> Unit,
+    master: RemoteChange.Upsert?): ArrayList<ContentProviderOperation>? {
     val baseline = receipt.baseline
     val expected = capturedAttachmentValues(baseline.receipt)
     expected.put(Events.SYNC_DATA7, capturedAcknowledgementMarker(receipt))
@@ -36,21 +47,21 @@ internal fun AndroidCalendarProjection.inspectCapturedHistory(receipt: CapturedC
     val scope = baseline.scope
     val account = accountFor(scope.account)
     val calendar = try { calendarRow(scope, account) } catch (failure: CalendarProjectionException) {
-        if (failure.category == CalendarProjectionFailure.IDENTITY_CONFLICT) return false
+        if (failure.category == CalendarProjectionFailure.IDENTITY_CONFLICT) return null
         throw failure
-    } ?: return false
+    } ?: return null
     val uri = syncUri(Events.CONTENT_URI, account)
     val intent = baseline.occurrenceIntent
     val local = if (intent == null) capturedLocalSelection(baseline.receipt, calendar) else
         Selection("${Events.CALENDAR_ID}=? AND ${Events.SYNC_DATA5}=?", arrayOf(calendar.toString(), occurrenceMarker(intent)))
-    val values = attachmentMetadata(uri, local) ?: return false
+    val values = attachmentMetadata(uri, local) ?: return null
     if (!colorMetadataMatches(values, expected) || values.getAsString(Events.SYNC_DATA5) != local.args[1])
-        return false
+        return null
     val remote = capturedRemoteSelection(baseline.receipt, calendar)
     val remoteMatches = resolver.query(uri, arrayOf(Events._ID), remote.sql, remote.args, null)?.use {
         it.count == 1 && it.moveToFirst() && it.getLong(0) == values.getAsLong(Events._ID)
     } ?: fail(CalendarProjectionFailure.PROVIDER_UNAVAILABLE)
-    if (!remoteMatches) return false
+    if (!remoteMatches) return null
     // Historical proof ignores later user data, children and dirty/deleted flags.
     val metadata = ContentValues(values).apply { remove(Events.DIRTY); remove(Events.DELETED) }
     checkActive()
@@ -64,16 +75,10 @@ internal fun AndroidCalendarProjection.inspectCapturedHistory(receipt: CapturedC
             .withValue(Events._ID, values.getAsLong(Events._ID)).withExpectedCount(1).build(),
     )
     if (intent != null) {
-        val family = occurrenceHistoryAssertions(intent, calendar, values.getAsLong(Events._ID)) ?: return false
+        val family = occurrenceHistoryAssertions(intent, calendar, values.getAsLong(Events._ID), master ?: requireNotNull(intent.occurrence).master) ?: return null
         checks.addAll(family)
     }
-    checkActive()
-    requirePermissions()
-    capturedBatch(checks, IntArray(checks.size) { 1 })
-    checkActive()
-    requirePermissions()
-    checkActive()
-    return true
+    return checks
 }
 
 internal fun AndroidCalendarProjection.inspectCapturedAttachmentInternal(receipt: CapturedCreateAttachmentReceipt): AppliedCapturedCreateAttachment? {

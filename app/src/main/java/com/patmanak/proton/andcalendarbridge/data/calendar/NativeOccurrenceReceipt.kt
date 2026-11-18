@@ -48,11 +48,12 @@ internal fun AndroidCalendarProjection.occurrenceMetadataWrite(step: OccurrenceN
 }
 
 /** A historical ACK survives later local edits. Qualify original family/slot, even on a dirty tombstone. */
-internal fun AndroidCalendarProjection.occurrenceHistoryAssertions(intent: LocalCreateIntent, calendar: Long, child: Long):
+internal fun AndroidCalendarProjection.occurrenceHistoryAssertions(intent: LocalCreateIntent, calendar: Long, child: Long,
+    master: RemoteChange.Upsert = requireNotNull(intent.occurrence).master):
     List<ContentProviderOperation>? {
     val occurrence = requireNotNull(intent.occurrence)
     val scope = intent.reservation.scope
-    val master = occurrence.master
+    if (!compatibleOccurrenceMaster(occurrence.master, master)) return null
     val series = digest("series-v1", calendarSyncId(scope), master.content.recurrence!!.uid)
     val remote = digest("event-v1", calendarSyncId(scope), master.eventId.value)
     val uri = syncUri(Events.CONTENT_URI, accountFor(scope.account))

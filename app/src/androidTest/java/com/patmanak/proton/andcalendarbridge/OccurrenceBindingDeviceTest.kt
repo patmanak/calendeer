@@ -117,13 +117,29 @@ class OccurrenceBindingDeviceTest {
         repeat(2) { assertEquals(CapturedCreateHandoffResult.HANDED_OFF, owner.handoffLocalCreate(scope, localId, id, port.attempt)) }
         store.admitTransaction = { it == scope }
         native.projection.admitOperation = { true }
-        val frame = checkNotNull(store.capturedHandoff(scope, port.remoteId)).frame
-        val next = frame.base.copy(revision = Revision("verified-next"), content = frame.base.content.copy(title = "Remote update"))
-        val pending = ProjectionIntent(scope, next)
-        store.transaction(scope) { putRemote(next); putProjection(pending) }
         editable = false
         val receiving = ImportCoordinatorProjection(store, reader, projection, attempts, { 0L }, { 0L },
-            { true }, { true }, { _, account -> account == scope.account }, owner::releasedProjectionSource)
+            { true }, { true }, { _, account -> account == scope.account }, owner::releasedProjectionSource, owner::releasedMasterSource)
+        val master = native.base.copy(revision = Revision("master-metadata"), content = native.base.content.copy(
+            title = "New master title", description = "Master-only description"))
+        suspend fun queue(change: RemoteChange): ProjectionIntent = ProjectionIntent(scope, change).also { intent ->
+            store.transaction(scope) { putRemote(change); putProjection(intent) }
+        }
+        val masterPending = queue(master)
+        val initial = checkNotNull(store.capturedHandoff(scope, port.remoteId)).frame
+        val child = native.rows().getValue(native.child)
+        assertEquals(listOf(masterPending), receiving.runnableProjections(scope))
+        val prepared = store.prepareProjection(masterPending, initial.format)
+        assertNotNull(native.projection.projectOccurrenceMaster(initial, prepared, inspect = false))
+        // Simulate loss of the response after the Provider committed its parent-only batch.
+        assertEquals(native.base, store.projectedBaseline(scope, master.eventId))
+        receiving.projectPending(masterPending, 0L)
+        assertEquals(child, native.rows().getValue(native.child))
+        assertEquals(master, store.projectedBaseline(scope, master.eventId))
+        val frame = checkNotNull(store.capturedHandoff(scope, port.remoteId)).frame
+        assertEquals(master, frame.occurrenceMaster)
+        val next = frame.base.copy(revision = Revision("verified-next"), content = frame.base.content.copy(title = "Remote update"))
+        val pending = queue(next)
         assertEquals(listOf(pending), receiving.runnableProjections(scope))
         val plan = store.prepareCapturedHandoffProjection(frame, pending)
         val parent = native.rows().getValue(native.parent)
@@ -139,6 +155,21 @@ class OccurrenceBindingDeviceTest {
         assertEquals(before, native.rows())
         assertEquals(parent, before.getValue(native.parent))
         assertEquals(1, port.sends)
+        val dirty = native.rows().getValue(native.child)
+        val another = master.copy(revision = Revision("master-dirty-child"), content = master.content.copy(location = "New location"))
+        receiving.projectPending(queue(another), 0L)
+        assertEquals(dirty, native.rows().getValue(native.child))
+        assertEquals(another, store.projectedBaseline(scope, master.eventId))
+        val stable = native.rows()
+        val structural = another.copy(revision = Revision("master-structural"), content = another.content.copy(
+            recurrence = another.content.recurrence!!.copy(rule = "FREQ=DAILY;COUNT=2")))
+        for (change in listOf(structural, RemoteChange.Deleted(another.eventId, Revision("master-gone")))) {
+            queue(change)
+            assertTrue(receiving.runnableProjections(scope).isEmpty())
+            receiving.publishImportProgress(scope, "IMPORTED")
+            assertEquals("CREATE_PENDING", store.selections(scope.account).single { it.scope == scope }.status)
+            assertEquals(stable, native.rows())
+        }
     }
 
     @Test fun aNewerChildBetweenReservationAndAckNeverRearmsTheNativeWrite() = OccurrenceCaptureDeviceTest().fixture {

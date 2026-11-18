@@ -28,6 +28,7 @@ class CapturedCreateHandoffFrame(
     receipt: CapturedCreateHandoffReceipt,
     base: RemoteChange.Upsert,
     lastProjection: ProjectionReceipt? = null,
+    occurrenceMaster: RemoteChange.Upsert? = receipt.acknowledgement.baseline.occurrenceIntent?.occurrence?.master,
 ) {
     val receipt: CapturedCreateHandoffReceipt = receipt.let {
         val acknowledgement = it.acknowledgement
@@ -38,7 +39,10 @@ class CapturedCreateHandoffFrame(
     }
     val base: RemoteChange.Upsert = base.copy(content = freezeHandoffContent(base.content))
     val lastProjection: ProjectionReceipt? = lastProjection?.snapshot()
+    val occurrenceMaster = occurrenceMaster?.let { OccurrenceEditCandidate.freezeMaster(it) }
     init {
+        val anchor = receipt.acknowledgement.baseline.occurrenceIntent?.occurrence?.master
+        require(if (anchor == null) this.occurrenceMaster == null else this.occurrenceMaster?.let { compatibleOccurrenceMaster(anchor, it) } == true)
         require(this.base.eventId == this.receipt.eventId && supportsCapturedHandoffContent(this.receipt.acknowledgement.baseline, this.base))
         val last = this.lastProjection
         if (last == null) require(this.base == this.receipt.acknowledgement.baseline.change)
@@ -54,12 +58,12 @@ class CapturedCreateHandoffFrame(
     val format: AdapterFormat get() = receipt.format
     val eventId: EventId get() = receipt.eventId
     fun copy(receipt: CapturedCreateHandoffReceipt = this.receipt, base: RemoteChange.Upsert = this.base,
-        lastProjection: ProjectionReceipt? = this.lastProjection) = CapturedCreateHandoffFrame(receipt, base, lastProjection)
+        lastProjection: ProjectionReceipt? = this.lastProjection) = CapturedCreateHandoffFrame(receipt, base, lastProjection, occurrenceMaster)
     operator fun component1() = receipt
     operator fun component2() = base
     operator fun component3() = lastProjection
     override fun equals(other: Any?) = other is CapturedCreateHandoffFrame &&
-        receipt == other.receipt && base == other.base && lastProjection == other.lastProjection
+        receipt == other.receipt && base == other.base && lastProjection == other.lastProjection && occurrenceMaster == other.occurrenceMaster
     override fun hashCode() = 31 * (31 * receipt.hashCode() + base.hashCode()) + (lastProjection?.hashCode() ?: 0)
     override fun toString() = "CapturedCreateHandoffFrame(REDACTED)"
 }

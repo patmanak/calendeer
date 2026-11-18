@@ -192,7 +192,18 @@ internal object ImportStoreCapturedSql {
                 change
             }
             val last = if (row.isNull(7)) null else decodeHandoffProjection(scope, row.getString(7))
-            CapturedCreateHandoffRecord(CapturedCreateHandoffFrame(receipt, base, last),
+            val master = origin.occurrenceIntent?.occurrence?.master?.let { anchor ->
+                db.rawQuery("SELECT payload,representation FROM projection_bases WHERE scope=? AND event=?",
+                    arrayOf(key(scope), anchor.eventId.value)).use {
+                    check(it.moveToFirst()) { "Missing occurrence master baseline" }
+                    val current = decodeChange(it.getString(0)) as? RemoteChange.Upsert
+                    check(current != null && compatibleOccurrenceMaster(anchor, current) && encodeChange(current) == it.getString(0))
+                    val reference = ProjectionRepresentationCodec.decode(current, it.getString(1))
+                    check(reference == null || reference.representation == ProjectionRepresentation.DIRECT_V1)
+                    current
+                }
+            }
+            CapturedCreateHandoffRecord(CapturedCreateHandoffFrame(receipt, base, last, master),
                 CapturedCreateHandoffState.valueOf(row.getString(5)), row.getString(6) == "1")
         }
 

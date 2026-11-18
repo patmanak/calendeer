@@ -52,20 +52,7 @@ private fun AndroidCalendarProjection.observeOccurrence(scope: CalendarScope, ma
     }
     val parent = row(masterWhere, masterArgs) ?: return null
     val parentId = parent.getAsLong(Events._ID) ?: return null
-    if (parentId <= 0 || parentId == childRow || parent.getAsString(Events._SYNC_ID) != series ||
-        parent.getAsString(Events.SYNC_DATA4) != remote || parent.getAsString(Events.SYNC_DATA1) != OWNER_MARKER ||
-        parent.getAsString(Events.SYNC_DATA2) != digest("revision-v1", master.revision.value) ||
-        ORDINARY_RESERVED_COLUMNS.any { parent[it] != null } ||
-        !ordinaryReceiptMarker(parent.getAsString(Events.SYNC_DATA3))) return null
-    val style = NativeColorStyle.read(parent.getAsString(Events.SYNC_DATA3)) ?: return null
-    val parentColor = parent.getAsInteger(Events.EVENT_COLOR)
-    if (parentColor != null && parentColor != 0 && parentColor.ushr(24) != 0xff) return null
-    if (parent.getAsInteger(Events.SELF_ATTENDEE_STATUS) != 0 || parent.getAsInteger(Events.ACCESS_LEVEL) != 0) return null
-    if (!style.accepts(master.content.colorRgb, parent.getAsInteger(Events.EVENT_COLOR)) ||
-        style.logicalColor(parent.getAsInteger(Events.EVENT_COLOR)) != master.content.colorRgb) return null
-    val expectedParent = eventValues(master, account)
-    if (expectedParent.keySet().any { it !in setOf(Events.SYNC_DATA3, Events.EVENT_COLOR, Events.EVENT_COLOR_KEY) &&
-            parent.getAsString(it) != expectedParent.getAsString(it) }) return null
+    if (parentId == childRow || !matchesOccurrenceParent(parent, parentId, series, remote, master, account)) return null
     val childWhere = "${Events.CALENDAR_ID}=? AND ${Events._ID}=?"
     val childArgs = arrayOf(calendar.toString(), childRow.toString())
     val child = row(childWhere, childArgs) ?: return null
@@ -117,7 +104,7 @@ private fun AndroidCalendarProjection.observeOccurrence(scope: CalendarScope, ma
         parent.getAsInteger(Events.HAS_ALARM) != if (parentAlerts.reminders.isEmpty()) 0 else 1) return null
     val childAlerts = personalMetadata.captureReminders(account, childRow, personal) ?: return null
     if (child.getAsInteger(Events.HAS_ALARM) != if (childAlerts.reminders.isEmpty()) 0 else 1) return null
-    val candidate = try { OccurrenceEditCandidate(master, original, personal.copy(details = EventDetails(childAlerts.reminders))) }
+    val candidate = try { OccurrenceEditCandidate(intent?.occurrence?.master ?: master, original, personal.copy(details = EventDetails(childAlerts.reminders))) }
         catch (_: IllegalArgumentException) { return null }
     if (intent != null && (intent.occurrence?.original != original || candidate.content != expectedContent)) return null
     val familyWhere = "${Events.ORIGINAL_ID}=? OR (${Events.CALENDAR_ID}=? AND ${Events.ORIGINAL_SYNC_ID}=?)"
@@ -211,13 +198,33 @@ internal suspend fun AndroidCalendarProjection.stampOccurrenceIdentity(intent: L
             if (it.count != 1 || !it.moveToFirst()) return@operation null
             it.getLong(0)
         } ?: fail(CalendarProjectionFailure.PROVIDER_UNAVAILABLE)
-        observeOccurrence(scope, candidate.master, row, intent, firstRow != null, caller::ensureActive, step)
+        observeOccurrence(scope, step?.frame?.occurrenceMaster ?: candidate.master, row, intent, firstRow != null, caller::ensureActive, step)
     }
 }
 
 private val OCCURRENCE_FLAGS = arrayOf(Events.HAS_ATTENDEE_DATA, Events.IS_ORGANIZER, Events.GUESTS_CAN_MODIFY,
     Events.GUESTS_CAN_INVITE_OTHERS, Events.GUESTS_CAN_SEE_GUESTS, Events.SELF_ATTENDEE_STATUS, Events.ACCESS_LEVEL)
-private val OCCURRENCE_COLUMNS = arrayOf(Events._ID, Events.CALENDAR_ID, Events.DIRTY, Events.DELETED, Events.TITLE,
+internal fun AndroidCalendarProjection.matchesOccurrenceParent(parent: ContentValues, parentId: Long, series: String,
+    remote: String, master: RemoteChange.Upsert, account: android.accounts.Account): Boolean {
+    if (parentId <= 0 || parent.getAsString(Events._SYNC_ID) != series ||
+        parent.getAsString(Events.SYNC_DATA4) != remote || parent.getAsString(Events.SYNC_DATA1) != OWNER_MARKER ||
+        parent.getAsString(Events.SYNC_DATA2) != digest("revision-v1", master.revision.value) ||
+        ORDINARY_RESERVED_COLUMNS.any { parent[it] != null } ||
+        !ordinaryReceiptMarker(parent.getAsString(Events.SYNC_DATA3))) return false
+    val style = NativeColorStyle.read(parent.getAsString(Events.SYNC_DATA3)) ?: return false
+    val parentColor = parent.getAsInteger(Events.EVENT_COLOR)
+    if (parentColor != null && parentColor != 0 && parentColor.ushr(24) != 0xff) return false
+    if (parent.getAsInteger(Events.SELF_ATTENDEE_STATUS) != 0 || parent.getAsInteger(Events.ACCESS_LEVEL) != 0) return false
+    if (!style.accepts(master.content.colorRgb, parent.getAsInteger(Events.EVENT_COLOR)) ||
+        style.logicalColor(parent.getAsInteger(Events.EVENT_COLOR)) != master.content.colorRgb) return false
+    val expectedParent = eventValues(master, account)
+    if (expectedParent.keySet().any { it !in setOf(Events.SYNC_DATA3, Events.EVENT_COLOR, Events.EVENT_COLOR_KEY) &&
+            parent.getAsString(it) != expectedParent.getAsString(it) }) return false
+    return parent.getAsInteger(Events.AVAILABILITY) == Events.AVAILABILITY_BUSY &&
+        parent[Events.CUSTOM_APP_PACKAGE] == null && parent[Events.CUSTOM_APP_URI] == null
+}
+
+internal val OCCURRENCE_COLUMNS = arrayOf(Events._ID, Events.CALENDAR_ID, Events.DIRTY, Events.DELETED, Events.TITLE,
     Events.DESCRIPTION, Events.EVENT_LOCATION, Events.DTSTART, Events.DTEND, Events.ALL_DAY,
     Events.EVENT_TIMEZONE, Events.EVENT_END_TIMEZONE, Events.EVENT_COLOR, Events.EVENT_COLOR_KEY,
     Events.RRULE, Events.RDATE, Events.EXRULE, Events.EXDATE, Events.DURATION,

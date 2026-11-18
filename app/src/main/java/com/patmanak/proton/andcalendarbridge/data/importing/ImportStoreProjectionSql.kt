@@ -184,7 +184,7 @@ internal class ImportStoreProjectionSql(
         if (record.state != CapturedCreateHandoffState.RELEASED || record.frame.receipt != frame.receipt ||
             hasLocalMutation(db, frame.scope, frame.eventId)) return@run false
         val outstanding = readHandoffProjectionReceipt(db, frame.scope, frame.eventId)
-        if (record.frame == CapturedCreateHandoffFrame(frame.receipt, receipt.change, receipt)) {
+        if (record.frame == CapturedCreateHandoffFrame(frame.receipt, receipt.change, receipt, frame.occurrenceMaster)) {
             return@run outstanding == null
         }
         if (record.frame != frame || outstanding != receipt) return@run false

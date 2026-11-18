@@ -416,6 +416,14 @@ internal class ImportCoordinatorCapturedCreates(
 
     /** Immutable local/dispatch provenance is checked separately from the mutable import reference. */
     /** Receiving changes on a transferred row remains allowed after its calendar becomes read-only. */
+    suspend fun releasedMasterSource(frame: CapturedCreateHandoffFrame, active: () -> Boolean): Boolean {
+        suspend fun released() = store.capturedHandoff(frame.scope, frame.eventId)?.let {
+            it.state == CapturedCreateHandoffState.RELEASED && it.frame == frame && frame.occurrenceMaster != null
+        } == true
+        return active() && released() && verifiedHandoffSource(frame, active, receiving = true, pendingMaster = true) &&
+            active() && released()
+    }
+
     suspend fun releasedProjectionSource(frame: CapturedCreateHandoffFrame, active: () -> Boolean): Boolean {
         if (frame.receipt.acknowledgement.baseline.occurrenceIntent == null) return handoffSource(frame, active)
         suspend fun released() = store.capturedHandoff(frame.scope, frame.base.eventId)?.let {
@@ -428,7 +436,7 @@ internal class ImportCoordinatorCapturedCreates(
         verifiedHandoffSource(frame, active, receiving = false)
 
     private suspend fun verifiedHandoffSource(frame: CapturedCreateHandoffFrame, active: () -> Boolean,
-        receiving: Boolean): Boolean {
+        receiving: Boolean, pendingMaster: Boolean = false): Boolean {
         val captures = localCreates ?: return false
         val journal = creates ?: return false
         val original = frame.receipt.acknowledgement.baseline
@@ -444,7 +452,8 @@ internal class ImportCoordinatorCapturedCreates(
             val submission = captures.readSubmission(frame.scope, identity.localId) ?: return false
             val intent = original.occurrenceIntent
             if (intent != null && ((!receiving && !systemCreatesEnabled(frame.scope)) || submission.reservation.intent != intent ||
-                    captures.readOccurrenceContext(frame.scope, identity.localId) != intent || !store.matchesOccurrenceSource(intent))) return false
+                    captures.readOccurrenceContext(frame.scope, identity.localId) != intent ||
+                    !store.matchesOccurrenceSource(intent, if (receiving) frame.occurrenceMaster else intent.occurrence?.master, pendingMaster))) return false
             val canonical = capturedCreateExpectation(submission, remote as? CalendarCreateSubmissionPort) ?: return false
             return CapturedCreateDispatchIdentity.of(submission) == identity &&
                 canonical == original.change.content && captures.readSubmission(frame.scope, identity.localId) == submission &&
