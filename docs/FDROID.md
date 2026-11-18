@@ -32,7 +32,7 @@ requires comparison against the signed APK.
 ## Listing and versions
 
 The [Fastlane listing](../fastlane/README.md) contains English and French text and
-Calendeer's existing deer artwork. No screenshots are supplied. The product is a
+Calendeer's deer artwork, plus three English screenshots of the app with fictional data. The product is a
 bridge to Android calendar applications: read-only by default, with one optional Editable
 mode per writable calendar. The Android calendar client handles viewing and editing.
 Keep the listing aligned with [current capabilities](STATUS.md). The recipe

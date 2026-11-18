@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="app/src/main/res/drawable-nodpi/calendeer_mascot.png" alt="Calendeer’s purple deer mascot holding a calendar" width="120">
+</p>
+
 # Calendeer
 
 Calendeer syncs Proton Calendar with the Android Calendar Provider. It lets you
@@ -8,6 +12,14 @@ open-source project and requires Android 12 or later and a Proton account.
 **Availability.** Calendeer is in development. You can build it from source.
 An F-Droid submission is planned after several weeks of daily use and review
 of a release candidate. [Distribution plan](docs/FDROID.md)
+
+## A look inside
+
+| Sign in | Calendars | Sync settings |
+| :---: | :---: | :---: |
+| <img src="fastlane/metadata/android/en-US/images/phoneScreenshots/1.png" alt="Calendeer sign-in screen with empty username and password fields" width="240"> | <img src="fastlane/metadata/android/en-US/images/phoneScreenshots/2.png" alt="Calendar list with Personal set to Editable and Family and Holidays set to Read-only" width="240"> | <img src="fastlane/metadata/android/en-US/images/phoneScreenshots/3.png" alt="Settings showing the connected account, last sync and hourly sync interval" width="240"> |
+
+Screenshots use fictional account and calendar data.
 
 ## Connect a calendar
 

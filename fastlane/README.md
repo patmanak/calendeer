@@ -14,8 +14,8 @@ a published release.
 `app/src/main/res/drawable-nodpi/calendeer_mascot.png`, the artwork used by the
 application's launcher foreground. Keep its existing project licensing and
 provenance; this listing does not introduce third-party artwork. Other locales
-use the English fallback icon. No screenshots are supplied yet. Add only current
-Calendeer screenshots with controlled fictional data after visual review.
+use the English fallback icon. The English phone screenshots show sign-in, calendar selection and sync settings
+with fictional data. The project README uses the same images.
 
 This source-repository layout follows the
 [F-Droid graphics and text conventions](https://f-droid.org/docs/All_About_Descriptions_Graphics_and_Screenshots/).
