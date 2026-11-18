@@ -50,6 +50,28 @@ jobs:
             --android-sdk "$ANDROID_HOME" --android-ndk "$ANDROID_NDK_HOME" \
             --java-home "$JAVA_HOME" --work "$RUNNER_TEMP/calendeer-native" \
             --repository "$GITHUB_WORKSPACE/proton-auth/native/build/maven"
+      - name: Report native build fingerprints
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib, io, json, zipfile, zlib
+          artifact, = Path('proton-auth/native/build/maven').rglob('*.aar')
+          with zipfile.ZipFile(artifact) as archive:
+              print('packaging zlib', zlib.ZLIB_RUNTIME_VERSION)
+              for name in sorted(archive.namelist()):
+                  if name.endswith(('.so', '.jar', '.json', '.xml')):
+                      data = archive.read(name)
+                      print(name, hashlib.sha256(data).hexdigest())
+                      if name.endswith('provenance.json'):
+                          for key, value in json.loads(data).items():
+                              print(key, hashlib.sha256(json.dumps(value, sort_keys=True).encode()).hexdigest())
+                      if name == 'classes.jar':
+                          with zipfile.ZipFile(io.BytesIO(data)) as classes:
+                              digest = hashlib.sha256()
+                              for entry in sorted(classes.namelist()):
+                                  digest.update(classes.read(entry))
+                              print('uncompressed Java classes', digest.hexdigest())
+          PY
       - name: Verify host suites, lint and APK builds
         run: |
           set -euo pipefail
