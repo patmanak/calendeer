@@ -2,7 +2,6 @@
 package com.patmanak.proton.andcalendarbridge.protonauth
 
 import android.content.Context
-import android.webkit.WebView
 import java.util.concurrent.atomic.AtomicBoolean
 import com.patmanak.proton.andcalendarbridge.sync.*
 import com.patmanak.proton.andcalendarbridge.auth.AuthenticationFlowPort
@@ -16,7 +15,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
-import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -50,22 +48,6 @@ object ProtonAuthentication {
         instance ?: SerializedAuthenticationPort(context.applicationContext, verification)
             .also { instance = it }
     }
-}
-
-/** UI metadata only. Hosted challenge URLs and solution tokens never cross this boundary. */
-data class HumanVerificationState(val isRequired: Boolean = false, val generation: Long = 0)
-
-class HumanVerificationHost internal constructor() {
-    internal val delegate = GateCInteractiveHumanVerification()
-    val state: StateFlow<HumanVerificationState> get() = delegate.uiState
-
-    /** Invoke on the UI thread. False means the installed WebView cannot safely host verification. */
-    fun load(webView: WebView, generation: Long, darkTheme: Boolean): Boolean =
-        delegate.load(webView, generation, darkTheme)
-
-    /** Releases this view, while allowing the pending challenge to attach to a replacement view. */
-    fun release(webView: WebView) = delegate.release(webView)
-    fun cancel() = delegate.cancel()
 }
 
 /** Serializes cleanup with even a slow, cancelling network call, preventing late session writes. */
