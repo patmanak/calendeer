@@ -245,3 +245,32 @@ that ID. Missing responses still require the full independent proof.
 These reads do not provide an atomic server snapshot. Incomplete or conflicting
 observations remain UNKNOWN. Inspection has no journal or send capability.
 The production assembly keeps the occurrence adapter disabled.
+
+## First detached occurrence qualification
+
+The generic system worker selects the occurrence path only when its submission
+port advertises the capability. The shipped authentication facade keeps it
+disabled. A debug-only probe can obtain a serialized port restricted to a
+single frozen intent, attempt, calendar generation and verified account hash.
+
+`CalendarScopedOccurrenceLiveDeviceTest.qualifyOneRetainedClientEdit` requires a
+synthetic timed series with a signed, supported source and no remote exception.
+Its title must be `Calendeer series <token>`. Edit one generated instance in
+the calendar client and give the exception the title `Calendeer exception <token>`.
+Select a calendar already enabled for editing. The test does not change settings.
+
+The instrumentation arguments are `occurrenceLivePhase` (`SEND` or `INSPECT`),
+`occurrenceFixture` (12 lowercase hex digits), `occurrenceAccountHash` (the
+authorized identity hash), `occurrenceCalendarHash`, `occurrenceMasterHash`,
+`occurrenceRevisionHash` (SHA-256 of each opaque UTF-8 value), `occurrenceGeneration`,
+`occurrenceOriginalUtc` and `occurrenceCaptureUtc` (whole-second ISO instants).
+Only `SEND` uses `occurrenceChildRow`, solely for initial capture. The attempt
+and capture UUIDs are stable per token. An existing reservation refuses a new
+`SEND`. `INSPECT` requires the original UNKNOWN and never prepares or submits.
+Keep all run-specific arguments and observations private.
+
+After a verified transfer, compatible remote updates can reach the same child
+through a conditional Provider batch. The original slot and both parent links
+remain qualified. Unrelated event projections can drain. A later change to the
+master remains pending to preserve its captured child, including a newer local
+edit. Supporting that parent update or deletion requires family-wide reconciliation.

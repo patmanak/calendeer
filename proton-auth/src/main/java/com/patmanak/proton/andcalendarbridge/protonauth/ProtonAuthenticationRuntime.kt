@@ -91,6 +91,7 @@ internal data class ProtonAuthenticationGraph(
     val events: CalendarDeltaRemote,
     val preparations: CalendarCreatePreparationPort = CalendarCreatePreparationPort { createUnavailable(CreatePreparationFailure.UNSUPPORTED) },
     val submissions: CalendarCreateSubmissionPort? = null,
+    val occurrenceQualification: (() -> CalendarCreateSubmissionPort)? = null,
     val matchesIdentityHash: suspend (AccountId, String) -> Boolean = { _, _ -> false },
     val localEdits: CalendarLocalEditPreparationPort = CalendarLocalEditPreparationPort { _, _ -> localEditUnavailable(LocalEditPreparationFailure.UNSUPPORTED) },
     val titleUpdates: CalendarTitleUpdateSubmissionPort? = null,
@@ -291,6 +292,11 @@ internal object ProtonAuthenticationRuntime {
                 val selected = ProtonCreateContextPolicy.select(scope, metadata, bootstrap, addresses)
                 ProtonTitleUpdateSubmissionCodec.context(selected, metadata, bootstrap)
             }
+        val createRemote = ProtonCreateSubmissionRemote(network.apiProvider)
+        val createPreparation = ProtonCreatePreparationAdapter(readSession, contextRefresher, calendarMetadata,
+            eventRemote, localAddresses, ProtonCreateContextResolver(cryptoContext)::prepare, eventProtector, submission = true)
+        fun submissions(occurrences: ProtonOccurrenceCreateAdapter? = null) = ProtonCreateSubmissionAdapter(createPreparation,
+            eventProtector, readSession, createRemote, eventRemote, eventDecoder::decodeCreated, occurrences)
         return ProtonAuthenticationGraph(
             authentication = ProtonAuthenticationFlowAdapter(
                 accountScope,
@@ -330,11 +336,11 @@ internal object ProtonAuthenticationRuntime {
                 ProtonTitleUpdateSubmissionRemote(network.apiProvider), eventRemote, eventDecoder::decodeCreated),
             deletions = ProtonDeleteSubmissionAdapter(eventProtector, readSession, titleContext,
                 ProtonDeleteSubmissionRemote(network.apiProvider), eventRemote, eventDecoder::decodeCreated),
-            submissions = ProtonCreateSubmissionAdapter(ProtonCreatePreparationAdapter(readSession, contextRefresher,
-                ProtonCreateCalendarMetadataRemote(network.apiProvider), eventRemote, localAddresses,
-                ProtonCreateContextResolver(cryptoContext)::prepare, eventProtector, submission = true),
-                eventProtector, readSession, ProtonCreateSubmissionRemote(network.apiProvider), eventRemote,
-                eventDecoder::decodeCreated),
+            submissions = submissions(),
+            occurrenceQualification = { submissions(ProtonOccurrenceCreateAdapter(readSession, contextRefresher,
+                calendarMetadata, eventRemote, createRemote, OccurrenceCreateCryptography { session, intent, id, meta, boot, source ->
+                    eventDecoder.prepareOccurrenceCreate(session, intent, id, meta, boot, source, eventProtector)
+                }, seriesFamilyVerifier(eventDecoder), eventProtector, occurrenceChildVerifier(eventDecoder))) },
             events = ProtonCalendarDeltaAdapter(baseline, readSession,
                 ProtonChangeFeed(readSession, ProtonChangeFeedRemote(network.apiProvider)), eventRemote,
                 eventDecoder, eventProtector, contextRefresher),

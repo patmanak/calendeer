@@ -46,7 +46,7 @@ object ProtonAuthentication {
     internal suspend fun matchesIdentityHash(context: Context, account: AccountId, expectedHash: String): Boolean =
         shared(context).matchesIdentityHash(account, expectedHash)
 
-    private fun shared(context: Context): SerializedAuthenticationPort = instance ?: synchronized(this) {
+    internal fun shared(context: Context): SerializedAuthenticationPort = instance ?: synchronized(this) {
         instance ?: SerializedAuthenticationPort(context.applicationContext, verification)
             .also { instance = it }
     }
@@ -99,6 +99,7 @@ internal class SerializedAuthenticationPort(
 
     private val lock = Mutex()
     private val localPreparations = SerializedLocalPreparations(dispatcher, lock, { authenticated }, { graph })
+    internal val occurrenceQualification = SerializedOccurrenceQualification(dispatcher, lock, { authenticated }, { graph })
     override suspend fun prepareLocalTime(intent: LocalEditIntent, timestamp: java.time.Instant): LocalTimeEditPreparation =
         localPreparations.prepareLocalTime(intent, timestamp)
     override suspend fun prepareLocalTime(intent: LocalEditIntent, timestamp: java.time.Instant,
