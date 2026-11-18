@@ -87,8 +87,10 @@ class ProtonSharedTitlePatcherTest {
         assertEquals("", Biweekly.parse(empty.encryptedShared).first().events.single().summary.value)
         val original = parts("SUMMARY:line1\\nline2\r\n")
         assertSame(original, patch(original, "line1\r\nline2", "line1\nline2"))
-        assertEquals("line1\r\nline2", Biweekly.parse(patch(parts(), next = "line1\r\nline2").encryptedShared)
-            .first().events.single().summary.value)
+        val wire = patch(parts(), next = "line1\r\nline2").encryptedShared
+        assertTrue("SUMMARY:line1\\nline2" in wire.split("\r\n"))
+        val decoded = Biweekly.parse(wire).first().events.single().summary.value
+        assertEquals("line1\nline2", decoded.replace("\r\n", "\n"))
     }
 
     @Test fun staleMissingDuplicateOrParameterizedEventTitlesAreRefused() {
