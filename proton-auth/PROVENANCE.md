@@ -1,5 +1,23 @@
 # Proton authentication adapter provenance
 
+## Organizer iTIP and internal guest Mail packages
+
+`ProtonGuestAttachment` and `ProtonGuestMailPackage` adapt the organizer
+invitation/cancellation transformations and internal guest packaging of Proton
+Android Calendar, release/2.34.1 at
+`dbc20fa485ca9a3e02988ec8f430145fc9e0b1af`, under the repository's GPLv3
+license. See the [pinned source index and adaptation limits](../docs/research/GUEST_WRITES.md):
+`ICalUtilsImpl.getBaseIcs/getInviteIcs/getCancelIcs`, `EventViewModel.handleAttendee`,
+`SendEmailDirect`, `GenerateEmailPackageUseCase` and
+`ObtainSendPreferencesUseCase.createDefaultSendPreferences`. Original project
+integration bounds the source shape, strips private alarms, verifies the single
+recipient, rejects unsupported preference schemes, separates package preparation
+from submission and clears temporary byte copies. The adapter uses existing
+biweekly 0.6.8 and Proton Core 36.8.0 key and crypto APIs. Its explicit wire
+fields match the published Core 36.8.0 `mail-message-data` DTOs. The published
+Mail domain and data modules were inspected as references. No Mail dependency
+was added.
+
 ## Offline temporal patch
 
 `ProtonSharedTextPatcher.patchTimeAt` is original project integration reusing its

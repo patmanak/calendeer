@@ -1,6 +1,6 @@
 package com.patmanak.proton.andcalendarbridge.sync
 
-internal sealed interface GuestRecipientChange {
+sealed interface GuestRecipientChange {
     data class Request(val guest: EventAttendee) : GuestRecipientChange
     data class Cancel(val guest: EventAttendee) : GuestRecipientChange
 }
@@ -10,7 +10,7 @@ internal sealed interface GuestRecipientChange {
  * Authentication of the base, account ownership, and authority to send are caller responsibilities.
  * A null result means there is no supported guest-only change.
  */
-internal fun guestRecipientChange(
+fun guestRecipientChange(
     authenticatedOrganizer: EventPerson,
     base: EventDetails,
     edited: EventDetails,
