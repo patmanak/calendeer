@@ -15,6 +15,26 @@ class ProtonSeriesEventUpdateTest {
     private val encrypted = f.fragments.encryptedSharedPart
     private fun request(after: EventContent, row: JsonObject = original, base: EventContent = before,
         defaults: JsonObject? = null) = ProtonSeriesEventUpdate.request(row, clear, encrypted, true, f.context, base, after, defaults)
+    @Test fun removalRequiresTheSignedRecurrenceSlotAndAllExactOuterExclusions() {
+        val time = before.time as EventTime.Timed
+        val slot = RecurrencePoint.Timed(time.start)
+        val base = before.copy(recurrence = before.recurrence!!.copy(excludedDates = listOf(slot)))
+        val row = JsonObject(original + ProtonPersonalEventUpdate.metadata(time) +
+            ("Exdates" to JsonArray(listOf(JsonPrimitive(slot.instant.epochSecond)))))
+        qualifySeriesRemovalRow(row, base)
+        fun refused(row: JsonObject, content: EventContent) {
+            try { qualifySeriesRemovalRow(row, content); fail("Invalid deletion family") }
+            catch (_: IllegalArgumentException) { }
+        }
+        refused(JsonObject(row + ("Exdates" to JsonArray(emptyList()))), base)
+        val moved = before.copy(recurrence = EventRecurrence(before.recurrence!!.uid, original = slot))
+        val child = JsonObject(original + ProtonPersonalEventUpdate.metadata(time) + mapOf(
+            "RRule" to JsonNull, "Exdates" to JsonArray(emptyList()), "RecurrenceID" to JsonPrimitive(slot.instant.epochSecond)))
+        qualifySeriesRemovalRow(child, moved)
+        refused(JsonObject(child + ("RecurrenceID" to JsonPrimitive(slot.instant.epochSecond + 1))), moved)
+        refused(JsonObject(child + ("IsOrganizer" to JsonPrimitive(0))), moved)
+    }
+
     private fun event(request: JsonObject) = (request.array("Events").single() as JsonObject).obj("Event")
     private fun actual(after: EventContent): JsonObject {
         val time = after.time as EventTime.Timed

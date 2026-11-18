@@ -73,13 +73,27 @@ internal sealed interface ProtonDeleteResponse {
 
 /** Indexed operation success needs no Event. None of these results establishes remote absence. */
 internal object ProtonDeleteResponseParser {
-    fun parse(body: String): ProtonDeleteResponse = try {
+    fun parse(body: String): ProtonDeleteResponse = parseBatch(body, 1)?.single() ?: ProtonDeleteResponse.Unknown
+
+    /** Results are informational and indexed by the submitted request, independent of response order. */
+    fun parseBatch(body: String, operations: Int): List<ProtonDeleteResponse>? = try {
+        require(operations in 1..367)
         deleteBounded(body); require(UniqueJsonKeys(body).validate())
         val root = (Json.parseToJsonElement(body) as JsonObject).also { deleteValidateJson(it) }
         require(root.number("Code") in setOf(1000L, 1001L))
-        val entry = root.array("Responses").single() as JsonObject
-        require(entry.number("Index") == 0L)
-        val response = entry.obj("Response")
+        val entries = root.array("Responses")
+        require(entries.size == operations)
+        val indexed = arrayOfNulls<ProtonDeleteResponse>(operations)
+        for (element in entries) {
+            val entry = element as JsonObject
+            val index = entry.number("Index").also { require(it in 0L until operations.toLong()) }.toInt()
+            require(indexed[index] == null)
+            indexed[index] = classify(entry.obj("Response"))
+        }
+        indexed.map { requireNotNull(it) }
+    } catch (_: Exception) { null }
+
+    private fun classify(response: JsonObject): ProtonDeleteResponse = try {
         require(response["Event"] == null || response["Event"] == JsonNull)
         val code = response.number("Code")
         if (code == 1000L && (response["Error"] == null || response["Error"] == JsonNull)) ProtonDeleteResponse.ReportedSuccess

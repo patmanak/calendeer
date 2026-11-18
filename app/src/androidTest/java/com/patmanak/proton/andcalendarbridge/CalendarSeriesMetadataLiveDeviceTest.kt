@@ -21,6 +21,7 @@ import java.time.temporal.ChronoUnit
 import java.util.UUID
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
 import org.junit.Rule
@@ -50,6 +51,9 @@ class CalendarSeriesMetadataLiveDeviceTest {
     @Test fun seedTwoRetainedSyntheticSeriesAndInspectTheirSignedMetadata() = runBlocking { seed(false) }
     @Test fun diagnoseOneDistinctSyntheticTransportAdmissionWithoutResendingUnknownWork() = runBlocking { seed(true) }
     @Test fun inspectDistinctUncolouredSeriesWithoutReplayingEarlierUnknownWork() = runBlocking { seed(true, colourless = true) }
+    @Test fun inspectRetainedSeriesRemovalFamiliesWithoutResending() = runBlocking {
+        seed(true, colourless = true, inspectRemoval = true)
+    }
     @Test fun qualifySimpleOffPaletteColourWithOneNewIdentity() = runBlocking {
         seed(true, colourCase = "simple-off-palette")
     }
@@ -85,14 +89,15 @@ class CalendarSeriesMetadataLiveDeviceTest {
     }
 
     private suspend fun seed(transport: Boolean, colourless: Boolean = false,
-        colourCase: String? = null) = withTimeout(240_000) {
+        colourCase: String? = null, inspectRemoval: Boolean = false) = withTimeout(240_000) {
         val args = InstrumentationRegistry.getArguments()
-        assumeTrue(args.getString(if (colourCase != null) "colourQualification" else if (transport) "seriesTransportSeed" else "seriesMetadataSeed") == "true")
+        assumeTrue(args.getString(if (inspectRemoval) "seriesRemovalRead" else if (colourCase != null) "colourQualification" else if (transport) "seriesTransportSeed" else "seriesMetadataSeed") == "true")
         val identityHash = args.getString("createAccountHash").orEmpty()
         assertTrue("Exact authorized account required", identityHash.matches(Regex("[a-f0-9]{64}")))
         val app = compose.activity.application as BridgeApplication
         compose.waitUntil(60_000) { app.imports.state.value.authenticated && app.imports.state.value.selections.any { it.available } }
         val prefs = app.getSharedPreferences("series-metadata-qa-v1", Context.MODE_PRIVATE)
+        if (inspectRemoval) check(prefs.contains("token")) { "Retained fixture required" }
         val available = app.imports.state.value.selections.filter { it.available }.map { it.scope }
         val scope = if (prefs.contains("token")) CalendarScope(AccountId(prefs.getString("account", null)!!),
             CalendarId(prefs.getString("calendar", null)!!), prefs.getLong("generation", -1)) else available.first()
@@ -123,6 +128,10 @@ class CalendarSeriesMetadataLiveDeviceTest {
             val observation = CreateAttemptStore(app, "series-metadata-qa-v1.db").use { journal ->
                 journal.admitDispatch = { it == scope && lease() }
                 val existing = journal.read(scope, id)
+                if (inspectRemoval) {
+                    check(existing?.state == CreateAttemptState.OUTCOME_UNKNOWN) { "Previously submitted fixture required" }
+                    return@use port.inspectCaptured(requireNotNull(existing), draft)
+                }
                 val record = existing ?: run {
                     assertTrue("A requested fixture must never be regenerated", !prefs.getBoolean("requested-$kind", false))
                     val receipt = port.prepareSubmission(draft)
@@ -166,6 +175,12 @@ class CalendarSeriesMetadataLiveDeviceTest {
                 inspected.second
             }
             if (actual == null) { if (transport) break else continue }
+            if (inspectRemoval) {
+                val plan = ProtonAuthentication.deletions(app).inspectSeriesRemoval(scope, actual, SeriesRemovalTarget.Entire) {
+                    it == scope && lease()
+                }
+                assertTrue("Exact retained master and revision required", plan?.deletions == listOf(actual.eventId to actual.revision))
+            }
             val shape = ProtonTemporalMetadataProbe.inspectSeries(app, scope, actual, identityHash, ::lease)
             assertTrue("Read-only current series observation required", shape != null)
             assertAndReport(shape!!, if (allDay) 2 else 1)

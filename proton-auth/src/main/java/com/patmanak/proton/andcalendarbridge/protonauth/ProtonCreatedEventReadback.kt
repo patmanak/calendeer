@@ -62,7 +62,8 @@ internal interface CreateReadbackRemote {
 /** Shared read-only path. No journal, preparation opening, admission, send or retry capability. */
 internal class ProtonCreatedEventReadback(private val sessions: CatalogSessionSource,
     private val remote: CreateReadbackRemote, private val events: EventImportRemote,
-    private val verifier: CreateEventVerifier, private val seriesVerifier: SeriesFamilyEventVerifier? = null) {
+    private val verifier: CreateEventVerifier, private val seriesVerifier: SeriesFamilyEventVerifier? = null,
+    private val removalVerifier: SeriesFamilyEventVerifier? = seriesVerifier) {
     /** Complete UID family plus a fresh signed exact base. No atomic server snapshot or write authority. */
     suspend fun qualifySeries(session: CatalogSession, scope: CalendarScope, base: RemoteChange.Upsert,
         checkpoint: suspend () -> Unit): RemoteChange.Upsert? = try {
@@ -135,6 +136,56 @@ internal class ProtonCreatedEventReadback(private val sessions: CatalogSessionSo
             if (actual.eventId.value != id || normalized(actual.content, policy) != normalized(expected, policy)) null else actual
         } catch (cancelled: CancellationException) { throw cancelled }
           catch (_: Exception) { null }
+    }
+
+    /** Read-only planning. A changed or incompletely verified family cannot authorize a deletion. */
+    suspend fun inspectSeriesRemoval(session: CatalogSession, scope: CalendarScope, expectedMaster: RemoteChange.Upsert,
+        target: SeriesRemovalTarget, expectedBootstrapHash: String? = null, checkpoint: suspend () -> Unit): SeriesRemovalPlan? {
+        val verify = removalVerifier ?: return null
+        return try {
+            val master = freezeSeriesRemovalMaster(expectedMaster)
+            val uid = requireNotNull(master.content.recurrence).uid
+            suspend fun check() {
+                currentCoroutineContext().ensureActive()
+                checkpoint()
+                checkSession(session, scope)
+                checkpoint()
+                currentCoroutineContext().ensureActive()
+            }
+            check()
+            val ids = uidFamily(session, scope, uid, 367, checkpoint = ::check) ?: return null
+            if (master.eventId.value !in ids) return null
+            val bootstrap = events.bootstrap(session, scope.calendar.value)
+            check()
+            if (expectedBootstrapHash != null && ProtonSimpleEventUpdate.hash(bootstrap.toString()) != expectedBootstrapHash) return null
+            val changes = ids.map { id ->
+                val row = remote.event(session, scope.calendar.value, id)
+                check()
+                if (row.string("CalendarID") != scope.calendar.value || row.string("ID") != id ||
+                    row.string("UID") != uid) return null
+                val change = verify.verify(session, scope.calendar.value, bootstrap, row, uid)
+                check()
+                if (change == null || change.eventId.value != id) return null
+                if (expectedBootstrapHash != null && change.revision != row.revision(bootstrap)) return null
+                change
+            }
+            val plan = seriesRemovalPlan(master, ids.map(::EventId), changes, target) ?: return null
+            if (expectedBootstrapHash != null) {
+                val currentBootstrap = events.bootstrap(session, scope.calendar.value)
+                check()
+                if (ProtonSimpleEventUpdate.hash(currentBootstrap.toString()) != expectedBootstrapHash) return null
+                for ((id, revision) in plan.family) {
+                    val current = remote.event(session, scope.calendar.value, id.value)
+                    check()
+                    if (current.string("ID") != id.value || current.string("CalendarID") != scope.calendar.value ||
+                        current.string("UID") != uid || current.revision(currentBootstrap) != revision) return null
+                }
+            }
+            if (uidFamily(session, scope, uid, 367, checkpoint = ::check) != ids) return null
+            check()
+            plan
+        } catch (cancelled: CancellationException) { throw cancelled }
+          catch (_: Exception) { currentCoroutineContext().ensureActive(); null }
     }
 
     /** A short terminal page is mandatory. An already ambiguous family is refused immediately. */

@@ -104,6 +104,24 @@ class ProtonSeriesFamilyQualificationTest {
             try { cancelled.qualify(); fail("Cancellation must propagate") } catch (_: CancellationException) { }
         }
     }
+    @Test fun deletionDiscoveryChecksTheCompleteFamilyAgainAfterVerification() = runTest {
+        val f = Fixture()
+        val expected = requireNotNull(f.removal())
+        assertEquals(listOf(f.base.eventId to f.base.revision), expected.deletions)
+        assertEquals(2, f.steps.count { it == "uid:0" })
+        for (mode in listOf("growth", "empty", "revoked", "changed", "missing")) {
+            val stale = Fixture()
+            stale.after = { if (it == "verify") when (mode) {
+                "growth" -> stale.rows = stale.rows + JsonObject(stale.row + ("ID" to JsonPrimitive("new-child")))
+                "empty" -> stale.rows = emptyList()
+                "revoked" -> stale.admitted = false
+                "changed" -> stale.actual = stale.base.copy(revision = Revision("changed"))
+                "missing" -> stale.actual = null
+            } }
+            assertNull(mode, stale.removal())
+        }
+    }
+
     private class Fixture(allDay: Boolean = false) {
         val scope = CalendarScope(AccountId("family-fixture"), CalendarId("calendar"), 0)
         val session = CatalogSession(UserId(scope.account.value), SessionId("synthetic-session"))
@@ -135,6 +153,7 @@ class ProtonSeriesFamilyQualificationTest {
             override suspend fun bootstrap(session: CatalogSession, calendar: String): JsonObject { step("bootstrap"); return buildJsonObject {} }
         }, CreateEventVerifier { _, _, _, _, _, _ -> error("No historical CREATE policy") },
             SeriesFamilyEventVerifier { _, _, _, _, _ -> step("verify"); actual })
+        suspend fun removal() = readback.inspectSeriesRemoval(session, scope, base, SeriesRemovalTarget.Entire) { check(admitted) }
         suspend fun qualify() = readback.qualifySeries(session, scope, base) { check(admitted) }
     }
 }

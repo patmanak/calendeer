@@ -10,11 +10,22 @@ sealed interface SeriesRemovalTarget {
 
 /** Offline description of personal finite-series operations. Carries no network or admission capability. */
 class SeriesRemovalPlan internal constructor(
+    family: List<Pair<EventId, Revision>>,
     deletions: List<Pair<EventId, Revision>>,
     val updatedMaster: RemoteChange.Upsert?,
 ) {
+    val family: List<Pair<EventId, Revision>> = Collections.unmodifiableList(family.toList())
     val deletions: List<Pair<EventId, Revision>> = Collections.unmodifiableList(deletions.toList())
     override fun toString() = "SeriesRemovalPlan(REDACTED)"
+}
+
+/** Immutable master for asynchronous family reads, retaining existing exclusions. */
+fun freezeSeriesRemovalMaster(base: RemoteChange.Upsert): RemoteChange.Upsert {
+    val content = freezePersonalEditContent(base.content)
+    val recurrence = requireNotNull(content.recurrence)
+    require(recurrence.isMaster && recurrence.additionalDates.isEmpty())
+    return base.copy(content = content.copy(recurrence = recurrence.copy(
+        additionalDates = emptyList(), excludedDates = Collections.unmodifiableList(recurrence.excludedDates.toList()))))
 }
 
 /**
@@ -53,9 +64,9 @@ fun seriesRemovalPlan(expectedMaster: RemoteChange.Upsert, enumeratedIds: List<E
     }
     require(bySlot.size == children.size)
     fun RemoteChange.Upsert.identity() = eventId to revision
+    val family = slots.mapNotNull { bySlot[it]?.identity() } + master.identity()
     when (target) {
-        SeriesRemovalTarget.Entire -> SeriesRemovalPlan(
-            slots.mapNotNull { bySlot[it]?.identity() } + master.identity(), null)
+        SeriesRemovalTarget.Entire -> SeriesRemovalPlan(family, family, null)
         is SeriesRemovalTarget.Single -> {
             val slot = target.original
             require(slot in slots)
@@ -64,7 +75,7 @@ fun seriesRemovalPlan(expectedMaster: RemoteChange.Upsert, enumeratedIds: List<E
                 master.copy(content = content.copy(recurrence = EventRecurrence(recurrence.uid,
                     recurrence.rule, excludedDates = dates)))
             }
-            SeriesRemovalPlan(listOfNotNull(bySlot[slot]?.identity()), updated)
+            SeriesRemovalPlan(family, listOfNotNull(bySlot[slot]?.identity()), updated)
         }
     }
 } catch (_: IllegalArgumentException) {

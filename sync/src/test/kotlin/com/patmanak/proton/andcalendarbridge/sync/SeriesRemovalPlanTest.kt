@@ -25,6 +25,7 @@ class SeriesRemovalPlanTest {
 
     @Test fun movedExceptionIsDeletedAndItsOriginalSlotIsExcludedWithoutLosingEarlierExclusions() {
         val plan = requireNotNull(plan())
+        assertEquals(listOf(child.eventId to child.revision, master.eventId to master.revision), plan.family)
         assertEquals(listOf(child.eventId to child.revision), plan.deletions)
         assertEquals(listOf(day(0), day(2)), plan.updatedMaster?.content?.recurrence?.excludedDates)
         assertEquals(master.revision, plan.updatedMaster?.revision)

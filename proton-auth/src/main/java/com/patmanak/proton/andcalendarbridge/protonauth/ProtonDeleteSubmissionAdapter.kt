@@ -17,9 +17,78 @@ internal class ProtonDeleteSubmissionAdapter(
     private val remote: DeleteSubmissionRemote,
     private val events: EventImportRemote,
     private val verifier: CreateEventVerifier,
+    private val seriesReadback: ProtonCreatedEventReadback? = null,
 ) : CalendarDeleteSubmissionPort {
     override val deleteFormat = DELETE_SUBMISSION_FORMAT
     private val codec = ProtonDeleteRequestCodec(protector)
+    private val seriesCodec = ProtonEntireSeriesRemovalCodec(protector)
+
+    override suspend fun inspectSeriesRemoval(scope: CalendarScope, base: RemoteChange.Upsert, target: SeriesRemovalTarget,
+        admit: (CalendarScope) -> Boolean): SeriesRemovalPlan? {
+        val family = seriesReadback ?: return null
+        val lease = Lease(scope, admit, currentCoroutineContext())
+        return try {
+            val master = freezeSeriesRemovalMaster(base)
+            val session = session(scope, lease)
+            family.inspectSeriesRemoval(session, scope, master, target) { checkSession(session, lease) }
+        } catch (cancelled: CancellationException) { throw cancelled }
+          catch (_: Exception) { currentCoroutineContext().ensureActive(); null }
+          finally { lease.close() }
+    }
+
+    /** No journal state or transport permit is created by this preparation. */
+    suspend fun prepareEntireSeriesRemoval(id: MutationId, scope: CalendarScope, base: RemoteChange.Upsert,
+        admit: (CalendarScope) -> Boolean): ProtonSealedSeriesRemoval? {
+        val family = seriesReadback ?: return null
+        val lease = Lease(scope, admit, currentCoroutineContext())
+        return try {
+            val master = freezeSeriesRemovalMaster(base)
+            val key = ProtonSeriesRemovalKey(id, scope, master.eventId, master.revision, requireNotNull(master.content.recurrence).uid)
+            val session = session(scope, lease)
+            val checkpoint: suspend () -> Unit = { checkSession(session, lease) }
+            val qualified = deleteSnapshot(context.qualify(session, scope, checkpoint)).also(::validateDeleteContext)
+            checkpoint()
+            val plan = family.inspectSeriesRemoval(session, scope, master, SeriesRemovalTarget.Entire,
+                qualified.string("bootstrap"), checkpoint) ?: return null
+            checkpoint()
+            val after = deleteSnapshot(context.qualify(session, scope, checkpoint))
+            checkpoint()
+            if (after != qualified) return null
+            seriesCodec.seal(key, plan, qualified).also { checkpoint() }
+        } catch (cancelled: CancellationException) { throw cancelled }
+          catch (_: Exception) { currentCoroutineContext().ensureActive(); null }
+          finally { lease.close() }
+    }
+
+    /** Inspect-only evidence about this complete family. Cannot acknowledge or submit an attempt. */
+    suspend fun inspectEntireSeriesAbsence(sealed: ProtonSealedSeriesRemoval, admit: (CalendarScope) -> Boolean): Boolean {
+        val family = seriesReadback ?: return false
+        val key = sealed.key
+        val scope = key.scope
+        val lease = Lease(scope, admit, currentCoroutineContext())
+        return try {
+            val session = session(scope, lease)
+            val checkpoint: suspend () -> Unit = { checkSession(session, lease) }
+            val batch = seriesCodec.open(sealed)
+            checkpoint()
+            suspend fun sameContext(): Boolean {
+                val current = context.qualify(session, scope, checkpoint)
+                checkpoint()
+                return current == batch.context
+            }
+            suspend fun emptyFamily() = family.uidFamily(session, scope, key.uid, 0, checkpoint = checkpoint)?.isEmpty() == true
+            if (!sameContext() || !emptyFamily()) return false
+            for ((member, _) in batch.members) {
+                val read = readEvent(session, scope, member)
+                checkpoint()
+                if (read !is ProtonDeleteEventRead.Absent || read.calendar != scope.calendar.value || read.eventId != member.value) return false
+            }
+            emptyFamily() && sameContext()
+        } catch (cancelled: CancellationException) { throw cancelled }
+          catch (failure: OutgoingReadUnavailableException) { currentCoroutineContext().ensureActive(); throw failure }
+          catch (_: Exception) { currentCoroutineContext().ensureActive(); false }
+          finally { lease.close() }
+    }
 
     override suspend fun prepareSubmission(id: MutationId, intent: LocalDeleteIntent,
         admit: (CalendarScope) -> Boolean): DeleteAttemptRecord? {

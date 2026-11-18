@@ -84,6 +84,9 @@ sealed interface DeleteSubmissionObservation {
 /** Separate default-off experimental port. UNKNOWN is inspect-only. No generic capability upgrade. */
 interface CalendarDeleteSubmissionPort {
     val deleteFormat: AdapterFormat?
+    /** Authenticated family reads only. A plan cannot be submitted or acknowledged. */
+    suspend fun inspectSeriesRemoval(scope: CalendarScope, base: RemoteChange.Upsert, target: SeriesRemovalTarget,
+        admit: (CalendarScope) -> Boolean): SeriesRemovalPlan? = null
     suspend fun prepareSubmission(id: MutationId, intent: LocalDeleteIntent,
         admit: (CalendarScope) -> Boolean): DeleteAttemptRecord?
     suspend fun submit(record: DeleteAttemptRecord, journal: DeleteAttemptJournal,

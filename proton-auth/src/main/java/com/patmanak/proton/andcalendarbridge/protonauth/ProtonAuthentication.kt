@@ -218,6 +218,15 @@ internal class SerializedAuthenticationPort(
         }
     }
 
+    override suspend fun inspectSeriesRemoval(scope: CalendarScope, base: RemoteChange.Upsert, target: SeriesRemovalTarget,
+        admit: (CalendarScope) -> Boolean): SeriesRemovalPlan? {
+        if (!admit(scope)) return null
+        val master = freezeSeriesRemovalMaster(base)
+        return deleteOperation(scope, admit, { false }, null) { runtime, lease, _ ->
+            runtime.inspectSeriesRemoval(scope, master, target, lease::allows)?.takeIf { lease.allows(scope) }
+        }
+    }
+
     override suspend fun prepareSubmission(id: MutationId, intent: LocalDeleteIntent,
         admit: (CalendarScope) -> Boolean): DeleteAttemptRecord? {
         currentCoroutineContext().ensureActive()

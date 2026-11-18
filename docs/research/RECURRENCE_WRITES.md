@@ -198,3 +198,12 @@ base and preserves the existing property bytes while adding one EXDATE. This
 stage precedes signing and produces no transport request. Dispatch requires a
 fresh complete family, a sealed request with every operation, independent
 readback after an uncertain outcome, and exact Android tombstone acknowledgement.
+
+The read-only removal adapter verifies signed event content and recurrence metadata
+for every member, then enumerates the UID again. Whole-series preparation also
+rechecks every revision and the writable calendar context before sealing the ordered
+operations. A mixed response maps each indexed result back to its frozen event.
+After an uncertain outcome, the inspector requires an empty UID family before and
+after the individual absence checks, and the same access context at both ends.
+These observations cannot lock the server against concurrent edits. Dispatch,
+durable claims and native tombstone acknowledgement for series remain outstanding.

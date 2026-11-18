@@ -264,7 +264,7 @@ internal object ProtonAuthenticationRuntime {
                     { session -> userManager.getUser(session.userId, refresh = true) },
                     { session -> userManager.getAddresses(session.userId, refresh = true) }))
             val seriesReadback = ProtonCreatedEventReadback(readSession, ProtonCreateSubmissionRemote(network.apiProvider),
-                eventRemote, eventDecoder::decodeCreated, seriesFamilyVerifier(eventDecoder))
+                eventRemote, eventDecoder::decodeCreated, seriesFamilyVerifier(eventDecoder), seriesRemovalVerifier(eventDecoder))
             val personalPreparations = ProtonPersonalPreparationAdapter(readSession, contextRefresher,
                 calendarMetadata, eventRemote, LocalTitleEventRemote { session, scope, id ->
                     ProtonChangeFeedRemote(network.apiProvider).event(session, scope.feedScope(), id.value).obj("Event")
@@ -335,7 +335,7 @@ internal object ProtonAuthenticationRuntime {
             timeUpdates = ProtonTimeUpdateSubmissionAdapter(timePreparations, eventProtector, readSession, titleContext,
                 ProtonTitleUpdateSubmissionRemote(network.apiProvider), eventRemote, eventDecoder::decodeCreated),
             deletions = ProtonDeleteSubmissionAdapter(eventProtector, readSession, titleContext,
-                ProtonDeleteSubmissionRemote(network.apiProvider), eventRemote, eventDecoder::decodeCreated),
+                ProtonDeleteSubmissionRemote(network.apiProvider), eventRemote, eventDecoder::decodeCreated, seriesReadback),
             submissions = submissions(),
             occurrenceQualification = { submissions(ProtonOccurrenceCreateAdapter(readSession, contextRefresher,
                 calendarMetadata, eventRemote, createRemote, OccurrenceCreateCryptography { session, intent, id, meta, boot, source ->

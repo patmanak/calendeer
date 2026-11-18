@@ -26,7 +26,7 @@ internal class ProtonDeleteRequestCodec(private val protector: EventPayloadProte
     suspend fun seal(id: MutationId, intent: LocalDeleteIntent, context: JsonObject, original: JsonObject): DeleteAttemptRecord {
         val frozen = DeleteSubmissionPolicy.freezeIntent(intent)
         require(frozen.format == EVENT_FORMAT)
-        val qualified = deleteSnapshot(context).also(::validateContext)
+        val qualified = deleteSnapshot(context).also(::validateDeleteContext)
         val row = deleteSnapshot(original).also { validateRow(frozen, it) }
         val plain = envelope(id, frozen, qualified, row).toString().also { deleteBounded(it) }
         currentCoroutineContext().ensureActive()
@@ -43,7 +43,7 @@ internal class ProtonDeleteRequestCodec(private val protector: EventPayloadProte
         deleteBounded(plain); require(UniqueJsonKeys(plain).validate())
         val root = Json.parseToJsonElement(plain) as JsonObject
         deleteValidateJson(root)
-        val context = root.obj("context").also(::validateContext)
+        val context = root.obj("context").also(::validateDeleteContext)
         val original = root.obj("original").also { validateRow(frozen.intent, it) }
         require(root == envelope(frozen.id, frozen.intent, context, original))
         return ProtonDeleteRequest(context, original, request(frozen.eventId, context))
@@ -52,23 +52,27 @@ internal class ProtonDeleteRequestCodec(private val protector: EventPayloadProte
         ProtonSimpleEventUpdate.qualify(row)
         require(row.string("ID") == intent.base.eventId.value && row.string("CalendarID") == intent.scope.calendar.value)
     }
-    private fun validateContext(context: JsonObject) {
-        require(context.keys == ProtonSimpleEventUpdate.CONTEXT_KEYS)
-        listOf("member", "address", "key", "passphrase", "author").forEach { deleteBounded(context.string(it), 4096) }
-        require(context.number("permissions") in 0L..127L && context.number("permissions") and 16L != 0L && context.number("flags") == 1L)
-        listOf("calendarKey", "signingKey", "calendar", "bootstrap").forEach {
-            require(context.string(it).matches(Regex("[a-f0-9]{64}")))
-        }
-    }
     private fun envelope(id: MutationId, intent: LocalDeleteIntent, context: JsonObject, original: JsonObject) = buildJsonObject {
         put("kind", "delete-request"); put("version", 1); put("requestId", id.value)
         put("intent", DeleteAttemptIdentity.intentFingerprint(intent))
         put("context", context); put("original", original); put("request", request(intent.base.eventId, context))
     }
-    private fun request(eventId: EventId, context: JsonObject) = buildJsonObject {
-        put("MemberID", context.string("member"))
-        putJsonArray("Events") { add(buildJsonObject { put("ID", eventId.value); put("DeletionReason", 0) }) }
-    }.also { deleteOnlyBytes(it.toString()).fill(0) }
+    private fun request(eventId: EventId, context: JsonObject) =
+        deleteRequest(listOf(eventId), context).also { deleteOnlyBytes(it.toString()).fill(0) }
+}
+
+internal fun validateDeleteContext(context: JsonObject) {
+    require(context.keys == ProtonSimpleEventUpdate.CONTEXT_KEYS)
+    listOf("member", "address", "key", "passphrase", "author").forEach { deleteBounded(context.string(it), 4096) }
+    require(context.number("permissions") in 0L..127L && context.number("permissions") and 16L != 0L && context.number("flags") == 1L)
+    listOf("calendarKey", "signingKey", "calendar", "bootstrap").forEach {
+        require(context.string(it).matches(Regex("[a-f0-9]{64}")))
+    }
+}
+
+internal fun deleteRequest(ids: List<EventId>, context: JsonObject) = buildJsonObject {
+    put("MemberID", context.string("member"))
+    putJsonArray("Events") { for (id in ids) add(buildJsonObject { put("ID", id.value); put("DeletionReason", 0) }) }
 }
 
 internal fun deleteBounded(value: String, limit: Int = DeleteAttemptRecord.MAX_PAYLOAD_BYTES) {
